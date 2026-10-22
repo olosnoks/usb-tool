@@ -23,7 +23,6 @@ import {
   Sliders, 
   Activity,
   ShieldAlert,
-  Laptop,
   Compass,
   Cpu,
   Layers,
@@ -44,7 +43,7 @@ const INITIAL_BOARD = {
     parity: 'none',
     flowControl: 'none'
   },
-  transportType: 'serial', // 'serial' | 'webusb' | 'simulator'
+  transportType: 'serial', // 'serial' | 'webusb'
   hardwareSignals: {
     dtr: false,
     rts: false,
@@ -66,8 +65,7 @@ const INITIAL_BOARD = {
   latestRxText: '',
   isMinimized: false,
   isMaximized: false,
-  pos: { x: 20, y: 20 },
-  isDemo: false
+  pos: { x: 20, y: 20 }
 };
 
 export default function App() {
@@ -89,7 +87,6 @@ export default function App() {
   const boardReadersRef = useRef({});
   const boardKeepReadingRef = useRef({});
   const boardPollIntervalsRef = useRef({});
-  const boardDemoIntervalsRef = useRef({});
   const boardOffsetsRef = useRef({});
   const boardRxTimersRef = useRef({});
   const boardTxTimersRef = useRef({});
@@ -300,10 +297,6 @@ export default function App() {
       clearInterval(boardPollIntervalsRef.current[targetBoardId]);
       delete boardPollIntervalsRef.current[targetBoardId];
     }
-    if (boardDemoIntervalsRef.current[targetBoardId]) {
-      clearInterval(boardDemoIntervalsRef.current[targetBoardId]);
-      delete boardDemoIntervalsRef.current[targetBoardId];
-    }
 
     boardKeepReadingRef.current[targetBoardId] = false;
     if (boardReadersRef.current[targetBoardId]) {
@@ -341,38 +334,6 @@ export default function App() {
     setTimeout(() => handleConnect(newId), 50);
   };
 
-  // Add a Virtual Simulator Board
-  const handleAddVirtualBoard = () => {
-    const newId = `board-${Date.now()}`;
-    const virtualCount = boards.filter(b => b.isDemo).length;
-    const simProfiles = [
-      { name: 'VIRTUAL ESP32-S3', baud: 115200, type: 'esp32' },
-      { name: 'VIRTUAL NMEA GPS', baud: 9600, type: 'gps' },
-      { name: 'VIRTUAL MODEM (AT)', baud: 115200, type: 'modem' }
-    ];
-    const profile = simProfiles[virtualCount % simProfiles.length];
-    const newNum = boards.length + 1;
-
-    const newBoard = {
-      ...INITIAL_BOARD,
-      id: newId,
-      name: `B${newNum}: ${profile.name}`,
-      isConnected: true,
-      portInfo: { usbVendorId: 0x10c4, usbProductId: 0xea60 },
-      baudRate: profile.baud,
-      transportType: 'simulator',
-      hardwareSignals: { dtr: false, rts: false, cts: true, dsr: true, dcd: false, ri: false },
-      pos: { x: 30 * newNum, y: 30 * newNum },
-      isDemo: true,
-      demoType: profile.type
-    };
-
-    setBoards(prev => [...prev, newBoard]);
-    setActiveBoardId(newId);
-    addLogToBoard(newId, `[SIMULATOR] ${profile.name} initialized @ ${profile.baud} bps.`, 'sys');
-    startVirtualBoardStream(newId, profile.type);
-  };
-
   // Close and remove board session
   const handleCloseBoard = async (boardId) => {
     await handleDisconnect(boardId);
@@ -383,63 +344,6 @@ export default function App() {
       }
       return remaining.length > 0 ? remaining : [INITIAL_BOARD];
     });
-  };
-
-  // Virtual Board Simulation Stream
-  const startVirtualBoardStream = (boardId, type) => {
-    if (boardDemoIntervalsRef.current[boardId]) clearInterval(boardDemoIntervalsRef.current[boardId]);
-
-    if (type === 'esp32') {
-      const bootLines = [
-        "\x1b[33mrst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)\x1b[0m\r\n",
-        "\x1b[32m[SYS] CPU0 & CPU1 Clocks initialized @ 240MHz\x1b[0m\r\n",
-        "\x1b[36m[WiFi] MAC: 24:0A:C4:58:91:DE\x1b[0m\r\n",
-        "starting kernel...\r\n",
-        "=> "
-      ];
-      let delay = 80;
-      bootLines.forEach(l => {
-        setTimeout(() => ingestIncomingBytes(boardId, new TextEncoder().encode(l)), delay);
-        delay += 100;
-      });
-
-      boardDemoIntervalsRef.current[boardId] = setInterval(() => {
-        const temp = (24.0 + Math.random() * 2).toFixed(1);
-        const volt = (3.28 + Math.random() * 0.05).toFixed(2);
-        const pid = Math.floor(40 + Math.random() * 10);
-        ingestIncomingBytes(boardId, new TextEncoder().encode(`${temp}, ${volt}, ${pid}\r\n`));
-      }, 1500);
-
-    } else if (type === 'gps') {
-      let lat = 37.774929;
-      let lon = -122.419416;
-
-      boardDemoIntervalsRef.current[boardId] = setInterval(() => {
-        lat += (Math.random() - 0.48) * 0.0001;
-        lon += (Math.random() - 0.48) * 0.0001;
-        const gga = `$GPGGA,123519,${Math.abs(lat).toFixed(4)},N,${Math.abs(lon).toFixed(4)},W,1,08,0.9,545.4,M,46.9,M,,*47\r\n`;
-        ingestIncomingBytes(boardId, new TextEncoder().encode(gga));
-      }, 1000);
-
-    } else if (type === 'modem') {
-      boardDemoIntervalsRef.current[boardId] = setInterval(() => {
-        const csq = Math.floor(18 + Math.random() * 12);
-        ingestIncomingBytes(boardId, new TextEncoder().encode(`+CSQ: ${csq},99\r\n`));
-      }, 3000);
-    }
-  };
-
-  const handleVirtualBoardRx = (boardId, bytes) => {
-    const text = new TextDecoder().decode(bytes).trim();
-    setTimeout(() => {
-      if (text.startsWith('AT')) {
-        ingestIncomingBytes(boardId, new TextEncoder().encode(`\r\nOK\r\n`));
-      } else if (text.includes('printenv')) {
-        ingestIncomingBytes(boardId, new TextEncoder().encode("bootcmd=run boot_flash\r\nbootargs=console=ttyS0,115200 root=/dev/mtdblock2\r\nbaudrate=115200\r\n=> "));
-      } else {
-        ingestIncomingBytes(boardId, new TextEncoder().encode(`\r\nACK: ${text}\r\n=> `));
-      }
-    }, 80);
   };
 
   // Transmit Raw Bytes
@@ -477,11 +381,6 @@ export default function App() {
     updateBoard(targetBoardId, b => ({
       hexByteStream: [...b.hexByteStream.slice(-4096), ...newHexItems]
     }));
-
-    if (currentBoard.isDemo) {
-      handleVirtualBoardRx(targetBoardId, uint8Array);
-      return;
-    }
 
     if (currentBoard.port && currentBoard.port.writable) {
       const writer = currentBoard.port.writable.getWriter();
@@ -553,8 +452,6 @@ export default function App() {
       } catch (err) {
         addLogToBoard(currentBoard.id, `Break assertion error: ${err.message}`, 'sys');
       }
-    } else if (currentBoard.isDemo) {
-      addLogToBoard(currentBoard.id, `[SIM BREAK] Asserted ${durationMs}ms UART Break.`, 'sys');
     }
   };
 
@@ -575,17 +472,6 @@ export default function App() {
   // Baud Hunter Helper
   const handleRunBaudScan = async (testBaud, sendProbe = true) => {
     const currentBoard = activeBoard;
-    if (currentBoard.isDemo) {
-      await new Promise(r => setTimeout(r, 350));
-      if (testBaud === 115200) {
-        return new TextEncoder().encode("rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)\r\nets Jun  8 2016 00:22:57\r\nMicroPython v1.22.0 on 2024-02-12\r\n>>> ");
-      } else {
-        const noise = new Uint8Array(24);
-        for (let i = 0; i < 24; i++) noise[i] = Math.floor(Math.random() * 256);
-        return noise;
-      }
-    }
-
     if (!currentBoard.port) return new Uint8Array(0);
 
     boardKeepReadingRef.current[currentBoard.id] = false;
@@ -705,13 +591,6 @@ export default function App() {
             <span className="text-[11px] text-slate-400 font-mono">
               ACTIVE SESSIONS: <strong className="text-cyber-cyan">{boards.filter(b => b.isConnected).length}</strong> / {boards.length}
             </span>
-            <button
-              onClick={handleAddVirtualBoard}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-bold transition-all bg-slate-900 hover:bg-slate-800 text-cyber-amber border border-slate-700 shadow-sm"
-            >
-              <Laptop className="w-3.5 h-3.5" />
-              <span>+ VIRTUAL SIMULATOR</span>
-            </button>
           </div>
         </div>
 
@@ -723,7 +602,6 @@ export default function App() {
           onConnectBoard={handleConnect}
           onDisconnectBoard={handleDisconnect}
           onAddNewBoard={handleAddNewBoard}
-          onAddVirtualBoard={handleAddVirtualBoard}
           onCloseBoard={handleCloseBoard}
           onSendToBoard={(boardId, text) => handleSendString(boardId, text)}
           onBroadcast={handleBroadcast}

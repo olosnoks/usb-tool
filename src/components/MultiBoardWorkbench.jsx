@@ -19,8 +19,7 @@ import {
   Share2, 
   Sparkles,
   RefreshCw,
-  Unplug,
-  Laptop
+  Unplug
 } from 'lucide-react';
 import StreamConsole from './StreamConsole';
 import HexInspection from './HexInspection';
@@ -41,7 +40,6 @@ export default function MultiBoardWorkbench({
   onConnectBoard,
   onDisconnectBoard,
   onAddNewBoard,
-  onAddVirtualBoard,
   onCloseBoard,
   onSendToBoard,
   onBroadcast,
@@ -164,7 +162,7 @@ export default function MultiBoardWorkbench({
             );
           })}
 
-          {/* Add Board Buttons */}
+          {/* Add Board Button */}
           <div className="flex items-center gap-1 pl-1">
             <button
               onClick={() => onAddNewBoard()}
@@ -173,15 +171,6 @@ export default function MultiBoardWorkbench({
             >
               <Plus className="w-3.5 h-3.5 text-cyber-cyan" />
               <span>CONNECT USB</span>
-            </button>
-
-            <button
-              onClick={() => onAddVirtualBoard()}
-              title="Add a simulated virtual board (ESP32, NMEA GPS, or AT Modem)"
-              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyber-amber border border-slate-800 text-xs transition-all"
-            >
-              <Laptop className="w-3 h-3 text-cyber-amber" />
-              <span className="hidden sm:inline">VIRTUAL</span>
             </button>
           </div>
         </div>

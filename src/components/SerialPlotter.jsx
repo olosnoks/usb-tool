@@ -320,25 +320,6 @@ export default function SerialPlotter({
     URL.revokeObjectURL(url);
   };
 
-  // Generate synthetic sine/cosine test data
-  const injectDemoWaveform = () => {
-    const now = Date.now();
-    const demo = [];
-    for (let i = 0; i < 100; i++) {
-      const t = i * 0.1;
-      const sine = Math.sin(t) * 50 + 20;
-      const cosine = Math.cos(t) * 30 + 10;
-      const noise = Math.random() * 8 + 5;
-      demo.push({
-        time: now + i * 20,
-        values: [Number(sine.toFixed(1)), Number(cosine.toFixed(1)), Number(noise.toFixed(1))],
-        labels: ['Sine', 'Cosine', 'Noise']
-      });
-    }
-    setChannelLabels(['Sine Wave', 'Cosine Wave', 'Analog Noise']);
-    setDataPoints(demo);
-  };
-
   return (
     <div className="bg-cyber-darkest border border-cyber-border rounded-xl shadow-xl p-4 flex flex-col gap-3 font-mono text-xs">
       {/* Title Bar */}
@@ -356,14 +337,6 @@ export default function SerialPlotter({
           >
             <Code className="w-3.5 h-3.5 text-cyber-cyan" />
             <span>Firmware Sketches</span>
-          </button>
-
-          <button
-            onClick={injectDemoWaveform}
-            className="flex items-center gap-1 text-[11px] bg-slate-900 hover:bg-slate-800 text-cyber-amber px-2.5 py-1 rounded-lg border border-slate-800 transition-colors"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Generate Test Waveform</span>
           </button>
 
           {/* Window Size Selector */}

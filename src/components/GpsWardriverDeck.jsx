@@ -219,39 +219,6 @@ export default function GpsWardriverDeck({
     URL.revokeObjectURL(url);
   };
 
-  // Simulate Wardriving Stream for Testing
-  const simulateWardriveStream = () => {
-    const baseLat = 37.7749;
-    const baseLon = -122.4194;
-    const mockAps = [
-      { bssid: 'F4:92:BF:88:12:4A', ssid: 'Starbucks_Guest', rssi: -58, channel: 6, auth: 'OPEN' },
-      { bssid: '00:1A:2B:99:44:EE', ssid: 'FBI_Surveillance_Van', rssi: -67, channel: 1, auth: 'WPA2-PSK' },
-      { bssid: '24:0A:C4:DE:FA:01', ssid: 'Piglet_Wardrive_Mesh', rssi: -42, channel: 11, auth: 'WPA3-SAE' },
-      { bssid: 'D8:EC:5E:11:33:77', ssid: 'NETGEAR-5G-EXT', rssi: -82, channel: 36, auth: 'WPA2' },
-      { bssid: 'A0:B1:C2:33:44:55', ssid: 'Tesla_Guest_WiFi', rssi: -64, channel: 3, auth: 'WPA2-ENTERPRISE' }
-    ];
-
-    setGpsData({
-      lat: baseLat + (Math.random() - 0.5) * 0.002,
-      lon: baseLon + (Math.random() - 0.5) * 0.002,
-      altitude: 24.8,
-      speedKmh: 38.5,
-      speedMph: 23.9,
-      heading: 125,
-      satellites: 12,
-      fixLabel: '3D DGPS Fix (RTK)',
-      valid: true,
-      time: new Date().toUTCString().slice(17, 25) + ' UTC'
-    });
-
-    setCapturedAps(mockAps.map(a => ({ ...a, seenTime: new Date().toLocaleTimeString() })));
-    setTrackHistory([
-      { lat: baseLat - 0.001, lon: baseLon - 0.001 },
-      { lat: baseLat - 0.0005, lon: baseLon - 0.0006 },
-      { lat: baseLat, lon: baseLon }
-    ]);
-  };
-
   const filteredAps = useMemo(() => {
     if (!apSearch.trim()) return capturedAps;
     return capturedAps.filter(ap => 
@@ -270,14 +237,6 @@ export default function GpsWardriverDeck({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={simulateWardriveStream}
-            className="flex items-center gap-1.5 text-[11px] bg-slate-900 hover:bg-slate-800 text-cyber-emerald px-2.5 py-1 rounded-lg border border-slate-800"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Simulate Wardrive Stream</span>
-          </button>
-
           <button
             onClick={handleExportWigleCsv}
             disabled={capturedAps.length === 0}

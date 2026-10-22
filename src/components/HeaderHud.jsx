@@ -104,14 +104,14 @@ export default function HeaderHud({
                 SKON'S <span className="text-cyber-amber cyber-glow-amber">WEB FLASHER</span>
               </h1>
               <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded bg-slate-800 text-cyber-cyan border border-cyber-cyan/30">
-                PRO v1.4
+                PRO v1.5
               </span>
             </div>
             <p className="text-[10px] sm:text-[11px] text-slate-400 font-mono tracking-tight flex items-center gap-1.5 sm:gap-2">
               <span>HARDWARE RE & FLASHER</span>
               <span className="text-slate-600">|</span>
               <span className="text-emerald-400/90">
-                {hasWebSerialSupport ? 'W3C WEB SERIAL' : hasWebUsbSupport ? 'ANDROID WEBUSB OTG' : 'SIMULATOR MODE'}
+                {hasWebSerialSupport ? 'W3C WEB SERIAL' : hasWebUsbSupport ? 'ANDROID WEBUSB OTG' : 'HARDWARE SERIAL'}
               </span>
             </p>
           </div>
@@ -128,7 +128,7 @@ export default function HeaderHud({
         {isAppleDevice && (
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-950/80 border border-amber-500/50 text-amber-300 text-[11px] font-mono">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-            <span>iOS: Apple blocks wired USB in browsers. Use Virtual Simulator mode.</span>
+            <span>iOS: Apple WebKit blocks wired USB. Use Chrome on PC, Mac, Linux, Chromebook, or Android.</span>
           </div>
         )}
 

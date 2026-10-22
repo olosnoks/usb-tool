@@ -1,4 +1,4 @@
-const CACHE_NAME = 'skons-flasher-v1.3';
+const CACHE_NAME = 'skons-flasher-v1.6';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
