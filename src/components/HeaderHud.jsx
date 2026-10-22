@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Usb, 
   Unplug, 
@@ -12,14 +12,17 @@ import {
   RefreshCw,
   Trash2,
   Info,
-  Smartphone
+  Smartphone,
+  Download,
+  BookOpen
 } from 'lucide-react';
 import { identifyUsbChip } from '../utils/usbDatabase';
+import PinoutModal from './PinoutModal';
 
 export default function HeaderHud({
   isConnected,
   isConnecting,
-  portInfo, // { usbVendorId, usbProductId }
+  portInfo,
   baudRate,
   onBaudRateChange,
   serialConfig,
@@ -41,12 +44,33 @@ export default function HeaderHud({
 }) {
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [showChipModal, setShowChipModal] = useState(false);
+  const [showPinoutModal, setShowPinoutModal] = useState(false);
   const [isAssertingBreak, setIsAssertingBreak] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
 
   const standardBauds = [
     300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880, 115200, 
     230400, 460800, 921600, 1000000, 1500000, 2000000
   ];
+
+  // Capture PWA installation prompt
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+  };
 
   const chipMetadata = identifyUsbChip(
     portInfo?.usbVendorId, 
@@ -80,7 +104,7 @@ export default function HeaderHud({
                 SKON'S <span className="text-cyber-amber cyber-glow-amber">WEB FLASHER</span>
               </h1>
               <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded bg-slate-800 text-cyber-cyan border border-cyber-cyan/30">
-                PRO v1.3
+                PRO v1.4
               </span>
             </div>
             <p className="text-[10px] sm:text-[11px] text-slate-400 font-mono tracking-tight flex items-center gap-1.5 sm:gap-2">
@@ -93,18 +117,18 @@ export default function HeaderHud({
           </div>
         </div>
 
-        {/* Dynamic Mobile & Browser Status Banners */}
+        {/* Dynamic Mobile Banners */}
         {isMobileDevice && !hasWebSerialSupport && hasWebUsbSupport && (
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-950/80 border border-cyan-500/50 text-cyan-300 text-[11px] font-mono">
             <Smartphone className="w-3.5 h-3.5 text-cyber-cyan flex-shrink-0" />
-            <span>Android OTG Detected: WebUSB Active (Zero flags required)</span>
+            <span>Android OTG: WebUSB Active (Zero flags)</span>
           </div>
         )}
 
         {isAppleDevice && (
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-950/80 border border-amber-500/50 text-amber-300 text-[11px] font-mono">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-            <span>iOS detected: Apple blocks wired USB in browsers. Use Virtual Simulator mode.</span>
+            <span>iOS: Apple blocks wired USB in browsers. Use Virtual Simulator mode.</span>
           </div>
         )}
 
@@ -114,7 +138,7 @@ export default function HeaderHud({
             BUS
           </div>
 
-          {/* DTR Output */}
+          {/* DTR */}
           <button
             onClick={() => onToggleSignal('dtr')}
             disabled={!isConnected}
@@ -129,7 +153,7 @@ export default function HeaderHud({
             DTR
           </button>
 
-          {/* RTS Output */}
+          {/* RTS */}
           <button
             onClick={() => onToggleSignal('rts')}
             disabled={!isConnected}
@@ -144,7 +168,7 @@ export default function HeaderHud({
             RTS
           </button>
 
-          {/* 250ms Break Trigger */}
+          {/* Break */}
           <button
             onClick={handleBreak}
             disabled={!isConnected || isAssertingBreak}
@@ -161,7 +185,7 @@ export default function HeaderHud({
 
           <div className="h-4 w-[1px] bg-slate-800 mx-1"></div>
 
-          {/* Polled Hardware Inputs: CTS, DSR, DCD, RI */}
+          {/* CTS & DSR */}
           <div className="flex items-center gap-1.5 sm:gap-2">
             <div 
               title="Clear To Send (CTS) - Hardware flow input"
@@ -194,7 +218,7 @@ export default function HeaderHud({
               title="View USB-UART Chip Specifications & Quirks"
             >
               <Cpu className="w-3.5 h-3.5 text-cyber-amber" />
-              <span className="font-semibold text-cyber-amber truncate max-w-[140px]">{chipMetadata.chip}</span>
+              <span className="font-semibold text-cyber-amber truncate max-w-[130px]">{chipMetadata.chip}</span>
             </button>
           )}
 
@@ -225,8 +249,30 @@ export default function HeaderHud({
           </button>
         </div>
 
-        {/* Right HUD: Baud Rate, Framing & Port Connection */}
+        {/* Right HUD: Baud Rate, Framing, Pinouts & Connect */}
         <div className="flex items-center gap-2">
+          {/* Pinouts Cheat Sheet Button */}
+          <button
+            onClick={() => setShowPinoutModal(true)}
+            title="Hardware Pinout Diagrams & 5V Level Shift Calculator"
+            className="flex items-center gap-1 bg-cyber-card hover:bg-slate-800 text-cyber-amber px-2.5 py-1.5 rounded-lg border border-slate-800 text-xs font-mono transition-all"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">PINOUTS</span>
+          </button>
+
+          {/* PWA Install Button if available */}
+          {deferredPrompt && (
+            <button
+              onClick={handleInstallPwa}
+              title="Install Skon's Web Flasher as standalone offline app"
+              className="flex items-center gap-1 bg-emerald-950/60 hover:bg-emerald-900/60 text-cyber-emerald px-2.5 py-1.5 rounded-lg border border-emerald-500/50 text-xs font-mono transition-all"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">INSTALL</span>
+            </button>
+          )}
+
           {/* Baud Rate Picker */}
           <div className="flex items-center bg-cyber-card rounded-lg border border-slate-800 p-0.5">
             <select
@@ -325,6 +371,9 @@ export default function HeaderHud({
           </div>
         </div>
       )}
+
+      {/* Pinout Modal */}
+      <PinoutModal isOpen={showPinoutModal} onClose={() => setShowPinoutModal(false)} />
 
       {/* Advanced UART Framing Modal */}
       {showConfigModal && (

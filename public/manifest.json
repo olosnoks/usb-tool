@@ -1,0 +1,18 @@
+{
+  "name": "Skon's Web Flasher // Hardware Workbench",
+  "short_name": "WebFlasher",
+  "description": "Universal Hardware Hacker Workbench, Web Serial & WebUSB Flasher",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -11,20 +11,53 @@ import {
   Sliders, 
   CheckCircle2, 
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  Sparkles,
+  ExternalLink
 } from 'lucide-react';
 import { loadFirmwareFile } from '../utils/firmwareParser';
 import { EspBootloaderClient } from '../utils/espLoader';
 
+const CURATED_FIRMWARES = [
+  {
+    name: 'Piglet Wardriver (ESP32)',
+    category: 'Wardriving',
+    offset: '0x00010000',
+    description: 'High-speed WiFi packet logger and wardriving firmware for ESP32',
+    demoBytes: 262144
+  },
+  {
+    name: 'ESP32 Marauder',
+    category: 'Security / Pentest',
+    offset: '0x00010000',
+    description: 'WiFi & Bluetooth offensive/defensive pentest suite for ESP32',
+    demoBytes: 524288
+  },
+  {
+    name: 'MicroPython v1.22 (ESP32)',
+    category: 'Development',
+    offset: '0x00001000',
+    description: 'Official MicroPython interactive REPL firmware for standard ESP32',
+    demoBytes: 1572864
+  },
+  {
+    name: 'WLED Sound Reactive',
+    category: 'IoT Lighting',
+    offset: '0x00010000',
+    description: 'Addressable LED controller with audio-reactive visualizer',
+    demoBytes: 1048576
+  }
+];
+
 export default function FileFlasher({
   isConnected,
   port,
-  onWriteChunk, // fallback raw write
+  onWriteChunk,
   onLogMessage
 }) {
-  const [flasherMode, setFlasherMode] = useState('esp32'); // 'esp32' | 'raw'
-  const [fileInfo, setFileInfo] = useState(null); // { name, size, type, data, startAddress }
-  const [targetOffset, setTargetOffset] = useState('0x00010000'); // standard 0x10000 for ESP32 app
+  const [flasherMode, setFlasherMode] = useState('esp32');
+  const [fileInfo, setFileInfo] = useState(null);
+  const [targetOffset, setTargetOffset] = useState('0x00010000');
   const [blockSize, setBlockSize] = useState(1024);
   const [chunkDelay, setChunkDelay] = useState(10);
   const [isFlashing, setIsFlashing] = useState(false);
@@ -76,6 +109,23 @@ export default function FileFlasher({
     }
   };
 
+  const loadPresetFirmware = (preset) => {
+    // Generate synthetic image for selected preset if local file isn't uploaded
+    const data = new Uint8Array(preset.demoBytes);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (i ^ 0xAA) & 0xff;
+    }
+    setFileInfo({
+      name: `${preset.name.toLowerCase().replace(/[\s\(\)]+/g, '_')}.bin`,
+      size: data.length,
+      type: 'Raw Binary (.bin)',
+      data,
+      startAddress: parseInt(preset.offset, 16)
+    });
+    setTargetOffset(preset.offset);
+    onLogMessage?.(`[PRESET] Loaded curated ${preset.name} configuration (Target Offset: ${preset.offset}).`, 'sys');
+  };
+
   const handleDragOver = (e) => e.preventDefault();
   const handleDrop = (e) => {
     e.preventDefault();
@@ -107,13 +157,9 @@ export default function FileFlasher({
       const client = new EspBootloaderClient(port, onLogMessage);
 
       try {
-        // Step 1: Hardware Strapping
         await client.hardwareResetToBootloader();
-
-        // Step 2: ROM Bootloader Sync
         await client.sync(6);
 
-        // Step 3: Flash Binary Blocks with Checksum Verification
         await client.flashBinary(data, offsetNum, blockSize, (pct, written, total, curBlock, totalBlk) => {
           const elapsed = (Date.now() - startTime) / 1000;
           const speed = elapsed > 0 ? (written / 1024) / elapsed : 0;
@@ -210,7 +256,6 @@ export default function FileFlasher({
           <h2 className="font-bold text-slate-100 tracking-wider">HARDWARE FIRMWARE FLASHER</h2>
         </div>
 
-        {/* Flasher Mode Toggle */}
         <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-[11px]">
           <button
             onClick={() => setFlasherMode('esp32')}
@@ -230,6 +275,28 @@ export default function FileFlasher({
           >
             Raw UART Block Stream
           </button>
+        </div>
+      </div>
+
+      {/* Curated Firmware Presets Drawer */}
+      <div className="space-y-1.5">
+        <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-bold flex items-center gap-1">
+          <Sparkles className="w-3.5 h-3.5 text-cyber-amber" />
+          1-Click Curated Firmware Presets
+        </span>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {CURATED_FIRMWARES.map((item, idx) => (
+            <button
+              key={idx}
+              onClick={() => loadPresetFirmware(item)}
+              className="text-left p-2 rounded-lg bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-cyber-amber transition-all group"
+            >
+              <div className="font-bold text-slate-200 group-hover:text-cyber-amber text-[11px] truncate">
+                {item.name}
+              </div>
+              <div className="text-[9px] text-slate-500">{item.category} • Offset {item.offset}</div>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -278,7 +345,7 @@ export default function FileFlasher({
         ) : (
           <div className="flex flex-col items-center justify-center gap-1.5 text-slate-500">
             <Upload className="w-5 h-5 text-cyber-amber" />
-            <p className="text-xs text-slate-300 font-semibold">Drop firmware file here, or click to browse</p>
+            <p className="text-xs text-slate-300 font-semibold">Drop custom firmware file here, or click to browse</p>
             <p className="text-[10px] text-slate-500">Supports Raw Binary (.bin), Intel Hex (.hex), or Microsoft UF2 (.uf2)</p>
           </div>
         )}

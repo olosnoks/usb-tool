@@ -8,6 +8,7 @@ import FrameInjector from './components/FrameInjector';
 import MacroDecks from './components/MacroDecks';
 import SerialPlotter from './components/SerialPlotter';
 import UBootTriage from './components/UBootTriage';
+import GpsWardriverDeck from './components/GpsWardriverDeck';
 import { parseHexInput } from './utils/checksums';
 import { requestWebUsbSerialPort } from './utils/webUsbSerial';
 import { 
@@ -20,7 +21,8 @@ import {
   Sliders, 
   Activity,
   ShieldAlert,
-  Laptop
+  Laptop,
+  Compass
 } from 'lucide-react';
 
 export default function App() {
@@ -668,6 +670,18 @@ export default function App() {
               </button>
 
               <button
+                onClick={() => setActiveBottomTab('wardrive')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  activeBottomTab === 'wardrive' 
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-emerald-glow' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Compass className="w-3.5 h-3.5" />
+                <span>WARDRIVE / GPS</span>
+              </button>
+
+              <button
                 onClick={() => setActiveBottomTab('macros')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
                   activeBottomTab === 'macros' 
@@ -681,7 +695,7 @@ export default function App() {
             </div>
 
             <div className="text-[11px] text-slate-500 font-mono hidden md:block">
-              HARDWARE HACKER WORKBENCH // v1.3 MOBILE-READY
+              HARDWARE HACKER WORKBENCH // v1.4 PWA & WARDRIVE READY
             </div>
           </div>
 
@@ -731,6 +745,14 @@ export default function App() {
                 onRunBaudScan={handleRunBaudScan}
                 onSendRawByte={handleSendRawBytes}
                 onSetSignals={handleSetSignals}
+                onLogMessage={addLog}
+              />
+            )}
+
+            {activeBottomTab === 'wardrive' && (
+              <GpsWardriverDeck
+                latestTextStream={latestRxText}
+                isConnected={isConnected}
                 onLogMessage={addLog}
               />
             )}
