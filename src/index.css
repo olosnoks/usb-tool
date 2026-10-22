@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  
+  body {
+    background-color: #020617;
+    background-image: 
+      radial-gradient(rgba(30, 41, 59, 0.4) 1px, transparent 0),
+      radial-gradient(rgba(251, 191, 36, 0.03) 1px, transparent 0);
+    background-size: 24px 24px, 96px 96px;
+    background-position: 0 0, 12px 12px;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #070c18;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* CRT / Cyber Scanline overlay (subtle) */
+.scanlines {
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%, 
+    rgba(0, 0, 0, 0.25) 50%
+  ), linear-gradient(
+    90deg,
+    rgba(255, 0, 0, 0.03),
+    rgba(0, 255, 0, 0.01),
+    rgba(0, 0, 255, 0.03)
+  );
+  background-size: 100% 2px, 3px 100%;
+  pointer-events: none;
+}
+
+/* Terminal blink cursor */
+@keyframes blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.animate-cursor {
+  animation: blink 1s infinite;
+}
+
+/* Cyber Button and Card effects */
+.cyber-card {
+  background: linear-gradient(135deg, rgba(12, 19, 34, 0.95) 0%, rgba(7, 12, 24, 0.98) 100%);
+  border: 1px solid rgba(30, 41, 59, 0.8);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+.cyber-card-active {
+  border-color: rgba(251, 191, 36, 0.4);
+  box-shadow: 0 0 15px -3px rgba(251, 191, 36, 0.15);
+}
+
+.cyber-glow-amber {
+  text-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+}
+
+.cyber-glow-cyan {
+  text-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+}
+
+.cyber-glow-emerald {
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
+}
+
+.cyber-glow-rose {
+  text-shadow: 0 0 8px rgba(244, 63, 94, 0.6);
+}
