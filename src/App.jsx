@@ -20,6 +20,9 @@ import MicroPythonFileManager from './components/MicroPythonFileManager';
 import CommandPalette from './components/CommandPalette';
 import HardwareIntelligenceModal from './components/HardwareIntelligenceModal';
 import PinoutModal from './components/PinoutModal';
+import AutoResponderDeck from './components/AutoResponderDeck';
+import TelemetryDashboard from './components/TelemetryDashboard';
+import ImprovWifiDeck from './components/ImprovWifiDeck';
 import { parseHexInput } from './utils/checksums';
 import { requestWebUsbSerialPort } from './utils/webUsbSerial';
 import { identifyUsbChip } from './utils/usbDatabase';
@@ -47,7 +50,10 @@ import {
   Upload,
   BookOpen,
   FolderTree,
-  Search
+  Search,
+  Wifi,
+  Gauge,
+  Bell
 } from 'lucide-react';
 
 const INITIAL_BOARD = {
@@ -872,11 +878,11 @@ export default function App() {
             {/* Category Filter Pills */}
             <div className="flex items-center gap-1 overflow-x-auto text-xs scrollbar-thin">
               {[
-                { id: 'all', name: 'ALL MODULES', icon: Layers, count: 14 },
-                { id: 'firmware', name: 'FIRMWARE & FLASH', icon: HardDrive, count: 3 },
+                { id: 'all', name: 'ALL MODULES', icon: Layers, count: 17 },
+                { id: 'firmware', name: 'FIRMWARE & FLASH', icon: HardDrive, count: 4 },
                 { id: 'protocols', name: 'PROTOCOLS & BUS', icon: ArrowLeftRight, count: 3 },
-                { id: 'debug', name: 'DEBUG & SIGNALS', icon: Activity, count: 4 },
-                { id: 'automation', name: 'AUTOMATION & RE', icon: Bot, count: 4 }
+                { id: 'debug', name: 'DEBUG & SIGNALS', icon: Activity, count: 5 },
+                { id: 'automation', name: 'AUTOMATION & RE', icon: Bot, count: 5 }
               ].map(cat => {
                 const Icon = cat.icon;
                 const isActive = workspaceCategory === cat.id;
@@ -886,10 +892,10 @@ export default function App() {
                     onClick={() => {
                       setWorkspaceCategory(cat.id);
                       const catModules = {
-                        firmware: ['flasher', 'esp-dump', 'micropython'],
+                        firmware: ['flasher', 'esp-dump', 'micropython', 'improv'],
                         protocols: ['bridge', 'packets', 'ubx'],
-                        debug: ['plotter', 'alerts', 'injector', 'uboot'],
-                        automation: ['scripting', 'diagnostics', 'wardrive', 'macros']
+                        debug: ['plotter', 'telemetry', 'alerts', 'injector', 'uboot'],
+                        automation: ['responder', 'scripting', 'diagnostics', 'wardrive', 'macros']
                       };
                       if (cat.id !== 'all' && catModules[cat.id] && !catModules[cat.id].includes(activeBottomTab)) {
                         setActiveBottomTab(catModules[cat.id][0]);
@@ -971,16 +977,19 @@ export default function App() {
                 { id: 'flasher', name: 'ESP32 FLASHER', category: 'firmware', icon: HardDrive, color: 'from-amber-500 to-amber-600', textGlow: 'shadow-amber-glow' },
                 { id: 'esp-dump', name: 'SILICON & DUMP', category: 'firmware', icon: Cpu, color: 'from-amber-500 to-amber-600', textGlow: 'shadow-amber-glow' },
                 { id: 'micropython', name: 'MICROPYTHON FILES', category: 'firmware', icon: FileCode, color: 'from-amber-500 to-amber-600', textGlow: 'shadow-amber-glow' },
+                { id: 'improv', name: 'IMPROV WI-FI', category: 'firmware', icon: Wifi, color: 'from-emerald-500 to-teal-600', textGlow: 'shadow-emerald-glow' },
 
                 { id: 'bridge', name: 'MitM BRIDGE', category: 'protocols', icon: ArrowLeftRight, color: 'from-cyan-500 to-cyan-600', textGlow: 'shadow-cyan-glow' },
                 { id: 'packets', name: 'PACKET FRAMER', category: 'protocols', icon: Layers, color: 'from-emerald-500 to-emerald-600', textGlow: 'shadow-emerald-glow' },
                 { id: 'ubx', name: 'UBX GPS', category: 'protocols', icon: Navigation, color: 'from-cyan-500 to-cyan-600', textGlow: 'shadow-cyan-glow' },
 
                 { id: 'plotter', name: 'OSCILLOSCOPE', category: 'debug', icon: Activity, color: 'from-cyan-500 to-cyan-600', textGlow: 'shadow-cyan-glow' },
+                { id: 'telemetry', name: 'TELEMETRY GAUGES', category: 'debug', icon: Gauge, color: 'from-cyan-500 to-blue-600', textGlow: 'shadow-cyan-glow' },
                 { id: 'alerts', name: 'CRASH ALERTS', category: 'debug', icon: ShieldAlert, color: 'from-rose-600 to-rose-700', textGlow: 'shadow-rose-glow' },
                 { id: 'injector', name: 'HEX INJECTOR', category: 'debug', icon: Binary, color: 'from-emerald-500 to-emerald-600', textGlow: 'shadow-emerald-glow' },
                 { id: 'uboot', name: 'U-BOOT TRIAGE', category: 'debug', icon: ShieldAlert, color: 'from-rose-600 to-rose-700', textGlow: 'shadow-rose-glow' },
 
+                { id: 'responder', name: 'AUTO-RESPONDER', category: 'automation', icon: Bot, color: 'from-purple-500 to-pink-600', textGlow: 'shadow-purple-glow' },
                 { id: 'scripting', name: 'TEST RUNNER', category: 'automation', icon: Bot, color: 'from-purple-500 to-purple-600', textGlow: 'shadow-purple-glow' },
                 { id: 'diagnostics', name: 'RE DIAGNOSTICS', category: 'automation', icon: Radar, color: 'from-purple-500 to-purple-600', textGlow: 'shadow-purple-glow' },
                 { id: 'wardrive', name: 'WARDRIVE / GPS', category: 'automation', icon: Compass, color: 'from-emerald-500 to-teal-600', textGlow: 'shadow-emerald-glow' },
@@ -1073,6 +1082,41 @@ export default function App() {
                 isConnected={activeBoard.isConnected}
                 onSendString={(str) => handleSendString(activeBoard.id, str)}
                 latestRxText={activeBoard.latestRxText}
+                onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+                boards={boards}
+                activeBoardId={activeBoardId}
+                onSelectBoard={setActiveBoardId}
+              />
+            )}
+
+            {activeBottomTab === 'improv' && (
+              <ImprovWifiDeck
+                isConnected={activeBoard.isConnected}
+                onSendRawBytes={(raw) => handleSendRawBytes(activeBoard.id, raw)}
+                onSendString={(str) => handleSendString(activeBoard.id, str)}
+                latestRxText={activeBoard.latestRxText}
+                onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+                boards={boards}
+                activeBoardId={activeBoardId}
+                onSelectBoard={setActiveBoardId}
+              />
+            )}
+
+            {activeBottomTab === 'telemetry' && (
+              <TelemetryDashboard
+                latestTextStream={activeBoard.latestRxText}
+                isConnected={activeBoard.isConnected}
+                boards={boards}
+                activeBoardId={activeBoardId}
+                onSelectBoard={setActiveBoardId}
+              />
+            )}
+
+            {activeBottomTab === 'responder' && (
+              <AutoResponderDeck
+                isConnected={activeBoard.isConnected}
+                latestRxText={activeBoard.latestRxText}
+                onSendString={(str) => handleSendString(activeBoard.id, str)}
                 onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
                 boards={boards}
                 activeBoardId={activeBoardId}

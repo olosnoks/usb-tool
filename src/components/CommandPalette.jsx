@@ -20,7 +20,9 @@ import {
   Download, 
   Sliders, 
   Zap, 
-  X
+  X,
+  Wifi,
+  Gauge
 } from 'lucide-react';
 
 export default function CommandPalette({
@@ -47,7 +49,10 @@ export default function CommandPalette({
     { id: 'tab-bridge', name: 'Open MitM Serial Bridge & Sniffer', category: 'Tools', icon: ArrowLeftRight, action: () => onSelectTab('bridge') },
     { id: 'tab-packets', name: 'Open Binary Packet Framer', category: 'Tools', icon: Layers, action: () => onSelectTab('packets') },
     { id: 'tab-ubx', name: 'Open u-blox GPS Configurator (UBX)', category: 'Tools', icon: Navigation, action: () => onSelectTab('ubx') },
-    { id: 'tab-micropython', name: 'Open MicroPython On-Chip File Explorer', category: 'Tools', icon: FileCode, action: () => onSelectTab('micropython') },
+    { id: 'tab-micropython', name: 'Open MicroPython On-Chip File Explorer & mip', category: 'Tools', icon: FileCode, action: () => onSelectTab('micropython') },
+    { id: 'tab-improv', name: 'Open Improv Wi-Fi Serial Provisioner', category: 'Tools', icon: Wifi, action: () => onSelectTab('improv') },
+    { id: 'tab-telemetry', name: 'Open Telemetry Dashboard & Speedometer Gauges', category: 'Tools', icon: Gauge, action: () => onSelectTab('telemetry') },
+    { id: 'tab-responder', name: 'Open Auto-Responder & Trigger Alarms', category: 'Tools', icon: Bot, action: () => onSelectTab('responder') },
     { id: 'tab-scripting', name: 'Open Automated Test Runner / Scripting', category: 'Tools', icon: Bot, action: () => onSelectTab('scripting') },
     { id: 'tab-alerts', name: 'Open Crash & Watchdog Alerts', category: 'Tools', icon: ShieldAlert, action: () => onSelectTab('alerts') },
     { id: 'tab-plotter', name: 'Open Live Oscilloscope / Telemetry', category: 'Tools', icon: Activity, action: () => onSelectTab('plotter') },
