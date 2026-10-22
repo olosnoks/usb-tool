@@ -61,6 +61,7 @@ export default function CommandPalette({
     { id: 'tab-diagnostics', name: 'Open RE Diagnostics & Baud Scanner', category: 'Tools', icon: Radar, action: () => onSelectTab('diagnostics') },
     { id: 'tab-wardrive', name: 'Open Wardrive / GPS NMEA Mapper', category: 'Tools', icon: Compass, action: () => onSelectTab('wardrive') },
     { id: 'tab-macros', name: 'Open Macro Decks & Custom Keypads', category: 'Tools', icon: Command, action: () => onSelectTab('macros') },
+    { id: 'tab-autopsy', name: 'Open USB Autopsy & Bootloader Forcer (Vapes / Mystery Chips)', category: 'Tools', icon: Usb, action: () => onSelectTab('autopsy') },
 
     // Actions
     { id: 'act-connect', name: isConnected ? 'Disconnect Active Serial Port' : 'Connect New USB / Serial Port', category: 'Actions', icon: Usb, action: () => isConnected ? onDisconnect() : onConnect() },

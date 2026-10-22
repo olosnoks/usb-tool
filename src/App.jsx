@@ -23,6 +23,7 @@ import PinoutModal from './components/PinoutModal';
 import AutoResponderDeck from './components/AutoResponderDeck';
 import TelemetryDashboard from './components/TelemetryDashboard';
 import ImprovWifiDeck from './components/ImprovWifiDeck';
+import UsbReconDeck from './components/UsbReconDeck';
 import { parseHexInput } from './utils/checksums';
 import { requestWebUsbSerialPort } from './utils/webUsbSerial';
 import { identifyUsbChip } from './utils/usbDatabase';
@@ -33,6 +34,7 @@ import {
   Radar, 
   Command, 
   Zap, 
+  Usb, 
   Sliders, 
   Activity, 
   ShieldAlert, 
@@ -878,11 +880,11 @@ export default function App() {
             {/* Category Filter Pills */}
             <div className="flex items-center gap-1 overflow-x-auto text-xs scrollbar-thin">
               {[
-                { id: 'all', name: 'ALL MODULES', icon: Layers, count: 17 },
+                { id: 'all', name: 'ALL MODULES', icon: Layers, count: 18 },
                 { id: 'firmware', name: 'FIRMWARE & FLASH', icon: HardDrive, count: 4 },
                 { id: 'protocols', name: 'PROTOCOLS & BUS', icon: ArrowLeftRight, count: 3 },
                 { id: 'debug', name: 'DEBUG & SIGNALS', icon: Activity, count: 5 },
-                { id: 'automation', name: 'AUTOMATION & RE', icon: Bot, count: 5 }
+                { id: 'automation', name: 'AUTOMATION & RE', icon: Bot, count: 6 }
               ].map(cat => {
                 const Icon = cat.icon;
                 const isActive = workspaceCategory === cat.id;
@@ -895,7 +897,7 @@ export default function App() {
                         firmware: ['flasher', 'esp-dump', 'micropython', 'improv'],
                         protocols: ['bridge', 'packets', 'ubx'],
                         debug: ['plotter', 'telemetry', 'alerts', 'injector', 'uboot'],
-                        automation: ['responder', 'scripting', 'diagnostics', 'wardrive', 'macros']
+                        automation: ['autopsy', 'responder', 'scripting', 'diagnostics', 'wardrive', 'macros']
                       };
                       if (cat.id !== 'all' && catModules[cat.id] && !catModules[cat.id].includes(activeBottomTab)) {
                         setActiveBottomTab(catModules[cat.id][0]);
@@ -989,6 +991,7 @@ export default function App() {
                 { id: 'injector', name: 'HEX INJECTOR', category: 'debug', icon: Binary, color: 'from-emerald-500 to-emerald-600', textGlow: 'shadow-emerald-glow' },
                 { id: 'uboot', name: 'U-BOOT TRIAGE', category: 'debug', icon: ShieldAlert, color: 'from-rose-600 to-rose-700', textGlow: 'shadow-rose-glow' },
 
+                { id: 'autopsy', name: 'USB AUTOPSY', category: 'automation', icon: Usb, color: 'from-amber-500 to-red-600', textGlow: 'shadow-amber-glow' },
                 { id: 'responder', name: 'AUTO-RESPONDER', category: 'automation', icon: Bot, color: 'from-purple-500 to-pink-600', textGlow: 'shadow-purple-glow' },
                 { id: 'scripting', name: 'TEST RUNNER', category: 'automation', icon: Bot, color: 'from-purple-500 to-purple-600', textGlow: 'shadow-purple-glow' },
                 { id: 'diagnostics', name: 'RE DIAGNOSTICS', category: 'automation', icon: Radar, color: 'from-purple-500 to-purple-600', textGlow: 'shadow-purple-glow' },
@@ -1194,6 +1197,24 @@ export default function App() {
                 onSendRawByte={(b) => handleSendRawBytes(activeBoard.id, b)}
                 onSendString={(str) => handleSendString(activeBoard.id, str)}
                 onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+              />
+            )}
+
+            {activeBottomTab === 'autopsy' && (
+              <UsbReconDeck
+                isConnected={activeBoard.isConnected}
+                onSendRawBytes={(raw) => handleSendRawBytes(activeBoard.id, raw)}
+                onSendString={(str) => handleSendString(activeBoard.id, str)}
+                onToggleSignal={handleToggleSignal}
+                onBaudRateChange={(newBaud) => {
+                  updateBoard(activeBoard.id, { baudRate: newBaud });
+                  addLogToBoard(activeBoard.id, `Baud rate switched to ${newBaud} bps`, 'sys');
+                }}
+                currentBaudRate={activeBoard.baudRate}
+                onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+                boards={boards}
+                activeBoardId={activeBoardId}
+                onSelectBoard={setActiveBoardId}
               />
             )}
           </div>

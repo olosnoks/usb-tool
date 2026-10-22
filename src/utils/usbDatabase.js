@@ -154,11 +154,11 @@ export const USB_CHIP_DATABASE = {
 
   // STMicroelectronics
   '0483:5740': {
-    manufacturer: 'STMicroelectronics',
-    chip: 'STM32 Virtual COM Port (VCP)',
+    manufacturer: 'STMicroelectronics / Flipper',
+    chip: 'STM32 Virtual COM Port / Flipper Zero CLI',
     voltage: '3.3V Logic',
     autoReset: 'Direct USB CDC interface',
-    notes: 'Standard CDC serial firmware running on STM32F1/F4/G4/H7.'
+    notes: 'Standard CDC serial firmware running on STM32F1/F4/G4/H7 or Flipper Zero.'
   },
   '0483:374b': {
     manufacturer: 'STMicroelectronics',
@@ -166,6 +166,139 @@ export const USB_CHIP_DATABASE = {
     voltage: '3.3V Logic',
     autoReset: 'SWD + Virtual COM Port',
     notes: 'Embedded on Nucleo and Discovery development boards.'
+  },
+  '0483:df11': {
+    manufacturer: 'STMicroelectronics',
+    chip: 'STM32 DFU System Bootloader',
+    voltage: '3.3V Logic',
+    autoReset: 'Active ROM Bootloader (BOOT0 asserted)',
+    notes: 'Device is in built-in hardware DFU flashing mode. Can write firmware via WebUSB DFU protocol.'
+  },
+
+  // Raspberry Pi
+  '2e8a:0003': {
+    manufacturer: 'Raspberry Pi',
+    chip: 'RP2040 BootROM (BOOTSEL Mode)',
+    voltage: '3.3V Logic',
+    autoReset: 'Active ROM Bootloader',
+    notes: 'Raspberry Pi Pico in bootloader state. Exposes UF2 USB mass storage and USB flashing.'
+  },
+  '2e8a:0005': {
+    manufacturer: 'Raspberry Pi',
+    chip: 'RP2040 MicroPython / CircuitPython CDC',
+    voltage: '3.3V Logic',
+    autoReset: '1200-baud magic knock resets to BOOTSEL',
+    notes: 'Standard Pico serial REPL. Open at 1200 bps to force back into bootloader.'
+  },
+  '2e8a:000f': {
+    manufacturer: 'Raspberry Pi',
+    chip: 'RP2350 BootROM (Pico 2 BOOTSEL)',
+    voltage: '3.3V Logic',
+    autoReset: 'Active ROM Bootloader',
+    notes: 'Next-gen RP2350 dual Hazard3 RISC-V / Cortex-M33 in bootloader mode.'
+  },
+
+  // Espressif Native USB
+  '303a:1001': {
+    manufacturer: 'Espressif Systems',
+    chip: 'ESP32-S2/S3/C3/C6 USB-JTAG/Serial Port',
+    voltage: '3.3V Logic',
+    autoReset: 'Native USB CDC + JTAG Controller',
+    notes: 'Native on-chip USB peripheral. RTS/DTR strapping toggles internal bootloader.'
+  },
+  '303a:0002': {
+    manufacturer: 'Espressif Systems',
+    chip: 'ESP32-S2/S3 USB DFU Bootloader',
+    voltage: '3.3V Logic',
+    autoReset: 'Active ROM DFU mode',
+    notes: 'Chip is in native DFU download mode ready for firmware flashing.'
+  },
+
+  // Mobile / SoC Emergency Download (EDL / BROM)
+  '05c6:9008': {
+    manufacturer: 'Qualcomm',
+    chip: 'Qualcomm HS-USB QDLoader 9008 (EDL Mode)',
+    voltage: '1.8V / 3.3V Logic',
+    autoReset: 'Emergency Download Mode',
+    notes: 'Snapdragon primary bootloader recovery mode. Used to unbrick cellular modems and phones.'
+  },
+  '0e8d:0003': {
+    manufacturer: 'MediaTek',
+    chip: 'MediaTek MTK Preloader / BROM Port',
+    voltage: '1.8V / 3.3V Logic',
+    autoReset: 'BootROM Handshake Mode',
+    notes: 'Device is in low-level MTK BROM flash mode.'
+  },
+  '1f3a:efe8': {
+    manufacturer: 'Allwinner Technology',
+    chip: 'Allwinner FEL Bootloader Mode',
+    voltage: '3.3V Logic',
+    autoReset: 'FEL Mode',
+    notes: 'Sunxi / Allwinner SOC in low-level USB flashing mode (Pine64, TV boxes, smart displays).'
+  },
+  '1b8e:c003': {
+    manufacturer: 'Amlogic',
+    chip: 'Amlogic WorldCup USB Burning Mode',
+    voltage: '3.3V Logic',
+    autoReset: 'Burning Mode (Amlogic SOC)',
+    notes: 'Found in Android TV boxes and smart media devices ready for USB image burning.'
+  },
+
+  // Microchip / Atmel
+  '03eb:6124': {
+    manufacturer: 'Microchip / Atmel',
+    chip: 'Atmel SAM-BA CDC Bootloader (SAMD21 / SAMD51)',
+    voltage: '3.3V Logic',
+    autoReset: 'Double-tap reset bootloader',
+    notes: 'Found on Arduino Zero, Adafruit Feather M0/M4, and ATSAMD boards.'
+  },
+  '03eb:2111': {
+    manufacturer: 'Microchip / Atmel',
+    chip: 'ATmega32U4 USB CDC (Arduino Leonardo / BadUSB)',
+    voltage: '5V / 3.3V Logic',
+    autoReset: '1200-baud reset pulse',
+    notes: 'Common in keystroke injection dongles (Rubber Ducky clones), custom mechanical keyboards, and Arduino Pro Micro.'
+  },
+
+  // Nordic Semiconductor
+  '1915:521f': {
+    manufacturer: 'Nordic Semiconductor',
+    chip: 'nRF52840 USB DFU Bootloader',
+    voltage: '3.3V Logic',
+    autoReset: 'Adafruit / Nordic UF2 Bootloader',
+    notes: 'Found on Bluetooth BLE dongles, smart beacons, and wearable health trackers.'
+  },
+
+  // WCH (WinChipHead) Bootloaders
+  '1a86:55e0': {
+    manufacturer: 'WCH (WinChipHead)',
+    chip: 'CH32V USB ISP Mode (CH32V003 / CH32X035 / CH32V203)',
+    voltage: '3.3V / 5V Logic',
+    autoReset: 'WCH Bootloader (BOOT0 asserted)',
+    notes: 'Ultra-cheap 10-cent RISC-V microcontroller in ISP download mode. Found in smart vapes, toys, and USB dongles.'
+  },
+
+  // Mystery Consumer Hardware & Smart Vapes
+  '3358:0001': {
+    manufacturer: 'Puya Semiconductor',
+    chip: 'Puya PY32F0xx USB Bootloader / Bridge',
+    voltage: '3.3V Logic',
+    autoReset: 'SWD / Serial Bootloader',
+    notes: 'Extremely popular in disposable smart screen vapes (Geek Bar Pulse, Lost Mary MO20000, Spaceman) for running the color LCD animations.'
+  },
+  '4c4a:0001': {
+    manufacturer: 'Zhuhai Jieli (JL / Jerry)',
+    chip: 'Jieli AC69 / AC70 USB Debug & Audio Bridge',
+    voltage: '3.3V Logic',
+    autoReset: 'Proprietary JL Flash Tool',
+    notes: 'Found in Bluetooth audio gadgets, smart vape motherboards, and cheap smart toys.'
+  },
+  '3171:0100': {
+    manufacturer: 'Geehy Semiconductor',
+    chip: 'Geehy APM32F0 / APM32F1 USB CDC',
+    voltage: '3.3V Logic',
+    autoReset: 'STM32-compatible Bootloader',
+    notes: 'High-speed Chinese ARM microcontroller clone widely used in industrial controllers and consumer IoT.'
   }
 };
 
