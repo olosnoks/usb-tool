@@ -6,6 +6,8 @@ import FileFlasher from './components/FileFlasher';
 import Diagnostics from './components/Diagnostics';
 import FrameInjector from './components/FrameInjector';
 import MacroDecks from './components/MacroDecks';
+import SerialPlotter from './components/SerialPlotter';
+import UBootTriage from './components/UBootTriage';
 import { parseHexInput } from './utils/checksums';
 import { 
   Terminal, 
@@ -15,8 +17,8 @@ import {
   Command, 
   Zap, 
   Sliders, 
-  HelpCircle,
-  ExternalLink,
+  Activity,
+  ShieldAlert,
   Laptop
 } from 'lucide-react';
 
@@ -25,7 +27,7 @@ export default function App() {
   const [port, setPort] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [portInfo, setPortInfo] = useState(null);
+  const [portInfo, setPortInfo] = useState(null); // { usbVendorId, usbProductId }
   const [baudRate, setBaudRate] = useState(115200);
   const [serialConfig, setSerialConfig] = useState({
     dataBits: 8,
@@ -34,7 +36,7 @@ export default function App() {
     flowControl: 'none'
   });
 
-  // Simulated Demo Mode (for testing without physical hardware)
+  // Simulated Demo Mode
   const [isDemoMode, setIsDemoMode] = useState(false);
   const demoIntervalRef = useRef(null);
 
@@ -64,15 +66,15 @@ export default function App() {
 
   // Stream & Hex Memory
   const [consoleEntries, setConsoleEntries] = useState([]);
-  const [hexByteStream, setHexByteStream] = useState([]); // { offset, byte, type: 'rx' | 'tx' }
+  const [latestRxText, setLatestRxText] = useState('');
+  const [hexByteStream, setHexByteStream] = useState([]);
   const globalOffsetRef = useRef(0);
 
   // Active Bottom Workbench Tab
-  const [activeBottomTab, setActiveBottomTab] = useState('flasher'); // 'flasher' | 'injector' | 'diagnostics' | 'macros'
+  const [activeBottomTab, setActiveBottomTab] = useState('flasher'); // 'flasher' | 'plotter' | 'uboot' | 'injector' | 'diagnostics' | 'macros'
 
   // Serial Streams & Reader Refs
   const readerRef = useRef(null);
-  const writerRef = useRef(null);
   const keepReadingRef = useRef(false);
   const signalsPollIntervalRef = useRef(null);
 
@@ -91,11 +93,11 @@ export default function App() {
     txTimerRef.current = setTimeout(() => setTxActivity(false), 90);
   }, []);
 
-  // System Log Entry Helper
+  // System Log Helper
   const addLog = useCallback((text, type = 'sys', rawBytes = null) => {
     const timestamp = new Date().toTimeString().split(' ')[0] + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
     setConsoleEntries(prev => [
-      ...prev.slice(-999), // Keep latest 1000 lines
+      ...prev.slice(-999), // Ring buffer clamp to 1000 lines
       {
         id: Math.random().toString(36).substring(2, 9),
         type,
@@ -106,25 +108,26 @@ export default function App() {
     ]);
   }, []);
 
-  // Ingest incoming bytes into both console and synchronized hex stream
+  // Ingest incoming bytes into console, hex view, plotter & uboot triage
   const ingestIncomingBytes = useCallback((bytes) => {
     if (!bytes || bytes.length === 0) return;
 
     triggerRxActivity();
 
-    // 1. Update stats
+    // 1. Stats
     setStats(prev => ({
       ...prev,
       rxBytes: prev.rxBytes + bytes.length,
       rxCount: prev.rxCount + 1
     }));
 
-    // 2. Decode text for console
+    // 2. Decode text
     const decoder = new TextDecoder('utf-8', { fatal: false });
     const text = decoder.decode(bytes);
+    setLatestRxText(text);
     addLog(text, 'rx', bytes);
 
-    // 3. Assemble into synchronized hex memory
+    // 3. Assemble synchronized hex memory
     const startOffset = globalOffsetRef.current;
     const newHexItems = [];
     for (let i = 0; i < bytes.length; i++) {
@@ -135,7 +138,6 @@ export default function App() {
       });
     }
     globalOffsetRef.current += bytes.length;
-
     setHexByteStream(prev => [...prev.slice(-4096), ...newHexItems]);
   }, [addLog, triggerRxActivity]);
 
@@ -152,10 +154,10 @@ export default function App() {
       const selectedPort = await navigator.serial.requestPort();
       
       const info = selectedPort.getInfo ? selectedPort.getInfo() : {};
-      const vidPid = info.usbVendorId 
-        ? `VID:0x${info.usbVendorId.toString(16).padStart(4, '0').toUpperCase()} PID:0x${info.usbProductId?.toString(16).padStart(4, '0').toUpperCase()}`
-        : 'Generic Serial Port';
-      setPortInfo(vidPid);
+      setPortInfo({
+        usbVendorId: info.usbVendorId,
+        usbProductId: info.usbProductId
+      });
 
       addLog(`Opening port @ ${baudRate} bps (${serialConfig.dataBits}${serialConfig.parity[0].toUpperCase()}${serialConfig.stopBits})...`, 'sys');
       await selectedPort.open({
@@ -171,7 +173,7 @@ export default function App() {
       setIsConnected(true);
       setIsConnecting(false);
       keepReadingRef.current = true;
-      addLog(`Connected to ${vidPid} successfully!`, 'sys');
+      addLog(`Connected to serial port successfully!`, 'sys');
 
       // Start Read Loop
       startReading(selectedPort);
@@ -195,12 +197,8 @@ export default function App() {
 
         while (true) {
           const { value, done } = await reader.read();
-          if (done) {
-            break;
-          }
-          if (value) {
-            ingestIncomingBytes(value);
-          }
+          if (done) break;
+          if (value) ingestIncomingBytes(value);
         }
       } catch (err) {
         if (keepReadingRef.current) {
@@ -210,16 +208,14 @@ export default function App() {
         break;
       } finally {
         if (readerRef.current) {
-          try {
-            readerRef.current.releaseLock();
-          } catch (e) {}
+          try { readerRef.current.releaseLock(); } catch (e) {}
           readerRef.current = null;
         }
       }
     }
   };
 
-  // Poll Hardware Signals (CTS, DSR, DCD, RI)
+  // Poll Hardware Signals
   const startSignalPolling = (activePort) => {
     if (signalsPollIntervalRef.current) clearInterval(signalsPollIntervalRef.current);
 
@@ -234,9 +230,7 @@ export default function App() {
           dcd: !!signals.dataCarrierDetect,
           ri: !!signals.ringIndicator
         }));
-      } catch (e) {
-        // Some USB-UART bridges don't implement getSignals
-      }
+      } catch (e) {}
     }, 250);
   };
 
@@ -255,19 +249,11 @@ export default function App() {
     }
 
     keepReadingRef.current = false;
-
     if (readerRef.current) {
-      try {
-        await readerRef.current.cancel();
-      } catch (e) {}
+      try { await readerRef.current.cancel(); } catch (e) {}
     }
-
     if (port) {
-      try {
-        await port.close();
-      } catch (e) {
-        console.warn('Port close warning:', e);
-      }
+      try { await port.close(); } catch (e) {}
       setPort(null);
     }
 
@@ -275,7 +261,7 @@ export default function App() {
     addLog('Serial port disconnected.', 'sys');
   };
 
-  // Toggle Output Signal (DTR or RTS)
+  // Toggle Output Signal
   const handleToggleSignal = async (signalName) => {
     const nextVal = !hardwareSignals[signalName];
     setHardwareSignals(prev => ({ ...prev, [signalName]: nextVal }));
@@ -288,8 +274,6 @@ export default function App() {
       } catch (err) {
         addLog(`Signal control error: ${err.message}`, 'sys');
       }
-    } else if (isDemoMode) {
-      addLog(`[SIM SIGNAL] Set ${signalName.toUpperCase()} = ${nextVal ? 'HIGH' : 'LOW'}`, 'sys');
     }
   };
 
@@ -310,33 +294,28 @@ export default function App() {
     }
   };
 
-  // Set Signals helper (for ESP32 bootloader strapping, etc.)
   const handleSetSignals = async (signalsObj) => {
     setHardwareSignals(prev => ({
       ...prev,
       dtr: signalsObj.dataTerminalReady !== undefined ? signalsObj.dataTerminalReady : prev.dtr,
       rts: signalsObj.requestToSend !== undefined ? signalsObj.requestToSend : prev.rts
     }));
-
     if (port && port.setSignals) {
       await port.setSignals(signalsObj);
     }
   };
 
-  // Transmit Raw Bytes to Serial Port
+  // Transmit Raw Bytes
   const handleSendRawBytes = async (uint8Array) => {
     if (!uint8Array || uint8Array.length === 0) return;
-
     triggerTxActivity();
 
-    // 1. Update stats
     setStats(prev => ({
       ...prev,
       txBytes: prev.txBytes + uint8Array.length,
       txCount: prev.txCount + 1
     }));
 
-    // 2. Append to hex memory stream
     const startOffset = globalOffsetRef.current;
     const newHexItems = [];
     for (let i = 0; i < uint8Array.length; i++) {
@@ -349,7 +328,6 @@ export default function App() {
     globalOffsetRef.current += uint8Array.length;
     setHexByteStream(prev => [...prev.slice(-4096), ...newHexItems]);
 
-    // 3. Physical write
     if (port && port.writable) {
       const writer = port.writable.getWriter();
       try {
@@ -358,7 +336,6 @@ export default function App() {
         writer.releaseLock();
       }
     } else if (isDemoMode) {
-      // Loopback / Simulator response
       handleDemoSimulatorRx(uint8Array);
     }
   };
@@ -382,13 +359,12 @@ export default function App() {
     await handleSendRawBytes(bytes);
   };
 
-  // Baud Hunter Scan Helper
+  // Baud Hunter Helper
   const handleRunBaudScan = async (testBaud, sendProbe = true) => {
     if (isDemoMode) {
-      // Simulate realistic entropy for baud 115200 and noise for others
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 350));
       if (testBaud === 115200) {
-        return new TextEncoder().encode("rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)\r\nets Jun  8 2016 00:22:57\r\n\r\nrst:0x10 (RTCWDT_RTC_RESET)\r\nMicroPython v1.22.0 on 2024-02-12; ESP32 module with ESP32\r\nType \"help()\" for more information.\r\n>>> ");
+        return new TextEncoder().encode("rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)\r\nets Jun  8 2016 00:22:57\r\nMicroPython v1.22.0 on 2024-02-12\r\n>>> ");
       } else {
         const noise = new Uint8Array(24);
         for (let i = 0; i < 24; i++) noise[i] = Math.floor(Math.random() * 256);
@@ -398,7 +374,6 @@ export default function App() {
 
     if (!port) return new Uint8Array(0);
 
-    // Safely reopen port at testBaud
     keepReadingRef.current = false;
     if (readerRef.current) {
       try { await readerRef.current.cancel(); } catch (e) {}
@@ -414,18 +389,12 @@ export default function App() {
       bufferSize: 4096
     });
 
-    // If active probe, send \r\n
     if (sendProbe && port.writable) {
       const writer = port.writable.getWriter();
-      try {
-        await writer.write(new TextEncoder().encode('\r\n'));
-      } catch (e) {}
-      finally {
-        writer.releaseLock();
-      }
+      try { await writer.write(new TextEncoder().encode('\r\n')); } catch (e) {}
+      finally { writer.releaseLock(); }
     }
 
-    // Read sample window (400ms)
     const sampleChunks = [];
     const reader = port.readable.getReader();
     const readDeadline = Date.now() + 400;
@@ -439,27 +408,24 @@ export default function App() {
         if (value) sampleChunks.push(value);
         if (done) break;
       }
-    } catch (e) {
-    } finally {
+    } catch (e) {}
+    finally {
       try { reader.releaseLock(); } catch (e) {}
     }
 
-    // Reopen at standard baud or continue
     return sampleChunks.length > 0 
       ? new Uint8Array(sampleChunks.flatMap(c => Array.from(c))) 
       : new Uint8Array(0);
   };
 
-  // Toggle Demo Simulator
+  // Demo Simulator Mode
   const toggleDemoSimulator = () => {
-    if (isConnected) {
-      handleDisconnect();
-    }
+    if (isConnected) handleDisconnect();
     const next = !isDemoMode;
     setIsDemoMode(next);
     if (next) {
       setIsConnected(true);
-      setPortInfo('Simulated ESP32-WROOM-32 (Virtual Demo)');
+      setPortInfo({ usbVendorId: 0x10c4, usbProductId: 0xea60 }); // CP2102
       addLog('[SIMULATOR] Connected to Virtual ESP32 Serial Workbench.', 'sys');
       startDemoSimulatorStream();
     } else {
@@ -470,24 +436,17 @@ export default function App() {
   };
 
   const startDemoSimulatorStream = () => {
-    // Initial ESP32 Boot log with ANSI colors
     const bootSequence = [
       "\x1b[33mrst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)\x1b[0m\r\n",
-      "configsip: 0, SPIWP:0xee\r\n",
       "clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00\r\n",
-      "mode:DIO, clock div:2\r\n",
-      "load:0x3fff0018,len:4\r\n",
-      "load:0x3fff001c,len:1044\r\n",
-      "load:0x40078000,len:10124\r\n",
-      "ho 0 tail 12 room 4\r\n",
       "\x1b[32m[SYS] CPU0 & CPU1 Clocks initialized @ 240MHz\x1b[0m\r\n",
       "\x1b[36m[WiFi] MAC: 24:0A:C4:58:91:DE\x1b[0m\r\n",
       "Hit any key to stop autoboot: 3...\r\n",
       "Hit any key to stop autoboot: 2...\r\n",
       "Hit any key to stop autoboot: 1...\r\n",
-      "\x1b[32mStarting MicroPython v1.22.0 on ESP32-D0WDQ6\x1b[0m\r\n",
-      "Type \"help()\" for more information.\r\n",
-      ">>> "
+      "starting kernel...\r\n",
+      "analog_temp:24.5 analog_volt:3.31 pid_out:42.0\r\n",
+      "=> "
     ];
 
     let delay = 100;
@@ -500,39 +459,24 @@ export default function App() {
       delay += 120;
     });
 
-    // Simulate periodic telemetry ping every 5 seconds
     demoIntervalRef.current = setInterval(() => {
-      const freeMem = Math.floor(110000 + Math.random() * 4000);
-      const pingText = `[TELEMETRY] Heap Free: ${freeMem} B | RSSI: -64 dBm | CTS: HIGH\r\n`;
-      ingestIncomingBytes(new TextEncoder().encode(pingText));
-      setHardwareSignals(prev => ({
-        ...prev,
-        cts: true,
-        dsr: true,
-        dcd: Math.random() > 0.5,
-        ri: false
-      }));
-    }, 5000);
+      const temp = (24.0 + Math.random() * 2).toFixed(1);
+      const volt = (3.28 + Math.random() * 0.05).toFixed(2);
+      const pid = Math.floor(40 + Math.random() * 10);
+      const telemetry = `${temp}, ${volt}, ${pid}\r\n`;
+      ingestIncomingBytes(new TextEncoder().encode(telemetry));
+    }, 1500);
   };
 
   const handleDemoSimulatorRx = (bytes) => {
     const text = new TextDecoder().decode(bytes).trim();
     setTimeout(() => {
-      if (text.includes('sys.implementation')) {
-        ingestIncomingBytes(new TextEncoder().encode("(name='micropython', version=(1, 22, 0), mpy=517)\r\n>>> "));
-      } else if (text.includes('gc.mem_free')) {
-        ingestIncomingBytes(new TextEncoder().encode("Free RAM: 114288 B | Alloc: 2432 B\r\n>>> "));
-      } else if (text.startsWith('AT+GMR')) {
-        ingestIncomingBytes(new TextEncoder().encode("AT version:2.2.0.0(s-401)\r\nSDK version:v4.4.4\r\ncompile time(a259c4b):Feb 12 2024\r\nOK\r\n"));
-      } else if (text.startsWith('AT')) {
-        ingestIncomingBytes(new TextEncoder().encode("OK\r\n"));
-      } else if (bytes[0] === 0x03) {
-        ingestIncomingBytes(new TextEncoder().encode("\r\nKeyboardInterrupt\r\n>>> "));
-      } else if (bytes[0] === 0x04) {
-        ingestIncomingBytes(new TextEncoder().encode("\r\nMPY: soft reboot\r\nMicroPython v1.22.0 on 2024-02-12; ESP32 module with ESP32\r\n>>> "));
+      if (text.includes('printenv')) {
+        ingestIncomingBytes(new TextEncoder().encode("bootcmd=run boot_flash\r\nbootargs=console=ttyS0,115200 root=/dev/mtdblock2\r\nipaddr=192.168.1.1\r\nserverip=192.168.1.100\r\nethaddr=00:1A:2B:3C:4D:5E\r\nbaudrate=115200\r\n=> "));
+      } else if (text.includes('init=/bin/sh')) {
+        ingestIncomingBytes(new TextEncoder().encode("\r\n[   1.452012] Linux version 5.10.16 ...\r\n[   2.100234] VFS: Mounted root (squashfs filesystem) readonly on device 31:2.\r\n/bin/sh: can't access tty; job control turned off\r\n# "));
       } else {
-        // Echo
-        ingestIncomingBytes(new TextEncoder().encode(`\r\nECHO: ${text}\r\n>>> `));
+        ingestIncomingBytes(new TextEncoder().encode(`\r\nACK: ${text}\r\n=> `));
       }
     }, 80);
   };
@@ -577,13 +521,13 @@ export default function App() {
 
       {/* Main Workspace Area */}
       <main className="flex-1 max-w-[1920px] w-full mx-auto p-3 sm:p-4 flex flex-col gap-3">
-        {/* Top Notice Bar with Quick Simulator Access */}
+        {/* Target Status & Simulator Toggle */}
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-cyber-card border border-slate-800 text-xs">
           <div className="flex items-center gap-2 text-slate-400">
             <span className="w-2 h-2 rounded-full bg-cyber-emerald animate-ping"></span>
             <span>TARGET STATUS:</span>
             <span className={`font-bold ${isConnected ? 'text-cyber-emerald' : 'text-slate-500'}`}>
-              {isConnected ? (isDemoMode ? 'VIRTUAL SIMULATOR ACTIVE' : `ONLINE // ${baudRate} 8N1`) : 'OFFLINE // READY'}
+              {isConnected ? (isDemoMode ? 'VIRTUAL SIMULATOR (CP2102 + ESP32)' : `ONLINE // ${baudRate} 8N1`) : 'OFFLINE // READY'}
             </span>
           </div>
 
@@ -603,8 +547,7 @@ export default function App() {
         </div>
 
         {/* Top Half: Dual Synchronized Terminal & Hex Inspection Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-[480px] min-h-[400px]">
-          {/* Left: ANSI Stream Console */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-[460px] min-h-[380px]">
           <StreamConsole
             entries={consoleEntries}
             onClear={() => setConsoleEntries([])}
@@ -612,7 +555,6 @@ export default function App() {
             isConnected={isConnected}
           />
 
-          {/* Right: Synchronized Hex Memory Inspection Grid */}
           <HexInspection
             byteStream={hexByteStream}
             onClear={() => {
@@ -625,9 +567,9 @@ export default function App() {
 
         {/* Bottom Half: Workbench Tools & Modules */}
         <div className="space-y-2">
-          {/* Workbench Tabs Navigation */}
+          {/* Navigation Tabs */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cyber-border pb-1">
-            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+            <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
               <button
                 onClick={() => setActiveBottomTab('flasher')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
@@ -637,14 +579,38 @@ export default function App() {
                 }`}
               >
                 <HardDrive className="w-3.5 h-3.5" />
-                <span>BINARY FLASHER</span>
+                <span>ESP32 FLASHER</span>
+              </button>
+
+              <button
+                onClick={() => setActiveBottomTab('plotter')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  activeBottomTab === 'plotter' 
+                    ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-slate-950 shadow-cyan-glow' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>LIVE OSCILLOSCOPE</span>
+              </button>
+
+              <button
+                onClick={() => setActiveBottomTab('uboot')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  activeBottomTab === 'uboot' 
+                    ? 'bg-gradient-to-r from-rose-600 to-rose-700 text-white shadow-rose-glow' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>U-BOOT TRIAGE</span>
               </button>
 
               <button
                 onClick={() => setActiveBottomTab('injector')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
                   activeBottomTab === 'injector' 
-                    ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-slate-950 shadow-cyan-glow' 
+                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-slate-950 shadow-emerald-glow' 
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -668,17 +634,17 @@ export default function App() {
                 onClick={() => setActiveBottomTab('macros')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
                   activeBottomTab === 'macros' 
-                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-slate-950 shadow-emerald-glow' 
+                    ? 'bg-slate-800 text-cyber-amber font-bold' 
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 <Command className="w-3.5 h-3.5" />
-                <span>MACRO DECKS</span>
+                <span>MACROS</span>
               </button>
             </div>
 
             <div className="text-[11px] text-slate-500 font-mono hidden md:block">
-              STATIC HOSTING ON GITHUB PAGES // RELATIVE ASSET BASE
+              HARDWARE HACKER WORKBENCH // v1.2 PRO
             </div>
           </div>
 
@@ -687,7 +653,24 @@ export default function App() {
             {activeBottomTab === 'flasher' && (
               <FileFlasher
                 isConnected={isConnected}
+                port={port}
                 onWriteChunk={handleSendRawBytes}
+                onLogMessage={addLog}
+              />
+            )}
+
+            {activeBottomTab === 'plotter' && (
+              <SerialPlotter
+                latestTextStream={latestRxText}
+                isConnected={isConnected}
+              />
+            )}
+
+            {activeBottomTab === 'uboot' && (
+              <UBootTriage
+                isConnected={isConnected}
+                onSendString={handleSendString}
+                latestRxText={latestRxText}
                 onLogMessage={addLog}
               />
             )}
@@ -730,17 +713,17 @@ export default function App() {
       {/* Cyberpunk Footer */}
       <footer className="border-t border-cyber-border bg-[#070c18] py-2 px-4 text-center text-[11px] text-slate-500 flex flex-wrap items-center justify-between gap-2 mt-auto">
         <div className="flex items-center gap-2">
-          <span className="text-slate-400 font-bold">SKON'S WEB FLASHER</span>
-          <span>// Client-side Web Serial & Reverse-Engineering Tool</span>
+          <span className="text-slate-400 font-bold">SKON'S WEB FLASHER v1.2</span>
+          <span>// Hardware Hacker Serial & Diagnostic Tool</span>
         </div>
         <div className="flex items-center gap-3">
-          <span>DTR/RTS Strapping</span>
+          <span>ESP32 ROM Flasher</span>
           <span>•</span>
-          <span>Baud Hunter</span>
+          <span>60 FPS Oscilloscope</span>
           <span>•</span>
-          <span>Modbus CRC-16</span>
+          <span>U-Boot Triage</span>
           <span>•</span>
-          <span>Intel HEX / UF2</span>
+          <span>Disk Logger</span>
         </div>
       </footer>
     </div>

@@ -10,13 +10,15 @@ import {
   AlertTriangle, 
   Cpu, 
   RefreshCw,
-  Trash2
+  Trash2,
+  Info
 } from 'lucide-react';
+import { identifyUsbChip } from '../utils/usbDatabase';
 
 export default function HeaderHud({
   isConnected,
   isConnecting,
-  portInfo,
+  portInfo, // object { usbVendorId, usbProductId } or string
   baudRate,
   onBaudRateChange,
   serialConfig,
@@ -26,20 +28,26 @@ export default function HeaderHud({
   hardwareSignals, // { dtr, rts, cts, dsr, dcd, ri }
   onToggleSignal,
   onAssertBreak,
-  stats, // { rxBytes, txBytes, rxCount, txCount }
+  stats,
   onResetStats,
   rxActivity,
   txActivity,
   hasWebSerialSupport
 }) {
   const [showConfigModal, setShowConfigModal] = useState(false);
-  const [customBaud, setCustomBaud] = useState('');
+  const [showChipModal, setShowChipModal] = useState(false);
   const [isAssertingBreak, setIsAssertingBreak] = useState(false);
 
   const standardBauds = [
     300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880, 115200, 
     230400, 460800, 921600, 1000000, 1500000, 2000000
   ];
+
+  // Identify chip
+  const chipMetadata = identifyUsbChip(
+    portInfo?.usbVendorId, 
+    portInfo?.usbProductId
+  );
 
   const handleBreak = async () => {
     setIsAssertingBreak(true);
@@ -68,7 +76,7 @@ export default function HeaderHud({
                 SKON'S <span className="text-cyber-amber cyber-glow-amber">WEB FLASHER</span>
               </h1>
               <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-cyber-cyan border border-cyber-cyan/30">
-                PRO v1.0
+                PRO v1.2
               </span>
             </div>
             <p className="text-[11px] text-slate-400 font-mono tracking-tight flex items-center gap-2">
@@ -142,7 +150,6 @@ export default function HeaderHud({
 
           {/* Polled Hardware Inputs: CTS, DSR, DCD, RI */}
           <div className="flex items-center gap-2">
-            {/* CTS */}
             <div 
               title="Clear To Send (CTS) - Hardware flow input"
               className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono border ${
@@ -153,7 +160,6 @@ export default function HeaderHud({
               CTS
             </div>
 
-            {/* DSR */}
             <div 
               title="Data Set Ready (DSR) - Modem/DCE status input"
               className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono border ${
@@ -164,7 +170,6 @@ export default function HeaderHud({
               DSR
             </div>
 
-            {/* DCD */}
             <div 
               title="Data Carrier Detect (DCD) - Carrier status input"
               className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono border ${
@@ -175,7 +180,6 @@ export default function HeaderHud({
               DCD
             </div>
 
-            {/* RI */}
             <div 
               title="Ring Indicator (RI) - Incoming call/ring signal"
               className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono border ${
@@ -188,8 +192,20 @@ export default function HeaderHud({
           </div>
         </div>
 
-        {/* Telemetry Stats: Rx / Tx byte meters */}
+        {/* Telemetry Stats: Rx / Tx byte meters & Chip badge */}
         <div className="hidden lg:flex items-center gap-3 bg-cyber-card px-3 py-1.5 rounded-lg border border-slate-800 text-xs font-mono">
+          {/* USB Chip Model Identifier Badge */}
+          {isConnected && (
+            <button
+              onClick={() => setShowChipModal(true)}
+              className="flex items-center gap-1.5 bg-slate-950 hover:bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-300 text-[11px] transition-colors"
+              title="View USB-UART Chip Specifications & Quirks"
+            >
+              <Cpu className="w-3.5 h-3.5 text-cyber-amber" />
+              <span className="font-semibold text-cyber-amber truncate max-w-[140px]">{chipMetadata.chip}</span>
+            </button>
+          )}
+
           {/* Rx Activity */}
           <div className="flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full transition-all duration-75 ${
@@ -219,7 +235,7 @@ export default function HeaderHud({
           </button>
         </div>
 
-        {/* Right HUD: Baud Rate, Serial Config & Connection Control */}
+        {/* Right HUD: Baud Rate, Framing & Port Connection */}
         <div className="flex items-center gap-2">
           {/* Baud Rate Picker */}
           <div className="flex items-center bg-cyber-card rounded-lg border border-slate-800 p-0.5">
@@ -271,7 +287,50 @@ export default function HeaderHud({
         </div>
       </div>
 
-      {/* Advanced UART Framing & Flow Control Modal / Popover */}
+      {/* Chip Specification & Quirk Modal */}
+      {showChipModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-4 space-y-3 font-mono text-xs shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-cyber-amber" />
+                <h3 className="font-bold text-slate-100">{chipMetadata.chip}</h3>
+              </div>
+              <button onClick={() => setShowChipModal(false)} className="text-slate-500 hover:text-slate-300 text-sm font-bold">&times;</button>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <span className="text-slate-500 block text-[10px] uppercase">Manufacturer</span>
+                <span className="text-slate-200 font-semibold">{chipMetadata.manufacturer}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-[10px] uppercase">Logic Voltage Level</span>
+                <span className="text-cyber-cyan font-semibold">{chipMetadata.voltage}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-[10px] uppercase">Auto-Reset / Strapping</span>
+                <span className="text-cyber-emerald font-semibold">{chipMetadata.autoReset}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-[10px] uppercase">Hardware Engineer Notes</span>
+                <p className="text-slate-300 bg-slate-950 p-2 rounded border border-slate-800 text-[11px] leading-relaxed">
+                  {chipMetadata.notes}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowChipModal(false)}
+              className="w-full py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Advanced UART Framing Modal */}
       {showConfigModal && (
         <div className="absolute right-4 top-14 w-80 bg-slate-900 border border-slate-700 rounded-xl p-4 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100">
           <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
@@ -279,12 +338,7 @@ export default function HeaderHud({
               <Sliders className="w-3.5 h-3.5 text-cyber-amber" />
               UART SERIAL FRAMING
             </h3>
-            <button 
-              onClick={() => setShowConfigModal(false)}
-              className="text-slate-500 hover:text-slate-300 text-sm font-mono"
-            >
-              &times;
-            </button>
+            <button onClick={() => setShowConfigModal(false)} className="text-slate-500 hover:text-slate-300 text-sm font-mono">&times;</button>
           </div>
 
           <div className="space-y-3 text-xs font-mono">
@@ -297,9 +351,7 @@ export default function HeaderHud({
                     onClick={() => onSerialConfigChange({ ...serialConfig, dataBits: bits })}
                     disabled={isConnected}
                     className={`py-1 rounded border text-center ${
-                      serialConfig.dataBits === bits 
-                        ? 'bg-amber-500/20 text-cyber-amber border-amber-500/50' 
-                        : 'bg-slate-950 text-slate-400 border-slate-800'
+                      serialConfig.dataBits === bits ? 'bg-amber-500/20 text-cyber-amber border-amber-500/50' : 'bg-slate-950 text-slate-400 border-slate-800'
                     }`}
                   >
                     {bits} Bits
@@ -317,9 +369,7 @@ export default function HeaderHud({
                     onClick={() => onSerialConfigChange({ ...serialConfig, stopBits: stops })}
                     disabled={isConnected}
                     className={`py-1 rounded border text-center ${
-                      serialConfig.stopBits === stops 
-                        ? 'bg-amber-500/20 text-cyber-amber border-amber-500/50' 
-                        : 'bg-slate-950 text-slate-400 border-slate-800'
+                      serialConfig.stopBits === stops ? 'bg-amber-500/20 text-cyber-amber border-amber-500/50' : 'bg-slate-950 text-slate-400 border-slate-800'
                     }`}
                   >
                     {stops} Stop Bit{stops > 1 ? 's' : ''}
@@ -337,9 +387,7 @@ export default function HeaderHud({
                     onClick={() => onSerialConfigChange({ ...serialConfig, parity: p })}
                     disabled={isConnected}
                     className={`py-1 rounded border text-center capitalize ${
-                      serialConfig.parity === p 
-                        ? 'bg-amber-500/20 text-cyber-amber border-amber-500/50' 
-                        : 'bg-slate-950 text-slate-400 border-slate-800'
+                      serialConfig.parity === p ? 'bg-amber-500/20 text-cyber-amber border-amber-500/50' : 'bg-slate-950 text-slate-400 border-slate-800'
                     }`}
                   >
                     {p}
@@ -357,9 +405,7 @@ export default function HeaderHud({
                     onClick={() => onSerialConfigChange({ ...serialConfig, flowControl: fc })}
                     disabled={isConnected}
                     className={`py-1 rounded border text-center capitalize ${
-                      serialConfig.flowControl === fc 
-                        ? 'bg-amber-500/20 text-cyber-amber border-amber-500/50' 
-                        : 'bg-slate-950 text-slate-400 border-slate-800'
+                      serialConfig.flowControl === fc ? 'bg-amber-500/20 text-cyber-amber border-amber-500/50' : 'bg-slate-950 text-slate-400 border-slate-800'
                     }`}
                   >
                     {fc}
@@ -367,12 +413,6 @@ export default function HeaderHud({
                 ))}
               </div>
             </div>
-
-            {isConnected && (
-              <p className="text-[10px] text-amber-400/80 italic pt-1 border-t border-slate-800">
-                * Disconnect port before changing framing parameters.
-              </p>
-            )}
           </div>
         </div>
       )}
