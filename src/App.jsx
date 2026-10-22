@@ -10,6 +10,13 @@ import SerialPlotter from './components/SerialPlotter';
 import UBootTriage from './components/UBootTriage';
 import GpsWardriverDeck from './components/GpsWardriverDeck';
 import MultiBoardWorkbench from './components/MultiBoardWorkbench';
+import EspMemoryInspector from './components/EspMemoryInspector';
+import SerialBridgeDeck from './components/SerialBridgeDeck';
+import PacketFramer from './components/PacketFramer';
+import UbxConfigDeck from './components/UbxConfigDeck';
+import ScriptRunner from './components/ScriptRunner';
+import CrashAlertDeck from './components/CrashAlertDeck';
+import MicroPythonFileManager from './components/MicroPythonFileManager';
 import { parseHexInput } from './utils/checksums';
 import { requestWebUsbSerialPort } from './utils/webUsbSerial';
 import { identifyUsbChip } from './utils/usbDatabase';
@@ -26,7 +33,11 @@ import {
   Compass,
   Cpu,
   Layers,
-  Radio
+  Radio,
+  ArrowLeftRight,
+  Navigation,
+  FileCode,
+  Bot
 } from 'lucide-react';
 
 const INITIAL_BOARD = {
@@ -76,6 +87,16 @@ export default function App() {
 
   // Active Bottom Workbench Tab
   const [activeBottomTab, setActiveBottomTab] = useState('flasher');
+
+  // MitM Hardware Serial Bridge State
+  const [bridgeConfig, setBridgeConfig] = useState({
+    active: false,
+    boardAId: 'board-1',
+    boardBId: ''
+  });
+  const [bridgeLog, setBridgeLog] = useState([]);
+  const lastBridgePacketTimeRef = useRef(Date.now());
+  const forwardBridgeBytesRef = useRef(null);
 
   // Mobile & API Detection
   const hasWebSerialSupport = typeof navigator !== 'undefined' && 'serial' in navigator;
@@ -163,6 +184,9 @@ export default function App() {
       latestRxText: text,
       hexByteStream: [...b.hexByteStream.slice(-4096), ...newHexItems]
     }));
+
+    // Forward to MitM serial bridge if active
+    forwardBridgeBytesRef.current?.(boardId, bytes);
   }, [addLogToBoard, updateBoard]);
 
   // Continuous Serial Read Loop per Board
@@ -389,6 +413,55 @@ export default function App() {
       } finally {
         writer.releaseLock();
       }
+    }
+  };
+
+  // Connect bridge forwarding ref to handleSendRawBytes
+  useEffect(() => {
+    forwardBridgeBytesRef.current = (sourceBoardId, bytes) => {
+      if (!bridgeConfig.active || !bridgeConfig.boardAId || !bridgeConfig.boardBId) return;
+      if (sourceBoardId !== bridgeConfig.boardAId && sourceBoardId !== bridgeConfig.boardBId) return;
+
+      const isA = sourceBoardId === bridgeConfig.boardAId;
+      const targetBoardId = isA ? bridgeConfig.boardBId : bridgeConfig.boardAId;
+      if (!targetBoardId) return;
+
+      const dir = isA ? 'A ➔ B' : 'B ➔ A';
+      const now = Date.now();
+      const deltaMs = now - lastBridgePacketTimeRef.current;
+      lastBridgePacketTimeRef.current = now;
+
+      const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+      const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+
+      setBridgeLog(prev => [
+        ...prev.slice(-300),
+        {
+          id: Math.random().toString(36).substring(2, 9),
+          time: new Date().toTimeString().split(' ')[0] + '.' + String(new Date().getMilliseconds()).padStart(3, '0'),
+          dir,
+          text,
+          hex,
+          deltaMs
+        }
+      ]);
+
+      handleSendRawBytes(targetBoardId, bytes);
+    };
+  }, [bridgeConfig, boards]);
+
+  const handleToggleBridge = (boardAId, boardBId, active) => {
+    setBridgeConfig({
+      active,
+      boardAId,
+      boardBId
+    });
+    if (active) {
+      addLogToBoard(boardAId, `[BRIDGE] MitM Sniffer Active ➔ Forwarding to ${boardBId}`, 'sys');
+      addLogToBoard(boardBId, `[BRIDGE] MitM Sniffer Active ➔ Forwarding to ${boardAId}`, 'sys');
+    } else {
+      addLogToBoard(boardAId, `[BRIDGE] MitM Sniffer stopped.`, 'sys');
+      addLogToBoard(boardBId, `[BRIDGE] MitM Sniffer stopped.`, 'sys');
     }
   };
 
@@ -624,10 +697,10 @@ export default function App() {
         <div className="space-y-2 pt-1">
           {/* Navigation Tabs */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cyber-border pb-1">
-            <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs overflow-x-auto max-w-full scrollbar-thin scrollbar-thumb-slate-800">
               <button
                 onClick={() => setActiveBottomTab('flasher')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
                   activeBottomTab === 'flasher' 
                     ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-amber-glow' 
                     : 'text-slate-400 hover:text-slate-200'
@@ -638,20 +711,104 @@ export default function App() {
               </button>
 
               <button
+                onClick={() => setActiveBottomTab('esp-dump')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
+                  activeBottomTab === 'esp-dump' 
+                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-amber-glow' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>SILICON & DUMP</span>
+              </button>
+
+              <button
+                onClick={() => setActiveBottomTab('bridge')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
+                  activeBottomTab === 'bridge' 
+                    ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-slate-950 shadow-cyan-glow' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                <span>MitM BRIDGE</span>
+              </button>
+
+              <button
+                onClick={() => setActiveBottomTab('packets')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
+                  activeBottomTab === 'packets' 
+                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-slate-950 shadow-emerald-glow' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>PACKET FRAMER</span>
+              </button>
+
+              <button
+                onClick={() => setActiveBottomTab('ubx')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
+                  activeBottomTab === 'ubx' 
+                    ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-slate-950 shadow-cyan-glow' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Navigation className="w-3.5 h-3.5" />
+                <span>UBX GPS</span>
+              </button>
+
+              <button
+                onClick={() => setActiveBottomTab('micropython')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
+                  activeBottomTab === 'micropython' 
+                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-amber-glow' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <FileCode className="w-3.5 h-3.5" />
+                <span>MICROPYTHON FILES</span>
+              </button>
+
+              <button
+                onClick={() => setActiveBottomTab('scripting')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
+                  activeBottomTab === 'scripting' 
+                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Bot className="w-3.5 h-3.5" />
+                <span>TEST RUNNER</span>
+              </button>
+
+              <button
+                onClick={() => setActiveBottomTab('alerts')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
+                  activeBottomTab === 'alerts' 
+                    ? 'bg-gradient-to-r from-rose-600 to-rose-700 text-white shadow-rose-glow' 
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>CRASH ALERTS</span>
+              </button>
+
+              <button
                 onClick={() => setActiveBottomTab('plotter')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
                   activeBottomTab === 'plotter' 
                     ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-slate-950 shadow-cyan-glow' 
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 <Activity className="w-3.5 h-3.5" />
-                <span>LIVE OSCILLOSCOPE</span>
+                <span>OSCILLOSCOPE</span>
               </button>
 
               <button
                 onClick={() => setActiveBottomTab('uboot')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
                   activeBottomTab === 'uboot' 
                     ? 'bg-gradient-to-r from-rose-600 to-rose-700 text-white shadow-rose-glow' 
                     : 'text-slate-400 hover:text-slate-200'
@@ -663,7 +820,7 @@ export default function App() {
 
               <button
                 onClick={() => setActiveBottomTab('injector')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
                   activeBottomTab === 'injector' 
                     ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-slate-950 shadow-emerald-glow' 
                     : 'text-slate-400 hover:text-slate-200'
@@ -675,7 +832,7 @@ export default function App() {
 
               <button
                 onClick={() => setActiveBottomTab('diagnostics')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
                   activeBottomTab === 'diagnostics' 
                     ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white' 
                     : 'text-slate-400 hover:text-slate-200'
@@ -687,7 +844,7 @@ export default function App() {
 
               <button
                 onClick={() => setActiveBottomTab('wardrive')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
                   activeBottomTab === 'wardrive' 
                     ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-emerald-glow' 
                     : 'text-slate-400 hover:text-slate-200'
@@ -699,7 +856,7 @@ export default function App() {
 
               <button
                 onClick={() => setActiveBottomTab('macros')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
                   activeBottomTab === 'macros' 
                     ? 'bg-slate-800 text-cyber-amber font-bold' 
                     : 'text-slate-400 hover:text-slate-200'
@@ -710,8 +867,8 @@ export default function App() {
               </button>
             </div>
 
-            <div className="text-[11px] text-slate-500 font-mono hidden md:block">
-              HARDWARE HACKER WORKBENCH // v1.5 MULTI-BOARD CONCURRENT
+            <div className="text-[11px] text-slate-500 font-mono hidden xl:block">
+              HARDWARE HACKER WORKBENCH // 14 PROTOCOL & DIAGNOSTIC MODULES
             </div>
           </div>
 
@@ -722,6 +879,67 @@ export default function App() {
                 isConnected={activeBoard.isConnected}
                 port={activeBoard.port}
                 onWriteChunk={(chunk) => handleSendRawBytes(activeBoard.id, chunk)}
+                onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+              />
+            )}
+
+            {activeBottomTab === 'esp-dump' && (
+              <EspMemoryInspector
+                isConnected={activeBoard.isConnected}
+                port={activeBoard.port}
+                onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+              />
+            )}
+
+            {activeBottomTab === 'bridge' && (
+              <SerialBridgeDeck
+                boards={boards}
+                bridgeConfig={bridgeConfig}
+                onToggleBridge={handleToggleBridge}
+                bridgeLog={bridgeLog}
+                onClearBridgeLog={() => setBridgeLog([])}
+                onSendRawBytes={(raw) => handleSendRawBytes(activeBoard.id, raw)}
+                onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+              />
+            )}
+
+            {activeBottomTab === 'packets' && (
+              <PacketFramer
+                activeHexByteStream={activeBoard.hexByteStream}
+                isConnected={activeBoard.isConnected}
+              />
+            )}
+
+            {activeBottomTab === 'ubx' && (
+              <UbxConfigDeck
+                isConnected={activeBoard.isConnected}
+                onSendRawBytes={(raw) => handleSendRawBytes(activeBoard.id, raw)}
+                onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+              />
+            )}
+
+            {activeBottomTab === 'micropython' && (
+              <MicroPythonFileManager
+                isConnected={activeBoard.isConnected}
+                onSendString={(str) => handleSendString(activeBoard.id, str)}
+                latestRxText={activeBoard.latestRxText}
+                onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+              />
+            )}
+
+            {activeBottomTab === 'scripting' && (
+              <ScriptRunner
+                isConnected={activeBoard.isConnected}
+                onSendString={(str) => handleSendString(activeBoard.id, str)}
+                latestRxText={activeBoard.latestRxText}
+                onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+              />
+            )}
+
+            {activeBottomTab === 'alerts' && (
+              <CrashAlertDeck
+                latestTextStream={activeBoard.latestRxText}
+                onPauseTerminal={() => {}}
                 onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
               />
             )}
