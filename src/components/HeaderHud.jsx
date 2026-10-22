@@ -14,7 +14,8 @@ import {
   Info,
   Smartphone,
   Download,
-  BookOpen
+  BookOpen,
+  Search
 } from 'lucide-react';
 import { identifyUsbChip } from '../utils/usbDatabase';
 import PinoutModal from './PinoutModal';
@@ -40,7 +41,9 @@ export default function HeaderHud({
   hasWebUsbSupport,
   isMobileDevice,
   isAppleDevice,
-  transportType
+  transportType,
+  onOpenCommandPalette,
+  onOpenHardwareIntel
 }) {
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [showChipModal, setShowChipModal] = useState(false);
@@ -213,7 +216,7 @@ export default function HeaderHud({
         <div className="hidden lg:flex items-center gap-3 bg-cyber-card px-3 py-1.5 rounded-lg border border-slate-800 text-xs font-mono">
           {isConnected && (
             <button
-              onClick={() => setShowChipModal(true)}
+              onClick={() => onOpenHardwareIntel ? onOpenHardwareIntel() : setShowChipModal(true)}
               className="flex items-center gap-1.5 bg-slate-950 hover:bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-slate-300 text-[11px] transition-colors"
               title="View USB-UART Chip Specifications & Quirks"
             >
@@ -272,6 +275,16 @@ export default function HeaderHud({
               <span className="hidden sm:inline">INSTALL</span>
             </button>
           )}
+
+          {/* Quick Command Palette Button */}
+          <button
+            onClick={onOpenCommandPalette}
+            title="Search tools, commands, and actions (Ctrl+K)"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyber-card hover:bg-slate-800 text-slate-300 border border-slate-800 hover:border-cyan-500/50 text-xs font-mono transition-all"
+          >
+            <Search className="w-3.5 h-3.5 text-cyber-cyan" />
+            <span className="hidden xl:inline text-[11px] text-slate-400">Ctrl+K</span>
+          </button>
 
           {/* Baud Rate Picker */}
           <div className="flex items-center bg-cyber-card rounded-lg border border-slate-800 p-0.5">

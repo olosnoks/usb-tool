@@ -16,16 +16,22 @@ import {
   AlertTriangle,
   Plus,
   X,
-  Code
+  Code,
+  CornerLeftUp,
+  FolderTree
 } from 'lucide-react';
 
 export default function MicroPythonFileManager({
   isConnected,
   onSendString,
   latestRxText = '',
-  onLogMessage
+  onLogMessage,
+  boards = [],
+  activeBoardId,
+  onSelectBoard
 }) {
   const [deviceFiles, setDeviceFiles] = useState([]);
+  const [currentPath, setCurrentPath] = useState('.');
   const [platformInfo, setPlatformInfo] = useState('');
   const [storageInfo, setStorageInfo] = useState({ totalKb: 0, freeKb: 0 });
   const [isScanning, setIsScanning] = useState(false);
@@ -49,22 +55,6 @@ export default function MicroPythonFileManager({
       rxBufferRef.current += latestRxText;
     }
   }, [latestRxText]);
-
-  // Helper to wait for a specific string in the RX stream with a timeout
-  const waitForResponse = (expectedPattern, timeoutMs = 3000) => {
-    return new Promise((resolve, reject) => {
-      const start = Date.now();
-      const checkInterval = setInterval(() => {
-        if (rxBufferRef.current.includes(expectedPattern)) {
-          clearInterval(checkInterval);
-          resolve(rxBufferRef.current);
-        } else if (Date.now() - start > timeoutMs) {
-          clearInterval(checkInterval);
-          reject(new Error(`Timeout waiting for "${expectedPattern}"`));
-        }
-      }, 50);
-    });
-  };
 
   // Helper to execute Python code via MicroPython Raw REPL
   const executeInRawRepl = async (codeStr, timeoutMs = 4000) => {
@@ -92,15 +82,16 @@ export default function MicroPythonFileManager({
     return rxBufferRef.current;
   };
 
-  // Scan Flash Filesystem
-  const handleScanFiles = async () => {
+  // Scan Flash Filesystem in currentPath
+  const handleScanFiles = async (dirToScan = currentPath) => {
     if (!isConnected) {
       alert('Please connect to a MicroPython/CircuitPython serial port first.');
       return;
     }
 
     setIsScanning(true);
-    onLogMessage?.('[MICROPYTHON] Interrogating on-chip filesystem via Raw REPL...', 'sys');
+    setCurrentPath(dirToScan);
+    onLogMessage?.(`[MICROPYTHON] Interrogating directory "${dirToScan}" via Raw REPL...`, 'sys');
 
     const scanPython = `
 import os, sys, ujson
@@ -113,8 +104,9 @@ try:
 except:
     pass
 items = []
+target_dir = '${dirToScan}'
 try:
-    for entry in os.ilistdir('.'):
+    for entry in os.ilistdir(target_dir):
         name = entry[0]
         mode = entry[1]
         sz = entry[3] if len(entry) > 3 else 0
@@ -122,7 +114,7 @@ try:
         items.append({'name': name, 'size': sz, 'isDir': is_dir})
 except:
     try:
-        for name in os.listdir('.'):
+        for name in os.listdir(target_dir):
             items.append({'name': name, 'size': 0, 'isDir': False})
     except:
         pass
@@ -146,9 +138,8 @@ print("__PY_DATA_END__")
         setPlatformInfo(data.platform || 'MicroPython Device');
         setStorageInfo({ totalKb: data.total_kb, freeKb: data.free_kb });
         setDeviceFiles(data.files || []);
-        onLogMessage?.(`[MICROPYTHON] Scanned successfully: ${data.files.length} items found on ${data.platform}`, 'sys');
+        onLogMessage?.(`[MICROPYTHON] Scanned "${dirToScan}": ${data.files.length} items found on ${data.platform}`, 'sys');
       } else {
-        // Fallback or warning
         onLogMessage?.('[MICROPYTHON] RAW REPL output did not contain structured JSON marker. Raw response:\n' + output, 'sys');
       }
     } catch (err) {
@@ -158,16 +149,21 @@ print("__PY_DATA_END__")
     }
   };
 
+  const getFullPath = (fileName) => {
+    return currentPath === '.' ? fileName : `${currentPath}/${fileName}`;
+  };
+
   // Read file from device to view/edit
   const handleReadFile = async (fileName) => {
     if (!isConnected) return;
     setIsExecuting(true);
-    onLogMessage?.(`[MICROPYTHON] Reading file "${fileName}"...`, 'sys');
+    const fullPath = getFullPath(fileName);
+    onLogMessage?.(`[MICROPYTHON] Reading file "${fullPath}"...`, 'sys');
 
     const readPython = `
 import ubinascii
 try:
-    with open('${fileName}', 'rb') as f:
+    with open('${fullPath}', 'rb') as f:
         print("__FILE_DATA_START__")
         print(ubinascii.b2a_base64(f.read()).decode().strip())
         print("__FILE_DATA_END__")
@@ -186,10 +182,10 @@ except Exception as e:
       if (sIdx !== -1 && eIdx !== -1) {
         const b64 = output.substring(sIdx + startMarker.length, eIdx).trim();
         const textContent = atob(b64);
-        setEditingFile({ name: fileName, content: textContent });
-        onLogMessage?.(`[MICROPYTHON] Successfully loaded "${fileName}" (${textContent.length} chars)`, 'sys');
+        setEditingFile({ name: fullPath, content: textContent });
+        onLogMessage?.(`[MICROPYTHON] Successfully loaded "${fullPath}" (${textContent.length} chars)`, 'sys');
       } else {
-        alert('Could not read file contents from device. See console for details.');
+        alert(`Could not read "${fullPath}" from device. See console for details.`);
       }
     } catch (err) {
       alert(`Error reading file: ${err.message}`);
@@ -202,12 +198,13 @@ except Exception as e:
   const handleDownloadFile = async (fileName) => {
     if (!isConnected) return;
     setIsExecuting(true);
-    onLogMessage?.(`[MICROPYTHON] Downloading "${fileName}" to PC...`, 'sys');
+    const fullPath = getFullPath(fileName);
+    onLogMessage?.(`[MICROPYTHON] Downloading "${fullPath}" to PC...`, 'sys');
 
     const readPython = `
 import ubinascii
 try:
-    with open('${fileName}', 'rb') as f:
+    with open('${fullPath}', 'rb') as f:
         print("__FILE_DATA_START__")
         print(ubinascii.b2a_base64(f.read()).decode().strip())
         print("__FILE_DATA_END__")
@@ -243,16 +240,16 @@ except Exception as e:
   };
 
   // Save / Upload File Content to Device
-  const handleSaveFileContent = async (fileName, content) => {
+  const handleSaveFileContent = async (targetFilePath, content) => {
     if (!isConnected) return;
     setIsExecuting(true);
-    onLogMessage?.(`[MICROPYTHON] Writing file "${fileName}" to on-chip flash...`, 'sys');
+    onLogMessage?.(`[MICROPYTHON] Writing file "${targetFilePath}" to flash...`, 'sys');
 
     const b64 = btoa(content);
     const writePython = `
 import ubinascii
 try:
-    with open('${fileName}', 'wb') as f:
+    with open('${targetFilePath}', 'wb') as f:
         f.write(ubinascii.a2b_base64('${b64}'))
     print("__FILE_WRITE_SUCCESS__")
 except Exception as e:
@@ -262,10 +259,10 @@ except Exception as e:
     try {
       const output = await executeInRawRepl(writePython);
       if (output.includes('__FILE_WRITE_SUCCESS__')) {
-        onLogMessage?.(`[MICROPYTHON] Successfully saved "${fileName}"!`, 'sys');
+        onLogMessage?.(`[MICROPYTHON] Successfully saved "${targetFilePath}"!`, 'sys');
         setEditingFile(null);
         setIsNewFileModal(false);
-        await handleScanFiles();
+        await handleScanFiles(currentPath);
       } else {
         alert('File write failed. See logs for details.');
       }
@@ -278,15 +275,16 @@ except Exception as e:
 
   // Delete file from device
   const handleDeleteFile = async (fileName) => {
-    if (!confirm(`Are you sure you want to delete "${fileName}" from the device filesystem?`)) return;
+    const fullPath = getFullPath(fileName);
+    if (!confirm(`Are you sure you want to delete "${fullPath}" from the device filesystem?`)) return;
 
     setIsExecuting(true);
-    onLogMessage?.(`[MICROPYTHON] Removing "${fileName}"...`, 'sys');
+    onLogMessage?.(`[MICROPYTHON] Removing "${fullPath}"...`, 'sys');
 
     const delPython = `
 import os
 try:
-    os.remove('${fileName}')
+    os.remove('${fullPath}')
     print("__FILE_DEL_SUCCESS__")
 except Exception as e:
     print("__FILE_DEL_ERROR__", str(e))
@@ -295,8 +293,8 @@ except Exception as e:
     try {
       const output = await executeInRawRepl(delPython);
       if (output.includes('__FILE_DEL_SUCCESS__')) {
-        onLogMessage?.(`[MICROPYTHON] Deleted "${fileName}"`, 'sys');
-        await handleScanFiles();
+        onLogMessage?.(`[MICROPYTHON] Deleted "${fullPath}"`, 'sys');
+        await handleScanFiles(currentPath);
       } else {
         alert('Failed to delete file from device.');
       }
@@ -312,10 +310,11 @@ except Exception as e:
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const target = getFullPath(file.name);
     const reader = new FileReader();
     reader.onload = async (event) => {
       const content = event.target.result;
-      await handleSaveFileContent(file.name, content);
+      await handleSaveFileContent(target, content);
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
     reader.readAsText(file);
@@ -337,6 +336,15 @@ except Exception as e:
     }
   };
 
+  // Parent dir navigation helper
+  const handleGoUp = () => {
+    if (currentPath === '.') return;
+    const parts = currentPath.split('/');
+    parts.pop();
+    const parent = parts.join('/') || '.';
+    handleScanFiles(parent);
+  };
+
   return (
     <div className="bg-cyber-darkest border border-cyber-border rounded-xl shadow-xl p-4 flex flex-col gap-3 font-mono text-xs">
       {/* Top Banner */}
@@ -353,8 +361,23 @@ except Exception as e:
           )}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-1.5">
+        {/* Target Board Selector & Actions */}
+        <div className="flex flex-wrap items-center gap-2">
+          {boards.length > 0 && onSelectBoard && (
+            <div className="flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800 text-[11px]">
+              <span className="text-slate-500 font-bold">TARGET:</span>
+              <select
+                value={activeBoardId}
+                onChange={(e) => onSelectBoard(e.target.value)}
+                className="bg-transparent text-cyber-cyan font-bold outline-none cursor-pointer"
+              >
+                {boards.map(b => (
+                  <option key={b.id} value={b.id}>{b.name} ({b.baudRate})</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <input
             type="file"
             ref={fileInputRef}
@@ -382,7 +405,7 @@ except Exception as e:
           </button>
 
           <button
-            onClick={handleScanFiles}
+            onClick={() => handleScanFiles(currentPath)}
             disabled={!isConnected || isScanning || isExecuting}
             className="flex items-center gap-1 px-3 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-cyber-amber font-bold border border-amber-500/40 hover:border-amber-400 disabled:opacity-50 transition-all"
           >
@@ -392,26 +415,33 @@ except Exception as e:
         </div>
       </div>
 
-      {/* Storage Gauge */}
-      {storageInfo.totalKb > 0 && (
-        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex flex-col gap-1.5">
-          <div className="flex items-center justify-between text-[11px] text-slate-400">
-            <span className="flex items-center gap-1.5">
-              <HardDrive className="w-3.5 h-3.5 text-cyber-cyan" />
-              Flash File System Capacity
-            </span>
-            <span className="font-mono text-slate-300">
-              {storageInfo.freeKb} KB Free / {storageInfo.totalKb} KB Total ({Math.round(((storageInfo.totalKb - storageInfo.freeKb) / storageInfo.totalKb) * 100)}% used)
-            </span>
-          </div>
-          <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-            <div 
-              className="bg-gradient-to-r from-cyber-cyan to-cyber-amber h-full rounded-full transition-all duration-300"
-              style={{ width: `${Math.min(100, Math.max(5, Math.round(((storageInfo.totalKb - storageInfo.freeKb) / storageInfo.totalKb) * 100)))}%` }}
-            />
-          </div>
+      {/* Breadcrumb Path & Storage Gauge */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950 p-2 rounded-lg border border-slate-800">
+        <div className="flex items-center gap-2 text-xs">
+          <FolderTree className="w-4 h-4 text-cyber-cyan" />
+          <span className="text-slate-500 uppercase font-bold">DIRECTORY:</span>
+          <span className="text-slate-200 font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+            /{currentPath === '.' ? '' : currentPath}
+          </span>
+          {currentPath !== '.' && (
+            <button
+              onClick={handleGoUp}
+              className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-cyber-amber border border-slate-800 text-[11px]"
+              title="Navigate to parent directory"
+            >
+              <CornerLeftUp className="w-3 h-3" />
+              <span>UP</span>
+            </button>
+          )}
         </div>
-      )}
+
+        {storageInfo.totalKb > 0 && (
+          <div className="flex items-center gap-2 text-[11px] text-slate-400">
+            <HardDrive className="w-3.5 h-3.5 text-cyber-cyan" />
+            <span>{storageInfo.freeKb} KB Free / {storageInfo.totalKb} KB Total</span>
+          </div>
+        )}
+      </div>
 
       {/* File List Table */}
       <div className="bg-slate-950 rounded-lg border border-slate-800 overflow-hidden">
@@ -425,11 +455,25 @@ except Exception as e:
             </tr>
           </thead>
           <tbody>
+            {currentPath !== '.' && (
+              <tr 
+                onClick={handleGoUp}
+                className="border-b border-slate-900 hover:bg-slate-900/50 cursor-pointer text-cyber-amber transition-colors"
+              >
+                <td className="py-2 px-3 w-10">
+                  <Folder className="w-4 h-4 text-cyber-amber" />
+                </td>
+                <td colSpan="3" className="py-2 px-3 font-mono font-bold">
+                  .. [Parent Directory]
+                </td>
+              </tr>
+            )}
+
             {deviceFiles.length === 0 ? (
               <tr>
                 <td colSpan="4" className="py-8 text-center text-slate-500">
                   {isConnected 
-                    ? 'No files detected yet. Click "SCAN DEVICE FILES" to query the MicroPython filesystem.' 
+                    ? 'No files detected in this directory. Click "SCAN DEVICE FILES" to query the MicroPython filesystem.' 
                     : 'Device not connected. Connect serial port to browse on-chip files.'}
                 </td>
               </tr>
@@ -448,15 +492,33 @@ except Exception as e:
                       <FileText className="w-4 h-4 text-slate-400" />
                     )}
                   </td>
-                  <td className="py-2 px-3 font-mono font-bold text-slate-200">
-                    {file.name}
+                  <td 
+                    onClick={() => {
+                      if (file.isDir) {
+                        const next = currentPath === '.' ? file.name : `${currentPath}/${file.name}`;
+                        handleScanFiles(next);
+                      }
+                    }}
+                    className={`py-2 px-3 font-mono font-bold ${file.isDir ? 'text-cyber-amber cursor-pointer hover:underline' : 'text-slate-200'}`}
+                  >
+                    {file.name} {file.isDir && '/'}
                   </td>
                   <td className="py-2 px-3 text-slate-400 font-mono text-[11px]">
                     {file.size > 0 ? `${file.size} B` : file.isDir ? '<DIR>' : '-'}
                   </td>
                   <td className="py-2 px-3 text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      {!file.isDir && (
+                      {file.isDir ? (
+                        <button
+                          onClick={() => {
+                            const next = currentPath === '.' ? file.name : `${currentPath}/${file.name}`;
+                            handleScanFiles(next);
+                          }}
+                          className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-cyber-amber border border-slate-800 text-[11px] font-bold"
+                        >
+                          ENTER
+                        </button>
+                      ) : (
                         <>
                           <button
                             onClick={() => handleReadFile(file.name)}
@@ -515,10 +577,10 @@ except Exception as e:
         </button>
       </div>
 
-      {/* Modal: View / Edit File */}
+      {/* Modal: View / Edit File with Line Numbers Gutter */}
       {editingFile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200 font-mono">
-          <div className="bg-[#030712] border border-cyan-500/40 rounded-xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+          <div className="bg-[#030712] border border-cyan-500/40 rounded-xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
             <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-slate-950">
               <div className="flex items-center gap-2">
                 <FileCode className="w-4 h-4 text-cyber-cyan" />
@@ -533,19 +595,31 @@ except Exception as e:
               </button>
             </div>
 
-            <div className="p-3 flex-1 flex flex-col min-h-[300px]">
-              <textarea
-                value={editingFile.content}
-                onChange={(e) => setEditingFile({ ...editingFile, content: e.target.value })}
-                className="w-full flex-1 bg-slate-950 border border-slate-800 rounded-lg p-3 text-slate-100 font-mono text-xs focus:border-cyan-500 outline-none resize-none leading-relaxed"
-                spellCheck="false"
-              />
+            {/* Editor with Line Numbers */}
+            <div className="p-3 flex-1 flex flex-col min-h-[360px] overflow-hidden">
+              <div className="flex bg-slate-950 border border-slate-800 rounded-lg overflow-hidden flex-1">
+                {/* Line Numbers Gutter */}
+                <div className="py-3 px-2 bg-slate-900/80 text-slate-600 font-mono text-xs select-none text-right border-r border-slate-800 flex flex-col min-w-[2.8rem]">
+                  {editingFile.content.split('\n').map((_, i) => (
+                    <span key={i} className="leading-relaxed">{i + 1}</span>
+                  ))}
+                </div>
+                {/* Textarea */}
+                <textarea
+                  value={editingFile.content}
+                  onChange={(e) => setEditingFile({ ...editingFile, content: e.target.value })}
+                  className="w-full flex-1 bg-transparent p-3 text-slate-100 font-mono text-xs focus:outline-none resize-none leading-relaxed overflow-y-auto"
+                  spellCheck="false"
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-between p-3 border-t border-slate-800 bg-slate-950">
-              <span className="text-[11px] text-slate-500">
-                {editingFile.content.length} characters
-              </span>
+              <div className="flex items-center gap-3 text-[11px] text-slate-500">
+                <span>{editingFile.content.split('\n').length} lines</span>
+                <span>•</span>
+                <span>{editingFile.content.length} characters</span>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setEditingFile(null)}
@@ -574,7 +648,7 @@ except Exception as e:
             <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-slate-950">
               <div className="flex items-center gap-2">
                 <Plus className="w-4 h-4 text-cyber-amber" />
-                <span className="font-bold text-slate-200 text-sm">CREATE NEW SCRIPT ON DEVICE</span>
+                <span className="font-bold text-slate-200 text-sm">CREATE NEW SCRIPT IN /{currentPath === '.' ? '' : currentPath}</span>
               </div>
               <button 
                 onClick={() => setIsNewFileModal(false)} 
@@ -587,7 +661,7 @@ except Exception as e:
             <div className="p-4 flex flex-col gap-3">
               <div>
                 <label className="text-[10px] text-slate-400 uppercase font-bold block mb-1">
-                  Filename (e.g. main.py, boot.py, sensor.py)
+                  Filename (e.g. main.py, config.json, sensor.py)
                 </label>
                 <input
                   type="text"
@@ -618,7 +692,10 @@ except Exception as e:
                 CANCEL
               </button>
               <button
-                onClick={() => handleSaveFileContent(newFileName.trim(), newFileContent)}
+                onClick={() => {
+                  const target = getFullPath(newFileName.trim());
+                  handleSaveFileContent(target, newFileContent);
+                }}
                 disabled={!newFileName.trim() || isExecuting}
                 className="flex items-center gap-1.5 px-4 py-1.5 rounded bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold shadow-amber-glow text-xs"
               >

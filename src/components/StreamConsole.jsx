@@ -224,6 +224,24 @@ export default function StreamConsole({
     ? entries.filter(e => e.text.toLowerCase().includes(searchQuery.toLowerCase()))
     : entries;
 
+  const totalMatchesCount = searchQuery.trim() ? filteredEntries.length : 0;
+
+  const renderHighlight = (text, query) => {
+    if (!query || !query.trim() || !text) return text;
+    const q = query.trim();
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    const parts = text.split(regex);
+    if (parts.length <= 1) return text;
+    return parts.map((part, i) => 
+      part.toLowerCase() === q.toLowerCase() ? (
+        <mark key={i} className="bg-amber-400 text-slate-950 font-bold px-0.5 rounded shadow-amber-glow">
+          {part}
+        </mark>
+      ) : part
+    );
+  };
+
   return (
     <div className="flex flex-col h-full bg-cyber-darkest border border-cyber-border rounded-xl shadow-xl overflow-hidden">
       {/* Terminal Title Bar */}
@@ -256,6 +274,11 @@ export default function StreamConsole({
               onChange={(e) => setSearchQuery(e.target.value)}
               className="bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2 py-0.5 text-[11px] text-slate-200 focus:border-cyber-cyan outline-none w-28 sm:w-36 transition-all"
             />
+            {searchQuery.trim() && (
+              <span className="ml-1.5 px-1.5 py-0.2 rounded bg-amber-500/20 text-cyber-amber border border-amber-500/40 text-[10px] font-bold">
+                {totalMatchesCount}
+              </span>
+            )}
           </div>
 
           {/* Timestamps */}
@@ -374,10 +397,12 @@ export default function StreamConsole({
                 <span className="break-all whitespace-pre-wrap flex-1 text-slate-200">
                   {ansiParts ? (
                     ansiParts.map((part, idx) => (
-                      <span key={idx} className={part.className}>{part.text}</span>
+                      <span key={idx} className={part.className}>
+                        {renderHighlight(part.text, searchQuery)}
+                      </span>
                     ))
                   ) : (
-                    entry.text
+                    renderHighlight(entry.text, searchQuery)
                   )}
                 </span>
               </div>

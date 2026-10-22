@@ -17,6 +17,9 @@ import UbxConfigDeck from './components/UbxConfigDeck';
 import ScriptRunner from './components/ScriptRunner';
 import CrashAlertDeck from './components/CrashAlertDeck';
 import MicroPythonFileManager from './components/MicroPythonFileManager';
+import CommandPalette from './components/CommandPalette';
+import HardwareIntelligenceModal from './components/HardwareIntelligenceModal';
+import PinoutModal from './components/PinoutModal';
 import { parseHexInput } from './utils/checksums';
 import { requestWebUsbSerialPort } from './utils/webUsbSerial';
 import { identifyUsbChip } from './utils/usbDatabase';
@@ -28,16 +31,23 @@ import {
   Command, 
   Zap, 
   Sliders, 
-  Activity,
-  ShieldAlert,
-  Compass,
-  Cpu,
-  Layers,
-  Radio,
-  ArrowLeftRight,
-  Navigation,
-  FileCode,
-  Bot
+  Activity, 
+  ShieldAlert, 
+  Compass, 
+  Cpu, 
+  Layers, 
+  Radio, 
+  ArrowLeftRight, 
+  Navigation, 
+  FileCode, 
+  Bot,
+  Maximize2,
+  Minimize2,
+  Save,
+  Upload,
+  BookOpen,
+  FolderTree,
+  Search
 } from 'lucide-react';
 
 const INITIAL_BOARD = {
@@ -85,8 +95,16 @@ export default function App() {
   const [activeBoardId, setActiveBoardId] = useState('board-1');
   const [showHexInspection, setShowHexInspection] = useState(true);
 
-  // Active Bottom Workbench Tab
+  // Active Bottom Workbench Tab & Workspace Mode
   const [activeBottomTab, setActiveBottomTab] = useState('flasher');
+  const [workspaceCategory, setWorkspaceCategory] = useState('all');
+  const [isWorkbenchMaximized, setIsWorkbenchMaximized] = useState(false);
+
+  // Modals & Command Palette
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isHardwareIntelOpen, setIsHardwareIntelOpen] = useState(false);
+  const [isPinoutModalOpen, setIsPinoutModalOpen] = useState(false);
+  const sessionFileInputRef = useRef(null);
 
   // MitM Hardware Serial Bridge State
   const [bridgeConfig, setBridgeConfig] = useState({
@@ -97,6 +115,80 @@ export default function App() {
   const [bridgeLog, setBridgeLog] = useState([]);
   const lastBridgePacketTimeRef = useRef(Date.now());
   const forwardBridgeBytesRef = useRef(null);
+
+  // Global Ctrl+K / Cmd+K listener
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleExportWorkspaceSession = () => {
+    const sessionData = {
+      app: "Skon's USB Tool // Serial Workbench",
+      version: '1.5',
+      savedAt: new Date().toISOString(),
+      activeBoardId,
+      activeBottomTab,
+      workspaceCategory,
+      boards: boards.map(b => ({
+        id: b.id,
+        name: b.name,
+        baudRate: b.baudRate,
+        serialConfig: b.serialConfig,
+        pos: b.pos
+      }))
+    };
+
+    const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `skon-session-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    addLogToBoard(activeBoardId, 'Exported workspace session configuration file.', 'sys');
+  };
+
+  const handleImportWorkspaceSession = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        if (data.boards && Array.isArray(data.boards)) {
+          setBoards(prev => data.boards.map(sb => {
+            const existing = prev.find(p => p.id === sb.id);
+            return {
+              ...INITIAL_BOARD,
+              ...existing,
+              id: sb.id,
+              name: sb.name,
+              baudRate: sb.baudRate || 115200,
+              serialConfig: sb.serialConfig || INITIAL_BOARD.serialConfig,
+              pos: sb.pos || { x: 20, y: 20 }
+            };
+          }));
+        }
+        if (data.activeBoardId) setActiveBoardId(data.activeBoardId);
+        if (data.activeBottomTab) setActiveBottomTab(data.activeBottomTab);
+        if (data.workspaceCategory) setWorkspaceCategory(data.workspaceCategory);
+        addLogToBoard(activeBoardId, `Successfully imported session config from "${file.name}"!`, 'sys');
+      } catch (err) {
+        alert(`Invalid session file: ${err.message}`);
+      } finally {
+        if (sessionFileInputRef.current) sessionFileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
 
   // Mobile & API Detection
   const hasWebSerialSupport = typeof navigator !== 'undefined' && 'serial' in navigator;
@@ -646,12 +738,60 @@ export default function App() {
         isMobileDevice={isMobileDevice}
         isAppleDevice={isAppleDevice}
         transportType={activeBoard.transportType}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onOpenHardwareIntel={() => setIsHardwareIntelOpen(true)}
+      />
+
+      {/* Hidden Session Import Input */}
+      <input
+        type="file"
+        ref={sessionFileInputRef}
+        onChange={handleImportWorkspaceSession}
+        accept=".json"
+        className="hidden"
+      />
+
+      {/* Command Palette Modal */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onSelectTab={(tab) => {
+          setActiveBottomTab(tab);
+          const catMap = {
+            flasher: 'firmware', 'esp-dump': 'firmware', micropython: 'firmware',
+            bridge: 'protocols', packets: 'protocols', ubx: 'protocols',
+            plotter: 'debug', alerts: 'debug', injector: 'debug', uboot: 'debug',
+            scripting: 'automation', diagnostics: 'automation', wardrive: 'automation', macros: 'automation'
+          };
+          if (catMap[tab]) setWorkspaceCategory(catMap[tab]);
+        }}
+        onConnect={() => handleConnect(activeBoardId)}
+        onDisconnect={() => handleDisconnect(activeBoardId)}
+        onClearLogs={() => updateBoard(activeBoardId, { entries: [] })}
+        onSetBaud={(baud) => updateBoard(activeBoardId, { baudRate: baud })}
+        onOpenHardwareIntel={() => setIsHardwareIntelOpen(true)}
+        onOpenPinouts={() => setIsPinoutModalOpen(true)}
+        onExportSession={handleExportWorkspaceSession}
+        isConnected={activeBoard.isConnected}
+      />
+
+      {/* Hardware Intelligence Modal */}
+      <HardwareIntelligenceModal
+        isOpen={isHardwareIntelOpen}
+        onClose={() => setIsHardwareIntelOpen(false)}
+        portInfo={activeBoard.portInfo}
+      />
+
+      {/* Pinouts Reference Modal */}
+      <PinoutModal
+        isOpen={isPinoutModalOpen}
+        onClose={() => setIsPinoutModalOpen(false)}
       />
 
       {/* Main Workspace Area */}
       <main className="flex-1 max-w-[1920px] w-full mx-auto p-2.5 sm:p-4 flex flex-col gap-3">
         {/* Target Status & Multi-Board Counter */}
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-cyber-card border border-slate-800 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-cyber-card border border-slate-800 text-xs font-mono">
           <div className="flex items-center gap-2 text-slate-400">
             <span className="w-2 h-2 rounded-full bg-cyber-emerald animate-ping"></span>
             <span>ACTIVE TARGET:</span>
@@ -667,208 +807,218 @@ export default function App() {
           </div>
         </div>
 
-        {/* Multi-Board Terminal Deck & Movable Windows */}
-        <MultiBoardWorkbench
-          boards={boards}
-          activeBoardId={activeBoardId}
-          onSelectActiveBoard={setActiveBoardId}
-          onConnectBoard={handleConnect}
-          onDisconnectBoard={handleDisconnect}
-          onAddNewBoard={handleAddNewBoard}
-          onCloseBoard={handleCloseBoard}
-          onSendToBoard={(boardId, text) => handleSendString(boardId, text)}
-          onBroadcast={handleBroadcast}
-          onClearBoardLog={(boardId) => updateBoard(boardId, { entries: [] })}
-          onMoveBoard={handleMoveBoard}
-          onUpdateBoardWindow={handleUpdateBoardWindow}
-          onBaudRateChange={(boardId, baud) => updateBoard(boardId, { baudRate: baud })}
-          showHexInspection={showHexInspection}
-          onToggleHexInspection={() => setShowHexInspection(!showHexInspection)}
-          activeHexByteStream={activeBoard.hexByteStream}
-          onClearHexStream={() => {
-            updateBoard(activeBoard.id, { hexByteStream: [] });
-            boardOffsetsRef.current[activeBoard.id] = 0;
-            addLogToBoard(activeBoard.id, 'Hex memory buffer cleared.', 'sys');
-          }}
-          isMobileDevice={isMobileDevice}
-        />
+        {/* Multi-Board Terminal Deck or Collapsed Status Bar */}
+        {!isWorkbenchMaximized ? (
+          <MultiBoardWorkbench
+            boards={boards}
+            activeBoardId={activeBoardId}
+            onSelectActiveBoard={setActiveBoardId}
+            onConnectBoard={handleConnect}
+            onDisconnectBoard={handleDisconnect}
+            onAddNewBoard={handleAddNewBoard}
+            onCloseBoard={handleCloseBoard}
+            onSendToBoard={(boardId, text) => handleSendString(boardId, text)}
+            onBroadcast={handleBroadcast}
+            onClearBoardLog={(boardId) => updateBoard(boardId, { entries: [] })}
+            onMoveBoard={handleMoveBoard}
+            onUpdateBoardWindow={handleUpdateBoardWindow}
+            onBaudRateChange={(boardId, baud) => updateBoard(boardId, { baudRate: baud })}
+            showHexInspection={showHexInspection}
+            onToggleHexInspection={() => setShowHexInspection(!showHexInspection)}
+            activeHexByteStream={activeBoard.hexByteStream}
+            onClearHexStream={() => {
+              updateBoard(activeBoard.id, { hexByteStream: [] });
+              boardOffsetsRef.current[activeBoard.id] = 0;
+              addLogToBoard(activeBoard.id, 'Hex memory buffer cleared.', 'sys');
+            }}
+            isMobileDevice={isMobileDevice}
+          />
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-cyber-card border border-cyan-500/30 text-xs font-mono shadow-lg">
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] font-bold text-cyber-cyan">
+                FULL-SCREEN TOOL VIEW // TERMINAL DECK COLLAPSED
+              </span>
+              <div className="flex items-center gap-1.5">
+                {boards.map(b => (
+                  <button
+                    key={b.id}
+                    onClick={() => setActiveBoardId(b.id)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-all ${
+                      b.id === activeBoardId
+                        ? 'bg-cyan-500/20 text-cyber-cyan border-cyan-500/50'
+                        : 'bg-slate-900 text-slate-400 border-slate-800'
+                    }`}
+                  >
+                    {b.name} ({b.baudRate})
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={() => setIsWorkbenchMaximized(false)}
+              className="flex items-center gap-1 px-3 py-1 rounded bg-slate-900 hover:bg-slate-800 text-cyber-amber border border-amber-500/40 text-xs font-bold"
+            >
+              <Minimize2 className="w-3.5 h-3.5" />
+              <span>RESTORE SPLIT VIEW</span>
+            </button>
+          </div>
+        )}
 
-        {/* Bottom Half: Workbench Tools & Modules (Follows Active Board) */}
+        {/* Bottom Half: Workbench Tools & Modules */}
         <div className="space-y-2 pt-1">
-          {/* Navigation Tabs */}
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cyber-border pb-1">
-            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs overflow-x-auto max-w-full scrollbar-thin scrollbar-thumb-slate-800">
-              <button
-                onClick={() => setActiveBottomTab('flasher')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'flasher' 
-                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-amber-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <HardDrive className="w-3.5 h-3.5" />
-                <span>ESP32 FLASHER</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('esp-dump')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'esp-dump' 
-                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-amber-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Cpu className="w-3.5 h-3.5" />
-                <span>SILICON & DUMP</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('bridge')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'bridge' 
-                    ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-slate-950 shadow-cyan-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <ArrowLeftRight className="w-3.5 h-3.5" />
-                <span>MitM BRIDGE</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('packets')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'packets' 
-                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-slate-950 shadow-emerald-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>PACKET FRAMER</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('ubx')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'ubx' 
-                    ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-slate-950 shadow-cyan-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Navigation className="w-3.5 h-3.5" />
-                <span>UBX GPS</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('micropython')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'micropython' 
-                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-amber-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <FileCode className="w-3.5 h-3.5" />
-                <span>MICROPYTHON FILES</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('scripting')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'scripting' 
-                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Bot className="w-3.5 h-3.5" />
-                <span>TEST RUNNER</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('alerts')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'alerts' 
-                    ? 'bg-gradient-to-r from-rose-600 to-rose-700 text-white shadow-rose-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <ShieldAlert className="w-3.5 h-3.5" />
-                <span>CRASH ALERTS</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('plotter')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'plotter' 
-                    ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-slate-950 shadow-cyan-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Activity className="w-3.5 h-3.5" />
-                <span>OSCILLOSCOPE</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('uboot')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'uboot' 
-                    ? 'bg-gradient-to-r from-rose-600 to-rose-700 text-white shadow-rose-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <ShieldAlert className="w-3.5 h-3.5" />
-                <span>U-BOOT TRIAGE</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('injector')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'injector' 
-                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-slate-950 shadow-emerald-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Binary className="w-3.5 h-3.5" />
-                <span>HEX INJECTOR</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('diagnostics')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'diagnostics' 
-                    ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Radar className="w-3.5 h-3.5" />
-                <span>RE DIAGNOSTICS</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('wardrive')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'wardrive' 
-                    ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-emerald-glow' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Compass className="w-3.5 h-3.5" />
-                <span>WARDRIVE / GPS</span>
-              </button>
-
-              <button
-                onClick={() => setActiveBottomTab('macros')}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
-                  activeBottomTab === 'macros' 
-                    ? 'bg-slate-800 text-cyber-amber font-bold' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Command className="w-3.5 h-3.5" />
-                <span>MACROS</span>
-              </button>
+          {/* Workspace Categories Toolbar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-[#090e1a] p-1.5 rounded-xl border border-cyber-border font-mono">
+            {/* Category Filter Pills */}
+            <div className="flex items-center gap-1 overflow-x-auto text-xs scrollbar-thin">
+              {[
+                { id: 'all', name: 'ALL MODULES', icon: Layers, count: 14 },
+                { id: 'firmware', name: 'FIRMWARE & FLASH', icon: HardDrive, count: 3 },
+                { id: 'protocols', name: 'PROTOCOLS & BUS', icon: ArrowLeftRight, count: 3 },
+                { id: 'debug', name: 'DEBUG & SIGNALS', icon: Activity, count: 4 },
+                { id: 'automation', name: 'AUTOMATION & RE', icon: Bot, count: 4 }
+              ].map(cat => {
+                const Icon = cat.icon;
+                const isActive = workspaceCategory === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => {
+                      setWorkspaceCategory(cat.id);
+                      const catModules = {
+                        firmware: ['flasher', 'esp-dump', 'micropython'],
+                        protocols: ['bridge', 'packets', 'ubx'],
+                        debug: ['plotter', 'alerts', 'injector', 'uboot'],
+                        automation: ['scripting', 'diagnostics', 'wardrive', 'macros']
+                      };
+                      if (cat.id !== 'all' && catModules[cat.id] && !catModules[cat.id].includes(activeBottomTab)) {
+                        setActiveBottomTab(catModules[cat.id][0]);
+                      }
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
+                      isActive 
+                        ? 'bg-slate-800 text-cyan-300 border border-cyan-500/50 shadow-cyan-glow' 
+                        : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{cat.name}</span>
+                    <span className="text-[10px] px-1 py-0.2 rounded bg-slate-900 text-slate-500">
+                      {cat.count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
-            <div className="text-[11px] text-slate-500 font-mono hidden xl:block">
-              HARDWARE HACKER WORKBENCH // 14 PROTOCOL & DIAGNOSTIC MODULES
+            {/* Quick Workbench Action Buttons */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setIsCommandPaletteOpen(true)}
+                title="Open Command Palette (Ctrl+K)"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 hover:border-cyan-500/40 text-xs"
+              >
+                <Search className="w-3.5 h-3.5 text-cyber-cyan" />
+                <span className="hidden sm:inline">Ctrl+K</span>
+              </button>
+
+              <button
+                onClick={handleExportWorkspaceSession}
+                title="Save entire multi-board session and test suites to file"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs"
+              >
+                <Save className="w-3.5 h-3.5 text-cyber-amber" />
+                <span className="hidden md:inline">SAVE SESSION</span>
+              </button>
+
+              <button
+                onClick={() => sessionFileInputRef.current?.click()}
+                title="Restore workspace session from .json file"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs"
+              >
+                <Upload className="w-3.5 h-3.5 text-cyber-emerald" />
+                <span className="hidden md:inline">RESTORE</span>
+              </button>
+
+              <button
+                onClick={() => setIsHardwareIntelOpen(true)}
+                title="Open Hardware Intelligence & Chip Lookup"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyber-cyan border border-slate-800 text-xs"
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span className="hidden lg:inline">CHIP INTEL</span>
+              </button>
+
+              <button
+                onClick={() => setIsWorkbenchMaximized(!isWorkbenchMaximized)}
+                title={isWorkbenchMaximized ? "Restore Terminal Split View" : "Maximize Tool to Full Height"}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-bold transition-all ${
+                  isWorkbenchMaximized 
+                    ? 'bg-amber-500/20 text-cyber-amber border-amber-500/50 shadow-amber-glow' 
+                    : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-600'
+                }`}
+              >
+                {isWorkbenchMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                <span className="hidden sm:inline">{isWorkbenchMaximized ? 'RESTORE' : 'EXPAND'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Sub-Tool Tabs Filtered by Category */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cyber-border pb-1">
+            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs overflow-x-auto max-w-full scrollbar-thin scrollbar-thumb-slate-800">
+              {[
+                { id: 'flasher', name: 'ESP32 FLASHER', category: 'firmware', icon: HardDrive, color: 'from-amber-500 to-amber-600', textGlow: 'shadow-amber-glow' },
+                { id: 'esp-dump', name: 'SILICON & DUMP', category: 'firmware', icon: Cpu, color: 'from-amber-500 to-amber-600', textGlow: 'shadow-amber-glow' },
+                { id: 'micropython', name: 'MICROPYTHON FILES', category: 'firmware', icon: FileCode, color: 'from-amber-500 to-amber-600', textGlow: 'shadow-amber-glow' },
+
+                { id: 'bridge', name: 'MitM BRIDGE', category: 'protocols', icon: ArrowLeftRight, color: 'from-cyan-500 to-cyan-600', textGlow: 'shadow-cyan-glow' },
+                { id: 'packets', name: 'PACKET FRAMER', category: 'protocols', icon: Layers, color: 'from-emerald-500 to-emerald-600', textGlow: 'shadow-emerald-glow' },
+                { id: 'ubx', name: 'UBX GPS', category: 'protocols', icon: Navigation, color: 'from-cyan-500 to-cyan-600', textGlow: 'shadow-cyan-glow' },
+
+                { id: 'plotter', name: 'OSCILLOSCOPE', category: 'debug', icon: Activity, color: 'from-cyan-500 to-cyan-600', textGlow: 'shadow-cyan-glow' },
+                { id: 'alerts', name: 'CRASH ALERTS', category: 'debug', icon: ShieldAlert, color: 'from-rose-600 to-rose-700', textGlow: 'shadow-rose-glow' },
+                { id: 'injector', name: 'HEX INJECTOR', category: 'debug', icon: Binary, color: 'from-emerald-500 to-emerald-600', textGlow: 'shadow-emerald-glow' },
+                { id: 'uboot', name: 'U-BOOT TRIAGE', category: 'debug', icon: ShieldAlert, color: 'from-rose-600 to-rose-700', textGlow: 'shadow-rose-glow' },
+
+                { id: 'scripting', name: 'TEST RUNNER', category: 'automation', icon: Bot, color: 'from-purple-500 to-purple-600', textGlow: 'shadow-purple-glow' },
+                { id: 'diagnostics', name: 'RE DIAGNOSTICS', category: 'automation', icon: Radar, color: 'from-purple-500 to-purple-600', textGlow: 'shadow-purple-glow' },
+                { id: 'wardrive', name: 'WARDRIVE / GPS', category: 'automation', icon: Compass, color: 'from-emerald-500 to-teal-600', textGlow: 'shadow-emerald-glow' },
+                { id: 'macros', name: 'MACROS', category: 'automation', icon: Command, color: 'from-amber-500 to-amber-600', textGlow: 'shadow-amber-glow' }
+              ]
+                .filter(m => workspaceCategory === 'all' || m.category === workspaceCategory)
+                .map(m => {
+                  const Icon = m.icon;
+                  const isActive = activeBottomTab === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => setActiveBottomTab(m.id)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold shrink-0 transition-all ${
+                        isActive 
+                          ? `bg-gradient-to-r ${m.color} text-slate-950 font-extrabold ${m.textGlow}` 
+                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{m.name}</span>
+                    </button>
+                  );
+                })}
+            </div>
+
+            {/* Target Board Selector for bottom tool */}
+            <div className="flex items-center gap-2 text-xs font-mono">
+              <span className="text-[11px] text-slate-500 uppercase font-bold hidden sm:inline">TOOL TARGET:</span>
+              <select
+                value={activeBoardId}
+                onChange={(e) => setActiveBoardId(e.target.value)}
+                className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-cyber-cyan font-bold outline-none cursor-pointer"
+              >
+                {boards.map(b => (
+                  <option key={b.id} value={b.id}>{b.name} ({b.baudRate})</option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -924,6 +1074,9 @@ export default function App() {
                 onSendString={(str) => handleSendString(activeBoard.id, str)}
                 latestRxText={activeBoard.latestRxText}
                 onLogMessage={(msg, type) => addLogToBoard(activeBoard.id, msg, type)}
+                boards={boards}
+                activeBoardId={activeBoardId}
+                onSelectBoard={setActiveBoardId}
               />
             )}
 
