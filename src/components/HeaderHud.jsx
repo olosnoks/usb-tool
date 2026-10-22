@@ -11,28 +11,33 @@ import {
   Cpu, 
   RefreshCw,
   Trash2,
-  Info
+  Info,
+  Smartphone
 } from 'lucide-react';
 import { identifyUsbChip } from '../utils/usbDatabase';
 
 export default function HeaderHud({
   isConnected,
   isConnecting,
-  portInfo, // object { usbVendorId, usbProductId } or string
+  portInfo, // { usbVendorId, usbProductId }
   baudRate,
   onBaudRateChange,
   serialConfig,
   onSerialConfigChange,
   onConnect,
   onDisconnect,
-  hardwareSignals, // { dtr, rts, cts, dsr, dcd, ri }
+  hardwareSignals,
   onToggleSignal,
   onAssertBreak,
   stats,
   onResetStats,
   rxActivity,
   txActivity,
-  hasWebSerialSupport
+  hasWebSerialSupport,
+  hasWebUsbSupport,
+  isMobileDevice,
+  isAppleDevice,
+  transportType
 }) {
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [showChipModal, setShowChipModal] = useState(false);
@@ -43,7 +48,6 @@ export default function HeaderHud({
     230400, 460800, 921600, 1000000, 1500000, 2000000
   ];
 
-  // Identify chip
   const chipMetadata = identifyUsbChip(
     portInfo?.usbVendorId, 
     portInfo?.usbProductId
@@ -62,43 +66,52 @@ export default function HeaderHud({
   };
 
   return (
-    <header className="border-b border-cyber-border bg-[#070c18]/90 backdrop-blur-md sticky top-0 z-40 px-4 py-2.5 shadow-lg">
+    <header className="border-b border-cyber-border bg-[#070c18]/90 backdrop-blur-md sticky top-0 z-40 px-3 sm:px-4 py-2.5 shadow-lg">
       <div className="max-w-[1920px] mx-auto flex flex-wrap items-center justify-between gap-3">
         {/* Brand & System Title */}
-        <div className="flex items-center gap-3">
-          <div className="relative flex items-center justify-center w-10 h-10 rounded-lg bg-cyber-card border border-amber-500/40 shadow-amber-glow">
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <div className="relative flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-cyber-card border border-amber-500/40 shadow-amber-glow flex-shrink-0">
             <Cpu className="w-5 h-5 text-cyber-amber animate-pulse" />
             <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-cyber-emerald rounded-full border border-slate-900 animate-ping"></div>
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold font-display tracking-widest text-slate-100 flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <h1 className="text-base sm:text-lg font-bold font-display tracking-widest text-slate-100 flex items-center gap-1.5">
                 SKON'S <span className="text-cyber-amber cyber-glow-amber">WEB FLASHER</span>
               </h1>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-cyber-cyan border border-cyber-cyan/30">
-                PRO v1.2
+              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded bg-slate-800 text-cyber-cyan border border-cyber-cyan/30">
+                PRO v1.3
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 font-mono tracking-tight flex items-center gap-2">
-              <span>HARDWARE RE & SERIAL WORKBENCH</span>
+            <p className="text-[10px] sm:text-[11px] text-slate-400 font-mono tracking-tight flex items-center gap-1.5 sm:gap-2">
+              <span>HARDWARE RE & FLASHER</span>
               <span className="text-slate-600">|</span>
-              <span className="text-emerald-400/80">W3C WEB SERIAL</span>
+              <span className="text-emerald-400/90">
+                {hasWebSerialSupport ? 'W3C WEB SERIAL' : hasWebUsbSupport ? 'ANDROID WEBUSB OTG' : 'SIMULATOR MODE'}
+              </span>
             </p>
           </div>
         </div>
 
-        {/* Global Warning if Web Serial is unsupported */}
-        {!hasWebSerialSupport && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-950/80 border border-rose-500/50 text-rose-300 text-xs font-mono animate-pulse">
-            <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0" />
-            <span>Web Serial API not detected. Please run on Google Chrome, Microsoft Edge, or Chromium.</span>
+        {/* Dynamic Mobile & Browser Status Banners */}
+        {isMobileDevice && !hasWebSerialSupport && hasWebUsbSupport && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-950/80 border border-cyan-500/50 text-cyan-300 text-[11px] font-mono">
+            <Smartphone className="w-3.5 h-3.5 text-cyber-cyan flex-shrink-0" />
+            <span>Android OTG Detected: WebUSB Active (Zero flags required)</span>
+          </div>
+        )}
+
+        {isAppleDevice && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-950/80 border border-amber-500/50 text-amber-300 text-[11px] font-mono">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+            <span>iOS detected: Apple blocks wired USB in browsers. Use Virtual Simulator mode.</span>
           </div>
         )}
 
         {/* Center HUD: Hardware Pin Status & Control */}
-        <div className="flex items-center gap-2 bg-cyber-card px-3 py-1.5 rounded-lg border border-slate-800 shadow-inner">
-          <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold pr-1 border-r border-slate-800">
-            BUS LINES
+        <div className="flex items-center gap-1.5 sm:gap-2 bg-cyber-card px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-800 shadow-inner">
+          <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold pr-1 border-r border-slate-800 hidden sm:block">
+            BUS
           </div>
 
           {/* DTR Output */}
@@ -143,16 +156,16 @@ export default function HeaderHud({
             } ${!isConnected && 'opacity-50 cursor-not-allowed'}`}
           >
             <Zap className="w-3 h-3 text-rose-400" />
-            <span>BREAK</span>
+            <span className="hidden sm:inline">BREAK</span>
           </button>
 
           <div className="h-4 w-[1px] bg-slate-800 mx-1"></div>
 
           {/* Polled Hardware Inputs: CTS, DSR, DCD, RI */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <div 
               title="Clear To Send (CTS) - Hardware flow input"
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono border ${
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-mono border ${
                 hardwareSignals.cts ? 'bg-emerald-950/40 text-cyber-emerald border-emerald-500/40' : 'bg-slate-900/40 text-slate-600 border-slate-800'
               }`}
             >
@@ -162,39 +175,18 @@ export default function HeaderHud({
 
             <div 
               title="Data Set Ready (DSR) - Modem/DCE status input"
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono border ${
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-mono border ${
                 hardwareSignals.dsr ? 'bg-cyan-950/40 text-cyber-cyan border-cyan-500/40' : 'bg-slate-900/40 text-slate-600 border-slate-800'
               }`}
             >
               <span className={`w-1.5 h-1.5 rounded-full ${hardwareSignals.dsr ? 'bg-cyber-cyan shadow-cyan-glow' : 'bg-slate-700'}`}></span>
               DSR
             </div>
-
-            <div 
-              title="Data Carrier Detect (DCD) - Carrier status input"
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono border ${
-                hardwareSignals.dcd ? 'bg-amber-950/40 text-cyber-amber border-amber-500/40' : 'bg-slate-900/40 text-slate-600 border-slate-800'
-              }`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${hardwareSignals.dcd ? 'bg-cyber-amber shadow-amber-glow' : 'bg-slate-700'}`}></span>
-              DCD
-            </div>
-
-            <div 
-              title="Ring Indicator (RI) - Incoming call/ring signal"
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono border ${
-                hardwareSignals.ri ? 'bg-violet-950/40 text-cyber-violet border-violet-500/40' : 'bg-slate-900/40 text-slate-600 border-slate-800'
-              }`}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${hardwareSignals.ri ? 'bg-cyber-violet' : 'bg-slate-700'}`}></span>
-              RI
-            </div>
           </div>
         </div>
 
         {/* Telemetry Stats: Rx / Tx byte meters & Chip badge */}
         <div className="hidden lg:flex items-center gap-3 bg-cyber-card px-3 py-1.5 rounded-lg border border-slate-800 text-xs font-mono">
-          {/* USB Chip Model Identifier Badge */}
           {isConnected && (
             <button
               onClick={() => setShowChipModal(true)}
@@ -206,7 +198,6 @@ export default function HeaderHud({
             </button>
           )}
 
-          {/* Rx Activity */}
           <div className="flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full transition-all duration-75 ${
               rxActivity ? 'bg-cyber-cyan shadow-cyan-glow scale-125' : 'bg-slate-700'
@@ -217,7 +208,6 @@ export default function HeaderHud({
 
           <span className="text-slate-700">|</span>
 
-          {/* Tx Activity */}
           <div className="flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full transition-all duration-75 ${
               txActivity ? 'bg-cyber-amber shadow-amber-glow scale-125' : 'bg-slate-700'
@@ -247,7 +237,7 @@ export default function HeaderHud({
             >
               {standardBauds.map((rate) => (
                 <option key={rate} value={rate} className="bg-slate-900 text-slate-200">
-                  {rate} bps {rate === 115200 ? '(Default)' : rate === 74880 ? '(ESP Rom)' : ''}
+                  {rate} bps
                 </option>
               ))}
             </select>
@@ -269,16 +259,22 @@ export default function HeaderHud({
           {!isConnected ? (
             <button
               onClick={onConnect}
-              disabled={isConnecting || !hasWebSerialSupport}
-              className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 px-4 py-1.5 rounded-lg font-mono font-bold text-xs tracking-wider uppercase transition-all shadow-amber-glow disabled:opacity-50"
+              disabled={isConnecting || (!hasWebSerialSupport && !hasWebUsbSupport)}
+              className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 px-3.5 sm:px-4 py-1.5 rounded-lg font-mono font-bold text-xs tracking-wider uppercase transition-all shadow-amber-glow disabled:opacity-50"
             >
-              <Usb className={`w-4 h-4 ${isConnecting ? 'animate-spin' : ''}`} />
-              <span>{isConnecting ? 'OPENING...' : 'CONNECT PORT'}</span>
+              {isMobileDevice && !hasWebSerialSupport ? (
+                <Smartphone className={`w-4 h-4 ${isConnecting ? 'animate-spin' : ''}`} />
+              ) : (
+                <Usb className={`w-4 h-4 ${isConnecting ? 'animate-spin' : ''}`} />
+              )}
+              <span>
+                {isConnecting ? 'OPENING...' : isMobileDevice && !hasWebSerialSupport ? 'CONNECT OTG' : 'CONNECT PORT'}
+              </span>
             </button>
           ) : (
             <button
               onClick={onDisconnect}
-              className="flex items-center gap-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 hover:border-rose-400 px-3.5 py-1.5 rounded-lg font-mono font-bold text-xs tracking-wider uppercase transition-all shadow-rose-glow"
+              className="flex items-center gap-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 hover:border-rose-400 px-3 sm:px-3.5 py-1.5 rounded-lg font-mono font-bold text-xs tracking-wider uppercase transition-all shadow-rose-glow"
             >
               <Unplug className="w-4 h-4 text-rose-400" />
               <span>DISCONNECT</span>

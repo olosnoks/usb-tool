@@ -9,6 +9,7 @@ import MacroDecks from './components/MacroDecks';
 import SerialPlotter from './components/SerialPlotter';
 import UBootTriage from './components/UBootTriage';
 import { parseHexInput } from './utils/checksums';
+import { requestWebUsbSerialPort } from './utils/webUsbSerial';
 import { 
   Terminal, 
   Binary, 
@@ -28,6 +29,7 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [portInfo, setPortInfo] = useState(null); // { usbVendorId, usbProductId }
+  const [transportType, setTransportType] = useState('serial'); // 'serial' | 'webusb' | 'simulator'
   const [baudRate, setBaudRate] = useState(115200);
   const [serialConfig, setSerialConfig] = useState({
     dataBits: 8,
@@ -35,6 +37,12 @@ export default function App() {
     parity: 'none',
     flowControl: 'none'
   });
+
+  // Mobile & API Detection
+  const hasWebSerialSupport = typeof navigator !== 'undefined' && 'serial' in navigator;
+  const hasWebUsbSupport = typeof navigator !== 'undefined' && 'usb' in navigator;
+  const isMobileDevice = typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isAppleDevice = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   // Simulated Demo Mode
   const [isDemoMode, setIsDemoMode] = useState(false);
@@ -71,14 +79,12 @@ export default function App() {
   const globalOffsetRef = useRef(0);
 
   // Active Bottom Workbench Tab
-  const [activeBottomTab, setActiveBottomTab] = useState('flasher'); // 'flasher' | 'plotter' | 'uboot' | 'injector' | 'diagnostics' | 'macros'
+  const [activeBottomTab, setActiveBottomTab] = useState('flasher');
 
   // Serial Streams & Reader Refs
   const readerRef = useRef(null);
   const keepReadingRef = useRef(false);
   const signalsPollIntervalRef = useRef(null);
-
-  const hasWebSerialSupport = typeof navigator !== 'undefined' && 'serial' in navigator;
 
   // Pulse Activity LEDs
   const triggerRxActivity = useCallback(() => {
@@ -97,7 +103,7 @@ export default function App() {
   const addLog = useCallback((text, type = 'sys', rawBytes = null) => {
     const timestamp = new Date().toTimeString().split(' ')[0] + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
     setConsoleEntries(prev => [
-      ...prev.slice(-999), // Ring buffer clamp to 1000 lines
+      ...prev.slice(-999),
       {
         id: Math.random().toString(36).substring(2, 9),
         type,
@@ -108,26 +114,23 @@ export default function App() {
     ]);
   }, []);
 
-  // Ingest incoming bytes into console, hex view, plotter & uboot triage
+  // Ingest incoming bytes
   const ingestIncomingBytes = useCallback((bytes) => {
     if (!bytes || bytes.length === 0) return;
 
     triggerRxActivity();
 
-    // 1. Stats
     setStats(prev => ({
       ...prev,
       rxBytes: prev.rxBytes + bytes.length,
       rxCount: prev.rxCount + 1
     }));
 
-    // 2. Decode text
     const decoder = new TextDecoder('utf-8', { fatal: false });
     const text = decoder.decode(bytes);
     setLatestRxText(text);
     addLog(text, 'rx', bytes);
 
-    // 3. Assemble synchronized hex memory
     const startOffset = globalOffsetRef.current;
     const newHexItems = [];
     for (let i = 0; i < bytes.length; i++) {
@@ -141,45 +144,72 @@ export default function App() {
     setHexByteStream(prev => [...prev.slice(-4096), ...newHexItems]);
   }, [addLog, triggerRxActivity]);
 
-  // Connect to Hardware Web Serial Port
+  // Connect Port (Native Web Serial OR WebUSB OTG Fallback)
   const handleConnect = async () => {
-    if (!hasWebSerialSupport) {
-      alert('Web Serial API is not supported in this browser. Please use Google Chrome, Edge, or Chromium.');
-      return;
-    }
-
     try {
       setIsConnecting(true);
-      addLog('Requesting USB / Serial port...', 'sys');
-      const selectedPort = await navigator.serial.requestPort();
-      
-      const info = selectedPort.getInfo ? selectedPort.getInfo() : {};
-      setPortInfo({
-        usbVendorId: info.usbVendorId,
-        usbProductId: info.usbProductId
-      });
 
-      addLog(`Opening port @ ${baudRate} bps (${serialConfig.dataBits}${serialConfig.parity[0].toUpperCase()}${serialConfig.stopBits})...`, 'sys');
-      await selectedPort.open({
-        baudRate: Number(baudRate),
-        dataBits: serialConfig.dataBits,
-        stopBits: serialConfig.stopBits,
-        parity: serialConfig.parity,
-        flowControl: serialConfig.flowControl,
-        bufferSize: 16384
-      });
+      if (hasWebSerialSupport) {
+        // Desktop / Enabled Web Serial API
+        addLog('Requesting USB / Serial port...', 'sys');
+        const selectedPort = await navigator.serial.requestPort();
+        
+        const info = selectedPort.getInfo ? selectedPort.getInfo() : {};
+        setPortInfo({
+          usbVendorId: info.usbVendorId,
+          usbProductId: info.usbProductId
+        });
+        setTransportType('serial');
 
-      setPort(selectedPort);
-      setIsConnected(true);
-      setIsConnecting(false);
-      keepReadingRef.current = true;
-      addLog(`Connected to serial port successfully!`, 'sys');
+        addLog(`Opening port @ ${baudRate} bps (${serialConfig.dataBits}${serialConfig.parity[0].toUpperCase()}${serialConfig.stopBits})...`, 'sys');
+        await selectedPort.open({
+          baudRate: Number(baudRate),
+          dataBits: serialConfig.dataBits,
+          stopBits: serialConfig.stopBits,
+          parity: serialConfig.parity,
+          flowControl: serialConfig.flowControl,
+          bufferSize: 16384
+        });
 
-      // Start Read Loop
-      startReading(selectedPort);
+        setPort(selectedPort);
+        setIsConnected(true);
+        setIsConnecting(false);
+        keepReadingRef.current = true;
+        addLog(`Connected via Web Serial API!`, 'sys');
 
-      // Start Polling Hardware Signals
-      startSignalPolling(selectedPort);
+        startReading(selectedPort);
+        startSignalPolling(selectedPort);
+
+      } else if (hasWebUsbSupport) {
+        // Mobile Android / WebUSB OTG Bridge
+        addLog('[WEBUSB OTG] Web Serial not native. Requesting USB-OTG device via WebUSB...', 'sys');
+        const webUsbPort = await requestWebUsbSerialPort();
+
+        const info = webUsbPort.getInfo();
+        setPortInfo(info);
+        setTransportType('webusb');
+
+        addLog(`[WEBUSB OTG] Opening USB-OTG endpoint @ ${baudRate} bps...`, 'sys');
+        await webUsbPort.open({
+          baudRate: Number(baudRate),
+          dataBits: serialConfig.dataBits,
+          stopBits: serialConfig.stopBits,
+          parity: serialConfig.parity
+        });
+
+        setPort(webUsbPort);
+        setIsConnected(true);
+        setIsConnecting(false);
+        keepReadingRef.current = true;
+        addLog(`[WEBUSB OTG] Connected to USB-OTG Device successfully!`, 'sys');
+
+        startReading(webUsbPort);
+        startSignalPolling(webUsbPort);
+
+      } else {
+        alert('Neither Web Serial nor WebUSB is supported on this browser. Please use Chrome on Android or Desktop.');
+        setIsConnecting(false);
+      }
 
     } catch (err) {
       console.error(err);
@@ -258,7 +288,7 @@ export default function App() {
     }
 
     setIsConnected(false);
-    addLog('Serial port disconnected.', 'sys');
+    addLog('Port disconnected.', 'sys');
   };
 
   // Toggle Output Signal
@@ -425,7 +455,8 @@ export default function App() {
     setIsDemoMode(next);
     if (next) {
       setIsConnected(true);
-      setPortInfo({ usbVendorId: 0x10c4, usbProductId: 0xea60 }); // CP2102
+      setPortInfo({ usbVendorId: 0x10c4, usbProductId: 0xea60 });
+      setTransportType('simulator');
       addLog('[SIMULATOR] Connected to Virtual ESP32 Serial Workbench.', 'sys');
       startDemoSimulatorStream();
     } else {
@@ -517,17 +548,23 @@ export default function App() {
         rxActivity={rxActivity}
         txActivity={txActivity}
         hasWebSerialSupport={hasWebSerialSupport}
+        hasWebUsbSupport={hasWebUsbSupport}
+        isMobileDevice={isMobileDevice}
+        isAppleDevice={isAppleDevice}
+        transportType={transportType}
       />
 
       {/* Main Workspace Area */}
-      <main className="flex-1 max-w-[1920px] w-full mx-auto p-3 sm:p-4 flex flex-col gap-3">
+      <main className="flex-1 max-w-[1920px] w-full mx-auto p-2.5 sm:p-4 flex flex-col gap-3">
         {/* Target Status & Simulator Toggle */}
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-cyber-card border border-slate-800 text-xs">
           <div className="flex items-center gap-2 text-slate-400">
             <span className="w-2 h-2 rounded-full bg-cyber-emerald animate-ping"></span>
             <span>TARGET STATUS:</span>
             <span className={`font-bold ${isConnected ? 'text-cyber-emerald' : 'text-slate-500'}`}>
-              {isConnected ? (isDemoMode ? 'VIRTUAL SIMULATOR (CP2102 + ESP32)' : `ONLINE // ${baudRate} 8N1`) : 'OFFLINE // READY'}
+              {isConnected 
+                ? (isDemoMode ? 'VIRTUAL SIMULATOR (CP2102 + ESP32)' : `${transportType.toUpperCase()} ONLINE // ${baudRate} 8N1`) 
+                : 'OFFLINE // READY'}
             </span>
           </div>
 
@@ -644,7 +681,7 @@ export default function App() {
             </div>
 
             <div className="text-[11px] text-slate-500 font-mono hidden md:block">
-              HARDWARE HACKER WORKBENCH // v1.2 PRO
+              HARDWARE HACKER WORKBENCH // v1.3 MOBILE-READY
             </div>
           </div>
 
@@ -713,17 +750,17 @@ export default function App() {
       {/* Cyberpunk Footer */}
       <footer className="border-t border-cyber-border bg-[#070c18] py-2 px-4 text-center text-[11px] text-slate-500 flex flex-wrap items-center justify-between gap-2 mt-auto">
         <div className="flex items-center gap-2">
-          <span className="text-slate-400 font-bold">SKON'S WEB FLASHER v1.2</span>
-          <span>// Hardware Hacker Serial & Diagnostic Tool</span>
+          <span className="text-slate-400 font-bold">SKON'S WEB FLASHER v1.3</span>
+          <span>// Web Serial & Android WebUSB OTG Workbench</span>
         </div>
         <div className="flex items-center gap-3">
+          <span>Android USB-OTG</span>
+          <span>•</span>
           <span>ESP32 ROM Flasher</span>
           <span>•</span>
           <span>60 FPS Oscilloscope</span>
           <span>•</span>
           <span>U-Boot Triage</span>
-          <span>•</span>
-          <span>Disk Logger</span>
         </div>
       </footer>
     </div>
