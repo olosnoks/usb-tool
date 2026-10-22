@@ -9,8 +9,12 @@ import {
   EyeOff, 
   Maximize2, 
   Sliders, 
-  Sparkles,
-  BarChart2
+  Sparkles, 
+  BarChart2,
+  Code,
+  Copy,
+  Check,
+  X
 } from 'lucide-react';
 
 const CHANNEL_COLORS = [
@@ -36,6 +40,9 @@ export default function SerialPlotter({
   const [autoScale, setAutoScale] = useState(true);
   const [customMinY, setCustomMinY] = useState(-50);
   const [customMaxY, setCustomMaxY] = useState(150);
+  const [showSketchModal, setShowSketchModal] = useState(false);
+  const [activeCodeTab, setActiveCodeTab] = useState('arduino');
+  const [copiedCode, setCopiedCode] = useState(false);
 
   const canvasRef = useRef(null);
   const lastProcessedTextRef = useRef('');
@@ -46,50 +53,80 @@ export default function SerialPlotter({
     const clean = line.trim();
     if (!clean || clean.length < 1) return null;
 
+    // Ignore known bootloader logs or text commands
+    if (
+      clean.startsWith('rst:') || 
+      clean.startsWith('boot:') || 
+      clean.startsWith('=>') || 
+      clean.startsWith('Hit any key') ||
+      clean.startsWith('[SYS]') ||
+      clean.startsWith('[WiFi]') ||
+      clean.startsWith('starting')
+    ) {
+      return null;
+    }
+
     // Check key:value pattern e.g. "temp:24.5 hum:62.1"
     const kvRegex = /([a-zA-Z0-9_\-]+)\s*[:=]\s*([+-]?\d+(?:\.\d+)?)/g;
     const kvMatches = [...clean.matchAll(kvRegex)];
     if (kvMatches.length > 0) {
-      const labels = kvMatches.map(m => m[1]);
-      const values = kvMatches.map(m => parseFloat(m[2]));
-      return { labels, values };
+      // Must cover a significant portion of the line to avoid false positives
+      const matchedLength = kvMatches.reduce((acc, m) => acc + m[0].length, 0);
+      if (matchedLength >= clean.length * 0.4) {
+        const labels = kvMatches.map(m => m[1]);
+        const values = kvMatches.map(m => parseFloat(m[2]));
+        return { labels, values };
+      }
     }
 
-    // Check CSV, space, or tab separated numbers e.g. "12.4, 45.1, -8.0"
-    const numRegex = /[+-]?(?:\d+\.\d+|\d+)/g;
-    const numbers = clean.match(numRegex);
-    if (numbers && numbers.length > 0) {
-      const values = numbers.map(n => parseFloat(n)).filter(n => !isNaN(n));
-      if (values.length > 0) {
-        const labels = values.map((_, idx) => `CH ${idx}`);
-        return { labels, values };
+    // Check strictly formatted numeric lines e.g. "12.4, 45.1, -8.0" or "100 200 150"
+    if (/^[\s,;\t+-0-9.]+$/.test(clean)) {
+      const numRegex = /[+-]?(?:\d+\.\d+|\d+)/g;
+      const numbers = clean.match(numRegex);
+      if (numbers && numbers.length > 0) {
+        const values = numbers.map(n => parseFloat(n)).filter(n => !isNaN(n));
+        if (values.length > 0) {
+          const labels = values.map((_, idx) => `CH ${idx}`);
+          return { labels, values };
+        }
       }
     }
 
     return null;
   }, []);
 
-  // Ingest stream changes
+  // Ingest stream changes (splits multi-line chunks to preserve high sampling rates)
   useEffect(() => {
     if (isPaused || !latestTextStream) return;
     if (latestTextStream === lastProcessedTextRef.current) return;
     lastProcessedTextRef.current = latestTextStream;
 
-    const parsed = parseLineTelemetry(latestTextStream);
-    if (!parsed) return;
+    const lines = latestTextStream.split(/\r?\n/);
+    const newPoints = [];
+    let updatedLabels = null;
 
-    // Update labels if new
-    if (parsed.labels.length > channelLabels.length) {
-      setChannelLabels(parsed.labels);
+    for (const line of lines) {
+      const parsed = parseLineTelemetry(line);
+      if (parsed && parsed.values.length > 0) {
+        if (!updatedLabels || parsed.labels.length > updatedLabels.length) {
+          updatedLabels = parsed.labels;
+        }
+        newPoints.push({
+          time: Date.now(),
+          values: parsed.values,
+          labels: parsed.labels
+        });
+      }
+    }
+
+    if (newPoints.length === 0) return;
+
+    if (updatedLabels && updatedLabels.length > channelLabels.length) {
+      setChannelLabels(updatedLabels);
     }
 
     setDataPoints(prev => {
-      const updated = [...prev.slice(-(windowSize * 2)), {
-        time: Date.now(),
-        values: parsed.values,
-        labels: parsed.labels
-      }];
-      return updated;
+      return [...prev.slice(-(windowSize * 2)), ...newPoints];
     });
   }, [latestTextStream, isPaused, windowSize, parseLineTelemetry, channelLabels.length]);
 
@@ -314,8 +351,16 @@ export default function SerialPlotter({
         {/* Top Controls */}
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowSketchModal(true)}
+            className="flex items-center gap-1 text-[11px] bg-slate-900 hover:bg-slate-800 text-cyber-cyan px-2.5 py-1 rounded-lg border border-slate-800 transition-colors"
+          >
+            <Code className="w-3.5 h-3.5 text-cyber-cyan" />
+            <span>Firmware Sketches</span>
+          </button>
+
+          <button
             onClick={injectDemoWaveform}
-            className="flex items-center gap-1 text-[11px] bg-slate-900 hover:bg-slate-800 text-cyber-amber px-2.5 py-1 rounded-lg border border-slate-800"
+            className="flex items-center gap-1 text-[11px] bg-slate-900 hover:bg-slate-800 text-cyber-amber px-2.5 py-1 rounded-lg border border-slate-800 transition-colors"
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>Generate Test Waveform</span>
@@ -411,6 +456,139 @@ export default function SerialPlotter({
           ))
         )}
       </div>
+
+      {/* Microcontroller Firmware Helper Modal */}
+      {showSketchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-[#0b1329] border border-cyan-500/40 rounded-2xl w-full max-w-2xl shadow-2xl p-5 flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Code className="w-5 h-5 text-cyber-cyan" />
+                <h3 className="font-bold text-slate-100 text-sm tracking-wide">
+                  HARDWARE OSCILLOSCOPE CODE TEMPLATES
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowSketchModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              To use your ESP32, Arduino, or RP2040 as an oscilloscope, flash one of these snippets. The microcontroller samples its analog ADC pins and writes comma-separated readings directly over UART.
+            </p>
+
+            <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+              <button
+                onClick={() => setActiveCodeTab('arduino')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                  activeCodeTab === 'arduino'
+                    ? 'bg-cyber-cyan text-slate-950 shadow-cyan-glow'
+                    : 'text-slate-400 hover:text-slate-200 bg-slate-900'
+                }`}
+              >
+                Arduino C++ (ESP32 / Uno)
+              </button>
+              <button
+                onClick={() => setActiveCodeTab('micropython')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                  activeCodeTab === 'micropython'
+                    ? 'bg-cyber-amber text-slate-950 shadow-amber-glow'
+                    : 'text-slate-400 hover:text-slate-200 bg-slate-900'
+                }`}
+              >
+                MicroPython (ESP32 / Pico)
+              </button>
+              <button
+                onClick={() => setActiveCodeTab('labeled')}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                  activeCodeTab === 'labeled'
+                    ? 'bg-cyber-emerald text-slate-950 shadow-emerald-glow'
+                    : 'text-slate-400 hover:text-slate-200 bg-slate-900'
+                }`}
+              >
+                Key:Value Named Channels
+              </button>
+            </div>
+
+            <div className="relative bg-[#030712] border border-slate-800 rounded-xl p-3 font-mono text-[11px] overflow-x-auto text-emerald-400 max-h-60">
+              <pre className="whitespace-pre">
+                {activeCodeTab === 'arduino' && `// Arduino / ESP32 3-Channel ADC Oscilloscope
+void setup() {
+  Serial.begin(115200);
+}
+
+void loop() {
+  int ch0 = analogRead(A0);  // Channel 0 (ADC Raw)
+  int ch1 = analogRead(A1);  // Channel 1 (ADC Raw)
+  float volt = ch0 * (3.3 / 4095.0); // Channel 2 (Calculated Volts)
+
+  // Output comma-separated telemetry line:
+  Serial.print(ch0);
+  Serial.print(",");
+  Serial.print(ch1);
+  Serial.print(",");
+  Serial.println(volt);
+
+  delay(20); // 50 Hz sampling rate
+}`}
+                {activeCodeTab === 'micropython' && `# MicroPython 2-Channel Live ADC Streamer
+import time
+from machine import ADC, Pin
+
+adc0 = ADC(Pin(34))
+adc1 = ADC(Pin(35))
+adc0.atten(ADC.ATTN_11DB) # 0 - 3.3V range
+
+while True:
+    raw0 = adc0.read()
+    raw1 = adc1.read()
+    voltage = raw0 * (3.3 / 4095)
+    print(f"{raw0},{raw1},{voltage:.2f}")
+    time.sleep_ms(20) # 50 Hz`}
+                {activeCodeTab === 'labeled' && `// Key:Value Format (Auto-creates channel names in plotter)
+void loop() {
+  float temp = readInternalTemp();
+  float vcc = readVccVoltage();
+  
+  // Format: "temp:24.5 vcc:3.31"
+  Serial.print("temp:");
+  Serial.print(temp, 1);
+  Serial.print(" vcc:");
+  Serial.println(vcc, 2);
+  
+  delay(50);
+}`}
+              </pre>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[11px] text-slate-500">
+                Baud rate must match the Header HUD setting (e.g. 115200 bps).
+              </span>
+              <button
+                onClick={() => {
+                  const snippet = 
+                    activeCodeTab === 'arduino' 
+                      ? `void setup() {\n  Serial.begin(115200);\n}\nvoid loop() {\n  int ch0 = analogRead(A0);\n  int ch1 = analogRead(A1);\n  float volt = ch0 * (3.3 / 4095.0);\n  Serial.print(ch0);\n  Serial.print(",");\n  Serial.print(ch1);\n  Serial.print(",");\n  Serial.println(volt);\n  delay(20);\n}`
+                      : activeCodeTab === 'micropython'
+                      ? `import time\nfrom machine import ADC, Pin\nadc0 = ADC(Pin(34))\nadc1 = ADC(Pin(35))\nadc0.atten(ADC.ATTN_11DB)\nwhile True:\n    raw0 = adc0.read()\n    raw1 = adc1.read()\n    voltage = raw0 * (3.3 / 4095)\n    print(f"{raw0},{raw1},{voltage:.2f}")\n    time.sleep_ms(20)`
+                      : `void loop() {\n  float temp = readInternalTemp();\n  float vcc = readVccVoltage();\n  Serial.print("temp:");\n  Serial.print(temp, 1);\n  Serial.print(" vcc:");\n  Serial.println(vcc, 2);\n  delay(50);\n}`;
+                  navigator.clipboard.writeText(snippet);
+                  setCopiedCode(true);
+                  setTimeout(() => setCopiedCode(false), 2000);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyber-card hover:bg-slate-800 text-cyber-cyan border border-cyber-cyan/30 text-xs font-bold transition-all"
+              >
+                {copiedCode ? <Check className="w-3.5 h-3.5 text-cyber-emerald" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedCode ? 'COPIED TO CLIPBOARD' : 'COPY CODE'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
