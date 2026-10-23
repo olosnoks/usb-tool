@@ -696,6 +696,24 @@ export class FlipperZeroDriver {
         return;
       }
 
+      // Field 62: property_get_response (.PB_Property.GetResponse) - streamed key/value pairs
+      const propRespField = mainFields.find(f => f.fieldNum === 62);
+      if (propRespField) {
+        const pf = parseFields(propRespField.data);
+        let key = '', value = '';
+        for (const f of pf) {
+          if (f.fieldNum === 1) key = new TextDecoder().decode(f.data);
+          if (f.fieldNum === 2) value = new TextDecoder().decode(f.data);
+        }
+        if (key) pending.accumulator.push({ key, value });
+        if (!hasNext) {
+          clearTimeout(pending.timer);
+          this.pendingRpc.delete(commandId);
+          pending.resolve(pending.accumulator);
+        }
+        return;
+      }
+
       // Generic OK response (mkdir, delete, write, sendInput, reboot, etc.)
       if (!hasNext) {
         clearTimeout(pending.timer);
@@ -726,6 +744,21 @@ export class FlipperZeroDriver {
         this.notifyState();
       } catch (e) {
         this.log(`RPC Device Info: ${e.message}`, 'warning');
+      }
+
+      // 1b. Power info (battery level/voltage/temp/health) via Property GetRequest (tag 61)
+      for (const propKey of ['pwrinfo', 'power_info']) {
+        try {
+          const pwr = await this.sendRpcRequest(61, encodeString(1, propKey), false, 3000);
+          if (Array.isArray(pwr) && pwr.length > 0) {
+            this.log(`[Power RAW] ${propKey}: ${pwr.map(i => `${i.key}=${i.value}`).join(', ')}`, 'info');
+            this.parseDeviceInfoRpc(pwr);
+            this.notifyState();
+            break;
+          }
+        } catch (e) {
+          this.log(`[Power RAW] ${propKey} failed: ${e.message}`, 'warning');
+        }
       }
 
       // 2. Storage Info for MicroSD (/ext) (tag 28: .PB_Storage.InfoRequest)
