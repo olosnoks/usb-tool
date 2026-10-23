@@ -45,6 +45,7 @@ export const SIDEBAR_SECTIONS = [
       { id: 'logic-analyzer', name: '24MHz Logic Analyzer', icon: Activity, accent: 'cyan', desc: '8-channel digital waveforms & protocol decoders' },
       { id: 'can-bus', name: 'CAN Bus & OBD-II Scanner', icon: Gauge, accent: 'emerald', desc: 'Live packet sniffer & car diagnostics' },
       { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF Sub-GHz RF deck, LCD screen & FREQMAN' },
+      { id: 'flipper', name: 'Flipper Zero Suite', icon: Bot, accent: 'amber', desc: 'qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC & SD' },
       { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', desc: '1-click chip identification & register watch' },
       { id: 'modbus-rtu', name: 'Modbus RTU & RS-485', icon: Activity, accent: 'amber', desc: 'Industrial holding registers & inverter telemetry' },
       { id: 'hex', name: 'Hex Stream Viewer', icon: Binary, accent: 'cyan', desc: 'Live 8/16-byte hexdump inspector' },

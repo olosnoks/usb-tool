@@ -38,6 +38,7 @@ import ModbusWorkbench from './components/tools/ModbusWorkbench';
 import AvrIspWorkbench from './components/tools/AvrIspWorkbench';
 import RfidNfcWorkbench from './components/tools/RfidNfcWorkbench';
 import PortapackWorkbench from './components/tools/PortapackWorkbench';
+import FlipperWorkbench from './components/tools/flipper/FlipperWorkbench';
 
 // Common & Guide Components
 import ToolGuide from './components/common/ToolGuide';
@@ -399,6 +400,12 @@ function AppContent() {
             {activeTool === 'mayhem' && (
               <div className="w-full">
                 <PortapackWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'flipper' && (
+              <div className="w-full">
+                <FlipperWorkbench />
               </div>
             )}
           </main>

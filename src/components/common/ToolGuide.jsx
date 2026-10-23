@@ -465,6 +465,25 @@ export const TOOL_GUIDES = {
       'Turn off the +14dB RF amp when receiving strong local signals to prevent front-end saturation.'
     ],
     shortcuts: 'PortaPack Mayhem & HackRF Suite'
+  },
+  flipper: {
+    title: 'Flipper Zero Workbench & qFlipper Companion',
+    shortDesc: 'Manage Flipper Zero over USB CDC Serial, navigate virtual 128x64 orange LCD, browse MicroSD tree, replay Sub-GHz signals, analyze NFC/RFID cards, and test BadUSB DuckyScripts.',
+    steps: [
+      'Connect Flipper Zero to USB (ensure official qFlipper desktop app is closed to release the COM port).',
+      'Click "CONNECT WEB SERIAL" and select your Flipper Zero (or use the built-in simulator with Demo Mode).',
+      'Click "Virtual 128x64 LCD" in the top bar to toggle the orange backlight screen and 5-way D-Pad controls.',
+      'In the "MicroSD File Manager" tab, explore /ext/subghz, /ext/nfc, /ext/rfid, /ext/badusb, and download files directly.',
+      'In the "Sub-GHz Signal Lab" tab, inspect raw pulse oscillograms (Tesla Charge Port, CAME Gate, Byron Doorbell) and click Transmit Replay.',
+      'In the "BadUSB DuckyScript" tab, edit keystroke injection payloads and test execution.'
+    ],
+    tips: [
+      'Flipper Zero communicates using standard CDC serial at 115,200 baud over VID: 0483, PID: 5740.',
+      'Close any open serial consoles or qFlipper on your PC before connecting in the browser.',
+      'Use the D-Pad OK button to launch apps and the BACK button to return to the Dolphin home screen.',
+      'Files ending in .sub, .nfc, and .rfid are plain text key formats that can be edited and uploaded.'
+    ],
+    shortcuts: 'Flipper Zero & qFlipper Suite'
   }
 };
 
