@@ -61,6 +61,67 @@
   animation: blink 1s infinite;
 }
 
+/* RocketGod's Leaflet Dark Map Tile Inversion & Marker Styling */
+.dark-tiles {
+  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+}
+
+.leaflet-container {
+  background-color: #020617 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  z-index: 10;
+}
+
+.leaflet-control-zoom {
+  border: 1px solid #334155 !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.leaflet-control-zoom a {
+  background-color: #0f172a !important;
+  color: #38bdf8 !important;
+  border-bottom: 1px solid #1e293b !important;
+}
+
+.leaflet-control-zoom a:hover {
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+}
+
+.leaflet-control-attribution {
+  background: rgba(2, 6, 23, 0.8) !important;
+  color: #64748b !important;
+  font-size: 9px !important;
+}
+
+.leaflet-control-attribution a {
+  color: #38bdf8 !important;
+}
+
+.geo-marker-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.geo-marker-label {
+  font-size: 9px;
+  font-weight: bold;
+  font-family: monospace;
+  background: rgba(2, 6, 23, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+  color: #e2e8f0;
+  margin-top: 2px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.8);
+}
+
 /* Cyber Button and Card effects */
 .cyber-card {
   background: linear-gradient(135deg, rgba(12, 19, 34, 0.95) 0%, rgba(7, 12, 24, 0.98) 100%);

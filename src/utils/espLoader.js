@@ -132,21 +132,23 @@ export class EspBootloaderClient {
 
   /**
    * Pulses DTR and RTS to force chip into ROM bootloader
+   * @param {number} resetDurationMs (default 150ms)
+   * @param {number} bootHoldDurationMs (default 50ms)
    */
-  async hardwareResetToBootloader() {
-    this.log('Asserting DTR/RTS bootloader strapping sequence...');
+  async hardwareResetToBootloader(resetDurationMs = 150, bootHoldDurationMs = 50) {
+    this.log(`Asserting DTR/RTS bootloader strapping sequence (${resetDurationMs}ms reset, ${bootHoldDurationMs}ms boot pin)...`);
     if (!this.port.setSignals) return;
 
-    // Reset: RTS=1, DTR=0 (EN pulled low)
-    await this.port.setSignals({ requestToSend: true, dataTerminalReady: false });
-    await new Promise(r => setTimeout(r, 120));
+    // Reset: Pull EN low, IO0 low (RTS=true, DTR=false)
+    await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+    await new Promise(r => setTimeout(r, resetDurationMs));
 
-    // Bootloader trigger: RTS=0, DTR=1 (EN released while GPIO0 held low)
-    await this.port.setSignals({ requestToSend: false, dataTerminalReady: true });
-    await new Promise(r => setTimeout(r, 150));
+    // Release EN high while IO0 remains low (RTS=false, DTR=true)
+    await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
+    await new Promise(r => setTimeout(r, bootHoldDurationMs));
 
-    // Release GPIO0: DTR=0
-    await this.port.setSignals({ dataTerminalReady: false });
+    // Release both to idle
+    await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
     await new Promise(r => setTimeout(r, 50));
     this.log('Hardware strapping pulse complete.');
   }
@@ -158,7 +160,7 @@ export class EspBootloaderClient {
     this.log('Resetting chip to run user application...');
     if (!this.port.setSignals) return;
     await this.port.setSignals({ requestToSend: true, dataTerminalReady: false });
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 120));
     await this.port.setSignals({ requestToSend: false, dataTerminalReady: false });
     await new Promise(r => setTimeout(r, 50));
   }
@@ -202,13 +204,14 @@ export class EspBootloaderClient {
   }
 
   /**
-   * Flashes binary payload into flash memory
+   * Flashes a single partition
    * @param {Uint8Array} binaryData
    * @param {number} flashOffset e.g. 0x10000
    * @param {number} blockSize e.g. 1024
-   * @param {function} onProgress callback(percent, written, total)
+   * @param {function} onProgress callback(percent, written, total, curBlock, totalBlk)
+   * @param {boolean} rebootAfter whether to reboot to user app at end
    */
-  async flashBinary(binaryData, flashOffset = 0x10000, blockSize = 1024, onProgress) {
+  async flashPartition(binaryData, flashOffset = 0x10000, blockSize = 1024, onProgress, rebootAfter = true) {
     const totalBytes = binaryData.length;
     const blockCount = Math.ceil(totalBytes / blockSize);
 
@@ -222,7 +225,7 @@ export class EspBootloaderClient {
     view.setUint32(8, blockSize, true);
     view.setUint32(12, flashOffset, true);
 
-    this.log('Erasing flash sectors...');
+    this.log(`Erasing flash sectors for offset 0x${flashOffset.toString(16).toUpperCase()}...`);
     await this.sendPacket(buildEspCommand(ESP_CMD.FLASH_BEGIN, beginPayload, 0));
     await new Promise(r => setTimeout(r, 300));
 
@@ -232,7 +235,6 @@ export class EspBootloaderClient {
       const end = Math.min(start + blockSize, totalBytes);
       const chunk = binaryData.subarray(start, end);
 
-      // Packet data header: size (4B), sequence (4B), 0, 0
       const dataPacket = new Uint8Array(16 + chunk.length);
       const dView = new DataView(dataPacket.buffer);
       dView.setUint32(0, chunk.length, true);
@@ -254,12 +256,76 @@ export class EspBootloaderClient {
 
     // 3. Send FLASH_END (reboot: false)
     const endPayload = new Uint8Array(4);
-    new DataView(endPayload.buffer).setUint32(0, 0, true); // 0 = don't reboot yet
+    new DataView(endPayload.buffer).setUint32(0, 0, true);
     await this.sendPacket(buildEspCommand(ESP_CMD.FLASH_END, endPayload, 0));
 
-    this.log('Flash programming completed successfully with checksum verification!');
+    this.log(`Partition at offset 0x${flashOffset.toString(16).toUpperCase()} successfully programmed!`);
+    if (rebootAfter) {
+      await this.hardwareResetToApp();
+    }
+    return true;
+  }
+
+  /**
+   * Flashes multiple partitions in sequence and reboots after the last one
+   * @param {Array<{ data: Uint8Array, offset: number, label: string }>} partitions
+   * @param {number} blockSize
+   * @param {function} onProgress callback({ partitionIndex, totalPartitions, label, partitionPercent, aggregatePercent, writtenBytes, totalBytes })
+   */
+  async flashMultiplePartitions(partitions, blockSize = 1024, onProgress) {
+    if (!partitions || partitions.length === 0) {
+      throw new Error('No partitions specified for flashing.');
+    }
+
+    const totalAllBytes = partitions.reduce((sum, p) => sum + p.data.length, 0);
+    let bytesWrittenPrior = 0;
+    this.log(`Starting multi-partition flashing: ${partitions.length} partitions, ${totalAllBytes} bytes total...`);
+
+    for (let i = 0; i < partitions.length; i++) {
+      const part = partitions[i];
+      const isLast = i === partitions.length - 1;
+      this.log(`[Slot ${i + 1}/${partitions.length}] Flashing "${part.label}" (${part.data.length} bytes) to offset 0x${part.offset.toString(16).toUpperCase()}...`);
+
+      await this.flashPartition(
+        part.data,
+        part.offset,
+        blockSize,
+        (partPct, partWritten, partTotal, curBlock, totalBlocks) => {
+          const overallWritten = bytesWrittenPrior + partWritten;
+          const aggregatePct = totalAllBytes > 0 
+            ? Math.min(100, Number(((overallWritten / totalAllBytes) * 100).toFixed(1)))
+            : partPct;
+
+          if (onProgress) {
+            onProgress({
+              partitionIndex: i,
+              totalPartitions: partitions.length,
+              label: part.label,
+              partitionPercent: partPct,
+              aggregatePercent: aggregatePct,
+              writtenBytes: overallWritten,
+              totalBytes: totalAllBytes,
+              currentBlock: curBlock,
+              totalBlocks
+            });
+          }
+        },
+        false // Do not reboot between partitions
+      );
+
+      bytesWrittenPrior += part.data.length;
+    }
+
+    this.log('All partitions successfully programmed! Resetting chip to application...');
     await this.hardwareResetToApp();
     return true;
+  }
+
+  /**
+   * Backward-compatible flashBinary method
+   */
+  async flashBinary(binaryData, flashOffset = 0x10000, blockSize = 1024, onProgress) {
+    return this.flashPartition(binaryData, flashOffset, blockSize, onProgress, true);
   }
 
   release() {

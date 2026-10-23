@@ -19,7 +19,9 @@ import {
   Eye, 
   BookOpen, 
   Download,
-  ChevronRight
+  ChevronRight,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { identifyUsbChip } from '../utils/usbDatabase';
 
@@ -51,6 +53,21 @@ export default function UsbReconDeck({
 
   // Active Tab: 'interrogate' | 'forcer' | 'guide'
   const [activeTab, setActiveTab] = useState('interrogate');
+
+  // Teardown guide dropdown steps (collapsed by default)
+  const [openGuideSteps, setOpenGuideSteps] = useState({
+    step1: false,
+    step2: false,
+    step3: false,
+    step4: false
+  });
+
+  const toggleGuideStep = (stepKey) => {
+    setOpenGuideSteps(prev => ({
+      ...prev,
+      [stepKey]: !prev[stepKey]
+    }));
+  };
 
   // Bootloader forcer running states
   const [forcerStatus, setForcerStatus] = useState('');
@@ -758,70 +775,130 @@ export default function UsbReconDeck({
               HOW TO TALK TO SMART VAPES & MYSTERY USB HARDWARE
             </span>
             <p className="text-[11px] text-slate-400">
-              Modern smart disposable vapes (Geek Bar Pulse, Lost Mary MO20000, Spaceman) contain real 32-bit ARM Cortex-M0+ (Puya PY32) or RISC-V (WCH CH32V) microcontrollers. Here is how to reverse engineer and communicate with them:
+              Modern smart disposable vapes (Geek Bar Pulse, Lost Mary MO20000, Spaceman) contain real 32-bit ARM Cortex-M0+ (Puya PY32) or RISC-V (WCH CH32V) microcontrollers. Click each step below to expand teardown instructions:
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Step 1: Power & Battery Safety */}
-            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-              <div className="flex items-center gap-2 text-rose-400 font-bold">
-                <AlertTriangle className="w-4 h-4" />
-                <span>STEP 1: LIPO BATTERY CAUTION</span>
+            <div className={`border rounded-xl transition-all overflow-hidden ${
+              openGuideSteps.step1 ? 'bg-slate-900 border-rose-500/50' : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+            }`}>
+              <div 
+                onClick={() => toggleGuideStep('step1')}
+                className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
+              >
+                <div className="flex items-center gap-2 text-rose-400 font-bold text-xs">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>STEP 1: LIPO BATTERY CAUTION</span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                  <span>{openGuideSteps.step1 ? 'HIDE' : 'CLICK TO EXPAND'}</span>
+                  {openGuideSteps.step1 ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </div>
               </div>
-              <p className="text-slate-300 text-[11px] leading-relaxed">
-                Smart vapes contain a 3.7V Lithium-Polymer pouch cell (typically 500mAh - 850mAh). Never puncture or short the cell. 
-                When opening the casing, safely desolder the battery negative wire before probing logic lines to prevent accidental shorts.
-              </p>
+              {openGuideSteps.step1 && (
+                <div className="p-3.5 border-t border-slate-800/80 bg-slate-950/60">
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    Smart vapes contain a 3.7V Lithium-Polymer pouch cell (typically 500mAh - 850mAh). Never puncture or short the cell. 
+                    When opening the casing, safely desolder the battery negative wire before probing logic lines to prevent accidental shorts.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Step 2: Locating GND & Power Rails */}
-            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-              <div className="flex items-center gap-2 text-amber-400 font-bold">
-                <Zap className="w-4 h-4" />
-                <span>STEP 2: FINDING GND & 3.3V POWER</span>
+            <div className={`border rounded-xl transition-all overflow-hidden ${
+              openGuideSteps.step2 ? 'bg-slate-900 border-amber-500/50' : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+            }`}>
+              <div 
+                onClick={() => toggleGuideStep('step2')}
+                className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
+              >
+                <div className="flex items-center gap-2 text-amber-400 font-bold text-xs">
+                  <Zap className="w-4 h-4" />
+                  <span>STEP 2: FINDING GND & 3.3V POWER</span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                  <span>{openGuideSteps.step2 ? 'HIDE' : 'CLICK TO EXPAND'}</span>
+                  {openGuideSteps.step2 ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </div>
               </div>
-              <p className="text-slate-300 text-[11px] leading-relaxed">
-                <strong>GND:</strong> Put your multimeter in continuity mode. The metal shell of the USB-C port is always connected to PCB GND.
-                <br />
-                <strong>VBUS (5V):</strong> Pin A4/B4 on USB-C goes to a LiPo charging chip (TP4056 or LP4056).
-                <br />
-                <strong>3.3V Rail:</strong> The microcontroller runs on 3.3V. Check the output pin of the 3-pin LDO regulator on the board.
-              </p>
+              {openGuideSteps.step2 && (
+                <div className="p-3.5 border-t border-slate-800/80 bg-slate-950/60">
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    <strong>GND:</strong> Put your multimeter in continuity mode. The metal shell of the USB-C port is always connected to PCB GND.
+                    <br />
+                    <strong>VBUS (5V):</strong> Pin A4/B4 on USB-C goes to a LiPo charging chip (TP4056 or LP4056).
+                    <br />
+                    <strong>3.3V Rail:</strong> The microcontroller runs on 3.3V. Check the output pin of the 3-pin LDO regulator on the board.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Step 3: Finding UART Serial Pads */}
-            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-              <div className="flex items-center gap-2 text-cyan-400 font-bold">
-                <Terminal className="w-4 h-4" />
-                <span>STEP 3: LOCATING UART TX / RX PADS</span>
+            <div className={`border rounded-xl transition-all overflow-hidden ${
+              openGuideSteps.step3 ? 'bg-slate-900 border-cyan-500/50' : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+            }`}>
+              <div 
+                onClick={() => toggleGuideStep('step3')}
+                className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
+              >
+                <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs">
+                  <Terminal className="w-4 h-4" />
+                  <span>STEP 3: LOCATING UART TX / RX PADS</span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                  <span>{openGuideSteps.step3 ? 'HIDE' : 'CLICK TO EXPAND'}</span>
+                  {openGuideSteps.step3 ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </div>
               </div>
-              <p className="text-slate-300 text-[11px] leading-relaxed">
-                Most smart vape PCBs have 3 to 5 unpopulated gold circular test pads near the microcontroller:
-                <br />
-                • <strong>TX Pin:</strong> Rests at logic high (+3.3V) when idle.
-                <br />
-                • Connect your USB-to-UART bridge GND to vape GND, and RX to the suspected pad.
-                <br />
-                • Common baud rates: <strong>115200 bps</strong> or <strong>9600 bps</strong>.
-              </p>
+              {openGuideSteps.step3 && (
+                <div className="p-3.5 border-t border-slate-800/80 bg-slate-950/60">
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    Most smart vape PCBs have 3 to 5 unpopulated gold circular test pads near the microcontroller:
+                    <br />
+                    • <strong>TX Pin:</strong> Rests at logic high (+3.3V) when idle.
+                    <br />
+                    • Connect your USB-to-UART bridge GND to vape GND, and RX to the suspected pad.
+                    <br />
+                    • Common baud rates: <strong>115200 bps</strong> or <strong>9600 bps</strong>.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Step 4: Finding SWD Debug Pads */}
-            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2">
-              <div className="flex items-center gap-2 text-purple-400 font-bold">
-                <Cpu className="w-4 h-4" />
-                <span>STEP 4: SWD PROGRAMMING (DOOM ON A VAPE)</span>
+            <div className={`border rounded-xl transition-all overflow-hidden ${
+              openGuideSteps.step4 ? 'bg-slate-900 border-purple-500/50' : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+            }`}>
+              <div 
+                onClick={() => toggleGuideStep('step4')}
+                className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
+              >
+                <div className="flex items-center gap-2 text-purple-400 font-bold text-xs">
+                  <Cpu className="w-4 h-4" />
+                  <span>STEP 4: SWD PROGRAMMING (DOOM ON A VAPE)</span>
+                </div>
+                <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                  <span>{openGuideSteps.step4 ? 'HIDE' : 'CLICK TO EXPAND'}</span>
+                  {openGuideSteps.step4 ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </div>
               </div>
-              <p className="text-slate-300 text-[11px] leading-relaxed">
-                To dump the flash memory or upload your own game / custom screen animation:
-                <br />
-                • Look for 2 pads labeled <strong>DIO</strong> (SWDIO) and <strong>CLK</strong> (SWCLK).
-                <br />
-                • Puya PY32 chips can be flashed via ST-LINK or an open-source CMSIS-DAP debugger.
-                <br />
-                • WCH CH32V chips use single-wire SDI (WCH-Link).
-              </p>
+              {openGuideSteps.step4 && (
+                <div className="p-3.5 border-t border-slate-800/80 bg-slate-950/60">
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    To dump the flash memory or upload your own game / custom screen animation:
+                    <br />
+                    • Look for 2 pads labeled <strong>DIO</strong> (SWDIO) and <strong>CLK</strong> (SWCLK).
+                    <br />
+                    • Puya PY32 chips can be flashed via ST-LINK or an open-source CMSIS-DAP debugger.
+                    <br />
+                    • WCH CH32V chips use single-wire SDI (WCH-Link).
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>

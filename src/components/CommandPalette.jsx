@@ -22,7 +22,8 @@ import {
   Zap, 
   X,
   Wifi,
-  Gauge
+  Gauge,
+  Radio
 } from 'lucide-react';
 
 export default function CommandPalette({
@@ -45,6 +46,17 @@ export default function CommandPalette({
   const ALL_ACTIONS = [
     // Tools
     { id: 'tab-flasher', name: 'Open ESP32 Flasher', category: 'Tools', icon: HardDrive, action: () => onSelectTab('flasher') },
+    { id: 'tab-usb-pd', name: 'Open USB-PD Power Delivery Analyzer & Voltage Trigger', category: 'Tools', icon: Zap, action: () => onSelectTab('usb-pd') },
+    { id: 'tab-bus-explorer', name: 'Open I2C & SPI Bus Explorer & Sensor Identifier', category: 'Tools', icon: Cpu, action: () => onSelectTab('bus-explorer') },
+    { id: 'tab-jtag', name: 'Open JTAG Boundary Scanner & SVF / CPLD Player', category: 'Tools', icon: Layers, action: () => onSelectTab('jtag-programmer') },
+    { id: 'tab-modbus', name: 'Open Industrial Modbus RTU & RS-485 Field Deck', category: 'Tools', icon: Activity, action: () => onSelectTab('modbus-rtu') },
+    { id: 'tab-avr-isp', name: 'Open AVR & Microchip UPDI / ISP Bootloader Programmer', category: 'Tools', icon: Cpu, action: () => onSelectTab('avr-isp') },
+    { id: 'tab-rfid-nfc', name: 'Open RFID / NFC Badge Deck & Proxmark3 Companion', category: 'Tools', icon: Radio, action: () => onSelectTab('rfid-nfc') },
+    { id: 'tab-mayhem', name: 'Open PortaPack Mayhem & HackRF Sub-GHz SDR Suite', category: 'Tools', icon: Radio, action: () => onSelectTab('mayhem') },
+    { id: 'tab-logic-analyzer', name: 'Open 24MHz 8-Channel USB Logic Analyzer & Protocol Decoder', category: 'Tools', icon: Activity, action: () => onSelectTab('logic-analyzer') },
+    { id: 'tab-can-bus', name: 'Open Automotive CAN Bus & OBD-II Diagnostic Deck', category: 'Tools', icon: Gauge, action: () => onSelectTab('can-bus') },
+    { id: 'tab-ch341a', name: 'Open CH341A USB SPI/I2C BIOS & Flash Programmer', category: 'Tools', icon: HardDrive, action: () => onSelectTab('ch341a') },
+    { id: 'tab-cmsis-dap', name: 'Open CMSIS-DAP / ARM Cortex-M SWD Debugger', category: 'Tools', icon: Cpu, action: () => onSelectTab('cmsis-dap') },
     { id: 'tab-dump', name: 'Open Silicon & Flash Dump', category: 'Tools', icon: Cpu, action: () => onSelectTab('esp-dump') },
     { id: 'tab-bridge', name: 'Open MitM Serial Bridge & Sniffer', category: 'Tools', icon: ArrowLeftRight, action: () => onSelectTab('bridge') },
     { id: 'tab-packets', name: 'Open Binary Packet Framer', category: 'Tools', icon: Layers, action: () => onSelectTab('packets') },

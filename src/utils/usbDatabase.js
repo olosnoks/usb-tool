@@ -299,6 +299,29 @@ export const USB_CHIP_DATABASE = {
     voltage: '3.3V Logic',
     autoReset: 'STM32-compatible Bootloader',
     notes: 'High-speed Chinese ARM microcontroller clone widely used in industrial controllers and consumer IoT.'
+  },
+
+  // Software Defined Radio (SDR) & RF Hardware
+  '1d50:6018': {
+    manufacturer: 'Great Scott Gadgets',
+    chip: 'HackRF / PortaPack Mayhem USB Transceiver (CDC ACM Serial)',
+    voltage: '5V USB Powered (3.3V Logic & RF Front-End)',
+    autoReset: 'CDC ACM Serial / Mayhem CLI Command Shell',
+    notes: 'PortaPack Mayhem standalone transceiver serial interface on COM port (e.g. COM13). Used for remote CLI, FREQMAN sync, and screenshot transfers.'
+  },
+  '1d50:6089': {
+    manufacturer: 'Great Scott Gadgets',
+    chip: 'HackRF One & PortaPack Mayhem (LPC4330 + MAX2837 + CPLD)',
+    voltage: '5V USB Powered (3.3V Logic & RF Front-End)',
+    autoReset: 'DFU / CDC ACM Control Protocol',
+    notes: '1 MHz to 6 GHz Half-Duplex Software Defined Radio. Operates with PortaPack Mayhem firmware for standalone touchscreen RF auditing.'
+  },
+  '1fc9:000c': {
+    manufacturer: 'NXP Semiconductors',
+    chip: 'LPC43xx USB DFU Bootloader (HackRF SPI Flashing)',
+    voltage: '3.3V Logic',
+    autoReset: 'DFU ROM Engine',
+    notes: 'NXP LPC43xx ROM DFU bootloader. Used to flash HackRF One firmware and PortaPack Mayhem binaries directly into on-board SPI flash.'
   }
 };
 
