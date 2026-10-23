@@ -54,6 +54,68 @@ import { identifyUsbChip } from '../../../utils/usbDatabase';
 import flipperSvg from '../../../assets/flipper/flipper.svg';
 import typecSvg from '../../../assets/flipper/typec.svg';
 
+/**
+ * Renders real Flipper Zero 1024-byte framebuffer (128x64 ST7567 LCD) onto HTML5 Canvas
+ */
+export function renderFlipperLcdToCanvas(buffer, canvas, fallbackState = null) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const width = 128;
+  const height = 64;
+
+  if (buffer && buffer.length === 1024) {
+    const imgData = ctx.createImageData(width, height);
+    // ST7567 display layout: 128 columns x 8 pages (each page is 8 vertical rows)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const byteIdx = x + Math.floor(y / 8) * width;
+        const bitMask = 1 << (y % 8);
+        const isPixelSet = (buffer[byteIdx] & bitMask) !== 0;
+        const targetIdx = (y * width + x) * 4;
+
+        if (isPixelSet) {
+          // Dark LCD Pixel (#120a00)
+          imgData.data[targetIdx]     = 18;
+          imgData.data[targetIdx + 1] = 12;
+          imgData.data[targetIdx + 2] = 4;
+        } else {
+          // Orange Backlight (#fe8a2c)
+          imgData.data[targetIdx]     = 254;
+          imgData.data[targetIdx + 1] = 138;
+          imgData.data[targetIdx + 2] = 44;
+        }
+        imgData.data[targetIdx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  } else {
+    // Draw crisp Flipper standby display with real device stats
+    ctx.fillStyle = '#fe8a2c';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = '#120a00';
+    ctx.font = 'bold 8px monospace';
+    ctx.fillText(fallbackState?.deviceName || 'FLIPPER ZERO', 8, 14);
+
+    ctx.font = '6px monospace';
+    const fwText = fallbackState?.firmwareVersion ? fallbackState.firmwareVersion.slice(0, 24) : (fallbackState?.isConnected ? 'ONLINE // USB CDC' : 'OFFLINE');
+    ctx.fillText(fwText, 8, 26);
+
+    const batText = fallbackState?.batteryPercent !== null && fallbackState?.batteryPercent !== undefined ? `BAT: ${fallbackState.batteryPercent}%` : 'BAT: --';
+    ctx.fillText(batText, 8, 38);
+    ctx.fillText(fallbackState?.sdMounted ? 'SD: OK' : 'SD: --', 80, 38);
+
+    ctx.fillStyle = '#612a02';
+    ctx.fillRect(8, 44, 112, 1);
+
+    ctx.fillStyle = '#120a00';
+    ctx.font = 'bold 6px monospace';
+    ctx.fillText(fallbackState?.isConnected ? 'CLICK TO STREAM LCD' : 'PLUG IN & CONNECT', 12, 56);
+  }
+}
+
 export default function FlipperWorkbench() {
   const serialCtx = useSerial();
   const driver = useMemo(() => getFlipperDriver(), []);
@@ -87,7 +149,9 @@ export default function FlipperWorkbench() {
   const [ledColor, setLedColor] = useState('off');
   const [selectedChannel, setSelectedChannel] = useState('Release');
 
-  const canvasRef = useRef(null);
+  // Screen Canvas Refs (Large screen viewer & Mini screen on Flipper casing)
+  const screenCanvasRef = useRef(null);
+  const miniCanvasRef = useRef(null);
   const logContainerRef = useRef(null);
 
   // Subscribe to driver state & logs without killing the connection on unmount
@@ -96,14 +160,37 @@ export default function FlipperWorkbench() {
     driver.onLogCallback = (log) => {
       setLogs(prev => [...prev.slice(-200), log]);
     };
+    driver.onScreenUpdateCallback = (buf) => {
+      if (screenCanvasRef.current) {
+        renderFlipperLcdToCanvas(buf, screenCanvasRef.current, driver.state);
+      }
+      if (miniCanvasRef.current) {
+        renderFlipperLcdToCanvas(buf, miniCanvasRef.current, driver.state);
+      }
+    };
+
     // Sync current state in case already connected
     setState({ ...driver.state });
+
+    // Initial render of standby / current buffer
+    if (screenCanvasRef.current) renderFlipperLcdToCanvas(driver.state.screenBuffer, screenCanvasRef.current, driver.state);
+    if (miniCanvasRef.current) renderFlipperLcdToCanvas(driver.state.screenBuffer, miniCanvasRef.current, driver.state);
 
     return () => {
       driver.onStateChangeCallback = null;
       driver.onLogCallback = null;
+      driver.onScreenUpdateCallback = null;
     };
   }, [driver]);
+
+  // Manage Protobuf RPC Screen Stream session when switching tabs
+  useEffect(() => {
+    if (state.isConnected && activeView === 'screen') {
+      driver.startScreenStream();
+    } else if (state.isConnected && activeView !== 'screen' && driver.isScreenStreaming) {
+      driver.stopScreenStream();
+    }
+  }, [state.isConnected, activeView, driver]);
 
   // Scan for pre-authorized or plugged-in Web Serial ports
   const scanPorts = useCallback(async () => {
@@ -368,7 +455,7 @@ export default function FlipperWorkbench() {
 
   // Screenshot capture
   const handleScreenshot = () => {
-    const canvas = canvasRef.current;
+    const canvas = screenCanvasRef.current || miniCanvasRef.current;
     if (!canvas) return;
     const link = document.createElement('a');
     link.download = `flipper_screenshot_${Date.now()}.png`;
@@ -425,7 +512,7 @@ export default function FlipperWorkbench() {
             </div>
 
             <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
-              <span>{state.isConnected ? (state.hardwareModel || 'STM32WB55') : 'qFlipper Companion (VID: 0483, PID: 5740)'}</span>
+              <span>{state.isConnected ? (state.hardwareModel || 'Detecting Target...') : 'qFlipper Companion (VID: 0483, PID: 5740)'}</span>
               {state.firmwareVersion && (
                 <>
                   <span>•</span>
@@ -435,7 +522,7 @@ export default function FlipperWorkbench() {
               {state.batteryPercent !== null && (
                 <>
                   <span>•</span>
-                  <span className="text-emerald-400 font-bold">BAT: {state.batteryPercent}% ({state.batteryVoltageMv || '4120'} mV)</span>
+                  <span className="text-emerald-400 font-bold">BAT: {state.batteryPercent}%{state.batteryVoltageMv ? ` (${state.batteryVoltageMv} mV)` : ''}</span>
                 </>
               )}
             </div>
@@ -671,10 +758,10 @@ export default function FlipperWorkbench() {
                 <div className="w-full flex items-center justify-between pb-3 border-b border-[#232733] mb-5">
                   <span className="text-xs font-bold text-[#fe8a2c] flex items-center gap-1.5 font-sans">
                     <Bot className="w-4 h-4" />
-                    <span>FLIPPER ZERO // {state.hardwareModel || 'F7'}</span>
+                    <span>FLIPPER ZERO // {state.hardwareModel || (state.isConnected ? 'Querying...' : 'F7')}</span>
                   </span>
                   <span className="text-[10px] text-slate-400 font-mono">
-                    {state.hardwareColor || 'White'} Edition
+                    {state.hardwareColor ? `${state.hardwareColor} Edition` : (state.isConnected ? 'Hardware Connected' : '')}
                   </span>
                 </div>
 
@@ -687,50 +774,30 @@ export default function FlipperWorkbench() {
                     className="w-full h-full object-contain filter drop-shadow-[0_0_40px_rgba(254,138,44,0.15)]"
                   />
 
-                  {/* 128x64 Orange Monochrome LCD Screen positioned precisely on the LCD cutout (88, 19, 136, 73) */}
+                  {/* 128x64 Live Monochrome LCD Canvas positioned on LCD cutout (88, 19, 136, 73) */}
                   <div 
                     onClick={() => setActiveView('screen')}
-                    className="absolute cursor-pointer rounded overflow-hidden flex flex-col justify-between text-black font-mono shadow-inner border border-[#9e5823]/60 transition-transform group-hover:scale-[1.02]"
+                    className="absolute cursor-pointer rounded overflow-hidden shadow-inner border border-[#9e5823]/60 transition-transform group-hover:scale-[1.02] bg-[#fe8a2c]"
                     style={{
                       left: '24.4%',
                       top: '12.2%',
                       width: '37.8%',
                       height: '46.8%',
-                      backgroundColor: '#fe8a2c',
-                      padding: '4px 6px',
                     }}
-                    title="Click to open Screen Stream"
+                    title="Click to open full Screen Stream"
                   >
-                    {/* Top Status Bar */}
-                    <div className="flex items-center justify-between text-[8px] font-bold border-b border-black/30 pb-0.5">
-                      <span>BAT: {state.batteryPercent !== null ? `${state.batteryPercent}%` : '98%'}</span>
-                      <span>{state.sdMounted ? 'SD:OK' : 'SD:--'}</span>
-                      <span>BLE</span>
-                    </div>
-
-                    {/* Mascot / App Center */}
-                    <div className="flex-1 flex flex-col items-center justify-center text-center">
-                      <div className="font-bold text-[10px] tracking-wider leading-none">
-                        {state.deviceName || 'FLIPPER ZERO'}
-                      </div>
-                      <div className="text-[8px] opacity-75 mt-0.5 leading-none">
-                        {state.firmwareVersion || 'FuriOS'}
-                      </div>
-                      <div className="text-[7px] mt-1 font-bold px-1.5 py-0.5 bg-black/10 rounded border border-black/20">
-                        ONLINE // USB CDC
-                      </div>
-                    </div>
-
-                    {/* Bottom Status */}
-                    <div className="flex items-center justify-between text-[7px] opacity-75">
-                      <span>{state.hardwareModel || 'F7B4C2'}</span>
-                      <span>HARDWARE</span>
-                    </div>
+                    <canvas 
+                      ref={miniCanvasRef}
+                      width={128} 
+                      height={64}
+                      className="w-full h-full object-fill"
+                      style={{ imageRendering: 'pixelated' }}
+                    />
 
                     {/* Screen Stream Hover Cue */}
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white font-bold text-[9px] gap-1">
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white font-bold text-[9px] gap-1">
                       <Monitor className="w-3 h-3 text-[#fe8a2c]" />
-                      <span>Stream</span>
+                      <span>Live Stream</span>
                     </div>
                   </div>
 
@@ -865,10 +932,10 @@ export default function FlipperWorkbench() {
                   <div className="flex items-center justify-between pb-4 border-b border-[#232733]">
                     <div>
                       <h2 className="text-xl font-bold text-white tracking-wide font-sans">
-                        {state.deviceName || 'Flipper Zero'}
+                        {state.deviceName || (state.isConnected ? 'Flipper Zero' : 'qFlipper Suite')}
                       </h2>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        Target: <span className="text-slate-200 font-semibold">{state.hardwareModel || 'F7B4C2'}</span> • Rev. 12
+                        Target: <span className="text-slate-200 font-semibold">{state.hardwareModel || (state.isConnected ? 'Querying Target...' : '--')}</span>
                       </p>
                     </div>
 
@@ -887,8 +954,10 @@ export default function FlipperWorkbench() {
                       <div>
                         <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block font-sans">FIRMWARE VERSION</span>
                         <div className="text-base font-bold text-white mt-0.5 flex items-center gap-2">
-                          <span>{state.firmwareVersion || '0.104.1'}</span>
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Up to date</span>
+                          <span>{state.firmwareVersion || (state.isConnected ? 'Reading Firmware...' : '--')}</span>
+                          {state.firmwareVersion && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Active</span>
+                          )}
                         </div>
                       </div>
 
@@ -911,13 +980,13 @@ export default function FlipperWorkbench() {
                     </div>
 
                     <div className="flex items-center justify-between pt-2 border-t border-[#232733] text-xs">
-                      <span className="text-slate-400">Branch: <strong className="text-slate-200 font-mono text-[11px]">{state.firmwareBranch || 'release'}</strong></span>
+                      <span className="text-slate-400">Branch: <strong className="text-slate-200 font-mono text-[11px]">{state.firmwareBranch || (state.isConnected ? 'installed' : '--')}</strong></span>
                       <button
                         onClick={() => driver.refreshAllRealData()}
                         className="px-4 py-2 bg-[#fe8a2c] hover:bg-[#ff9722] text-slate-950 font-bold rounded-xl text-xs font-sans transition shadow-lg shadow-[#fe8a2c]/25 flex items-center gap-1.5 active:scale-95"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
-                        <span>REPAIR / REINSTALL</span>
+                        <span>SYNC TELEMETRY</span>
                       </button>
                     </div>
                   </div>
@@ -934,13 +1003,15 @@ export default function FlipperWorkbench() {
                           <span>MicroSD Card (/ext)</span>
                         </span>
                         <span className="text-slate-400">
-                          {state.sdMounted ? `${formatKb(state.sdFreeKb)} Free / ${formatKb(state.sdTotalKb)} Total` : '14.2 GB Free / 16.0 GB Total'}
+                          {state.sdMounted && state.sdTotalKb 
+                            ? `${formatKb(state.sdFreeKb)} Free / ${formatKb(state.sdTotalKb)} Total` 
+                            : (state.isConnected ? 'Reading SD Card...' : '--')}
                         </span>
                       </div>
                       <div className="w-full h-2.5 bg-[#171920] rounded-full overflow-hidden border border-[#2b303c]">
                         <div 
                           className="h-full bg-gradient-to-r from-[#fe8a2c] to-[#ff9722] rounded-full transition-all duration-500"
-                          style={{ width: state.sdTotalKb && state.sdFreeKb ? `${Math.max(5, ((state.sdTotalKb - state.sdFreeKb) / state.sdTotalKb) * 100)}%` : '12%' }}
+                          style={{ width: state.sdTotalKb && state.sdFreeKb ? `${Math.max(2, Math.min(100, ((state.sdTotalKb - state.sdFreeKb) / state.sdTotalKb) * 100))}%` : '0%' }}
                         />
                       </div>
                     </div>
@@ -953,13 +1024,15 @@ export default function FlipperWorkbench() {
                           <span>Internal Flash (/int)</span>
                         </span>
                         <span className="text-slate-400">
-                          {state.intFreeKb ? `${formatKb(state.intFreeKb)} Free / ${formatKb(state.intTotalKb)} Total` : '184 KB Free / 256 KB'}
+                          {state.intTotalKb 
+                            ? `${formatKb(state.intFreeKb)} Free / ${formatKb(state.intTotalKb)} Total` 
+                            : (state.isConnected ? 'Reading Internal Flash...' : '--')}
                         </span>
                       </div>
                       <div className="w-full h-2.5 bg-[#171920] rounded-full overflow-hidden border border-[#2b303c]">
                         <div 
                           className="h-full bg-[#228cff] rounded-full transition-all duration-500"
-                          style={{ width: state.intTotalKb && state.intFreeKb ? `${Math.max(5, ((state.intTotalKb - state.intFreeKb) / state.intTotalKb) * 100)}%` : '28%' }}
+                          style={{ width: state.intTotalKb && state.intFreeKb ? `${Math.max(2, Math.min(100, ((state.intTotalKb - state.intFreeKb) / state.intTotalKb) * 100))}%` : '0%' }}
                         />
                       </div>
                     </div>
@@ -970,14 +1043,19 @@ export default function FlipperWorkbench() {
                     <div>
                       <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block font-sans">BATTERY HEALTH</span>
                       <div className="text-base font-bold text-emerald-400 mt-0.5 flex items-center gap-2">
-                        <span>{state.batteryPercent !== null ? `${state.batteryPercent}%` : '98%'}</span>
-                        <span className="text-xs text-slate-400 font-normal">({state.batteryVoltageMv || '4120'} mV)</span>
+                        <span>{state.batteryPercent !== null ? `${state.batteryPercent}%` : '--'}</span>
+                        <span className="text-xs text-slate-400 font-normal">{state.batteryVoltageMv ? `(${state.batteryVoltageMv} mV)` : ''}</span>
+                        {state.chargeState && (
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono capitalize">
+                            {state.chargeState}
+                          </span>
+                        )}
                       </div>
                     </div>
 
                     <div className="text-right text-xs text-slate-400 space-y-0.5">
-                      <div>Temp: <strong className="text-slate-200">{state.batteryTempC || '28.5'} °C</strong></div>
-                      <div>Health: <strong className="text-emerald-400">98%</strong></div>
+                      <div>Temp: <strong className="text-slate-200">{state.batteryTempC !== null ? `${state.batteryTempC} °C` : '--'}</strong></div>
+                      <div>Health: <strong className="text-emerald-400">{state.batteryHealth !== null ? `${state.batteryHealth}%` : '--'}</strong></div>
                     </div>
                   </div>
                 </div>
@@ -1026,6 +1104,26 @@ export default function FlipperWorkbench() {
 
                 <div className="flex items-center gap-2">
                   <button
+                    onClick={async () => {
+                      if (driver.isScreenStreaming) {
+                        await driver.stopScreenStream();
+                      } else {
+                        await driver.startScreenStream();
+                      }
+                      setState({ ...driver.state });
+                    }}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 ${
+                      driver.isScreenStreaming 
+                        ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40 hover:bg-rose-600/30' 
+                        : 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30'
+                    }`}
+                    title={driver.isScreenStreaming ? "Pause Live Screen Streaming" : "Start Live Screen Streaming"}
+                  >
+                    <Monitor className="w-3.5 h-3.5" />
+                    <span>{driver.isScreenStreaming ? 'Pause Stream' : 'Start Stream'}</span>
+                  </button>
+
+                  <button
                     onClick={() => setKeyboardNavEnabled(!keyboardNavEnabled)}
                     className={`px-3.5 py-1.5 rounded-xl text-xs font-mono transition flex items-center gap-1.5 ${
                       keyboardNavEnabled 
@@ -1051,36 +1149,22 @@ export default function FlipperWorkbench() {
 
               {/* Large Screen Frame (Scaled 128x64 Monochrome Orange Display) */}
               <div className="relative p-6 bg-[#1e212b] border-4 border-[#9e5823] rounded-3xl shadow-[0_0_60px_rgba(254,138,44,0.25)] max-w-xl w-full flex flex-col items-center">
-                <div className="w-full aspect-[2/1] bg-[#fe8a2c] rounded-2xl p-4 flex flex-col justify-between text-black select-none shadow-inner border border-[#ce5300] font-mono">
-                  {/* Top Status */}
-                  <div className="flex items-center justify-between text-xs font-bold border-b border-black/30 pb-1.5">
-                    <span>BAT: {state.batteryPercent !== null ? `${state.batteryPercent}%` : '98%'}</span>
-                    <span>{state.sdMounted ? 'SD:OK' : 'SD:--'}</span>
-                    <span>BLE:READY</span>
-                  </div>
-
-                  {/* Main Screen Content */}
-                  <div className="flex-1 flex flex-col items-center justify-center py-4 text-center">
-                    <div className="font-bold text-base tracking-wider">
-                      {state.deviceName || 'FLIPPER ZERO'}
-                    </div>
-                    <div className="text-xs mt-1 opacity-80">
-                      {state.firmwareVersion || 'FuriOS'}
-                    </div>
-                    <div className="text-[10px] mt-3 font-bold px-3 py-1 bg-black/10 rounded-lg border border-black/20">
-                      KEYBOARD NAVIGATION ACTIVE
-                    </div>
-                  </div>
-
-                  {/* Bottom Bar */}
-                  <div className="flex items-center justify-between text-[10px] opacity-75">
-                    <span>{state.hardwareModel || 'F7'}</span>
-                    <span>128x64 ILI9163</span>
-                  </div>
+                <div className="w-full aspect-[2/1] bg-[#fe8a2c] rounded-2xl overflow-hidden shadow-inner border border-[#ce5300] relative flex items-center justify-center p-2">
+                  <canvas 
+                    ref={screenCanvasRef}
+                    width={128} 
+                    height={64}
+                    className="w-full h-full object-contain"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
                 </div>
 
-                <div className="mt-3 text-center text-[10px] text-amber-500/80 font-bold uppercase tracking-widest">
-                  FLIPPER ZERO // 128x64 PIXELS MONOCHROME
+                <div className="mt-3 flex items-center justify-between w-full px-2 text-[10px] text-amber-500/80 font-bold uppercase tracking-widest font-mono">
+                  <span>FLIPPER ZERO // 128x64 ST7567 LCD</span>
+                  <span className={driver.isScreenStreaming ? 'text-emerald-400 font-mono flex items-center gap-1.5' : 'text-slate-400 font-mono flex items-center gap-1.5'}>
+                    {driver.isScreenStreaming && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>}
+                    {driver.isScreenStreaming ? 'STREAMING REAL HARDWARE LCD' : 'STREAM STANDBY'}
+                  </span>
                 </div>
               </div>
 
