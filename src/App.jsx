@@ -39,6 +39,7 @@ import AvrIspWorkbench from './components/tools/AvrIspWorkbench';
 import RfidNfcWorkbench from './components/tools/RfidNfcWorkbench';
 import PortapackWorkbench from './components/tools/PortapackWorkbench';
 import FlipperWorkbench from './components/tools/flipper/FlipperWorkbench';
+import ProxmarkWorkbench from './components/tools/proxmark/ProxmarkWorkbench';
 
 // Common & Guide Components
 import ToolGuide from './components/common/ToolGuide';
@@ -406,6 +407,12 @@ function AppContent() {
             {activeTool === 'flipper' && (
               <div className="w-full">
                 <FlipperWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'proxmark' && (
+              <div className="w-full">
+                <ProxmarkWorkbench />
               </div>
             )}
           </main>

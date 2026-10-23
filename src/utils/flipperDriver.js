@@ -122,10 +122,51 @@ function buildRpcPacket(commandId, fieldNumber, subBytes = [], hasNext = false) 
 }
 
 export function formatKb(kb) {
-  if (kb === null || kb === undefined) return '--';
-  if (kb >= 1024 * 1024) return `${(kb / (1024 * 1024)).toFixed(1)} GB`;
-  if (kb >= 1024) return `${(kb / 1024).toFixed(1)} MB`;
-  return `${kb} KB`;
+  if (kb === null || kb === undefined || kb === '') return '--';
+  const num = typeof kb === 'string' ? parseFloat(kb) : Number(kb);
+  if (isNaN(num) || num < 0) return '--';
+  if (num === 0) return '0 KB';
+  if (num >= 1024 * 1024) return `${(num / (1024 * 1024)).toFixed(1)} GB`;
+  if (num >= 1024) return `${(num / 1024).toFixed(1)} MB`;
+  return `${Math.round(num)} KB`;
+}
+
+export function formatBytes(bytes) {
+  if (bytes === null || bytes === undefined || bytes === '') return '--';
+  const num = typeof bytes === 'bigint' ? Number(bytes) : (typeof bytes === 'string' ? parseFloat(bytes) : Number(bytes));
+  if (isNaN(num) || num < 0) return '--';
+  if (num === 0) return '0 B';
+  if (num >= 1024 * 1024 * 1024) return `${(num / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  if (num >= 1024 * 1024) return `${(num / (1024 * 1024)).toFixed(1)} MB`;
+  if (num >= 1024) return `${(num / 1024).toFixed(1)} KB`;
+  return `${Math.round(num)} B`;
+}
+
+export function normalizeSdToKb(val) {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'string' && (val.toLowerCase().includes('kb') || val.toLowerCase().includes('kib'))) {
+    return parseInt(val.replace(/\D/g, ''), 10) || 0;
+  }
+  const n = typeof val === 'bigint' ? val : BigInt(String(val).replace(/\D/g, '') || '0');
+  if (n <= 0n) return 0;
+  // In Flipper Zero RPC, total_space and free_space from Storage.InfoResponse are uint64 raw bytes.
+  // Converting bytes to KiB:
+  return Math.round(Number(n / 1024n));
+}
+
+export function normalizeIntToKb(val) {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'string' && (val.toLowerCase().includes('kb') || val.toLowerCase().includes('kib'))) {
+    return parseInt(val.replace(/\D/g, ''), 10) || 0;
+  }
+  const n = typeof val === 'bigint' ? val : BigInt(String(val).replace(/\D/g, '') || '0');
+  if (n <= 0n) return 0;
+  // Internal flash partition (/int) is 40KB - 256KB (40,960 - 262,144 bytes).
+  // If reported in raw bytes (> 1024), convert to KiB
+  if (n > 1024n) {
+    return Math.round(Number(n / 1024n));
+  }
+  return Number(n);
 }
 
 export function formatFileSize(bytes) {
@@ -226,8 +267,12 @@ export class FlipperZeroDriver {
 
       // Storage Info
       sdMounted: false,
+      sdTotalBytes: null,
+      sdFreeBytes: null,
       sdTotalKb: null,
       sdFreeKb: null,
+      intTotalBytes: null,
+      intFreeBytes: null,
       intTotalKb: null,
       intFreeKb: null,
 
@@ -684,62 +729,117 @@ export class FlipperZeroDriver {
       }
 
       // 2. Storage Info for MicroSD (/ext) (tag 28: .PB_Storage.InfoRequest)
-      try {
-        const extPathBytes = encodeString(1, '/ext');
-        const extInfo = await this.sendRpcRequest(28, extPathBytes, false, 5000);
-        if (extInfo && extInfo.total_space > 0n) {
-          const totalKb = Math.round(Number(extInfo.total_space / 1024n));
-          const freeKb = Math.round(Number(extInfo.free_space / 1024n));
-          this.state.sdTotalKb = totalKb;
-          this.state.sdFreeKb = freeKb;
-          this.state.sdMounted = true;
-          this.log(`[Storage RPC] MicroSD (/ext): ${(freeKb / 1024 / 1024).toFixed(2)} GB Free of ${(totalKb / 1024 / 1024).toFixed(2)} GB`, 'success');
-        } else {
-          this.state.sdMounted = false;
-        }
-        this.notifyState();
-      } catch (e) {
-        this.log(`RPC Storage /ext (/ext): ${e.message}`, 'warning');
-        // Fallback: try relative path 'ext' without leading slash
+      let sdFound = false;
+      const sdCandidatePaths = ['/ext', 'ext', '@/ext'];
+      for (const p of sdCandidatePaths) {
+        if (sdFound) break;
         try {
-          const fallbackBytes = encodeString(1, 'ext');
-          const extInfo = await this.sendRpcRequest(28, fallbackBytes, false, 3000);
+          const pathBytes = encodeString(1, p);
+          const extInfo = await this.sendRpcRequest(28, pathBytes, false, 3500);
+          this.log(`[Storage RAW] path=${p} total=${extInfo && extInfo.total_space} free=${extInfo && extInfo.free_space} (bytes)`, 'info');
           if (extInfo && extInfo.total_space > 0n) {
-            const totalKb = Math.round(Number(extInfo.total_space / 1024n));
-            const freeKb = Math.round(Number(extInfo.free_space / 1024n));
-            this.state.sdTotalKb = totalKb;
-            this.state.sdFreeKb = freeKb;
-            this.state.sdMounted = true;
-            this.notifyState();
+            const totalBytes = BigInt(extInfo.total_space);
+            const freeBytes = BigInt(extInfo.free_space);
+            const totalKb = normalizeSdToKb(totalBytes);
+            const freeKb = normalizeSdToKb(freeBytes);
+            if (totalKb > 0) {
+              this.state.sdTotalBytes = totalBytes;
+              this.state.sdFreeBytes = freeBytes;
+              this.state.sdTotalKb = totalKb;
+              this.state.sdFreeKb = freeKb;
+              this.state.sdMounted = true;
+              sdFound = true;
+              this.log(`[Storage RPC] MicroSD (${p}): ${formatBytes(freeBytes)} Free of ${formatBytes(totalBytes)} Total`, 'success');
+              this.notifyState();
+            }
           }
-        } catch (e2) {
-          this.state.sdMounted = false;
-          this.notifyState();
+        } catch (e) {
+          this.log(`[Storage RAW] path=${p} failed: ${e.message}`, 'warning');
         }
+      }
+      if (!sdFound && this.state.sdTotalKb === null) {
+        this.state.sdMounted = false;
+        this.notifyState();
       }
 
       // 3. Storage Info for Internal Flash (/int) (tag 28: .PB_Storage.InfoRequest)
-      try {
-        const intPathBytes = encodeString(1, '/int');
-        const intInfo = await this.sendRpcRequest(28, intPathBytes, false, 4000);
-        if (intInfo && intInfo.total_space > 0n) {
-          this.state.intTotalKb = Math.round(Number(intInfo.total_space / 1024n));
-          this.state.intFreeKb = Math.round(Number(intInfo.free_space / 1024n));
-          this.log(`[Storage RPC] Internal Flash (/int): ${this.state.intFreeKb} KB Free of ${this.state.intTotalKb} KB`, 'info');
-          this.notifyState();
-        }
-      } catch (e) {
-        // Fallback: if /int is not queried, check if already populated by DeviceInfo or default to STM32 LittleFS flash size
-        if (!this.state.intTotalKb) {
-          this.state.intTotalKb = 256;
-          this.state.intFreeKb = 184;
-          this.notifyState();
+      let intFound = false;
+      const intCandidatePaths = ['/int', 'int', '@/int'];
+      for (const p of intCandidatePaths) {
+        if (intFound) break;
+        try {
+          const pathBytes = encodeString(1, p);
+          const intInfo = await this.sendRpcRequest(28, pathBytes, false, 3500);
+          this.log(`[Storage RAW] path=${p} total=${intInfo && intInfo.total_space} free=${intInfo && intInfo.free_space} (bytes)`, 'info');
+          if (intInfo && intInfo.total_space > 0n && !(sdFound && BigInt(intInfo.total_space) === this.state.sdTotalBytes)) {
+            const totalBytes = BigInt(intInfo.total_space);
+            const freeBytes = BigInt(intInfo.free_space);
+            const totalKb = normalizeIntToKb(totalBytes);
+            const freeKb = normalizeIntToKb(freeBytes);
+            if (totalKb > 0) {
+              this.state.intTotalBytes = totalBytes;
+              this.state.intFreeBytes = freeBytes;
+              this.state.intTotalKb = totalKb;
+              this.state.intFreeKb = freeKb;
+              intFound = true;
+              this.log(`[Storage RPC] Internal Flash (${p}): ${formatBytes(freeBytes)} Free of ${formatBytes(totalBytes)} Total`, 'info');
+              this.notifyState();
+            }
+          }
+        } catch (e) {
+          // Continue to next candidate path
         }
       }
 
       this.notifyState();
     } catch (err) {
       this.log(`Error syncing physical telemetry: ${err.message}`, 'error');
+    }
+  }
+
+  /**
+   * Refreshes real storage capacity metrics for MicroSD and Internal Flash
+   */
+  async refreshStorageInfo() {
+    if (!this.isConnected) return;
+    this.log('[Storage RPC] Refreshing physical storage metrics...', 'info');
+    try {
+      await this.ensureRpcSession();
+      for (const p of ['/ext', 'ext', '@/ext']) {
+        try {
+          const extInfo = await this.sendRpcRequest(28, encodeString(1, p), false, 3500);
+          if (extInfo && extInfo.total_space > 0n) {
+            const totalBytes = BigInt(extInfo.total_space);
+            const freeBytes = BigInt(extInfo.free_space);
+            this.state.sdTotalBytes = totalBytes;
+            this.state.sdFreeBytes = freeBytes;
+            this.state.sdTotalKb = normalizeSdToKb(totalBytes);
+            this.state.sdFreeKb = normalizeSdToKb(freeBytes);
+            this.state.sdMounted = true;
+            this.log(`[Storage RPC] MicroSD updated: ${formatBytes(freeBytes)} Free of ${formatBytes(totalBytes)} Total`, 'success');
+            this.notifyState();
+            break;
+          }
+        } catch (e) {}
+      }
+      for (const p of ['/int', 'int', '@/int']) {
+        try {
+          const intInfo = await this.sendRpcRequest(28, encodeString(1, p), false, 3500);
+          if (intInfo && intInfo.total_space > 0n && BigInt(intInfo.total_space) !== this.state.sdTotalBytes) {
+            const totalBytes = BigInt(intInfo.total_space);
+            const freeBytes = BigInt(intInfo.free_space);
+            this.state.intTotalBytes = totalBytes;
+            this.state.intFreeBytes = freeBytes;
+            this.state.intTotalKb = normalizeIntToKb(totalBytes);
+            this.state.intFreeKb = normalizeIntToKb(freeBytes);
+            this.log(`[Storage RPC] Internal Flash updated: ${formatBytes(freeBytes)} Free of ${formatBytes(totalBytes)} Total`, 'info');
+            this.notifyState();
+            break;
+          }
+        } catch (e) {}
+      }
+    } catch (e) {
+      this.log(`Failed to refresh storage info: ${e.message}`, 'warning');
     }
   }
 
@@ -817,25 +917,27 @@ export class FlipperZeroDriver {
       if (k.includes('storage') && (k.includes('sd') || k.includes('ext'))) {
         const m = v.match(/(\d+)/);
         if (m) {
-          const bytes = BigInt(m[1]);
-          const kb = Math.round(Number(bytes / 1024n));
-          if (k.includes('total')) {
-            this.state.sdTotalKb = kb;
-            if (kb > 0) this.state.sdMounted = true;
-          } else if (k.includes('free')) {
-            this.state.sdFreeKb = kb;
+          const kb = normalizeSdToKb(m[1]);
+          if (kb !== null && kb > 0) {
+            if (k.includes('total')) {
+              this.state.sdTotalKb = kb;
+              this.state.sdMounted = true;
+            } else if (k.includes('free')) {
+              this.state.sdFreeKb = kb;
+            }
           }
         }
       }
       if (k.includes('storage') && (k.includes('internal') || k.includes('int') || k.includes('databases'))) {
         const m = v.match(/(\d+)/);
         if (m) {
-          const bytes = BigInt(m[1]);
-          const kb = Math.round(Number(bytes / 1024n));
-          if (k.includes('total')) {
-            this.state.intTotalKb = kb;
-          } else if (k.includes('free')) {
-            this.state.intFreeKb = kb;
+          const kb = normalizeIntToKb(m[1]);
+          if (kb !== null && kb > 0) {
+            if (k.includes('total')) {
+              this.state.intTotalKb = kb;
+            } else if (k.includes('free')) {
+              this.state.intFreeKb = kb;
+            }
           }
         }
       }
@@ -1233,8 +1335,12 @@ export class FlipperZeroDriver {
       batteryHealth: 99,
       chargeState: 'Discharging',
       sdMounted: true,
+      sdTotalBytes: 32686211072n,
+      sdFreeBytes: 29094799360n,
       sdTotalKb: 31920128,
       sdFreeKb: 28412890,
+      intTotalBytes: 262144n,
+      intFreeBytes: 188416n,
       intTotalKb: 256,
       intFreeKb: 184
     };
@@ -1273,6 +1379,14 @@ export class FlipperZeroDriver {
       firmwareVersion: null,
       batteryPercent: null,
       sdMounted: false,
+      sdTotalBytes: null,
+      sdFreeBytes: null,
+      sdTotalKb: null,
+      sdFreeKb: null,
+      intTotalBytes: null,
+      intFreeBytes: null,
+      intTotalKb: null,
+      intFreeKb: null,
       screenBuffer: null
     };
 

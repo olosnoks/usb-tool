@@ -48,7 +48,7 @@ import {
   ArrowUp,
   Plus
 } from 'lucide-react';
-import { FlipperZeroDriver, getFlipperDriver } from '../../../utils/flipperDriver';
+import { FlipperZeroDriver, getFlipperDriver, formatKb, formatBytes } from '../../../utils/flipperDriver';
 import { useSerial } from '../../../context/SerialContext';
 import { identifyUsbChip } from '../../../utils/usbDatabase';
 import flipperSvg from '../../../assets/flipper/flipper.svg';
@@ -1001,7 +1001,19 @@ export default function FlipperWorkbench() {
 
                   {/* Storage Meters (qFlipper Style Progress Bars) */}
                   <div className="mt-5 p-5 bg-[#1e212b] border border-[#2b303c] rounded-2xl space-y-4">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block font-sans">STORAGE CAPACITY</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block font-sans">STORAGE CAPACITY</span>
+                      {state.isConnected && (
+                        <button
+                          onClick={() => driver.refreshStorageInfo()}
+                          className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center gap-1 transition"
+                          title="Re-query physical storage info"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Refresh</span>
+                        </button>
+                      )}
+                    </div>
 
                     {/* MicroSD Card Progress */}
                     <div className="space-y-1.5">
@@ -1011,8 +1023,8 @@ export default function FlipperWorkbench() {
                           <span>MicroSD Card (/ext)</span>
                         </span>
                         <span className="text-slate-400 font-mono text-[11px]">
-                          {state.sdMounted === true && state.sdTotalKb 
-                            ? `${formatKb(state.sdFreeKb)} Free / ${formatKb(state.sdTotalKb)} Total` 
+                          {state.sdMounted === true && (state.sdTotalBytes != null || state.sdTotalKb != null)
+                            ? `${state.sdFreeBytes != null ? formatBytes(state.sdFreeBytes) : formatKb(state.sdFreeKb)} Free / ${state.sdTotalBytes != null ? formatBytes(state.sdTotalBytes) : formatKb(state.sdTotalKb)} Total` 
                             : (state.sdMounted === false 
                                 ? 'No MicroSD Card Inserted' 
                                 : (state.isConnected ? 'Reading MicroSD...' : '--'))}
@@ -1021,7 +1033,13 @@ export default function FlipperWorkbench() {
                       <div className="w-full h-2.5 bg-[#171920] rounded-full overflow-hidden border border-[#2b303c]">
                         <div 
                           className="h-full bg-gradient-to-r from-[#fe8a2c] to-[#ff9722] rounded-full transition-all duration-500"
-                          style={{ width: state.sdTotalKb && state.sdFreeKb ? `${Math.max(2, Math.min(100, ((state.sdTotalKb - state.sdFreeKb) / state.sdTotalKb) * 100))}%` : '0%' }}
+                          style={{ 
+                            width: (state.sdTotalBytes && state.sdFreeBytes != null)
+                              ? `${Math.max(2, Math.min(100, ((Number(state.sdTotalBytes) - Number(state.sdFreeBytes)) / Number(state.sdTotalBytes)) * 100))}%`
+                              : (state.sdTotalKb && state.sdFreeKb != null
+                                  ? `${Math.max(2, Math.min(100, ((state.sdTotalKb - state.sdFreeKb) / state.sdTotalKb) * 100))}%`
+                                  : '0%')
+                          }}
                         />
                       </div>
                     </div>
@@ -1033,16 +1051,22 @@ export default function FlipperWorkbench() {
                           <Cpu className="w-3.5 h-3.5 text-[#228cff]" />
                           <span>Internal Flash (/int)</span>
                         </span>
-                        <span className="text-slate-400">
-                          {state.intTotalKb 
-                            ? `${formatKb(state.intFreeKb)} Free / ${formatKb(state.intTotalKb)} Total` 
+                        <span className="text-slate-400 font-mono text-[11px]">
+                          {(state.intTotalBytes != null || state.intTotalKb != null)
+                            ? `${state.intFreeBytes != null ? formatBytes(state.intFreeBytes) : formatKb(state.intFreeKb)} Free / ${state.intTotalBytes != null ? formatBytes(state.intTotalBytes) : formatKb(state.intTotalKb)} Total` 
                             : (state.isConnected ? 'Reading Internal Flash...' : '--')}
                         </span>
                       </div>
                       <div className="w-full h-2.5 bg-[#171920] rounded-full overflow-hidden border border-[#2b303c]">
                         <div 
                           className="h-full bg-[#228cff] rounded-full transition-all duration-500"
-                          style={{ width: state.intTotalKb && state.intFreeKb ? `${Math.max(2, Math.min(100, ((state.intTotalKb - state.intFreeKb) / state.intTotalKb) * 100))}%` : '0%' }}
+                          style={{ 
+                            width: (state.intTotalBytes && state.intFreeBytes != null)
+                              ? `${Math.max(2, Math.min(100, ((Number(state.intTotalBytes) - Number(state.intFreeBytes)) / Number(state.intTotalBytes)) * 100))}%`
+                              : (state.intTotalKb && state.intFreeKb != null
+                                  ? `${Math.max(2, Math.min(100, ((state.intTotalKb - state.intFreeKb) / state.intTotalKb) * 100))}%`
+                                  : '0%')
+                          }}
                         />
                       </div>
                     </div>
