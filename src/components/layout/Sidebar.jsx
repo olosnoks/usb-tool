@@ -49,6 +49,8 @@ export const SIDEBAR_SECTIONS = [
       { id: 'proxmark', name: 'Proxmark3 / PM5 Suite', icon: Radio, accent: 'cyan', desc: '13.56MHz & 125kHz RFID cloner, raw NG framing & WebFlash' },
       { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', desc: '1-click chip identification & register watch' },
       { id: 'modbus-rtu', name: 'Modbus RTU & RS-485', icon: Activity, accent: 'amber', desc: 'Industrial holding registers & inverter telemetry' },
+      { id: 'packet-analyzer', name: 'Packet & Protocol Analyzer', icon: Activity, accent: 'purple', desc: '802.11 Wi-Fi frames, EAPOL, PCAP & hex inspector' },
+      { id: 'cyberchef', name: 'CyberChef Obfuscator', icon: Sparkles, accent: 'cyan', desc: 'Recipe pipeline, multi-format encoder/decoder & payload obfuscator' },
       { id: 'hex', name: 'Hex Stream Viewer', icon: Binary, accent: 'cyan', desc: 'Live 8/16-byte hexdump inspector' },
       { id: 'plotter', name: 'Oscilloscope Plotter', icon: Activity, accent: 'rose', desc: 'Multi-channel live waveforms' },
       { id: 'packets', name: 'Packet Framer', icon: Layers, accent: 'emerald', desc: 'SLIP, COBS & custom protocols' },
@@ -60,6 +62,7 @@ export const SIDEBAR_SECTIONS = [
     id: 'utilities',
     title: 'DEVICE UTILITIES',
     items: [
+      { id: 'ducky', name: 'DuckyScript BadUSB Studio', icon: Keyboard, accent: 'amber', desc: 'HID keystroke compiler, simulator & Flipper exporter' },
       { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'PPS variable voltage trigger & VBUS analyzer' },
       { id: 'jtag-programmer', name: 'JTAG & SVF Player', icon: Layers, accent: 'purple', desc: 'Boundary scan & FPGA bitstream runner' },
       { id: 'avr-isp', name: 'AVR ISP & Bootloader', icon: Cpu, accent: 'cyan', desc: 'Optiboot burner & fuse bit calculator' },

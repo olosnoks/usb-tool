@@ -25,6 +25,7 @@ import {
   formatHexOffset, 
   calculateTotalPayloadSize 
 } from '../../utils/partitionPresets';
+import CloudFirmwareCatalog from '../flasher/CloudFirmwareCatalog';
 
 export default function FlasherTab() {
   const {
@@ -33,6 +34,9 @@ export default function FlasherTab() {
     addLog,
     sendRawBytes
   } = useSerial();
+
+  // Sub-view: 'catalog' (ESP Terminator 400+ presets) | 'slots' (Custom Multi-Slot Flasher)
+  const [subView, setSubView] = useState('catalog');
 
   // Selected layout preset
   const [activePresetId, setActivePresetId] = useState('esp32-classic');
@@ -178,6 +182,27 @@ export default function FlasherTab() {
   const totalPayloadSize = calculateTotalPayloadSize(slots);
   const enabledSlotsWithFiles = slots.filter(s => s.enabled && s.fileInfo?.data?.length > 0);
 
+  // Load firmware directly from Cloud Catalog into slots
+  const handleLoadFromCatalog = ({ firmware, files, flashConfig }) => {
+    const newSlots = files.map((f, idx) => ({
+      id: `part-${idx + 1}`,
+      label: f.name.replace(/\.bin$/i, ''),
+      offset: f.address || (idx === 0 ? '0x0' : '0x10000'),
+      enabled: true,
+      file: { name: f.name },
+      fileInfo: {
+        name: f.name,
+        size: f.size,
+        type: 'Raw Binary',
+        data: f.data,
+        startAddress: parseHexOffset(f.address || '0x0')
+      }
+    }));
+    setSlots(newSlots);
+    setSubView('slots');
+    addLog(`[FLASHER] Loaded ${firmware.name} (${files.length} partitions) from Cloud Catalog. Ready to flash!`, 'success');
+  };
+
   // Start Flashing Execution
   const startFlashing = async () => {
     if (!isConnected) {
@@ -319,14 +344,49 @@ export default function FlasherTab() {
 
   return (
     <div className="flex flex-col gap-4 font-mono">
-      {/* Presets Header Card */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 sm:p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <HardDrive className="w-4 h-4 text-amber-400" />
-              <span>MULTI-OFFSET PARTITION FLASHING</span>
-            </h2>
+      {/* Sub-Tab Navigation Header */}
+      <div className="flex items-center gap-2 p-1 bg-[#101216] border border-[#232733] rounded-2xl w-fit">
+        <button
+          onClick={() => setSubView('catalog')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
+            subView === 'catalog'
+              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+          <span>Cloud Firmware Catalog (400+ Presets)</span>
+        </button>
+        <button
+          onClick={() => setSubView('slots')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
+            subView === 'slots'
+              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <HardDrive className="w-3.5 h-3.5 text-amber-400" />
+          <span>Multi-Slot Partition Flasher</span>
+          {enabledSlotsWithFiles.length > 0 && (
+            <span className="text-[10px] px-1.5 py-0.2 bg-amber-500/30 text-amber-200 rounded-full font-mono">
+              {enabledSlotsWithFiles.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {subView === 'catalog' ? (
+        <CloudFirmwareCatalog onSelectFirmwareForFlashing={handleLoadFromCatalog} />
+      ) : (
+        <>
+          {/* Presets Header Card */}
+          <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 sm:p-4 shadow-xl">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+              <div>
+                <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                  <HardDrive className="w-4 h-4 text-amber-400" />
+                  <span>MULTI-OFFSET PARTITION FLASHING</span>
+                </h2>
             <p className="text-[11px] text-slate-400">
               Configure 1 to 4 independent binary/HEX slots with absolute memory offsets for ESP32, ESP8266, or custom targets.
             </p>
@@ -670,6 +730,8 @@ export default function FlasherTab() {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

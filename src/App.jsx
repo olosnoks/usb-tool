@@ -40,6 +40,9 @@ import RfidNfcWorkbench from './components/tools/RfidNfcWorkbench';
 import PortapackWorkbench from './components/tools/PortapackWorkbench';
 import FlipperWorkbench from './components/tools/flipper/FlipperWorkbench';
 import ProxmarkWorkbench from './components/tools/proxmark/ProxmarkWorkbench';
+import CyberChefWorkbench from './components/tools/CyberChefWorkbench';
+import DuckyScriptStudio from './components/tools/DuckyScriptStudio';
+import PacketAnalyzerWorkbench from './components/tools/PacketAnalyzerWorkbench';
 
 // Common & Guide Components
 import ToolGuide from './components/common/ToolGuide';
@@ -413,6 +416,24 @@ function AppContent() {
             {activeTool === 'proxmark' && (
               <div className="w-full">
                 <ProxmarkWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'cyberchef' && (
+              <div className="w-full">
+                <CyberChefWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'ducky' && (
+              <div className="w-full">
+                <DuckyScriptStudio />
+              </div>
+            )}
+
+            {activeTool === 'packet-analyzer' && (
+              <div className="w-full">
+                <PacketAnalyzerWorkbench />
               </div>
             )}
           </main>
