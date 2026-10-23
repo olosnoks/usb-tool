@@ -57,7 +57,7 @@ import typecSvg from '../../../assets/flipper/typec.svg';
 /**
  * Renders real Flipper Zero 1024-byte framebuffer (128x64 ST7567 LCD) onto HTML5 Canvas
  */
-export function renderFlipperLcdToCanvas(buffer, canvas, fallbackState = null) {
+export function renderFlipperLcdToCanvas(buffer, canvas, fallbackState = null, orientation = 0) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -67,11 +67,14 @@ export function renderFlipperLcdToCanvas(buffer, canvas, fallbackState = null) {
 
   if (buffer && buffer.length === 1024) {
     const imgData = ctx.createImageData(width, height);
+    const isFlipped = orientation === 1 || orientation === 3;
     // ST7567 display layout: 128 columns x 8 pages (each page is 8 vertical rows)
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const byteIdx = x + Math.floor(y / 8) * width;
-        const bitMask = 1 << (y % 8);
+        const drawX = isFlipped ? 127 - x : x;
+        const drawY = isFlipped ? 63 - y : y;
+        const byteIdx = drawX + Math.floor(drawY / 8) * width;
+        const bitMask = 1 << (drawY % 8);
         const isPixelSet = (buffer[byteIdx] & bitMask) !== 0;
         const targetIdx = (y * width + x) * 4;
 
@@ -160,12 +163,12 @@ export default function FlipperWorkbench() {
     driver.onLogCallback = (log) => {
       setLogs(prev => [...prev.slice(-200), log]);
     };
-    driver.onScreenUpdateCallback = (buf) => {
+    driver.onScreenUpdateCallback = (buf, orientation = 0) => {
       if (screenCanvasRef.current) {
-        renderFlipperLcdToCanvas(buf, screenCanvasRef.current, driver.state);
+        renderFlipperLcdToCanvas(buf, screenCanvasRef.current, driver.state, orientation);
       }
       if (miniCanvasRef.current) {
-        renderFlipperLcdToCanvas(buf, miniCanvasRef.current, driver.state);
+        renderFlipperLcdToCanvas(buf, miniCanvasRef.current, driver.state, orientation);
       }
     };
 
@@ -173,8 +176,8 @@ export default function FlipperWorkbench() {
     setState({ ...driver.state });
 
     // Initial render of standby / current buffer
-    if (screenCanvasRef.current) renderFlipperLcdToCanvas(driver.state.screenBuffer, screenCanvasRef.current, driver.state);
-    if (miniCanvasRef.current) renderFlipperLcdToCanvas(driver.state.screenBuffer, miniCanvasRef.current, driver.state);
+    if (screenCanvasRef.current) renderFlipperLcdToCanvas(driver.state.screenBuffer, screenCanvasRef.current, driver.state, driver.state.screenOrientation || 0);
+    if (miniCanvasRef.current) renderFlipperLcdToCanvas(driver.state.screenBuffer, miniCanvasRef.current, driver.state, driver.state.screenOrientation || 0);
 
     return () => {
       driver.onStateChangeCallback = null;
@@ -187,6 +190,11 @@ export default function FlipperWorkbench() {
   useEffect(() => {
     if (state.isConnected && (activeView === 'device' || activeView === 'screen')) {
       driver.startScreenStream();
+      // Paint latest framebuffer immediately upon tab switch so no blank frame occurs
+      if (driver.state.screenBuffer) {
+        if (screenCanvasRef.current) renderFlipperLcdToCanvas(driver.state.screenBuffer, screenCanvasRef.current, driver.state, driver.state.screenOrientation || 0);
+        if (miniCanvasRef.current) renderFlipperLcdToCanvas(driver.state.screenBuffer, miniCanvasRef.current, driver.state, driver.state.screenOrientation || 0);
+      }
     } else if (state.isConnected && activeView !== 'device' && activeView !== 'screen' && driver.isScreenStreaming) {
       driver.stopScreenStream();
     }
@@ -1002,10 +1010,12 @@ export default function FlipperWorkbench() {
                           <HardDrive className="w-3.5 h-3.5 text-[#fe8a2c]" />
                           <span>MicroSD Card (/ext)</span>
                         </span>
-                        <span className="text-slate-400">
-                          {state.sdMounted && state.sdTotalKb 
+                        <span className="text-slate-400 font-mono text-[11px]">
+                          {state.sdMounted === true && state.sdTotalKb 
                             ? `${formatKb(state.sdFreeKb)} Free / ${formatKb(state.sdTotalKb)} Total` 
-                            : (state.isConnected ? 'Reading SD Card...' : '--')}
+                            : (state.sdMounted === false 
+                                ? 'No MicroSD Card Inserted' 
+                                : (state.isConnected ? 'Reading MicroSD...' : '--'))}
                         </span>
                       </div>
                       <div className="w-full h-2.5 bg-[#171920] rounded-full overflow-hidden border border-[#2b303c]">
@@ -1163,7 +1173,9 @@ export default function FlipperWorkbench() {
                   <span>FLIPPER ZERO // 128x64 ST7567 LCD</span>
                   <span className={driver.isScreenStreaming ? 'text-emerald-400 font-mono flex items-center gap-1.5' : 'text-slate-400 font-mono flex items-center gap-1.5'}>
                     {driver.isScreenStreaming && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>}
-                    {driver.isScreenStreaming ? 'STREAMING REAL HARDWARE LCD' : 'STREAM STANDBY'}
+                    {driver.isScreenStreaming 
+                      ? `STREAMING REAL HARDWARE LCD ${state.screenFrameCount ? `(${state.screenFrameCount} frames)` : ''}` 
+                      : 'STREAM STANDBY'}
                   </span>
                 </div>
               </div>

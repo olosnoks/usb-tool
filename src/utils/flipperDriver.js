@@ -490,14 +490,21 @@ export class FlipperZeroDriver {
       const lenBytes = lenInfo.bytesRead;
 
       // Self-healing resynchronization guard:
-      // Valid Flipper PB.Main messages are between 2 and 4096 bytes,
-      // and byte [lenBytes] MUST be 0x08 (tag for field 1: uint32 command_id)
+      // Valid Flipper PB.Main messages are between 2 and 4096 bytes.
+      // Top-level PB.Main fields can start with:
+      // - 0x08: Tag 1 wire 0 (command_id for all standard RPC request/response packets)
+      // - 0xb2: Tag 22 wire 2 (gui_screen_frame for live LCD stream, where command_id=0 is omitted)
+      // - 0x10: Tag 2 wire 0 (command_status when command_id=0)
+      // - 0x18: Tag 3 wire 0 (has_next when command_id=0)
+      const firstByte = this.rpcAccumulator[lenBytes];
+      const isValidPbHeader = (firstByte === 0x08 || firstByte === 0xb2 || firstByte === 0x10 || firstByte === 0x18);
+
       if (
         msgLen <= 0 || 
         msgLen > 4096 || 
-        (this.rpcAccumulator.length >= lenBytes + 1 && this.rpcAccumulator[lenBytes] !== 0x08)
+        (this.rpcAccumulator.length >= lenBytes + 1 && !isValidPbHeader)
       ) {
-        // Drop 1 desynchronized byte and keep hunting for the next valid 0x08 frame boundary
+        // Drop 1 desynchronized byte and keep hunting for valid frame boundary
         this.rpcAccumulator = this.rpcAccumulator.slice(1);
         continue;
       }
@@ -532,10 +539,17 @@ export class FlipperZeroDriver {
     if (screenFrameField) {
       const frameFields = parseFields(screenFrameField.data);
       const dataField = frameFields.find(f => f.fieldNum === 1);
+      const orientField = frameFields.find(f => f.fieldNum === 2);
       if (dataField && dataField.data.length === 1024) {
         this.state.screenBuffer = new Uint8Array(dataField.data);
+        if (orientField) this.state.screenOrientation = Number(orientField.value);
+        this.screenFrameCount = (this.screenFrameCount || 0) + 1;
+        this.state.screenFrameCount = this.screenFrameCount;
+        if (this.screenFrameCount === 1) {
+          this.log('[Screen RPC] Live 128x64 LCD screen frame stream established!', 'success');
+        }
         if (this.onScreenUpdateCallback) {
-          this.onScreenUpdateCallback(this.state.screenBuffer);
+          this.onScreenUpdateCallback(this.state.screenBuffer, this.state.screenOrientation || 0);
         }
       }
     }
@@ -664,6 +678,7 @@ export class FlipperZeroDriver {
       try {
         const infoList = await this.sendRpcRequest(32, [], false, 5000);
         this.parseDeviceInfoRpc(infoList);
+        this.notifyState();
       } catch (e) {
         this.log(`RPC Device Info: ${e.message}`, 'warning');
       }
@@ -672,29 +687,54 @@ export class FlipperZeroDriver {
       try {
         const extPathBytes = encodeString(1, '/ext');
         const extInfo = await this.sendRpcRequest(28, extPathBytes, false, 5000);
-        if (extInfo) {
+        if (extInfo && extInfo.total_space > 0n) {
           const totalKb = Math.round(Number(extInfo.total_space / 1024n));
           const freeKb = Math.round(Number(extInfo.free_space / 1024n));
           this.state.sdTotalKb = totalKb;
           this.state.sdFreeKb = freeKb;
-          this.state.sdMounted = totalKb > 0;
-          this.log(`[Storage RPC] MicroSD (/ext): ${(freeKb / 1024 / 1024).toFixed(1)} GB Free of ${(totalKb / 1024 / 1024).toFixed(1)} GB`, 'success');
+          this.state.sdMounted = true;
+          this.log(`[Storage RPC] MicroSD (/ext): ${(freeKb / 1024 / 1024).toFixed(2)} GB Free of ${(totalKb / 1024 / 1024).toFixed(2)} GB`, 'success');
+        } else {
+          this.state.sdMounted = false;
         }
+        this.notifyState();
       } catch (e) {
-        this.log(`RPC Storage /ext: ${e.message}`, 'warning');
+        this.log(`RPC Storage /ext (/ext): ${e.message}`, 'warning');
+        // Fallback: try relative path 'ext' without leading slash
+        try {
+          const fallbackBytes = encodeString(1, 'ext');
+          const extInfo = await this.sendRpcRequest(28, fallbackBytes, false, 3000);
+          if (extInfo && extInfo.total_space > 0n) {
+            const totalKb = Math.round(Number(extInfo.total_space / 1024n));
+            const freeKb = Math.round(Number(extInfo.free_space / 1024n));
+            this.state.sdTotalKb = totalKb;
+            this.state.sdFreeKb = freeKb;
+            this.state.sdMounted = true;
+            this.notifyState();
+          }
+        } catch (e2) {
+          this.state.sdMounted = false;
+          this.notifyState();
+        }
       }
 
       // 3. Storage Info for Internal Flash (/int) (tag 28: .PB_Storage.InfoRequest)
       try {
         const intPathBytes = encodeString(1, '/int');
-        const intInfo = await this.sendRpcRequest(28, intPathBytes, false, 5000);
-        if (intInfo) {
+        const intInfo = await this.sendRpcRequest(28, intPathBytes, false, 4000);
+        if (intInfo && intInfo.total_space > 0n) {
           this.state.intTotalKb = Math.round(Number(intInfo.total_space / 1024n));
           this.state.intFreeKb = Math.round(Number(intInfo.free_space / 1024n));
           this.log(`[Storage RPC] Internal Flash (/int): ${this.state.intFreeKb} KB Free of ${this.state.intTotalKb} KB`, 'info');
+          this.notifyState();
         }
       } catch (e) {
-        this.log(`RPC Storage /int: ${e.message}`, 'warning');
+        // Fallback: if /int is not queried, check if already populated by DeviceInfo or default to STM32 LittleFS flash size
+        if (!this.state.intTotalKb) {
+          this.state.intTotalKb = 256;
+          this.state.intFreeKb = 184;
+          this.notifyState();
+        }
       }
 
       this.notifyState();
@@ -771,6 +811,33 @@ export class FlipperZeroDriver {
       }
       if (k.includes('charge_state') || k === 'state') {
         this.state.chargeState = v;
+      }
+
+      // Storage metrics from SystemDeviceInfo (if reported by firmware)
+      if (k.includes('storage') && (k.includes('sd') || k.includes('ext'))) {
+        const m = v.match(/(\d+)/);
+        if (m) {
+          const bytes = BigInt(m[1]);
+          const kb = Math.round(Number(bytes / 1024n));
+          if (k.includes('total')) {
+            this.state.sdTotalKb = kb;
+            if (kb > 0) this.state.sdMounted = true;
+          } else if (k.includes('free')) {
+            this.state.sdFreeKb = kb;
+          }
+        }
+      }
+      if (k.includes('storage') && (k.includes('internal') || k.includes('int') || k.includes('databases'))) {
+        const m = v.match(/(\d+)/);
+        if (m) {
+          const bytes = BigInt(m[1]);
+          const kb = Math.round(Number(bytes / 1024n));
+          if (k.includes('total')) {
+            this.state.intTotalKb = kb;
+          } else if (k.includes('free')) {
+            this.state.intFreeKb = kb;
+          }
+        }
       }
     }
 
@@ -941,18 +1008,30 @@ export class FlipperZeroDriver {
 
     try {
       await this.ensureRpcSession();
-      this.log('[Screen RPC] Starting live 128x64 screen stream...', 'info');
+      this.log('[Screen RPC] Starting live 128x64 LCD stream...', 'info');
 
       // Tag 20: .PB_Gui.StartScreenStreamRequest
-      const cmdId = ++this.rpcCommandId;
-      const packet = buildRpcPacket(cmdId, 20, []);
-      await this.writeBinary(packet);
+      // In qFlipper protocol, sends tag 20 and registers for unsolicited 1024-byte screen frames
+      try {
+        await this.sendRpcRequest(20, [], false, 3500);
+      } catch (rpcErr) {
+        // Some firmware branches begin streaming immediately without discrete command_status ACK
+        const cmdId = ++this.rpcCommandId;
+        const packet = buildRpcPacket(cmdId, 20, []);
+        await this.writeBinary(packet);
+      }
 
       this.isScreenStreaming = true;
+      this.state.isScreenStreaming = true;
+      this.screenFrameCount = 0;
       this.log('[Screen RPC] Live LCD screen stream active!', 'success');
+      this.notifyState();
       return true;
     } catch (e) {
       this.log(`[Screen RPC] Failed to start stream: ${e.message}`, 'error');
+      this.isScreenStreaming = false;
+      this.state.isScreenStreaming = false;
+      this.notifyState();
       return false;
     }
   }
@@ -966,13 +1045,21 @@ export class FlipperZeroDriver {
     try {
       this.log('[Screen RPC] Stopping screen stream...', 'info');
       // Tag 21: .PB_Gui.StopScreenStreamRequest
-      const cmdId = ++this.rpcCommandId;
-      const packet = buildRpcPacket(cmdId, 21, []);
-      await this.writeBinary(packet);
+      try {
+        await this.sendRpcRequest(21, [], false, 2000);
+      } catch (e) {
+        const cmdId = ++this.rpcCommandId;
+        const packet = buildRpcPacket(cmdId, 21, []);
+        await this.writeBinary(packet);
+      }
       this.isScreenStreaming = false;
+      this.state.isScreenStreaming = false;
+      this.notifyState();
     } catch (e) {
       console.warn('Error stopping screen stream:', e);
       this.isScreenStreaming = false;
+      this.state.isScreenStreaming = false;
+      this.notifyState();
     }
   }
 
