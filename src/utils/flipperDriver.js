@@ -697,7 +697,14 @@ export class FlipperZeroDriver {
       }
 
       // Field 62: property_get_response (.PB_Property.GetResponse) - streamed key/value pairs
-      const propRespField = mainFields.find(f => f.fieldNum === 62);
+      // Property get response (.PB_Property.GetResponse) - streamed key/value pairs.
+      // Accept expected tag 62, or any other length-delimited main field for a property request.
+      const propRespField = mainFields.find(f => f.fieldNum === 62) ||
+        (pending.fieldNum === 61 ? mainFields.find(f => f.wireType === 2 && ![1, 2, 3].includes(f.fieldNum)) : null);
+      if (propRespField && pending.fieldNum === 61 && propRespField.fieldNum !== 62 && !pending.loggedField) {
+        pending.loggedField = true;
+        this.log(`[Power RAW] response arrived on main field ${propRespField.fieldNum}`, 'info');
+      }
       if (propRespField) {
         const pf = parseFields(propRespField.data);
         let key = '', value = '';
@@ -756,6 +763,7 @@ export class FlipperZeroDriver {
             this.notifyState();
             break;
           }
+          this.log(`[Power RAW] ${propKey} returned no data (${Array.isArray(pwr) ? 'empty list' : 'plain OK'})`, 'warning');
         } catch (e) {
           this.log(`[Power RAW] ${propKey} failed: ${e.message}`, 'warning');
         }

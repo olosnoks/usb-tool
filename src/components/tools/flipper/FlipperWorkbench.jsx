@@ -1054,7 +1054,7 @@ export default function FlipperWorkbench() {
                         <span className="text-slate-400 font-mono text-[11px]">
                           {(state.intTotalBytes != null || state.intTotalKb != null)
                             ? `${state.intFreeBytes != null ? formatBytes(state.intFreeBytes) : formatKb(state.intFreeKb)} Free / ${state.intTotalBytes != null ? formatBytes(state.intTotalBytes) : formatKb(state.intTotalKb)} Total` 
-                            : (state.isConnected ? 'Reading Internal Flash...' : '--')}
+                            : (state.isConnected ? 'Not reported by firmware' : '--')}
                         </span>
                       </div>
                       <div className="w-full h-2.5 bg-[#171920] rounded-full overflow-hidden border border-[#2b303c]">
