@@ -94,7 +94,7 @@ export default function HeaderHud({
 
   return (
     <header className="border-b border-cyber-border bg-[#070c18]/90 backdrop-blur-md sticky top-0 z-40 px-3 sm:px-4 py-2.5 shadow-lg">
-      <div className="max-w-[1920px] mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div className="w-full flex flex-wrap items-center justify-between gap-3">
         {/* Brand & System Title */}
         <div className="flex items-center gap-2.5 sm:gap-3">
           <div className="relative flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-cyber-card border border-amber-500/40 shadow-amber-glow flex-shrink-0">

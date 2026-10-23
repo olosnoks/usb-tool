@@ -34,7 +34,8 @@ import {
   RadioTower,
   ShieldCheck,
   Shield,
-  Scan
+  Scan,
+  Monitor
 } from 'lucide-react';
 import { 
   MayhemPortaPackDriver, 
@@ -77,6 +78,7 @@ export default function PortapackWorkbench() {
   const [fftData, setFftData] = useState([]);
   const [iqFileStats, setIqFileStats] = useState(null);
   const [connectError, setConnectError] = useState(null);
+  const [showVirtualLcd, setShowVirtualLcd] = useState(false);
 
   // RocketGod HackRF DSP & Transmit States
   const [agcEnabled, setAgcEnabled] = useState(true);
@@ -521,7 +523,7 @@ export default function PortapackWorkbench() {
     return () => {
       cancelAnimationFrame(animId);
     };
-  }, [state]);
+  }, [state, showVirtualLcd]);
 
   const handleTunePreset = (preset) => {
     driver.sendCommand(`freq ${preset.freq}`);
@@ -654,6 +656,20 @@ export default function PortapackWorkbench() {
           >
             <RefreshCw className="w-3 h-3" /> Demo
           </button>
+
+          <button
+            onClick={() => setShowVirtualLcd(prev => !prev)}
+            className={`px-2.5 py-1 rounded text-xs font-mono transition flex items-center gap-1.5 ${
+              showVirtualLcd 
+                ? 'bg-purple-600/40 border border-purple-400 text-purple-200 font-bold shadow-lg shadow-purple-600/20' 
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+            }`}
+            title="Toggle Virtual PortaPack 320x240 LCD & D-Pad Keypad"
+          >
+            <Monitor className="w-3.5 h-3.5 text-purple-400" />
+            <span>Virtual LCD & Keypad</span>
+            <span className="text-[10px]">{showVirtualLcd ? '▲ Hide' : '▼ Show'}</span>
+          </button>
         </div>
       </div>
 
@@ -678,135 +694,142 @@ export default function PortapackWorkbench() {
         </div>
       )}
 
-      {/* Main Grid: Virtual PortaPack Display + Hardware Keypad | Side Panels */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Left Column: PortaPack Physical Hardware Frame (320x240 LCD + Controls) */}
-        <div className="lg:col-span-6 bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col items-center">
+      {/* Collapsible Virtual PortaPack LCD & Hardware Controls Drawer */}
+      {showVirtualLcd && (
+        <div className="w-full bg-slate-950/95 border border-purple-500/40 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col items-center animate-in slide-in-from-top-2 duration-200">
           <div className="w-full flex items-center justify-between pb-3 border-b border-slate-800/80 mb-4">
             <span className="text-xs font-bold text-purple-400 tracking-wider flex items-center gap-2">
-              <Radio className="w-4 h-4" /> 320x240 LCD SCREEN // ILI9341
+              <Radio className="w-4 h-4" /> 320x240 LCD SCREEN // ILI9341 & HARDWARE CONTROLS
             </span>
-            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+            <div className="flex items-center gap-3 text-[10px] text-slate-400 font-mono">
               <span>BAT: {state.batteryMv}mV</span>
               <span>•</span>
               <span>SD: FAT32</span>
+              <button
+                onClick={() => setShowVirtualLcd(false)}
+                className="text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 text-[10px] border border-slate-700 transition"
+              >
+                ✕ Close
+              </button>
             </div>
           </div>
 
-          {/* Simulated LCD Screen Frame */}
-          <div className="relative p-2 bg-slate-900 border-2 border-slate-700 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.15)]">
-            <canvas
-              ref={canvasRef}
-              width={320}
-              height={240}
-              className="rounded-lg shadow-inner cursor-pointer"
-              title="Click on screen to simulate touch coordinates"
-              onClick={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const x = Math.floor(e.clientX - rect.left);
-                const y = Math.floor(e.clientY - rect.top);
-                driver.log(`Touch Event at (${x}, ${y})`, 'info');
-              }}
-            />
-          </div>
-
-          {/* PortaPack Physical Hardware Keypad & D-Pad */}
-          <div className="mt-6 w-full max-w-sm bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col items-center gap-4">
-            <div className="text-[11px] font-mono text-slate-400 tracking-wider">
-              HARDWARE KEYPAD & ROTARY JOG DIAL
+          <div className="flex flex-wrap items-center justify-center gap-8 w-full">
+            {/* Simulated LCD Screen Frame */}
+            <div className="relative p-2 bg-slate-900 border-2 border-slate-700 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.15)] shrink-0">
+              <canvas
+                ref={canvasRef}
+                width={320}
+                height={240}
+                className="rounded-lg shadow-inner cursor-pointer"
+                title="Click on screen to simulate touch coordinates"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const x = Math.floor(e.clientX - rect.left);
+                  const y = Math.floor(e.clientY - rect.top);
+                  driver.log(`Touch Event at (${x}, ${y})`, 'info');
+                }}
+              />
             </div>
 
-            <div className="flex items-center justify-around w-full">
-              {/* 4-Way D-Pad */}
-              <div className="grid grid-cols-3 gap-1.5 w-28 h-28">
-                <div></div>
-                <button
-                  onClick={() => driver.pressKey('up')}
-                  className="bg-slate-800 hover:bg-purple-600/40 text-slate-200 border border-slate-700 rounded p-2 flex items-center justify-center transition active:scale-95"
-                  title="D-Pad Up"
-                >
-                  <ChevronUp className="w-4 h-4" />
-                </button>
-                <div></div>
-
-                <button
-                  onClick={() => driver.pressKey('left')}
-                  className="bg-slate-800 hover:bg-purple-600/40 text-slate-200 border border-slate-700 rounded p-2 flex items-center justify-center transition active:scale-95"
-                  title="D-Pad Left"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-
-                <button
-                  onClick={() => driver.pressKey('select')}
-                  className="bg-purple-600 hover:bg-purple-500 text-white font-bold rounded p-2 flex items-center justify-center transition shadow-lg shadow-purple-600/30 active:scale-95 text-xs font-mono"
-                  title="Center Select"
-                >
-                  SEL
-                </button>
-
-                <button
-                  onClick={() => driver.pressKey('right')}
-                  className="bg-slate-800 hover:bg-purple-600/40 text-slate-200 border border-slate-700 rounded p-2 flex items-center justify-center transition active:scale-95"
-                  title="D-Pad Right"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-
-                <div></div>
-                <button
-                  onClick={() => driver.pressKey('down')}
-                  className="bg-slate-800 hover:bg-purple-600/40 text-slate-200 border border-slate-700 rounded p-2 flex items-center justify-center transition active:scale-95"
-                  title="D-Pad Down"
-                >
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-                <div></div>
+            {/* PortaPack Physical Hardware Keypad & D-Pad */}
+            <div className="w-full max-w-sm bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-col items-center gap-4">
+              <div className="text-[11px] font-mono text-slate-400 tracking-wider">
+                HARDWARE KEYPAD & ROTARY JOG DIAL
               </div>
 
-              {/* Rotary Jog Dial Tuning & Back Button */}
-              <div className="flex flex-col items-center gap-2">
-                <div className="text-[10px] text-slate-400 font-mono">ROTARY WHEEL</div>
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-around w-full">
+                {/* 4-Way D-Pad */}
+                <div className="grid grid-cols-3 gap-1.5 w-28 h-28">
+                  <div></div>
                   <button
-                    onClick={() => driver.pressKey('step_down')}
-                    className="p-3 bg-slate-800 hover:bg-cyan-600/30 border border-slate-700 text-cyan-300 rounded-lg text-xs font-mono transition active:scale-90"
-                    title="-25 kHz Step"
+                    onClick={() => driver.pressKey('up')}
+                    className="bg-slate-800 hover:bg-purple-600/40 text-slate-200 border border-slate-700 rounded p-2 flex items-center justify-center transition active:scale-95"
+                    title="D-Pad Up"
                   >
-                    -25k
+                    <ChevronUp className="w-4 h-4" />
                   </button>
+                  <div></div>
+
                   <button
-                    onClick={() => driver.pressKey('step_up')}
-                    className="p-3 bg-slate-800 hover:bg-cyan-600/30 border border-slate-700 text-cyan-300 rounded-lg text-xs font-mono transition active:scale-90"
-                    title="+25 kHz Step"
+                    onClick={() => driver.pressKey('left')}
+                    className="bg-slate-800 hover:bg-purple-600/40 text-slate-200 border border-slate-700 rounded p-2 flex items-center justify-center transition active:scale-95"
+                    title="D-Pad Left"
                   >
-                    +25k
+                    <ChevronLeft className="w-4 h-4" />
                   </button>
+
+                  <button
+                    onClick={() => driver.pressKey('select')}
+                    className="bg-purple-600 hover:bg-purple-500 text-white font-bold rounded p-2 flex items-center justify-center transition shadow-lg shadow-purple-600/30 active:scale-95 text-xs font-mono"
+                    title="Center Select"
+                  >
+                    SEL
+                  </button>
+
+                  <button
+                    onClick={() => driver.pressKey('right')}
+                    className="bg-slate-800 hover:bg-purple-600/40 text-slate-200 border border-slate-700 rounded p-2 flex items-center justify-center transition active:scale-95"
+                    title="D-Pad Right"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+
+                  <div></div>
+                  <button
+                    onClick={() => driver.pressKey('down')}
+                    className="bg-slate-800 hover:bg-purple-600/40 text-slate-200 border border-slate-700 rounded p-2 flex items-center justify-center transition active:scale-95"
+                    title="D-Pad Down"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                  <div></div>
                 </div>
 
-                <div className="flex items-center gap-2 mt-2">
-                  <button
-                    onClick={() => driver.pressKey('back')}
-                    className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 text-amber-300 rounded text-xs font-mono transition"
-                  >
-                    BACK / MENU
-                  </button>
-                  <button
-                    onClick={() => driver.sendCommand('dfu')}
-                    className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 rounded text-xs font-mono transition"
-                    title="Enter LPC43xx DFU Mode"
-                  >
-                    DFU
-                  </button>
+                {/* Rotary Jog Dial Tuning & Back Button */}
+                <div className="flex flex-col items-center gap-2">
+                  <div className="text-[10px] text-slate-400 font-mono">ROTARY WHEEL</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => driver.pressKey('step_down')}
+                      className="p-3 bg-slate-800 hover:bg-cyan-600/30 border border-slate-700 text-cyan-300 rounded-lg text-xs font-mono transition active:scale-90"
+                      title="-25 kHz Step"
+                    >
+                      -25k
+                    </button>
+                    <button
+                      onClick={() => driver.pressKey('step_up')}
+                      className="p-3 bg-slate-800 hover:bg-cyan-600/30 border border-slate-700 text-cyan-300 rounded-lg text-xs font-mono transition active:scale-90"
+                      title="+25 kHz Step"
+                    >
+                      +25k
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={() => driver.pressKey('back')}
+                      className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 text-amber-300 rounded text-xs font-mono transition"
+                    >
+                      BACK / MENU
+                    </button>
+                    <button
+                      onClick={() => driver.sendCommand('dfu')}
+                      className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 rounded text-xs font-mono transition"
+                      title="Enter LPC43xx DFU Mode"
+                    >
+                      DFU
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      )}
 
-        {/* Right Column: Workbench Operations & Tool Decks */}
-        <div className="lg:col-span-6 bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col">
+      {/* Main Full-Width Operational Deck */}
+      <div className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col">
           {/* Workspace Subtabs */}
           <div className="flex items-center gap-1.5 border-b border-slate-800 pb-3 mb-4 overflow-x-auto">
             {[
@@ -899,11 +922,11 @@ export default function PortapackWorkbench() {
               </div>
 
               {/* Real-time Spectrum Trace & Inferno Waterfall Canvas */}
-              <div className="relative bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl flex-1 min-h-[300px]">
+              <div className="relative bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl flex-1 min-h-[360px]">
                 <canvas
                   ref={waterfallCanvasRef}
-                  width={600}
-                  height={300}
+                  width={1200}
+                  height={360}
                   className="w-full h-full block"
                 />
               </div>
@@ -1441,6 +1464,5 @@ export default function PortapackWorkbench() {
           )}
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }

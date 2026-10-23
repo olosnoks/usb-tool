@@ -117,6 +117,38 @@ export default function TacticalMapDeck({
     };
   }, []);
 
+  // Responsive full-width and zoom level map size invalidator
+  useEffect(() => {
+    const handleResize = () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    let resizeObserver;
+    if (mapContainerRef.current && window.ResizeObserver) {
+      resizeObserver = new ResizeObserver(() => {
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
+      });
+      resizeObserver.observe(mapContainerRef.current);
+    }
+
+    const timer = setTimeout(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+      }
+    }, 200);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (resizeObserver) resizeObserver.disconnect();
+      clearTimeout(timer);
+    };
+  }, []);
+
   // 2. Tile Layer Swapper (100% Free / Zero API Key)
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -434,11 +466,11 @@ export default function TacticalMapDeck({
       </div>
 
       {/* Main Interactive Map Viewport (Leaflet DOM Container) */}
-      <div className="relative w-full h-[520px] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+      <div className="relative w-full h-[620px] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
         <div 
           ref={mapContainerRef} 
           className="w-full h-full"
-          style={{ minHeight: '520px' }}
+          style={{ minHeight: '620px' }}
         />
 
         {/* Squawk 7700 Emergency Alert Toast */}

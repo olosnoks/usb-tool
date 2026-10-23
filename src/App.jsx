@@ -184,7 +184,7 @@ function AppContent() {
 
             {/* Specialized Modules direct rendering */}
             {activeTool === 'plotter' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <SerialPlotter
                   latestTextStream={latestRxText}
                   isConnected={isConnected}
@@ -193,7 +193,7 @@ function AppContent() {
             )}
 
             {activeTool === 'hex' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <HexViewer
                   byteStream={hexByteStream}
                   onClear={clearHexStream}
@@ -203,7 +203,7 @@ function AppContent() {
             )}
 
             {activeTool === 'packets' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <PacketFramer
                   activeHexByteStream={hexByteStream}
                   isConnected={isConnected}
@@ -212,7 +212,7 @@ function AppContent() {
             )}
 
             {activeTool === 'bridge' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <SerialBridgeDeck
                   boards={boards}
                   bridgeConfig={{ active: false, boardAId: activeBoardId, boardBId: '' }}
@@ -226,7 +226,7 @@ function AppContent() {
             )}
 
             {activeTool === 'ubx' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <UbxConfigDeck
                   isConnected={isConnected}
                   onSendRawBytes={sendRawBytes}
@@ -236,7 +236,7 @@ function AppContent() {
             )}
 
             {activeTool === 'micropython' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <MicroPythonFileManager
                   isConnected={isConnected}
                   onSendString={sendString}
@@ -250,7 +250,7 @@ function AppContent() {
             )}
 
             {activeTool === 'improv' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <ImprovWifiDeck
                   isConnected={isConnected}
                   onSendRawBytes={sendRawBytes}
@@ -265,7 +265,7 @@ function AppContent() {
             )}
 
             {activeTool === 'telemetry' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <TelemetryDashboard
                   latestTextStream={latestRxText}
                   isConnected={isConnected}
@@ -277,7 +277,7 @@ function AppContent() {
             )}
 
             {activeTool === 'wardrive' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <GpsWardriverDeck
                   latestTextStream={latestRxText}
                   isConnected={isConnected}
@@ -287,7 +287,7 @@ function AppContent() {
             )}
 
             {activeTool === 'alerts' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <CrashAlertDeck
                   latestTextStream={latestRxText}
                   onPauseTerminal={() => {}}
@@ -297,7 +297,7 @@ function AppContent() {
             )}
 
             {activeTool === 'automation' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <ScriptRunner
                   isConnected={isConnected}
                   onSendString={sendString}
@@ -308,7 +308,7 @@ function AppContent() {
             )}
 
             {activeTool === 'autopsy' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <UsbReconDeck
                   isConnected={isConnected}
                   onSendRawBytes={sendRawBytes}
@@ -325,7 +325,7 @@ function AppContent() {
             )}
 
             {activeTool === 'esp-dump' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <EspMemoryInspector
                   isConnected={isConnected}
                   port={port}
@@ -336,68 +336,68 @@ function AppContent() {
 
             {/* 4 New Hardware Diagnostic Tools */}
             {activeTool === 'ch341a' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <Ch341aProgrammer />
               </div>
             )}
 
             {activeTool === 'cmsis-dap' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <CmsisDapDebugger />
               </div>
             )}
 
             {activeTool === 'can-bus' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <CanBusWorkbench />
               </div>
             )}
 
             {activeTool === 'logic-analyzer' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <LogicAnalyzerWorkbench />
               </div>
             )}
 
             {/* 6 New Hardware Workbenches */}
             {activeTool === 'usb-pd' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <UsbPdWorkbench />
               </div>
             )}
 
             {activeTool === 'bus-explorer' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <BusExplorerWorkbench />
               </div>
             )}
 
             {activeTool === 'jtag-programmer' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <JtagWorkbench />
               </div>
             )}
 
             {activeTool === 'modbus-rtu' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <ModbusWorkbench />
               </div>
             )}
 
             {activeTool === 'avr-isp' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <AvrIspWorkbench />
               </div>
             )}
 
             {activeTool === 'rfid-nfc' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <RfidNfcWorkbench />
               </div>
             )}
 
             {activeTool === 'mayhem' && (
-              <div className="max-w-6xl mx-auto">
+              <div className="w-full">
                 <PortapackWorkbench />
               </div>
             )}

@@ -77,7 +77,7 @@ export default function TabNavigation({ activeTab, onSelectTab }) {
 
   return (
     <nav className="bg-[#040817] border-b border-cyber-border px-3 sm:px-5 py-1.5 sticky top-[57px] z-30 font-mono">
-      <div className="max-w-[1920px] mx-auto flex items-center justify-between gap-2 overflow-x-auto scrollbar-none">
+      <div className="w-full flex items-center justify-between gap-2 overflow-x-auto scrollbar-none">
         <div className="flex items-center gap-1.5 sm:gap-2">
           {PRIMARY_TABS.map((tab, idx) => {
             const Icon = tab.icon;
