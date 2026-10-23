@@ -13,6 +13,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { globalAdsbDecoder } from '../../utils/adsbDecoder';
+import { AIRPORT_WAYPOINTS } from '../../utils/geoMapData';
 
 // RocketGod's vector glyphs from mayhem-mobile/web/src/geomap.ts
 const ROCKETGOD_GLYPHS = {
