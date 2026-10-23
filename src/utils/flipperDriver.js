@@ -677,42 +677,21 @@ export class FlipperZeroDriver {
         return;
       }
 
-      // Field 33: system_device_info_response (.PB_System.DeviceInfoResponse)
-      const devRespField = mainFields.find(f => f.fieldNum === 33);
-      if (devRespField) {
-        const devFields = parseFields(devRespField.data);
+      // Streamed key/value pairs:
+      // - Field 33: system_device_info_response (.PB_System.DeviceInfoResponse)
+      // - Field 45: system_power_info_response (.PB_System.PowerInfoResponse)
+      // - Field 62: property_get_response (.PB_Property.GetResponse)
+      const kvRespField = mainFields.find(f => f.fieldNum === 33 || f.fieldNum === 45 || f.fieldNum === 62) ||
+        ((pending.fieldNum === 44 || pending.fieldNum === 32 || pending.fieldNum === 61) ? mainFields.find(f => f.wireType === 2 && ![1, 2, 3].includes(f.fieldNum)) : null);
+      if (kvRespField) {
+        const kvFields = parseFields(kvRespField.data);
         let key = '', value = '';
-        for (const df of devFields) {
-          if (df.fieldNum === 1) key = new TextDecoder().decode(df.data);
-          if (df.fieldNum === 2) value = new TextDecoder().decode(df.data);
-        }
-        if (key) pending.accumulator.push({ key, value });
-
-        if (!hasNext) {
-          clearTimeout(pending.timer);
-          this.pendingRpc.delete(commandId);
-          pending.resolve(pending.accumulator);
-        }
-        return;
-      }
-
-      // Field 62: property_get_response (.PB_Property.GetResponse) - streamed key/value pairs
-      // Property get response (.PB_Property.GetResponse) - streamed key/value pairs.
-      // Accept expected tag 62, or any other length-delimited main field for a property request.
-      const propRespField = mainFields.find(f => f.fieldNum === 62) ||
-        (pending.fieldNum === 61 ? mainFields.find(f => f.wireType === 2 && ![1, 2, 3].includes(f.fieldNum)) : null);
-      if (propRespField && pending.fieldNum === 61 && propRespField.fieldNum !== 62 && !pending.loggedField) {
-        pending.loggedField = true;
-        this.log(`[Power RAW] response arrived on main field ${propRespField.fieldNum}`, 'info');
-      }
-      if (propRespField) {
-        const pf = parseFields(propRespField.data);
-        let key = '', value = '';
-        for (const f of pf) {
+        for (const f of kvFields) {
           if (f.fieldNum === 1) key = new TextDecoder().decode(f.data);
           if (f.fieldNum === 2) value = new TextDecoder().decode(f.data);
         }
         if (key) pending.accumulator.push({ key, value });
+
         if (!hasNext) {
           clearTimeout(pending.timer);
           this.pendingRpc.delete(commandId);
@@ -753,19 +732,37 @@ export class FlipperZeroDriver {
         this.log(`RPC Device Info: ${e.message}`, 'warning');
       }
 
-      // 1b. Power info (battery level/voltage/temp/health) via Property GetRequest (tag 61)
-      for (const propKey of ['pwrinfo', 'power_info']) {
-        try {
-          const pwr = await this.sendRpcRequest(61, encodeString(1, propKey), false, 3000);
-          if (Array.isArray(pwr) && pwr.length > 0) {
-            this.log(`[Power RAW] ${propKey}: ${pwr.map(i => `${i.key}=${i.value}`).join(', ')}`, 'info');
-            this.parseDeviceInfoRpc(pwr);
-            this.notifyState();
-            break;
+      // 1b. Power info (battery level/voltage/temp/health) via System PowerInfoRequest (tag 44)
+      let powerSynced = false;
+      try {
+        const pwr = await this.sendRpcRequest(44, [], false, 4000);
+        if (Array.isArray(pwr) && pwr.length > 0) {
+          this.log(`[Power RAW] PowerInfo (tag 44): ${pwr.map(i => `${i.key}=${i.value}`).join(', ')}`, 'info');
+          this.parseDeviceInfoRpc(pwr);
+          this.notifyState();
+          powerSynced = true;
+        } else {
+          this.log(`[Power RAW] PowerInfo (tag 44) returned no data`, 'warning');
+        }
+      } catch (e) {
+        this.log(`[Power RAW] PowerInfo (tag 44) failed: ${e.message}`, 'warning');
+      }
+
+      // Fallback: Property GetRequest (tag 61) with property keys
+      if (!powerSynced) {
+        for (const propKey of ['power', 'system']) {
+          try {
+            const pwr = await this.sendRpcRequest(61, encodeString(1, propKey), false, 3000);
+            if (Array.isArray(pwr) && pwr.length > 0) {
+              this.log(`[Power RAW] PropertyGet (${propKey}): ${pwr.map(i => `${i.key}=${i.value}`).join(', ')}`, 'info');
+              this.parseDeviceInfoRpc(pwr);
+              this.notifyState();
+              powerSynced = true;
+              break;
+            }
+          } catch (e) {
+            this.log(`[Power RAW] PropertyGet (${propKey}) failed: ${e.message}`, 'warning');
           }
-          this.log(`[Power RAW] ${propKey} returned no data (${Array.isArray(pwr) ? 'empty list' : 'plain OK'})`, 'warning');
-        } catch (e) {
-          this.log(`[Power RAW] ${propKey} failed: ${e.message}`, 'warning');
         }
       }
 
@@ -930,7 +927,7 @@ export class FlipperZeroDriver {
       }
 
       // Battery & Power
-      if (k.includes('charge_level') || k.includes('battery_charge') || k.includes('charge') || k === 'level') {
+      if (k.includes('charge_level') || k.includes('battery_charge') || k.includes('charge') || k === 'level' || k.includes('capacity') || k.includes('percent')) {
         const m = v.match(/(\d+)/);
         if (m) this.state.batteryPercent = parseInt(m[1]);
       }
@@ -938,19 +935,28 @@ export class FlipperZeroDriver {
         const m = v.match(/(\d+)/);
         if (m) this.state.batteryVoltageMv = parseInt(m[1]);
       }
-      if (k.includes('battery_current') || k.includes('current')) {
+      if (k.includes('battery_current') || k.includes('current') || k.includes('ibat')) {
         const m = v.match(/(-?\d+)/);
         if (m) this.state.batteryCurrentMa = parseInt(m[1]);
       }
       if (k.includes('battery_temp') || k.includes('temperature') || k.includes('temp')) {
         const m = v.match(/(\d+(?:\.\d+)?)/);
-        if (m) this.state.batteryTempC = parseFloat(m[1]);
+        if (m) {
+          let t = parseFloat(m[1]);
+          if (t > 1000) t = t / 1000;
+          else if (t > 150) t = t / 10;
+          this.state.batteryTempC = Math.round(t * 10) / 10;
+        }
       }
-      if (k.includes('battery_health') || k.includes('health')) {
+      if (k.includes('battery_health') || k.includes('health') || k.includes('soh') || k.includes('state_of_health')) {
         const m = v.match(/(\d+)/);
-        if (m) this.state.batteryHealth = parseInt(m[1]);
+        if (m) {
+          this.state.batteryHealth = parseInt(m[1]);
+        } else if (v) {
+          this.state.batteryHealth = v;
+        }
       }
-      if (k.includes('charge_state') || k === 'state') {
+      if (k.includes('charge_state') || k === 'state' || k.includes('charging_status')) {
         this.state.chargeState = v;
       }
 

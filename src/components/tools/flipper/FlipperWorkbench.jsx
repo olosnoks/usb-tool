@@ -1089,7 +1089,7 @@ export default function FlipperWorkbench() {
 
                     <div className="text-right text-xs text-slate-400 space-y-0.5">
                       <div>Temp: <strong className="text-slate-200">{state.batteryTempC !== null ? `${state.batteryTempC} °C` : '--'}</strong></div>
-                      <div>Health: <strong className="text-emerald-400">{state.batteryHealth !== null ? `${state.batteryHealth}%` : '--'}</strong></div>
+                      <div>Health: <strong className="text-emerald-400">{state.batteryHealth !== null ? (typeof state.batteryHealth === 'number' || /^\d+$/.test(String(state.batteryHealth)) ? `${state.batteryHealth}%` : state.batteryHealth) : '--'}</strong></div>
                     </div>
                   </div>
                 </div>
