@@ -288,8 +288,10 @@ export class FlipperZeroDriver {
     // Establish RPC session (1:1 with qFlipper)
     await this.ensureRpcSession();
 
-    // Refresh all physical hardware telemetry
-    await this.refreshAllRealData();
+    // Trigger physical hardware telemetry in background (non-blocking so UI remains responsive)
+    this.refreshAllRealData().catch(e => {
+      this.log(`Initial telemetry sync warning: ${e.message}`, 'warning');
+    });
 
     this.notifyState();
     return true;
@@ -414,26 +416,30 @@ export class FlipperZeroDriver {
    */
   async ensureRpcSession() {
     if (this.isRpcMode) return true;
-    this.log('[RPC] Establishing Flipper Protobuf RPC session (start_rpc_session)...', 'info');
+    this.log('[RPC] Handshaking Flipper Protobuf RPC session...', 'info');
 
-    // Wake up shell and cancel any interrupted command
-    await this.writeRaw('\x03\r\n');
-    await new Promise(r => setTimeout(r, 80));
+    // Drain and clear any interrupted CLI line
+    await this.writeRaw('\r\n');
+    await new Promise(r => setTimeout(r, 150));
 
-    // Send qFlipper command to start RPC session
-    await this.writeRaw('start_rpc_session\r\n');
-    this.isRpcMode = true;
+    // Send qFlipper command to start RPC session (qFlipper writes start_rpc_session\r)
+    await this.writeRaw('start_rpc_session\r');
+    
+    // Wait for Flipper CLI echo to arrive and be consumed by text reader
+    await new Promise(r => setTimeout(r, 350));
+
+    // Clear binary accumulator so no leftover text echo corrupts Protobuf frame length
     this.rpcAccumulator = new Uint8Array(0);
-    await new Promise(r => setTimeout(r, 120));
+    this.isRpcMode = true;
 
-    this.log('[RPC] Protobuf RPC session established successfully!', 'success');
+    this.log('[RPC] Protobuf RPC session active! Binary framing engaged.', 'success');
     return true;
   }
 
   /**
    * Send length-delimited Protobuf RPC Request to Flipper and await response
    */
-  sendRpcRequest(fieldNum, subBytes = [], hasNext = false, timeoutMs = 8000) {
+  sendRpcRequest(fieldNum, subBytes = [], hasNext = false, timeoutMs = 4000) {
     if (!this.isConnected || !this.writer) {
       return Promise.reject(new Error('Flipper Zero is not connected.'));
     }
@@ -444,7 +450,7 @@ export class FlipperZeroDriver {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingRpc.delete(commandId);
-        reject(new Error(`RPC request timed out (id: ${commandId}, field: ${fieldNum})`));
+        reject(new Error(`RPC request timeout (cmdId: ${commandId}, tag: ${fieldNum})`));
       }, timeoutMs);
 
       this.pendingRpc.set(commandId, {
@@ -464,7 +470,7 @@ export class FlipperZeroDriver {
   }
 
   /**
-   * Handle incoming binary chunks during RPC mode
+   * Handle incoming binary chunks during RPC mode with self-healing stream resync
    */
   handleRpcChunk(chunk) {
     if (!chunk || chunk.length === 0) return;
@@ -475,7 +481,7 @@ export class FlipperZeroDriver {
     combined.set(chunk, this.rpcAccumulator.length);
     this.rpcAccumulator = combined;
 
-    // Process all complete length-delimited protobuf packets
+    // Process all complete length-delimited protobuf packets with self-healing resync
     while (this.rpcAccumulator.length > 0) {
       const lenInfo = readVarint(this.rpcAccumulator, 0);
       if (!lenInfo) break;
@@ -483,8 +489,21 @@ export class FlipperZeroDriver {
       const msgLen = Number(lenInfo.value);
       const lenBytes = lenInfo.bytesRead;
 
+      // Self-healing resynchronization guard:
+      // Valid Flipper PB.Main messages are between 2 and 4096 bytes,
+      // and byte [lenBytes] MUST be 0x08 (tag for field 1: uint32 command_id)
+      if (
+        msgLen <= 0 || 
+        msgLen > 4096 || 
+        (this.rpcAccumulator.length >= lenBytes + 1 && this.rpcAccumulator[lenBytes] !== 0x08)
+      ) {
+        // Drop 1 desynchronized byte and keep hunting for the next valid 0x08 frame boundary
+        this.rpcAccumulator = this.rpcAccumulator.slice(1);
+        continue;
+      }
+
       if (this.rpcAccumulator.length < lenBytes + msgLen) {
-        // Incomplete frame, wait for more data from serial
+        // Frame is valid, wait for full payload to arrive from serial
         break;
       }
 
@@ -1037,13 +1056,16 @@ export class FlipperZeroDriver {
     this.log('Testing physical haptic vibration motor on Flipper Zero...', 'warning');
     try {
       if (this.isRpcMode) {
-        // In RPC mode, can toggle vibro or send input
-        this.log('Vibration pulse triggered', 'success');
+        // Tag 38: .PB_System.PlayAudiovisualAlertRequest (plays real haptic buzz + sound + LED alert)
+        const cmdId = ++this.rpcCommandId;
+        const packet = buildRpcPacket(cmdId, 38, []);
+        await this.writeBinary(packet);
+        this.log('[Hardware RPC] Audiovisual alert & haptic pulse fired on Flipper Zero!', 'success');
       } else {
-        await this.executeCommand('vibro 1', 1000);
+        await this.executeCommand('vibro 1', 500);
         setTimeout(async () => {
-          await this.executeCommand('vibro 0', 1000);
-        }, 400);
+          await this.executeCommand('vibro 0', 500);
+        }, 300);
       }
     } catch (e) {
       console.warn(e);

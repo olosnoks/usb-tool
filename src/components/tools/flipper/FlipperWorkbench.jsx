@@ -183,11 +183,11 @@ export default function FlipperWorkbench() {
     };
   }, [driver]);
 
-  // Manage Protobuf RPC Screen Stream session when switching tabs
+  // Manage Protobuf RPC Screen Stream session when switching tabs (mirror LCD on both device view & screen tab)
   useEffect(() => {
-    if (state.isConnected && activeView === 'screen') {
+    if (state.isConnected && (activeView === 'device' || activeView === 'screen')) {
       driver.startScreenStream();
-    } else if (state.isConnected && activeView !== 'screen' && driver.isScreenStreaming) {
+    } else if (state.isConnected && activeView !== 'device' && activeView !== 'screen' && driver.isScreenStreaming) {
       driver.stopScreenStream();
     }
   }, [state.isConnected, activeView, driver]);
