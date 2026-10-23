@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Bot, 
   RotateCcw, 
@@ -17,9 +17,9 @@ import {
   FileText,
   AlertTriangle,
   CheckCircle2,
-  Cpu,
-  Radio,
-  Wifi,
+  Cpu, 
+  Radio, 
+  Wifi, 
   ExternalLink,
   Folder,
   FolderOpen,
@@ -44,15 +44,23 @@ import {
   Compass,
   Sliders,
   Battery,
-  BatteryCharging
+  BatteryCharging,
+  ArrowUp,
+  Plus
 } from 'lucide-react';
-import { FlipperZeroDriver } from '../../../utils/flipperDriver';
+import { FlipperZeroDriver, getFlipperDriver } from '../../../utils/flipperDriver';
+import { useSerial } from '../../../context/SerialContext';
+import { identifyUsbChip } from '../../../utils/usbDatabase';
 import flipperSvg from '../../../assets/flipper/flipper.svg';
 import typecSvg from '../../../assets/flipper/typec.svg';
 
 export default function FlipperWorkbench() {
-  const [driver] = useState(() => new FlipperZeroDriver());
+  const serialCtx = useSerial();
+  const driver = useMemo(() => getFlipperDriver(), []);
   const [state, setState] = useState(() => driver.state);
+
+  // Auto-detected USB / Serial ports
+  const [detectedPorts, setDetectedPorts] = useState([]);
 
   // qFlipper Navigation Views: 'device' (Home/Overview) | 'files' (File Manager) | 'screen' (Screen Streaming) | 'cli' (Console)
   const [activeView, setActiveView] = useState('device');
@@ -72,6 +80,7 @@ export default function FlipperWorkbench() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileContent, setFileContent] = useState('');
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const fileUploadInputRef = useRef(null);
 
   // Hardware Actions State
   const [vibrating, setVibrating] = useState(false);
@@ -81,17 +90,68 @@ export default function FlipperWorkbench() {
   const canvasRef = useRef(null);
   const logContainerRef = useRef(null);
 
-  // Subscribe to driver state & logs
+  // Subscribe to driver state & logs without killing the connection on unmount
   useEffect(() => {
     driver.onStateChangeCallback = (s) => setState({ ...s });
     driver.onLogCallback = (log) => {
       setLogs(prev => [...prev.slice(-200), log]);
     };
+    // Sync current state in case already connected
+    setState({ ...driver.state });
 
     return () => {
-      driver.disconnect();
+      driver.onStateChangeCallback = null;
+      driver.onLogCallback = null;
     };
   }, [driver]);
+
+  // Scan for pre-authorized or plugged-in Web Serial ports
+  const scanPorts = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !('serial' in navigator)) return;
+    try {
+      const ports = await navigator.serial.getPorts();
+      const mapped = ports.map((p, idx) => {
+        const info = p.getInfo ? p.getInfo() : {};
+        const isFlipper = (info.usbVendorId === 0x0483 && info.usbProductId === 0x5740) ||
+                          info.usbVendorId === 0x0483 ||
+                          (info.usbVendorId === 0x1d50 && info.usbProductId === 0x6018);
+        const chip = identifyUsbChip(info.usbVendorId, info.usbProductId);
+        return {
+          port: p,
+          index: idx,
+          info,
+          chip,
+          isFlipper,
+          label: isFlipper 
+            ? 'Flipper Zero USB CDC' 
+            : (chip.name !== 'Generic / Unknown UART Bridge' ? chip.name : `USB Serial Port ${idx + 1}`)
+        };
+      });
+      setDetectedPorts(mapped);
+    } catch (e) {
+      console.warn('Error reading Web Serial ports:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    scanPorts();
+    if (typeof navigator !== 'undefined' && 'serial' in navigator) {
+      const handleConnectEvent = () => {
+        scanPorts();
+        driver.log('USB device plugged in detected!', 'info');
+      };
+      const handleDisconnectEvent = () => {
+        scanPorts();
+        driver.log('USB device unplugged.', 'warning');
+      };
+      navigator.serial.addEventListener('connect', handleConnectEvent);
+      navigator.serial.addEventListener('disconnect', handleDisconnectEvent);
+      return () => {
+        navigator.serial.removeEventListener('connect', handleConnectEvent);
+        navigator.serial.removeEventListener('disconnect', handleDisconnectEvent);
+      };
+    }
+  }, [scanPorts, driver]);
 
   // Scroll logs to bottom
   useEffect(() => {
@@ -130,12 +190,123 @@ export default function FlipperWorkbench() {
     }
   };
 
-  // Connect handler
-  const handleConnect = async (noFilter = false) => {
+  // Go up one directory level
+  const handleGoUp = () => {
+    if (currentDir === '/' || currentDir === '/ext' || currentDir === '/int') {
+      if (currentDir !== '/ext') {
+        setCurrentDir('/ext');
+        loadDirectory('/ext');
+      }
+      return;
+    }
+    const parts = currentDir.split('/').filter(Boolean);
+    parts.pop();
+    const parentPath = '/' + parts.join('/');
+    setCurrentDir(parentPath);
+    loadDirectory(parentPath);
+  };
+
+  // Create new folder
+  const handleCreateFolder = async () => {
+    const name = window.prompt('Enter folder name:');
+    if (!name || !name.trim()) return;
+    const fullPath = `${currentDir}/${name.trim()}`.replace(/\/+/g, '/');
+    try {
+      await driver.createRealDirectory(fullPath);
+      await loadDirectory(currentDir);
+    } catch (e) {
+      alert(`Failed to create folder: ${e.message}`);
+    }
+  };
+
+  // Delete file or folder
+  const handleDeleteItem = async (item, e) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm(`Delete ${item.isDir ? 'folder' : 'file'} "${item.name}" from Flipper?`)) return;
+    try {
+      await driver.removeRealFile(item.path);
+      if (selectedFile?.path === item.path) {
+        setSelectedFile(null);
+        setFileContent('');
+      }
+      await loadDirectory(currentDir);
+    } catch (err) {
+      alert(`Failed to delete: ${err.message}`);
+    }
+  };
+
+  // Upload file to Flipper
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const content = evt.target.result;
+      const targetPath = `${currentDir}/${file.name}`.replace(/\/+/g, '/');
+      try {
+        await driver.writeRealFile(targetPath, content);
+        await loadDirectory(currentDir);
+      } catch (err) {
+        alert(`Failed to upload: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  // Connect directly to a detected port
+  const handleConnectToPort = async (port) => {
     setConnectError(null);
     setIsConnecting(true);
     try {
+      if (serialCtx?.isConnected) {
+        driver.log('Releasing COM port from Main Flasher...', 'warning');
+        await serialCtx.disconnect();
+        await new Promise(r => setTimeout(r, 200));
+      }
+      await driver.connectPort(port);
+      await scanPorts();
+    } catch (err) {
+      setConnectError(err.message);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  // Connect handler - defaults to noFilter=true (all ports) so device always shows on Windows
+  const handleConnect = async (noFilter = true) => {
+    setConnectError(null);
+    setIsConnecting(true);
+    try {
+      if (serialCtx?.isConnected) {
+        driver.log('Releasing active COM port from Main Flasher...', 'warning');
+        await serialCtx.disconnect();
+        await new Promise(r => setTimeout(r, 200));
+      }
       await driver.connectHardware({ noFilter });
+      await scanPorts();
+    } catch (err) {
+      setConnectError(err.message);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  // Transfer active connection from SerialContext (Local test)
+  const handleTransferFromMainSerial = async () => {
+    setConnectError(null);
+    setIsConnecting(true);
+    try {
+      const activePort = serialCtx.port;
+      driver.log('Transferring active connection from Main Flasher to qFlipper Suite...', 'info');
+      await serialCtx.disconnect();
+      await new Promise(r => setTimeout(r, 200));
+      if (activePort) {
+        await driver.connectPort(activePort);
+      } else {
+        await driver.connectHardware({ noFilter: true });
+      }
+      await scanPorts();
     } catch (err) {
       setConnectError(err.message);
     } finally {
@@ -322,25 +493,37 @@ export default function FlipperWorkbench() {
               </button>
             </>
           ) : (
-            <>
+            <div className="flex items-center gap-2">
+              {serialCtx?.isConnected && (
+                <button
+                  onClick={handleTransferFromMainSerial}
+                  disabled={isConnecting}
+                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/25 transition active:scale-95 animate-pulse"
+                  title="Transfer active port from Main Flasher Header"
+                >
+                  <Zap className="w-3.5 h-3.5 fill-current" />
+                  <span>Transfer from Header</span>
+                </button>
+              )}
+
               <button
-                onClick={() => handleConnect(false)}
+                onClick={() => handleConnect(true)}
                 disabled={isConnecting}
                 className="px-5 py-2 bg-[#fe8a2c] hover:bg-[#ff9722] active:scale-95 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs font-sans transition shadow-lg shadow-[#fe8a2c]/25 flex items-center gap-2"
-                title="Connect real Flipper Zero via Web Serial"
+                title="Connect Flipper Zero via Web Serial (All Ports)"
               >
                 <Zap className="w-4 h-4 fill-current" />
                 <span>{isConnecting ? 'Connecting...' : 'CONNECT FLIPPER'}</span>
               </button>
 
               <button
-                onClick={() => handleConnect(true)}
+                onClick={() => handleConnect(false)}
                 className="px-3 py-2 bg-[#1e212b] hover:bg-[#282d3b] text-slate-300 border border-[#2e3444] rounded-xl text-xs font-mono transition"
-                title="Pick COM Port directly from system"
+                title="Filter for Flipper VID:PID (0483:5740)"
               >
-                All Ports
+                Filtered
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -352,7 +535,7 @@ export default function FlipperWorkbench() {
             <div>
               <div className="font-bold text-sm">Connection Failed: {connectError}</div>
               <div className="text-[11px] text-rose-300/80 mt-1 leading-relaxed">
-                Tip: If the desktop <strong>qFlipper</strong> application is currently open on your PC, close it completely so it releases the USB serial port. Then plug your Flipper in and click Connect.
+                Tip: If the desktop <strong>qFlipper</strong> application or the top Header HUD flasher is open on your PC, make sure the port is released first. Then click Connect or Transfer.
               </div>
             </div>
           </div>
@@ -362,7 +545,76 @@ export default function FlipperWorkbench() {
 
       {/* 2. Official qFlipper Disconnected Welcome Screen (NoDeviceOverlay) */}
       {!state.isConnected ? (
-        <div className="bg-[#171920] border border-[#2b303c] rounded-3xl p-10 sm:p-14 shadow-2xl flex flex-col items-center justify-center text-center max-w-4xl mx-auto my-4">
+        <div className="bg-[#171920] border border-[#2b303c] rounded-3xl p-8 sm:p-12 shadow-2xl flex flex-col items-center justify-center text-center max-w-4xl mx-auto my-4">
+          {/* Active Serial Connection in Main Header Alert */}
+          {serialCtx?.isConnected && (
+            <div className="w-full max-w-xl bg-amber-950/40 border-2 border-amber-500/60 rounded-2xl p-4 sm:p-5 mb-6 text-amber-200 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-2xl text-left">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex-shrink-0">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-bold text-sm text-white flex items-center gap-2">
+                    <span>Flipper Connected in Main Flasher</span>
+                    <span className="px-1.5 py-0.2 rounded text-[9px] bg-amber-500 text-slate-950 font-black">OPEN</span>
+                  </div>
+                  <p className="text-xs text-amber-300/80 mt-1 leading-relaxed">
+                    Your Flipper Zero is currently connected in the top Header HUD ({serialCtx.activeBoard?.name || 'COM Port'}). Web Serial requires exclusive access. Transfer it directly to the qFlipper suite:
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleTransferFromMainSerial}
+                disabled={isConnecting}
+                className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 active:scale-95 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 flex-shrink-0 shadow-lg shadow-amber-500/25 transition whitespace-nowrap"
+              >
+                <Zap className="w-4 h-4 fill-current" />
+                <span>Transfer to qFlipper</span>
+              </button>
+            </div>
+          )}
+
+          {/* Plugged-in / Pre-Authorized Device Detected Card */}
+          {detectedPorts.length > 0 && !serialCtx?.isConnected && (
+            <div className="w-full max-w-xl bg-emerald-950/40 border border-emerald-500/50 rounded-2xl p-4 sm:p-5 mb-6 text-emerald-200 text-left shadow-2xl">
+              <div className="flex items-center justify-between mb-3 border-b border-emerald-500/20 pb-2">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                  <span>PLUGGED IN & RECOGNIZED</span>
+                </div>
+                <span className="text-[10px] text-emerald-300/70 font-mono">Web Serial Ready</span>
+              </div>
+              <div className="space-y-2">
+                {detectedPorts.map((dp, i) => (
+                  <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#13151c] p-3 rounded-xl border border-emerald-500/30">
+                    <div>
+                      <div className="font-bold text-white text-xs flex items-center gap-2">
+                        <Bot className="w-4 h-4 text-[#fe8a2c]" />
+                        <span>{dp.label}</span>
+                        {dp.isFlipper && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] bg-[#fe8a2c]/20 text-[#fe8a2c] border border-[#fe8a2c]/40 font-bold">
+                            FLIPPER ZERO
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                        VID: 0x{dp.info.usbVendorId?.toString(16).toUpperCase() || '0483'} | PID: 0x{dp.info.usbProductId?.toString(16).toUpperCase() || '5740'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleConnectToPort(dp.port)}
+                      disabled={isConnecting}
+                      className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-bold rounded-lg text-xs transition shadow-lg shadow-emerald-500/30 flex items-center justify-center gap-1.5 flex-shrink-0"
+                    >
+                      <Zap className="w-3.5 h-3.5 fill-current" />
+                      <span>Connect Now</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Authentic qFlipper Vector Graphics: Flipper + Type-C Plug */}
           <div className="relative w-full max-w-lg h-44 sm:h-52 flex items-center justify-center mb-6">
             <img 
@@ -385,7 +637,7 @@ export default function FlipperWorkbench() {
 
           <div className="flex flex-wrap items-center justify-center gap-3.5">
             <button
-              onClick={() => handleConnect(false)}
+              onClick={() => handleConnect(true)}
               disabled={isConnecting}
               className="px-8 py-3.5 bg-[#fe8a2c] hover:bg-[#ff9722] active:scale-95 disabled:opacity-50 text-slate-950 font-bold rounded-2xl text-sm font-sans transition shadow-xl shadow-[#fe8a2c]/30 flex items-center gap-2.5"
             >
@@ -394,10 +646,10 @@ export default function FlipperWorkbench() {
             </button>
 
             <button
-              onClick={() => handleConnect(true)}
+              onClick={() => handleConnect(false)}
               className="px-5 py-3.5 bg-[#1e212b] hover:bg-[#282d3b] text-slate-300 border border-[#2e3444] rounded-2xl text-xs font-mono transition"
             >
-              Show All Ports
+              Filtered Search
             </button>
           </div>
 
@@ -894,41 +1146,130 @@ export default function FlipperWorkbench() {
           {/* VIEW 3: qFlipper File Manager (FileManager.qml style Two-Pane Tree Browser) */}
           {activeView === 'files' && (
             <div className="bg-[#171920] border border-[#2b303c] rounded-3xl p-6 shadow-2xl flex flex-col space-y-4">
-              {/* Path and Action Toolbar */}
+              {/* Hidden file upload input */}
+              <input 
+                type="file" 
+                ref={fileUploadInputRef} 
+                onChange={handleUploadFile} 
+                className="hidden" 
+              />
+
+              {/* Path, Breadcrumbs and Action Toolbar */}
               <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#232733]">
-                <div className="flex items-center gap-2">
-                  <FolderOpen className="w-4 h-4 text-[#fe8a2c]" />
-                  <span className="font-bold text-white text-sm">{currentDir}</span>
-                  {isLoadingFiles && <span className="text-[#fe8a2c] text-[10px] animate-pulse">Reading Flipper Storage...</span>}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={handleGoUp}
+                    disabled={currentDir === '/' || currentDir === '/ext'}
+                    className="p-1.5 rounded-lg bg-[#1e212b] border border-[#2e3444] text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    title="Up one level (..)"
+                  >
+                    <ArrowUp className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1.5 bg-[#13151c] px-3 py-1.5 rounded-xl border border-[#282d38] text-xs font-mono">
+                    <FolderOpen className="w-4 h-4 text-[#fe8a2c] shrink-0" />
+                    <button
+                      onClick={() => { setCurrentDir('/ext'); loadDirectory('/ext'); }}
+                      className="text-slate-400 hover:text-[#fe8a2c] font-bold"
+                    >
+                      /ext
+                    </button>
+                    {currentDir.replace(/^\/ext/, '').split('/').filter(Boolean).map((part, idx, arr) => {
+                      const subPath = '/ext/' + arr.slice(0, idx + 1).join('/');
+                      const isLast = idx === arr.length - 1;
+                      return (
+                        <React.Fragment key={subPath}>
+                          <span className="text-slate-600">/</span>
+                          <button
+                            onClick={() => { setCurrentDir(subPath); loadDirectory(subPath); }}
+                            className={`font-semibold hover:underline ${isLast ? 'text-white font-bold' : 'text-slate-400 hover:text-[#fe8a2c]'}`}
+                          >
+                            {part}
+                          </button>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    onClick={() => loadDirectory(currentDir)}
+                    disabled={isLoadingFiles}
+                    className="p-1.5 rounded-lg bg-[#1e212b] border border-[#2e3444] text-cyan-400 hover:text-cyan-300 hover:bg-slate-800 transition disabled:opacity-50"
+                    title="Reload directory"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isLoadingFiles ? 'animate-spin' : ''}`} />
+                  </button>
+
+                  {isLoadingFiles && (
+                    <span className="text-[#fe8a2c] text-[11px] animate-pulse font-mono flex items-center gap-1">
+                      <span>Reading Flipper Storage...</span>
+                    </span>
+                  )}
                 </div>
 
+                {/* File Operations: New Folder, Upload */}
                 <div className="flex items-center gap-2">
-                  {['/ext', '/ext/subghz', '/ext/nfc', '/ext/rfid', '/ext/badusb', '/ext/infrared', '/ext/apps', '/int'].map(p => (
-                    <button
-                      key={p}
-                      onClick={() => {
-                        setCurrentDir(p);
-                        loadDirectory(p);
-                      }}
-                      className={`px-3 py-1 rounded-lg text-xs transition ${
-                        currentDir === p 
-                          ? 'bg-[#fe8a2c] text-slate-950 font-bold shadow' 
-                          : 'bg-[#1e212b] text-slate-400 border border-[#2e3444] hover:text-white'
-                      }`}
-                    >
-                      {p.split('/').pop() || 'ext'}
-                    </button>
-                  ))}
+                  <button
+                    onClick={handleCreateFolder}
+                    className="px-3 py-1.5 bg-[#1e212b] hover:bg-[#282d3b] text-slate-200 border border-[#2e3444] rounded-xl text-xs font-mono transition flex items-center gap-1.5 active:scale-95"
+                    title="Create new folder"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>New Folder</span>
+                  </button>
+
+                  <button
+                    onClick={() => fileUploadInputRef.current?.click()}
+                    className="px-3 py-1.5 bg-[#1e212b] hover:bg-[#282d3b] text-slate-200 border border-[#2e3444] rounded-xl text-xs font-mono transition flex items-center gap-1.5 active:scale-95"
+                    title="Upload file to Flipper SD card"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Upload</span>
+                  </button>
                 </div>
+              </div>
+
+              {/* Quick Jump Directory Bar (qFlipper shortcuts) */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
+                <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mr-1">Quick Jump:</span>
+                {['/ext', '/ext/subghz', '/ext/nfc', '/ext/rfid', '/ext/badusb', '/ext/infrared', '/ext/ibutton', '/ext/apps', '/int'].map(p => (
+                  <button
+                    key={p}
+                    onClick={() => {
+                      setCurrentDir(p);
+                      loadDirectory(p);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg transition whitespace-nowrap ${
+                      currentDir === p 
+                        ? 'bg-[#fe8a2c] text-slate-950 font-bold shadow' 
+                        : 'bg-[#1e212b] text-slate-400 border border-[#2e3444] hover:text-white'
+                    }`}
+                  >
+                    {p.split('/').pop() || 'ext'}
+                  </button>
+                ))}
               </div>
 
               {/* Two-Pane Tree & Inspector */}
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                 {/* File List Table */}
-                <div className="md:col-span-5 bg-[#1e212b] border border-[#2b303c] rounded-2xl p-3 max-h-96 overflow-y-auto space-y-1">
+                <div className="md:col-span-5 bg-[#1e212b] border border-[#2b303c] rounded-2xl p-3 max-h-[460px] overflow-y-auto space-y-1">
+                  {/* Up One Level row */}
+                  {currentDir !== '/' && currentDir !== '/ext' && (
+                    <div
+                      onClick={handleGoUp}
+                      className="p-2.5 rounded-xl border border-transparent hover:border-[#2e3444] hover:bg-[#171920] text-slate-400 cursor-pointer transition flex items-center gap-2"
+                    >
+                      <Folder className="w-4 h-4 text-slate-500" />
+                      <span className="text-xs font-bold">.. (Parent Directory)</span>
+                    </div>
+                  )}
+
                   {dirItems.length === 0 && !isLoadingFiles && (
-                    <div className="p-6 text-center text-slate-500 text-xs">
-                      Directory is empty or awaiting response from device
+                    <div className="p-8 text-center text-slate-500 text-xs font-mono">
+                      <Folder className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
+                      <div>No files or folders found in {currentDir}</div>
+                      <div className="text-[10px] text-slate-600 mt-1">Click "Reload" or "New Folder" to create one.</div>
                     </div>
                   )}
 
@@ -936,13 +1277,13 @@ export default function FlipperWorkbench() {
                     <div
                       key={item.path}
                       onClick={() => handleSelectFile(item)}
-                      className={`p-2.5 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                      className={`p-2.5 rounded-xl border cursor-pointer transition flex items-center justify-between group ${
                         selectedFile?.path === item.path
                           ? 'bg-[#fe8a2c]/20 border-[#fe8a2c]/60 text-[#fe8a2c] font-bold shadow'
                           : 'bg-[#171920]/80 border-[#282d38] text-slate-300 hover:bg-[#212530]'
                       }`}
                     >
-                      <div className="flex items-center gap-2 truncate">
+                      <div className="flex items-center gap-2 truncate flex-1 min-w-0 mr-2">
                         {item.isDir ? (
                           <Folder className="w-4 h-4 text-[#fe8a2c] shrink-0" />
                         ) : (
@@ -950,37 +1291,68 @@ export default function FlipperWorkbench() {
                         )}
                         <span className="truncate text-xs">{item.name}</span>
                       </div>
-                      {!item.isDir && <span className="text-[10px] text-slate-500 shrink-0 ml-2">{item.size} B</span>}
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {!item.isDir && (
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            {item.size ? (item.size.endsWith('b') || item.size.endsWith('B') ? item.size : `${item.size} B`) : ''}
+                          </span>
+                        )}
+                        <button
+                          onClick={(e) => handleDeleteItem(item, e)}
+                          className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-rose-400 transition rounded"
+                          title={`Delete ${item.name} from Flipper`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
 
                 {/* File Viewer & Content */}
-                <div className="md:col-span-7 bg-[#1e212b] border border-[#2b303c] rounded-2xl p-4 flex flex-col justify-between">
+                <div className="md:col-span-7 bg-[#1e212b] border border-[#2b303c] rounded-2xl p-4 flex flex-col justify-between min-h-[460px]">
                   <div>
                     <div className="flex items-center justify-between pb-3 border-b border-[#2b303c] mb-3">
-                      <span className="font-bold text-white text-xs truncate">
-                        {selectedFile ? selectedFile.path : 'Select a file to inspect'}
-                      </span>
+                      <div className="truncate mr-2">
+                        <span className="font-bold text-white text-xs truncate block">
+                          {selectedFile ? selectedFile.path : 'Select a file to inspect'}
+                        </span>
+                        {selectedFile && (
+                          <span className="text-[10px] text-slate-400">
+                            {selectedFile.size ? `${selectedFile.size}` : ''}
+                          </span>
+                        )}
+                      </div>
+
                       {selectedFile && (
-                        <button
-                          onClick={() => {
-                            const blob = new Blob([fileContent || ''], { type: 'text/plain' });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = selectedFile.name;
-                            a.click();
-                            URL.revokeObjectURL(url);
-                          }}
-                          className="px-3 py-1 bg-[#fe8a2c] hover:bg-[#ff9722] text-slate-950 font-bold rounded-lg text-xs font-mono transition flex items-center gap-1.5"
-                        >
-                          <Download className="w-3.5 h-3.5" /> Export File
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => {
+                              const blob = new Blob([fileContent || ''], { type: 'text/plain' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = selectedFile.name;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                            className="px-3 py-1 bg-[#fe8a2c] hover:bg-[#ff9722] text-slate-950 font-bold rounded-lg text-xs font-mono transition flex items-center gap-1.5 shadow"
+                          >
+                            <Download className="w-3.5 h-3.5" /> Export
+                          </button>
+
+                          <button
+                            onClick={(e) => handleDeleteItem(selectedFile, e)}
+                            className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-500/30 rounded-lg text-xs font-mono transition flex items-center gap-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> Delete
+                          </button>
+                        </div>
                       )}
                     </div>
 
-                    <pre className="text-[11px] font-mono text-[#fe8a2c] whitespace-pre-wrap max-h-72 overflow-y-auto bg-[#171920] p-3 rounded-xl border border-[#232733]">
+                    <pre className="text-[11px] font-mono text-[#fe8a2c] whitespace-pre-wrap max-h-[380px] overflow-y-auto bg-[#171920] p-4 rounded-xl border border-[#232733] select-text">
                       {fileContent || '// Select a file on your Flipper to inspect contents'}
                     </pre>
                   </div>

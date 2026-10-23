@@ -59,6 +59,7 @@ export class FlipperZeroDriver {
 
     this.cliLogs = [];
     this.incomingBuffer = '';
+    this.commandAccumulator = '';
     this.pendingCommandResolve = null;
     this.pendingCommandReject = null;
   }
@@ -80,6 +81,44 @@ export class FlipperZeroDriver {
   }
 
   /**
+   * Connect to an existing / pre-authorized Web Serial port directly
+   */
+  async connectPort(port) {
+    if (!port) throw new Error('No port provided.');
+    this.port = port;
+
+    try {
+      await this.port.open({ baudRate: 115200 });
+    } catch (openErr) {
+      if (openErr.name === 'NetworkError' || openErr.message?.includes('Failed to open')) {
+        throw new Error('COM port is locked or in use! If the desktop qFlipper application or the main Flasher header is currently open, close or transfer the port first.');
+      }
+      throw openErr;
+    }
+
+    this.isConnected = true;
+    this.isDemo = false;
+    this.state.isConnected = true;
+    this.state.isDemo = false;
+    this.writer = this.port.writable.getWriter();
+
+    this.log('Connected to Flipper Zero USB CDC-ACM port! Initializing FuriOS session...', 'success');
+
+    // Start serial reader in background
+    this.startSerialReader();
+
+    // Wake up Flipper CLI shell
+    await this.writeRaw('\r\n');
+    await new Promise(r => setTimeout(r, 150));
+
+    // Refresh all real telemetry directly from physical device
+    await this.refreshAllRealData();
+
+    this.notifyState();
+    return true;
+  }
+
+  /**
    * Connect to physical Flipper Zero via Web Serial API
    */
   async connectHardware(options = {}) {
@@ -88,59 +127,30 @@ export class FlipperZeroDriver {
     }
 
     try {
-      this.log('Searching for Flipper Zero USB device (VID: 0x0483, PID: 0x5740)...', 'info');
-
-      // Request port with Flipper Zero filter, or allow all if noFilter is specified
       let port;
-      if (options.noFilter) {
+      if (options.port) {
+        port = options.port;
+      } else if (options.noFilter) {
+        this.log('Opening Web Serial port selector (All COM Ports)...', 'info');
         port = await navigator.serial.requestPort();
       } else {
+        this.log('Searching for Flipper Zero USB device (VID: 0x0483, PID: 0x5740)...', 'info');
         try {
           port = await navigator.serial.requestPort({
             filters: [
               { usbVendorId: 0x0483, usbProductId: 0x5740 },
-              { usbVendorId: 0x0483 }
+              { usbVendorId: 0x0483 },
+              { usbVendorId: 0x1d50, usbProductId: 0x6018 }
             ]
           });
         } catch (filterErr) {
-          if (filterErr.name === 'NotFoundError') {
-            throw new Error('Connection cancelled: No device selected.');
-          }
-          this.log('Filtered port prompt fallback: Showing all serial ports...', 'warning');
+          // If filtered device prompt returned nothing or was cancelled, immediately fall back to showing all COM ports
+          this.log('Filtered port prompt cancelled or device not matched. Showing all serial ports...', 'warning');
           port = await navigator.serial.requestPort();
         }
       }
 
-      this.port = port;
-      try {
-        await this.port.open({ baudRate: 115200 });
-      } catch (openErr) {
-        if (openErr.name === 'NetworkError' || openErr.message?.includes('Failed to open')) {
-          throw new Error('COM port is locked or in use! If the desktop qFlipper application is open, please close it completely so Windows frees the port.');
-        }
-        throw openErr;
-      }
-
-      this.isConnected = true;
-      this.isDemo = false;
-      this.state.isConnected = true;
-      this.state.isDemo = false;
-      this.writer = this.port.writable.getWriter();
-
-      this.log('Connected to Flipper Zero USB CDC-ACM port! Initializing FuriOS session...', 'success');
-
-      // Start serial reader in background
-      this.startSerialReader();
-
-      // Wake up Flipper CLI shell
-      await this.writeRaw('\r\n');
-      await new Promise(r => setTimeout(r, 150));
-
-      // Refresh all real telemetry directly from physical device
-      await this.refreshAllRealData();
-
-      this.notifyState();
-      return true;
+      return await this.connectPort(port);
     } catch (err) {
       this.isConnected = false;
       this.state.isConnected = false;
@@ -175,6 +185,7 @@ export class FlipperZeroDriver {
 
   handleSerialChunk(chunk) {
     this.incomingBuffer += chunk;
+    this.commandAccumulator += chunk;
 
     // Split on newlines to display raw lines in log
     const lines = this.incomingBuffer.split('\n');
@@ -189,9 +200,9 @@ export class FlipperZeroDriver {
     }
 
     // Check if prompt `>: ` has arrived to resolve pending CLI commands
-    if (this.pendingCommandResolve && this.incomingBuffer.includes('>:')) {
-      const fullResponse = this.incomingBuffer;
-      this.incomingBuffer = '';
+    if (this.pendingCommandResolve && (this.incomingBuffer.includes('>:') || this.commandAccumulator.includes('>:'))) {
+      const fullResponse = this.commandAccumulator;
+      this.commandAccumulator = '';
       const resolve = this.pendingCommandResolve;
       this.pendingCommandResolve = null;
       this.pendingCommandReject = null;
@@ -214,14 +225,16 @@ export class FlipperZeroDriver {
     }
 
     this.log(`> ${cmd}`, 'tx');
-    this.incomingBuffer = '';
+    this.commandAccumulator = '';
 
     return new Promise(async (resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pendingCommandResolve) {
+          const resp = this.commandAccumulator || this.incomingBuffer;
           this.pendingCommandResolve = null;
           this.pendingCommandReject = null;
-          resolve(this.incomingBuffer);
+          this.commandAccumulator = '';
+          resolve(resp);
         }
       }, timeoutMs);
 
@@ -390,32 +403,58 @@ export class FlipperZeroDriver {
   async listRealDirectory(dirPath = '/ext') {
     if (!this.isConnected) return [];
     try {
-      const res = await this.executeCommand(`storage list ${dirPath}`, 3500);
-      const lines = res.split('\n');
+      const cleanPath = dirPath.endsWith('/') && dirPath !== '/' ? dirPath.slice(0, -1) : dirPath;
+      this.log(`Querying Flipper storage: storage list ${cleanPath}...`, 'info');
+      
+      const res = await this.executeCommand(`storage list ${cleanPath}`, 4000);
+      const lines = res.split(/\r?\n/);
       const items = [];
 
-      lines.forEach(l => {
-        const line = l.trim();
-        if (line.startsWith('[DIR]')) {
-          const name = line.replace('[DIR]', '').trim();
+      for (const rawLine of lines) {
+        // Strip ANSI color/terminal escape sequences and clean line
+        const line = rawLine.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
+        if (!line || line.startsWith('storage list') || line.startsWith('>:') || line === '>') continue;
+
+        // Match [D] or [DIR] (folder entry)
+        const dirMatch = line.match(/^\[(?:D|DIR)\]\s*(.+)$/i);
+        if (dirMatch) {
+          const name = dirMatch[1].trim();
           if (name && name !== '.' && name !== '..') {
-            items.push({ name, isDir: true, path: `${dirPath}/${name}`.replace('//', '/') });
-          }
-        } else if (line.startsWith('[FILE]')) {
-          const parts = line.replace('[FILE]', '').trim().split(/\s+/);
-          const name = parts[0];
-          const size = parts[1] || '0';
-          if (name) {
+            const itemPath = cleanPath === '/' ? `/${name}` : `${cleanPath}/${name}`;
             items.push({ 
               name, 
-              isDir: false, 
-              size, 
-              path: `${dirPath}/${name}`.replace('//', '/') 
+              isDir: true, 
+              path: itemPath.replace(/\/+/g, '/'),
+              size: ''
             });
           }
+          continue;
         }
+
+        // Match [F] or [FILE] (file entry with optional size like "512b" or "1024")
+        const fileMatch = line.match(/^\[(?:F|FILE)\]\s*(\S+)(?:\s+(.+))?$/i);
+        if (fileMatch) {
+          const name = fileMatch[1].trim();
+          const rawSize = fileMatch[2] ? fileMatch[2].trim() : '0';
+          const itemPath = cleanPath === '/' ? `/${name}` : `${cleanPath}/${name}`;
+          items.push({ 
+            name, 
+            isDir: false, 
+            path: itemPath.replace(/\/+/g, '/'),
+            size: rawSize
+          });
+          continue;
+        }
+      }
+
+      // Sort directories first, then alphabetically
+      items.sort((a, b) => {
+        if (a.isDir && !b.isDir) return -1;
+        if (!a.isDir && b.isDir) return 1;
+        return a.name.localeCompare(b.name);
       });
 
+      this.log(`Loaded ${items.length} items from ${cleanPath}`, 'success');
       return items;
     } catch (e) {
       this.log(`Failed to list ${dirPath}: ${e.message}`, 'error');
@@ -430,15 +469,55 @@ export class FlipperZeroDriver {
     if (!this.isConnected) return '';
     try {
       this.log(`Reading file ${filePath} from Flipper storage...`, 'info');
-      const res = await this.executeCommand(`storage read ${filePath}`, 4000);
-      // Remove command echo and trailing prompt
-      const lines = res.split('\n');
-      const cleanLines = lines.filter(l => !l.startsWith('storage read') && !l.includes('>:'));
+      const res = await this.executeCommand(`storage read ${filePath}`, 5000);
+      const lines = res.split(/\r?\n/);
+      const cleanLines = lines
+        .map(l => l.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ''))
+        .filter(l => !l.startsWith('storage read') && !l.includes('>:'));
       return cleanLines.join('\n').trim();
     } catch (e) {
       this.log(`Failed to read ${filePath}: ${e.message}`, 'error');
       return '';
     }
+  }
+
+  /**
+   * Create directory on Flipper storage
+   */
+  async createRealDirectory(dirPath) {
+    if (!this.isConnected) throw new Error('Not connected to Flipper');
+    this.log(`Creating directory: storage mkdir ${dirPath}...`, 'info');
+    const res = await this.executeCommand(`storage mkdir ${dirPath}`, 3000);
+    this.log(`Directory ${dirPath} created.`, 'success');
+    return res;
+  }
+
+  /**
+   * Remove file or directory on Flipper storage
+   */
+  async removeRealFile(path) {
+    if (!this.isConnected) throw new Error('Not connected to Flipper');
+    this.log(`Deleting from storage: storage remove ${path}...`, 'warning');
+    const res = await this.executeCommand(`storage remove ${path}`, 3000);
+    this.log(`Removed ${path}`, 'success');
+    return res;
+  }
+
+  /**
+   * Write text content to Flipper storage file
+   */
+  async writeRealFile(path, content) {
+    if (!this.isConnected || !this.writer) throw new Error('Not connected to Flipper');
+    this.log(`Writing file to Flipper storage: ${path} (${content.length} bytes)...`, 'info');
+    await this.writeRaw(`storage write ${path}\r\n`);
+    await new Promise(r => setTimeout(r, 200));
+    await this.writeRaw(content);
+    await new Promise(r => setTimeout(r, 200));
+    // Send Ctrl+C (0x03) to terminate write stream and save
+    await this.writeRaw('\x03\r\n');
+    await new Promise(r => setTimeout(r, 200));
+    this.log(`Wrote ${content.length} bytes to ${path}`, 'success');
+    return true;
   }
 
   /**
@@ -566,4 +645,13 @@ export class FlipperZeroDriver {
     this.log('Disconnected from Flipper Zero.', 'info');
     this.notifyState();
   }
+}
+
+// Global Singleton to preserve session across React tab switching
+let globalFlipperDriver = null;
+export function getFlipperDriver() {
+  if (!globalFlipperDriver) {
+    globalFlipperDriver = new FlipperZeroDriver();
+  }
+  return globalFlipperDriver;
 }
