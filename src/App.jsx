@@ -106,8 +106,8 @@ function AppContent() {
     } catch (e) {}
   };
 
-  // Live Terminal Drawer state
-  const [isDrawerOpen, setIsDrawerOpen] = useState(true);
+  // Live Terminal Drawer state (closed by default)
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   // Modals
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
