@@ -48,9 +48,6 @@ const ProtocolPacketLab = React.lazy(() => import('./components/tools/ProtocolPa
 const GpsNavigationSuite = React.lazy(() => import('./components/tools/GpsNavigationSuite'));
 const HardwareProgrammersSuite = React.lazy(() => import('./components/tools/HardwareProgrammersSuite'));
 
-// Common & Guide Components
-import ToolGuide from './components/common/ToolGuide';
-
 // Modals
 import CommandPalette from './components/CommandPalette';
 import HardwareIntelligenceModal from './components/HardwareIntelligenceModal';
@@ -203,9 +200,6 @@ function AppContent() {
         <div className="flex-1 flex flex-col overflow-hidden bg-[#020617]">
           {/* Active Tool Viewport */}
           <main className="flex-1 overflow-y-auto p-3 sm:p-4 scrollbar-thin scrollbar-thumb-slate-800">
-            {/* Contextual How-To Dropdown Guide for Active Tool */}
-            <ToolGuide toolId={activeTool} />
-
             <React.Suspense fallback={
               <div className="py-20 flex flex-col items-center justify-center text-slate-400 font-mono text-xs space-y-3">
                 <div className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>

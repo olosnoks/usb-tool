@@ -1,6 +1,7 @@
 /**
- * Core Operations Wiki Articles — Comprehensive Technical Manual
+ * Core Operations Wiki Articles — Comprehensive Interactive Technical Manual
  * Covering Terminal & Console, Firmware Flasher, and Hardware Controls & Bootstrapping
+ * Utilizing interactive <details> and <summary> disclosure elements for deep technical reference
  */
 
 export const CORE_ARTICLES = [
@@ -11,7 +12,7 @@ export const CORE_ARTICLES = [
     title: 'Terminal & Console — Serial Monitor & Baud Hunter Manual',
     summary: 'Comprehensive beginner-to-advanced guide to the WebSerial monitor, ANSI terminal decoding, Baud Hunter heuristics, hex streaming, and serial troubleshooting.',
     tags: ['Terminal', 'WebSerial', 'Baud Rate', 'ANSI', 'Hex Stream', 'Logging', 'UART', 'Debugging'],
-    readTime: '12 min read',
+    readTime: '14 min read',
     content: `
 # Terminal & Console — Serial Monitor & Baud Hunter
 
@@ -35,18 +36,26 @@ Unlike SPI or I2C, UART is **asynchronous** — there is no shared clock wire be
 - **TTL Serial (3.3V / 5V)**: Modern microcontrollers use TTL logic levels. A digital \`1\` (Mark/Idle) is +3.3V (or +5V), and a digital \`0\` (Space) is 0V (GND).
 - **RS-232 (+12V / -12V)**: Legacy serial ports invert and amplify voltages (-12V is \`1\`, +12V is \`0\`). *Never connect raw RS-232 to an ESP32 without an RS-232 transceiver (e.g. MAX3232), or you will destroy the chip!*
 
-#### UART Frame Anatomy (8-N-1)
-Every character sent over UART is encapsulated in a frame:
-1. **Idle Line**: Held at logical HIGH (+3.3V).
-2. **Start Bit (1 bit)**: Driven LOW (0V) for exactly 1 bit duration to notify the receiver's hardware timer that data is arriving.
-3. **Data Bits (8 bits)**: Transmitted Least Significant Bit (LSB) first to Most Significant Bit (MSB).
-4. **Parity Bit (None)**: Used for error checking (rarely used in modern microcontrollers, default is 'None').
-5. **Stop Bit (1 bit)**: Pulled HIGH (+3.3V) to reset the receiver state machine.
+<details>
+<summary>Deep-Dive: UART Frame Timing, Bit Anatomy & Sampling Calculations</summary>
 
-#### Baud Rate Timing
-The **Baud Rate** is the number of signal transitions per second. For example, at **115,200 baud**:
-- 1 bit duration = \`1 / 115,200\` = **8.68 microseconds**.
-- If the sender and receiver clock speeds diverge by more than ~3%, the receiver samples bits at the wrong millisecond, turning valid words into unreadable garbage characters (\`?\`, \`x\`, \`\`).
+Every character sent over UART is encapsulated in a strict framing envelope:
+1. **Idle Line**: Held continuously at logical HIGH (+3.3V).
+2. **Start Bit (1 bit)**: The transmitter drives the line LOW (0V) for exactly 1 bit duration. This falling edge triggers the receiver's internal hardware timer.
+3. **Data Bits (8 bits)**: Transmitted Least Significant Bit (LSB) first to Most Significant Bit (MSB).
+4. **Parity Bit (None)**: Optional error checking bit (Rare in modern hardware, default: 'None').
+5. **Stop Bit (1 bit)**: Pulled HIGH (+3.3V) to reset the receiver's state machine.
+
+#### Bit Duration Formula:
+\`\`\`text
+Bit Duration (Seconds) = 1 / Baud Rate
+\`\`\`
+- At **9,600 baud**: 1 bit = \`104.16 microseconds\`.
+- At **115,200 baud**: 1 bit = \`8.68 microseconds\`.
+- At **921,600 baud**: 1 bit = \`1.085 microseconds\`.
+
+The receiver samples the line at **16x oversampling** (sampling in the dead center at the 8th clock tick) to ensure noise immunity. If the clocks diverge by more than **3.0%**, sampling drifts into adjacent bit boundaries, turning text into garbage!
+</details>
 
 ---
 
@@ -85,26 +94,26 @@ If connecting an external USB-to-UART bridge (CH340, CP2102, FT232R) to a bare m
 
 ### 5. Advanced Terminal Features
 
-#### The Baud Hunter Engine
-If you connect to an unknown development board, IoT device, or discarded router and see unintelligible symbols:
-1. Click **Baud Hunter**.
-2. The engine temporarily takes control of the UART port and cycles through a heuristic matrix:
-   \`300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880 (ESP8266 ROM), 115200, 230400, 460800, 921600\`.
-3. For each candidate baud rate, it listens for 250ms, checks UART framing error counters, analyzes the statistical distribution of printable ASCII characters vs control bytes, and automatically locks onto the correct frequency!
+<details>
+<summary>Deep-Dive: How Baud Hunter Automatically Detects Unknown Frequencies</summary>
+
+When you click **Baud Hunter**, the engine executes a multi-stage heuristic analysis:
+1. Temporarily claims the WebSerial port and loops through standard test rates:
+   \`300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880 (ESP8266 boot ROM), 115200, 230400, 460800, 921600\`.
+2. For each baud rate, it listens for a 250ms sample window.
+3. It counts:
+   - **UART Framing Errors**: Occurs when stop bits fail to settle HIGH.
+   - **Printable ASCII Distribution**: Checks if received bytes fall within \`0x20\` to \`0x7E\` or common control bytes (\`\\r\`, \`\\n\`, \`\\t\`).
+   - **Shannon Entropy**: Measures randomness vs linguistic patterns.
+4. The candidate with the highest ASCII density and lowest framing error count is automatically locked and set as active!
+</details>
 
 #### Line Endings (CR / LF / CRLF / HEX)
 When typing commands into the bottom input bar, choose the appropriate terminator for your firmware:
 - **CRLF (\\r\\n - 0x0D 0x0A)**: Required by AT command cellular/Wi-Fi modems and ESP-IDF CLI.
 - **LF (\\n - 0x0A)**: Standard for MicroPython REPL, Linux shells, and Arduino \`Serial.readStringUntil('\\n')\`.
 - **CR (\\r - 0x0D)**: Used by classic U-Boot bootloader prompts.
-- **HEX Mode**: Type raw hexadecimal bytes separated by spaces (e.g. \`AA 55 01 FE 00\`) to test custom binary protocols or send raw framing packets directly to hardware.
-
-#### Live Hex Stream Split View
-Toggle the **Hex Stream** view to open a real-time side-by-side memory inspector:
-- Left column: Memory offset (\`00000000\`).
-- Middle column: 16 raw hexadecimal bytes (\`45 53 50 2D 49 44 46 ...\`).
-- Right column: ASCII character representation with dots for unprintable bytes.
-- This allows you to spot binary packets, CRC checksums, and hidden control bytes that standard text terminals swallow.
+- **HEX Mode**: Type raw hexadecimal bytes separated by spaces (e.g. \`AA 55 01 FE 00\`) to test custom binary protocols.
 
 ---
 
@@ -125,7 +134,7 @@ Toggle the **Hex Stream** view to open a real-time side-by-side memory inspector
     title: 'Firmware Flasher — ESP32 & ESP8266 Memory Partition Studio',
     summary: 'Master ESP-IDF ROM bootloader synchronization, high-speed baud auto-negotiation, partition tables, factory offsets, and unbricking stubs.',
     tags: ['Flasher', 'ESP32', 'ROM Bootloader', 'Partitions', 'esptool', 'Flash Memory', 'Firmware'],
-    readTime: '15 min read',
+    readTime: '17 min read',
     content: `
 # Firmware Flasher — Memory Partition Studio
 
@@ -184,27 +193,29 @@ FLASH MEMORY MAP (Standard 4MB ESP32)
 0x003FFFFF +-----------------------------------+ (End of 4MB Flash)
 \`\`\`
 
-> **Why Partition Offsets Matter**:
-> If you accidentally flash a factory firmware binary to offset \`0x0000\`, you will overwrite the hardware bootloader. The chip will brick until you re-flash the first-stage bootloader at \`0x1000\`!
+<details>
+<summary>Deep-Dive: The ESP-IDF SLIP Framing & Flash Command Protocol</summary>
+
+All communication with the ESP32 ROM bootloader uses **SLIP (Serial Line Internet Protocol)** framing:
+- **Delimiter**: Packets begin and end with \`0xC0\`.
+- **Escaping**: If \`0xC0\` occurs in data, it is escaped as \`0xDB 0xDC\`. If \`0xDB\` occurs, it is escaped as \`0xDB 0xDD\`.
+
+#### Master ROM Bootloader Command Opcodes:
+| Opcode (Hex) | Command Name | Description |
+| :--- | :--- | :--- |
+| **\`0x08\`** | **SYNC** | Sends \`0x07 0x07 0x12 0x20\` to sync UART baud timing |
+| **\`0x0A\`** | **READ_REG** | Reads 32-bit hardware register or eFuse word |
+| **\`0x09\`** | **WRITE_REG**| Writes 32-bit register value |
+| **\`0x24\`** | **CHANGE_BAUD**| Commands ROM to accelerate from 115,200 to 921,600 baud |
+| **\`0x02\`** | **FLASH_BEGIN**| Erases flash sectors and prepares for incoming blocks |
+| **\`0x03\`** | **FLASH_DATA** | Transmits 4,096-byte flash block with sequence number |
+| **\`0x04\`** | **FLASH_END** | Flushes write buffers and resets flash status |
+| **\`0x13\`** | **SPI_ATTACH** | Initializes hardware SPI pins for flash communication |
+</details>
 
 ---
 
-### 4. How the Bootloader Synchronization Sequence Works
-
-1. **Hardware Bootstrap**: When you click **Connect & Flash**, the tool asserts the USB bridge's DTR and RTS signals in a precise pattern to pull GPIO0 LOW while pulsing the RESET line LOW.
-2. **ROM Handshake (\`0x08\` SYNC)**: The browser sends a continuous train of \`0x08\` SYNC bytes framed with SLIP delimiters (\`0xC0\`). The internal ROM responds with its hardware identification packet.
-3. **Silicon Introspection**: The tool queries internal eFuses to determine the exact silicon type (e.g. ESP32-S3 Revision 0.1), MAC address, and flash voltage (3.3V vs 1.8V).
-4. **Baud Rate Acceleration**: After initial sync at 115,200 baud, the flasher commands the ROM to jump to 921,600 baud. This drops the flash time of a 2MB firmware from 3 minutes down to **18 seconds**!
-5. **SPI Flash Writing**:
-   - Sends \`FLASH_BEGIN\` with total size and destination address.
-   - Streams 4096-byte blocks using \`FLASH_DATA\` packets.
-   - Validates each written block using hardware MD5 checksum calculations.
-   - Sends \`FLASH_END\` to flush buffers.
-6. **System Reboot**: Clears RTS and pulses DTR to boot your newly installed firmware immediately.
-
----
-
-### 5. Step-by-Step Usage Guide
+### 4. Step-by-Step Usage Guide
 
 #### Option A: 1-Click Curated Presets
 1. Select your target suite from the **Curated Presets** dropdown:
@@ -226,19 +237,20 @@ FLASH MEMORY MAP (Standard 4MB ESP32)
 6. Optional: Check **Full Chip Erase** if wiping old credentials or upgrading across major SDK versions.
 7. Click **Flash Partitions**.
 
----
+<details>
+<summary>Manual Bootloader Recovery Guide: The Two-Button Reset Dance</summary>
 
-### 6. The "Manual Bootloader Trick" (Unbricking Finicky Boards)
-Some development boards have weak pull-up resistors or lack the dual-transistor auto-reset circuit. If the flasher gets stuck on:
+If your development board has weak pull-up resistors or lacks the transistor auto-reset circuit, it may get stuck on:
 \`\`\`text
 Connecting... (Timed out waiting for packet header)
 \`\`\`
 **Perform the Manual Button Dance**:
-1. Locate the two physical buttons on your board: **BOOT** (or GPIO0) and **RESET** (or EN).
+1. Locate the two physical push buttons on your board: **BOOT** (or GPIO0) and **RESET** (or EN).
 2. **Press and HOLD the BOOT button**.
 3. While continuing to hold BOOT, **press the RESET button once** and release it.
 4. Release the **BOOT button**.
 5. Your board is now locked in ROM download mode. Click **Connect & Flash** in the web tool, and it will sync immediately!
+</details>
 `
   },
   {
@@ -248,7 +260,7 @@ Connecting... (Timed out waiting for packet header)
     title: 'Hardware Controls — Pin Strapping, DTR/RTS & U-Boot Interrupter',
     summary: 'Hardware-level control of USB-UART modem signals, auto-reset timing manipulation, ESP strapping pin voltages, and automated bootloader interrupts.',
     tags: ['Hardware Controls', 'DTR', 'RTS', 'Strapping Pins', 'U-Boot', 'Reset Timing', 'GPIO0', 'EN'],
-    readTime: '10 min read',
+    readTime: '12 min read',
     content: `
 # Hardware Controls — Pin Strapping & Signal Timing
 
@@ -281,13 +293,16 @@ DTR ----\\___/---- Base Q1 ---> Collector connected to ESP RESET (EN)
 RTS ----/   \\---- Base Q2 ---> Collector connected to ESP GPIO0 (BOOT)
 \`\`\`
 
-#### The Truth Table
-| DTR State | RTS State | ESP EN (Reset) | ESP GPIO0 (Boot) | Resulting Silicon State |
+<details>
+<summary>Deep-Dive: Complete Auto-Reset Transistor Truth Table & Signal States</summary>
+
+| DTR Line | RTS Line | Transistor Q1 (EN) | Transistor Q2 (GPIO0) | Resulting Silicon State |
 | :---: | :---: | :---: | :---: | :--- |
-| **1 (HIGH)** | **1 (HIGH)** | HIGH (3.3V) | HIGH (3.3V) | **Normal Run Mode** (Executes user app) |
-| **0 (LOW)** | **1 (HIGH)** | **LOW (0V)** | HIGH (3.3V) | **Hardware Reset** (Held in reset) |
-| **1 (HIGH)** | **0 (LOW)** | HIGH (3.3V) | **LOW (0V)** | GPIO0 pulled LOW (Prepares for download) |
-| **0 (LOW)** | **0 (LOW)** | HIGH (3.3V) | HIGH (3.3V) | Protected state (Transistors cancel out) |
+| **1 (HIGH)** | **1 (HIGH)** | OFF (EN pulled HIGH via 10k) | OFF (GPIO0 pulled HIGH) | **Normal Run Mode** (Executes user app) |
+| **0 (LOW)** | **1 (HIGH)** | **ON (Pulls EN to 0V)** | OFF (GPIO0 remains HIGH) | **Hardware Reset** (Held in reset) |
+| **1 (HIGH)** | **0 (LOW)** | OFF (EN remains HIGH) | **ON (Pulls GPIO0 to 0V)** | GPIO0 pulled LOW (Prepares for download) |
+| **0 (LOW)** | **0 (LOW)** | OFF (Both cancel out) | OFF (Both cancel out) | Idle protected state |
+</details>
 
 ---
 
@@ -306,8 +321,14 @@ When the \`EN\` pin rises from 0V to 3.3V (power-on or reset release), the inter
   - *Warning: If an external sensor pulls GPIO12 HIGH during boot, the ESP32 under-volts its own flash chip and bootloops with a flash read error!*
 - **GPIO15**: Must be pulled HIGH (or floating) during boot. Outputs UART boot log clock.
 
-#### ESP32-S3 / C3 / C6 Strapping Pins
-- **GPIO0 (S3) / GPIO9 (C3/C6)**: Serves as the primary bootloader trigger pin. LOW = Download mode, HIGH = Normal run.
+<details>
+<summary>Deep-Dive: ESP32-S3 / C3 / C6 Modern Strapping Differences</summary>
+
+In newer RISC-V and Xtensa architectures (ESP32-S3, C3, C6):
+- **GPIO0 (S3) / GPIO9 (C3 / C6)**: Serves as the primary bootloader strapping pin.
+- **Internal Weak Pull-Ups**: Modern Espressif SoCs integrate 45kΩ internal pull-up resistors on boot pins to eliminate floating states.
+- **Native USB-JTAG/Serial Mode**: If GPIO0/GPIO9 is pulled LOW on boot, the native USB peripheral exposes the built-in USB bootloader directly, bypassing external USB-UART chips!
+</details>
 
 ---
 
@@ -323,10 +344,7 @@ Generates a hardware-timed reset cycle:
 - Pulses the \`EN\` line LOW for a configurable duration (50ms to 500ms).
 - **Pro Tip**: If your board has a large capacitor on the reset line (e.g. 10uF for noise filtering), standard 50ms pulses might not discharge the capacitor completely. Increase the pulse slider to **250ms** for 100% reliable reset triggering.
 
-#### 3. Force Bootloader Trigger
-Executes the exact microsecond transistor sequence required to force stubborn boards into download mode without needing physical finger access to buttons.
-
-#### 4. U-Boot Console Interrupter
+#### 3. U-Boot Console Interrupter
 When working with Linux Single Board Computers (Raspberry Pi, Orange Pi, Banana Pi, OpenWrt Wi-Fi routers, IP cameras):
 - The U-Boot bootloader provides a recovery shell to re-flash Linux kernels, dump flash memory, or bypass root passwords.
 - U-Boot only pauses autoboot if it receives a keypress (Space, Enter, or \`Ctrl+C\`) within a narrow 1-second countdown window after power-on.

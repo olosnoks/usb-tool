@@ -11,7 +11,7 @@ export const UTILITY_ARTICLES = [
     title: 'MicroPython Filesystem Explorer — Raw REPL & On-Chip Files',
     summary: 'Browse on-chip flash storage, upload boot.py and main.py, download logs, and execute Python code via MicroPython Raw REPL mode without desktop apps.',
     tags: ['MicroPython', 'CircuitPython', 'Raw REPL', 'Filesystem', 'boot.py', 'main.py', 'Python', 'Thonny'],
-    readTime: '14 min read',
+    readTime: '16 min read',
     content: `
 # MicroPython Filesystem Explorer — On-Chip Storage
 
@@ -24,29 +24,63 @@ The **MicroPython Filesystem Explorer** interacts directly with microcontrollers
 MicroPython is a lean, efficient implementation of Python 3 optimized to run on bare-metal microcontrollers. While the interactive terminal prompt (\`>>>\`) is great for humans typing commands, transferring files over it is error-prone because the shell echoes back every character and auto-indents new lines.
 
 To solve this, MicroPython features **Raw REPL Mode**:
-1. The tool sends **Ctrl+A (\`0x01\`)**: Halts user code, disables character echoing, and enters raw machine-to-machine mode.
-2. The browser transmits small Python introspection scripts (e.g. \`os.listdir()\`, \`os.stat()\`).
-3. Sends **Ctrl+D (\`0x04\`)** to execute and sample the output.
-4. Sends **Ctrl+B (\`0x02\`)** upon completion to return the microcontroller to friendly REPL.
+
+<details>
+<summary>MicroPython Raw REPL Protocol & Control Byte Handshake</summary>
+
+The browser communicates with the microcontroller using standard ASCII control characters:
+
+1. **Ctrl+C (\`0x03\`)**: Transmitted twice to interrupt any currently running user scripts or infinite loops.
+2. **Ctrl+A (\`0x01\`)**: Enters Raw REPL mode. The microcontroller responds with:
+   \`\`\`text
+   raw REPL; CTRL-B to exit\r\n>
+   \`\`\`
+   In this mode, character echoing is disabled and newline auto-indentation is bypassed.
+3. **Command Payload**: Transmitted in 256-byte chunks.
+4. **Ctrl+D (\`0x04\`)**: Executes the uploaded Python snippet. The board responds with:
+   \`\`\`text
+   OK<stdout_bytes>\x04<stderr_bytes>\x04>
+   \`\`\`
+   - If \`stderr_bytes\` is non-empty, a Python exception occurred.
+5. **Ctrl+B (\`0x02\`)**: Exits raw mode and performs a soft reboot, returning to the normal interactive \`>>>\` REPL.
+
+</details>
+
+<details>
+<summary>Chunked File Transfer & SHA-256 Checksum Validation Script</summary>
+
+When uploading files, Skon's USB Tool injects an ephemeral memory-efficient stream writer directly through the Raw REPL:
+
+\`\`\`python
+import ubinascii, uhashlib
+def __write_chunk(filename, offset, b64_chunk):
+    mode = 'wb' if offset == 0 else 'ab'
+    with open(filename, mode) as f:
+        f.seek(offset)
+        f.write(ubinascii.a2b_base64(b64_chunk))
+
+def __verify_sha256(filename, expected_sha):
+    h = uhashlib.sha256()
+    with open(filename, 'rb') as f:
+        while True:
+            chunk = f.read(512)
+            if not chunk: break
+            h.update(chunk)
+    digest = ubinascii.hexlify(h.digest()).decode()
+    return digest == expected_sha
+\`\`\`
+This atomic chunking mechanism allows files up to tens of megabytes to be written reliably without causing MicroPython out-of-memory (\`MemoryError\`) crashes.
+
+</details>
 
 ---
 
 ### 2. Key Workbench Capabilities
 
-#### 1. Live Flash Tree Explorer
-- Lists all files and folders stored in the on-chip FAT or LittleFS partition.
-- Displays exact file sizes in bytes and creation timestamps.
-
-#### 2. File Upload & Download
-- **Download**: Click any file (\`boot.py\`, \`main.py\`, sensor data logs) to download it directly to your PC.
-- **Upload**: Drag and drop \`.py\` scripts or asset files from your computer. The tool splits files into stream-safe chunks and writes them to flash using chunked \`f.write()\` operations with SHA-256 validation.
-
-#### 3. In-Browser Python Code Editor
-- Click any file to open it in the built-in syntax-highlighted code editor.
-- Make edits and click **Save to Board**. The tool writes the file and issues a soft reboot (**Ctrl+D**) to run your new code immediately!
-
-#### 4. Memory Heap Monitor
-Runs \`gc.mem_free()\` and \`gc.mem_alloc()\` to display real-time RAM usage on your microcontroller.
+- **Live Flash Tree Explorer**: Lists all files and folders in FAT or LittleFS partitions with byte sizes and directory depth.
+- **File Upload & Download**: Drag and drop scripts directly to the board; click any file to download to your PC.
+- **In-Browser Code Editor**: Edit \`boot.py\` and \`main.py\` with syntax highlighting and click **Save & Soft Reboot**.
+- **Memory Heap Monitor**: Periodically queries \`gc.mem_free()\` and \`gc.mem_alloc()\` to track RAM usage.
 `
   },
   {
@@ -56,7 +90,7 @@ Runs \`gc.mem_free()\` and \`gc.mem_alloc()\` to display real-time RAM usage on 
     title: 'Improv Wi-Fi — Standardized Serial IoT Wi-Fi Provisioner',
     summary: 'Provision Wi-Fi credentials to ESPHome, Home Assistant, and Tasmota devices over serial without mobile apps or captive portals.',
     tags: ['Improv Wi-Fi', 'Home Assistant', 'ESPHome', 'IoT', 'Provisioning', 'Wi-Fi Credentials', 'Tasmota'],
-    readTime: '12 min read',
+    readTime: '14 min read',
     content: `
 # Improv Wi-Fi — Serial Provisioner
 
@@ -66,30 +100,37 @@ Runs \`gc.mem_free()\` and \`gc.mem_alloc()\` to display real-time RAM usage on 
 
 ### 1. Why Improv Wi-Fi Matters
 
-Traditionally, setting up Wi-Fi on a new IoT device required:
-1. Connecting your phone to an unsecured temporary Wi-Fi access point spawned by the device.
-2. Waiting for a captive portal to pop up.
-3. Typing your home Wi-Fi password over an unencrypted local HTTP connection.
+Traditionally, setting up Wi-Fi on a new IoT device required connecting your phone to an unsecured temporary Wi-Fi access point, waiting for a captive portal, and submitting passwords over unencrypted HTTP.
 
-**Improv Wi-Fi over Serial** eliminates this entirely. By plugging the device into USB, the browser handshakes with the board, discovers available home Wi-Fi networks, and securely provisions the credentials over physical serial wires in under 5 seconds!
+**Improv Wi-Fi over Serial** eliminates this entirely. By plugging the device into USB, the browser handshakes with the board, discovers available home Wi-Fi networks, and securely provisions credentials over physical wires in under 5 seconds!
 
 ---
 
 ### 2. The Improv Serial Packet Framing Standard
 
-An Improv packet follows this binary structure:
+<details>
+<summary>Improv Wi-Fi Serial Framing & Error Codes Specification</summary>
+
+An Improv packet conforms to this binary format:
 \`\`\`
 +------------------+--------------+------------------+------------------+------------------+--------------+
 | Header "IMPROV"  | Version 0x01 | Packet Type (1B) | Data Length (1B) | Data Bytes (N B) | Checksum (1B)|
 +------------------+--------------+------------------+------------------+------------------+--------------+
 \`\`\`
-The checksum is the 8-bit sum of all preceding bytes modulo 256.
 
-#### Supported Commands & States
-- **State 0x01 (Current State)**: \`Stopped\`, \`Awaiting Authorization\`, \`Authorized\`, \`Provisioning\`, \`Provisioned\`.
-- **Command 0x01 (Send Wi-Fi Credentials)**: Transmits target SSID and password.
-- **Command 0x02 (Identify)**: Blinks the device's physical onboard LED to confirm you are configuring the right physical hardware.
-- **Command 0x03 (Scan Networks)**: Instructs the device to scan for local 2.4GHz Wi-Fi networks and stream back signal strength (RSSI) levels.
+#### Checksum Equation
+The 8-bit checksum is calculated as:
+$$\text{Checksum} = \left(\sum \text{all preceding bytes from 'I' to last data byte}\right) \pmod{256}$$
+
+#### Master Packet Types & State Enum
+| Packet Type | Name | Direction | Description |
+| :--- | :--- | :--- | :--- |
+| **\`0x01\`** | Current State | Device -> Host | \`0x01\`=Stopped, \`0x02\`=Awaiting Auth, \`0x03\`=Authorized, \`0x04\`=Provisioning, \`0x05\`=Provisioned. |
+| **\`0x02\`** | Error State | Device -> Host | \`0x01\`=Invalid RPC, \`0x02\`=Unknown Cmd, \`0x03\`=Unable to Connect, \`0x04\`=Not Authorized. |
+| **\`0x03\`** | Command | Host -> Device | \`0x01\`=Send Wi-Fi, \`0x02\`=Identify (Blink LED), \`0x03\`=Scan Wi-Fi. |
+| **\`0x04\`** | Command Result | Device -> Host | Returns array of strings (e.g. Device Name, Firmware Version, Local IP address). |
+
+</details>
 
 ---
 
@@ -110,7 +151,7 @@ The checksum is the 8-bit sum of all preceding bytes modulo 256.
     title: 'Telemetry Gauges — Analog Speedometer & Metric Dials',
     summary: 'Extract numerical sensor values from raw serial streams and display them on responsive analog gauge dials and digital meters.',
     tags: ['Telemetry', 'Gauges', 'Analog Meter', 'Speedometer', 'Sensors', 'Metrics', 'Regex'],
-    readTime: '11 min read',
+    readTime: '13 min read',
     content: `
 # Telemetry Gauges — Responsive Metric Dials
 
@@ -126,20 +167,28 @@ The telemetry engine allows you to map incoming serial lines to dials using stan
 temp:(?<temperature>\\d+\\.\\d+)\\s+rpm:(?<rpm>\\d+)
 \`\`\`
 
-When a matching line arrives:
-1. The engine extracts the captured values.
-2. Computes gauge needle deflection angle:
-   \`\`\`text
-   Angle = MinAngle + ((Value - Min) / (Max - Min)) * (MaxAngle - MinAngle)
-   \`\`\`
-3. Updates the SVG needle and digital readout smoothly at 60 FPS using requestAnimationFrame.
+<details>
+<summary>Mathematical Needle Deflection & Rolling Min/Max Equations</summary>
+
+When a matching value arrives, the dial needle deflection angle is calculated across a $240^\circ$ sweep:
+
+$$\theta = \theta_{\min} + \left(\frac{V - V_{\min}}{V_{\max} - V_{\min}}\right) \times (\theta_{\max} - \theta_{\min})$$
+
+Where:
+- $\theta_{\min} = -120^\circ$, $\theta_{\max} = +120^\circ$.
+- $V$: Current extracted sensor reading.
+- $V_{\min}, V_{\max}$: Configured dial range bounds.
+
+#### Peak-Hold Memory
+The dial retains the highest recorded value ($V_{\text{peak}} = \max(V_{\text{peak}}, V)$) indicated by a luminous neon tick mark on the outer bezel, resetting only when manually cleared.
+
+</details>
 
 ---
 
 ### 2. Configurable Dial Properties
 - **Range & Limits**: Set Minimum and Maximum values (e.g. \`0\` to \`8000\` RPM).
 - **Warning & Danger Zones**: Define colored arc bands (Yellow for warning, Red for redline/danger).
-- **Peak Hold**: Leaves a subtle glowing marker at the highest measured value during the session.
 - **Units Label**: Customizable text indicator (e.g. \`°C\`, \`km/h\`, \`V\`, \`mA\`, \`PSI\`).
 `
   },
@@ -150,7 +199,7 @@ When a matching line arrives:
     title: 'Crash & Panic Alerts Deck — Kernel Exceptions & Guru Meditation',
     summary: 'Real-time serial scanner detecting ESP-IDF Guru Meditation Errors, Watchdog timer resets, stack overflows, and register dumps.',
     tags: ['Crash Alerts', 'Panic', 'Guru Meditation', 'Watchdog', 'ESP-IDF', 'Stack Overflow', 'addr2line'],
-    readTime: '13 min read',
+    readTime: '15 min read',
     content: `
 # Crash & Panic Alerts Deck — Exception Analyzer
 
@@ -160,28 +209,48 @@ The **Crash & Panic Alerts Deck** acts as a sentinel on your serial connection, 
 
 ### 1. Common Exception Signatures Detected
 
-#### 1. ESP-IDF Guru Meditation Error
-Occurs when the Xtensa or RISC-V CPU triggers an unhandled architectural exception:
 - **LoadProhibited / StoreProhibited**: Attempting to read or write to an invalid memory address (e.g. dereferencing a \`NULL\` pointer \`0x00000000\`).
 - **InstrFetchProhibited**: Jumping execution to an unmapped memory region.
 - **IllegalInstruction**: CPU encountered an invalid opcode (often caused by corrupted flash memory or mismatched compiler architecture flags).
+- **Task Watchdog Reset (TWDT)**: High-priority FreeRTOS task starved the idle task.
+- **Brownout Detector Reset**: Internal 3.3V supply dipped below 2.43V during Wi-Fi transmission.
 
-#### 2. Watchdog Timer Resets (TWDT / RWDT)
-- **Task Watchdog Reset**: Occurs when a high-priority FreeRTOS task runs continuously without yielding execution (\`vTaskDelay\` or waiting on a queue), starving the idle task.
-- **Interrupt Watchdog Reset**: Occurs when an Interrupt Service Routine (ISR) takes too long to execute.
+<details>
+<summary>ESP-IDF Guru Meditation Register Dump Reference & addr2line Syntax</summary>
 
-#### 3. Brownout Detector Reset
-Triggered when the ESP32's internal supply voltage dips below the brownout threshold (~2.43V). Almost always caused by:
-- Weak USB power from unpowered hubs.
-- High current surges during Wi-Fi / Bluetooth transmission without adequate decoupling capacitors.
+When an ESP32 panics, the ROM bootloader outputs a register frame:
+
+| Register | Architectural Meaning | Diagnostic Clue |
+| :--- | :--- | :--- |
+| **PC** | Program Counter | Exact memory address of the machine code instruction that crashed. |
+| **PS** | Processor Status | CPU privilege level, interrupt mask, and ALU condition codes. |
+| **A0** | Return Address | Address that called the crashing function (one level back in call stack). |
+| **A1 (SP)** | Stack Pointer | Top of active FreeRTOS task stack. If close to stack limit, task experienced a stack overflow! |
+| **EXCVADDR** | Exception Virtual Address | The illegal memory pointer that the CPU tried to read or write (e.g. \`0x00000004\` indicates struct member access on NULL). |
+
+#### Translating PC Address to Source Line with addr2line
+The workbench generates the exact command to find the bug in your source code:
+\`\`\`bash
+# For ESP32 Classic (Xtensa):
+xtensa-esp32-elf-addr2line -pfia -e build/my_project.elf 0x400d1a44
+
+# For ESP32-C3 / C6 (RISC-V):
+riscv32-esp-elf-addr2line -pfia -e build/my_project.elf 0x420042a8
+\`\`\`
+Output prints the exact C/C++ file name and line number:
+\`\`\`text
+0x400d1a44: sensor_read at /home/user/esp/main/sensor.c:142
+\`\`\`
+
+</details>
 
 ---
 
-### 2. Automated Diagnostic Decoding
-When a crash occurs:
-- The alert panel flashes an emergency warning banner and sounds an optional audio alert.
-- **Registers Extracted**: Automatically extracts **PC** (Program Counter), **PS** (Processor Status), **A0-A15** (Return address and general registers), and **EXCVADDR** (Faulty memory address).
-- **CLI Decode Command**: Generates the exact \`xtensa-esp32-elf-addr2line\` command needed to translate the raw hexadecimal PC address into the exact source code file and line number in your project!
+### 2. Automated Diagnostic Actions
+When a panic arrives:
+- The alert panel flashes an emergency warning banner and sounds an optional audio chime.
+- Extracts registers and provides root cause diagnosis.
+- Copies the \`addr2line\` command to clipboard in 1 click.
 `
   },
   {
@@ -191,7 +260,7 @@ When a crash occurs:
     title: 'Automated Test Runner & Scripts — Bench Testing Engine',
     summary: 'Write sandboxed JavaScript automation routines, send timed serial sequences, assert responses, and automate quality control.',
     tags: ['Automation', 'Test Runner', 'Scripting', 'JavaScript', 'Regression Testing', 'Bench Test', 'QA'],
-    readTime: '13 min read',
+    readTime: '15 min read',
     content: `
 # Automated Test Runner & Scripts — Bench Testing
 
@@ -201,44 +270,46 @@ The **Test Runner & Automation Deck** provides a sandboxed execution environment
 
 ### 1. The Scripting API
 
-Automation scripts are written in standard JavaScript using asynchronous helper primitives exposed by the runner:
+Automation scripts are written in standard JavaScript using asynchronous helper primitives:
 
+<details>
+<summary>Full Test Runner API Specification & Automated Regression Recipes</summary>
+
+| API Function | Parameters | Description |
+| :--- | :--- | :--- |
+| \`session.send(text)\` | \`text: string\` | Transmits text string followed by configured line endings. |
+| \`session.sendBytes(arr)\` | \`arr: number[]\` | Transmits raw binary bytes (e.g. \`[0xAA, 0x55, 0x01]\`). |
+| \`session.expect(pat, timeoutMs)\` | \`pat: string \| RegExp\` | Awaits matching pattern in incoming buffer. Returns \`{matched: bool, text: string}\`. |
+| \`session.delay(ms)\` | \`ms: number\` | Non-blocking execution delay. |
+| \`session.log(msg)\` | \`msg: string\` | Appends info message to the test runner audit log. |
+| \`session.assert(cond, msg)\` | \`cond: bool, msg: string\` | Throws test failure if condition is false. |
+| \`session.pass(msg)\` | \`msg: string\` | Explicitly marks test step passed. |
+| \`session.fail(msg)\` | \`msg: string\` | Explicitly aborts test queue with failure verdict. |
+
+#### Complete Factory Quality Control Recipe
 \`\`\`javascript
-// Sample Automated AT Modem Diagnostic Test
-async function runTest(session) {
-  session.log("Checking AT command response...");
+async function runFactoryQA(session) {
+  session.log("Checking AT bootloader response...");
   await session.send("AT\r\n");
+  const res = await session.expect("OK", 1000);
+  session.assert(res.matched, "Target failed to respond to AT command within 1s");
   
-  const response = await session.expect("OK", 1000);
-  if (!response.matched) {
-    throw new Error("Modem failed to respond with OK!");
-  }
+  session.log("Querying MAC address...");
+  await session.send("AT+CIPSTAMAC?\r\n");
+  const macRes = await session.expect(/\+CIPSTAMAC:"([0-9a-f:]+)"/i, 1500);
+  session.assert(macRes.matched, "MAC address query failed");
   
-  session.log("Querying firmware version...");
-  await session.send("AT+GMR\r\n");
-  await session.delay(500);
-  
-  session.pass("Device passed all initialization checks!");
+  session.log("Target MAC: " + macRes.text);
+  session.pass("Board passed electrical and serial smoke checks!");
 }
 \`\`\`
 
-#### Available API Primitives
-| Function | Description |
-| :--- | :--- |
-| \`session.send(text)\` | Transmits a string over the active serial port |
-| \`session.sendBytes([0xAA, ...])\` | Transmits raw binary byte arrays |
-| \`session.expect(pattern, timeoutMs)\` | Waits for a string or regex in the serial stream |
-| \`session.delay(ms)\` | Pauses script execution for specified milliseconds |
-| \`session.log(message)\` | Prints informational message to the test console |
-| \`session.assert(condition, message)\` | Evaluates a truthy assertion |
-| \`session.pass(message)\` / \`fail(msg)\` | Marks test verdict and advances queue |
+</details>
 
 ---
 
-### 2. Use Cases & Test Report Export
-- **Factory Production Testing**: Verify that newly soldered boards communicate, report correct silicon MAC addresses, and pass loopback checks.
-- **Stress & Burn-in Testing**: Send thousands of commands over 24 hours and log failure rates.
-- **Exporting Results**: Click **Export Report** to generate clean JSON / CSV test audit logs.
+### 2. Exporting Audit Reports
+Click **Export Report** to generate clean JSON / CSV test audit logs with pass/fail timestamps and complete serial interaction transcripts.
 `
   },
   {
@@ -248,7 +319,7 @@ async function runTest(session) {
     title: 'USB Recon & Device Autopsy — Descriptor Analysis & Clones',
     summary: 'Inspect USB Device, Configuration, Interface, and Endpoint descriptors, identify counterfeit bridge chips, and analyze USB capabilities.',
     tags: ['USB Recon', 'Autopsy', 'Descriptors', 'WebUSB', 'VID/PID', 'Counterfeit Chips', 'FTDI Clone'],
-    readTime: '13 min read',
+    readTime: '15 min read',
     content: `
 # USB Recon & Device Autopsy — Descriptor Analysis
 
@@ -258,26 +329,44 @@ The **USB Recon & Autopsy** workbench performs deep interrogation of USB hardwar
 
 ### 1. Anatomy of USB Descriptors
 
-Every USB device presents a hierarchical tree of descriptors upon enumeration:
-1. **Device Descriptor**:
-   - \`idVendor\` (VID) & \`idProduct\` (PID): Registered manufacturer and device identifiers.
-   - \`bcdUSB\`: USB specification compliance (e.g. 0x0200 for USB 2.0).
-   - \`bDeviceClass\`: Standard class (e.g. 0x02 for Communication Device Class, 0x00 for composite interfaces).
-   - String descriptors: Manufacturer Name, Product String, and Hardware Serial Number.
-2. **Configuration Descriptor**: Power requirements (Bus-powered vs Self-powered) and \`bMaxPower\` (current consumption in 2mA units).
-3. **Interface Descriptors**: Logical function groups (e.g. CDC Control vs CDC Data).
-4. **Endpoint Descriptors**:
-   - Direction: IN (Device to Host) vs OUT (Host to Device).
-   - Transfer Type: Control, Bulk, Interrupt, or Isochronous.
-   - \`wMaxPacketSize\`: Maximum packet payload (e.g. 64 bytes for Full-Speed bulk).
+Every USB peripheral presents a hierarchical tree of descriptors during USB enumeration:
+
+<details>
+<summary>USB Device Descriptor Hierarchy & WCH / FTDI Clone Detection Rules</summary>
+
+#### USB Descriptor Hierarchy (USB 2.0 / 3.0 Chapter 9)
+1. **Device Descriptor (18 Bytes)**:
+   - \`bLength\`: \`0x12\` (18 bytes).
+   - \`bDescriptorType\`: \`0x01\` (DEVICE).
+   - \`bcdUSB\`: USB specification compliance (e.g. \`0x0200\` for USB 2.0).
+   - \`bDeviceClass\`: \`0x02\` (CDC), \`0x00\` (Composite / Interface-specific).
+   - \`idVendor\` (VID) & \`idProduct\` (PID): 16-bit identifiers.
+   - \`iManufacturer\`, \`iProduct\`, \`iSerialNumber\`: String descriptor index pointers.
+2. **Configuration Descriptor (9 Bytes)**:
+   - \`wTotalLength\`: Cumulative size of config, interfaces, and endpoints.
+   - \`bmAttributes\`: Bus-powered vs Self-powered, Remote Wakeup support.
+   - \`bMaxPower\`: Maximum current draw expressed in 2mA units (e.g. \`50\` = 100mA, \`250\` = 500mA).
+3. **Interface Descriptor (9 Bytes)**:
+   - \`bInterfaceClass\`: \`0x03\` (HID), \`0x0A\` (CDC Data), \`0xFF\` (Vendor Specific).
+4. **Endpoint Descriptor (7 Bytes)**:
+   - \`bEndpointAddress\`: Bit 7 indicates direction (\`0\` = OUT / Host-to-Device, \`1\` = IN / Device-to-Host). Bits 0-3 specify endpoint number (1 to 15).
+   - \`bmAttributes\`: \`00\`=Control, \`01\`=Isochronous, \`10\`=Bulk, \`11\`=Interrupt.
+   - \`wMaxPacketSize\`: Maximum transfer payload (typically 64 bytes for Full-Speed bulk).
+
+#### Counterfeit Silicon Detection Heuristics
+- **FTDI FT232R Clones**: Non-genuine chips often implement static serial numbers (e.g. \`A50285BI\`) or corrupt internal EEPROM registers upon receiving non-standard FTDI latency timer requests.
+- **CH340 Variations**: Differentiates between authentic WCH CH340G (requires external 12MHz crystal oscillator), CH340C (integrated internal clock), and unbranded Chinese clones that drop packets at bauds above 115,200.
+
+</details>
 
 ---
 
-### 2. Counterfeit & Clone IC Forensics
-The workbench includes heuristic detection for counterfeit USB-UART bridge ICs:
-- **FTDI FT232RL Clones**: Identifies cloned FTDI chips by checking response to non-standard EEPROM read requests and timing jitter on CTS/RTS handshakes.
-- **CH340 Variations**: Differentiates between authentic WCH CH340G (requires external crystal), CH340C (built-in clock), CH340N (8-pin compact), and non-genuine third-party clones.
-- **Prolific PL2303**: Detects legacy discontinued revision chips that fail on modern Windows 11 drivers.
+### 2. Step-by-Step Reconnaissance
+
+1. Connect any mystery device via USB and click **Interrogate USB Device**.
+2. Select the target device in the browser's native WebUSB prompt.
+3. The autopsy workbench constructs the complete descriptor hierarchy tree on screen.
+4. Claim raw interfaces and stream raw bulk or interrupt packets in real-time!
 `
   },
   {
@@ -287,7 +376,7 @@ The workbench includes heuristic detection for counterfeit USB-UART bridge ICs:
     title: 'Silicon Memory Dump — Hardware eFuses & Flash Geometry',
     summary: 'Read hardware eFuses, chip security states, MAC addresses, silicon revisions, and SPI flash geometries without flashing firmware.',
     tags: ['Silicon Dump', 'eFuses', 'Flash Geometry', 'Security State', 'ROM Bootloader', 'MAC Address', 'JEDEC'],
-    readTime: '13 min read',
+    readTime: '15 min read',
     content: `
 # Silicon Memory Dump — eFuse & Flash Geometry
 
@@ -299,25 +388,40 @@ The **Silicon Memory Dump** workbench leverages low-level ESP-IDF ROM bootloader
 
 eFuses are microscopic, one-time programmable (OTP) physical electronic fuses inside the silicon die. Once burned (blown from 0 to 1), an eFuse can **never** be reset or restored. They store permanent hardware characteristics and cryptographic security configurations.
 
+<details>
+<summary>ESP32 eFuse Memory Map (BLOCK0 to BLOCK3) & Silicon Errata</summary>
+
+The ESP32 family divides its eFuse controller into 4 physical blocks:
+
+| Block | Name | Bit Length | Function & Security Significance |
+| :--- | :--- | :--- | :--- |
+| **BLOCK0** | System Parameters | 256 bits | Factory MAC address, silicon revision, flash voltage (1.8V vs 3.3V), JTAG disable, download mode lock. |
+| **BLOCK1** | Flash Encryption Key | 256 bits | 256-bit AES key for on-the-fly hardware flash decryption. Read-protected when active. |
+| **BLOCK2** | Secure Boot Key | 256 bits | 256-bit SHA-256 digest or RSA public key hash for cryptographically signed boot verification. |
+| **BLOCK3** | Custom User Data | 256 bits | Free space for OEM serial numbers and device certificates. |
+
+#### SPI Flash Silicon Geometry (JEDEC ID)
+By issuing SPI command \`0x9F\` directly through the ROM bootloader SPI engine:
+- **Manufacturer Byte**:
+  - \`0xEF\`: Winbond Electronics
+  - \`0xC8\`: GigaDevice
+  - \`0xC2\`: Macronix
+  - \`0x20\`: Micron / XMC
+- **Capacity Byte**:
+  - \`0x16\`: 32 Mbit (4 Megabytes)
+  - \`0x17\`: 64 Mbit (8 Megabytes)
+  - \`0x18\`: 128 Mbit (16 Megabytes)
+
+</details>
+
 ---
 
-### 2. Data Extracted by the Memory Inspector
+### 2. Cryptographic Security Auditing
 
-#### 1. Chip Identification & Silicon Errata
-- **Exact Silicon Revision**: (e.g. ESP32 v3.0 ECO with fixed TWAI CAN bugs vs v1.0 silicon).
-- **Factory MAC Address**: Burned directly in BLOCK0 by Espressif.
-- **Feature Flags**: Embedded PSRAM detection, integrated flash size, dual-core vs single-core verification.
-
-#### 2. Cryptographic Security Auditing
-- **Flash Encryption Status**: Indicates whether hardware AES-256 flash encryption is enabled and whether the encryption key is permanently locked from read access.
-- **Secure Boot State**: Checks whether Secure Boot v1 or Secure Boot v2 RSA-3072 signature verification is enforced.
-- **JTAG Debug Disable**: Checks whether physical silicon hardware debugging via JTAG pins is permanently burned disabled.
-- **Download Mode Disable**: Confirms whether the ROM download bootloader is permanently locked for production security.
-
-#### 3. Flash Chip Hardware Geometry
-By sending the standard SPI command \`0x9F\` (Read JEDEC ID) directly through the ROM:
-- **Manufacturer ID**: (e.g. \`0xEF\` for Winbond, \`0xC8\` for GigaDevice, \`0xC2\` for Macronix).
-- **Memory Type & Capacity**: (e.g. \`0x4016\` = 4MB, \`0x4017\` = 8MB, \`0x4018\` = 16MB).
+The inspector verifies whether physical devices are protected against hardware tampering:
+- **Flash Encryption**: Confirms whether flash contents are readable if desoldered with a hot air gun.
+- **Secure Boot Status**: Confirms whether unsigned custom firmwares can be flashed.
+- **JTAG Debug Disable**: Confirms whether physical silicon hardware debugging is locked out.
 `
   }
 ];

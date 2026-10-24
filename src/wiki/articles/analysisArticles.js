@@ -11,7 +11,7 @@ export const ANALYSIS_ARTICLES = [
     title: 'Packet & Protocol Lab — 802.11 Dissector, PCAP & Packet Framer',
     summary: 'Master raw 802.11 Wi-Fi promiscuous frame capture, EAPOL 4-way handshakes, PCAP export for Wireshark, hex stream slicing, and custom serial protocol framing.',
     tags: ['Wi-Fi', '802.11', 'PCAP', 'Packet Framer', 'Hex Stream', 'Dissector', 'EAPOL', 'Handshake', 'Wireshark'],
-    readTime: '15 min read',
+    readTime: '18 min read',
     content: `
 # Packet & Protocol Lab — 802.11 Dissector & PCAP Studio
 
@@ -41,18 +41,65 @@ Every raw Wi-Fi frame conforms to this binary format:
 | Frame Control (2B) | Duration(2B) | Address 1(6B)| Address 2(6B)| Address 3(6B)| Seq Ctrl(2B)| Payload (N B) | FCS (4B) |
 +--------------------+--------------+--------------+--------------+--------------+-------------+---------------+----------+
 \`\`\`
-1. **Frame Control (2 Bytes)**:
-   - **Type (2 bits)**: \`00\` = Management, \`01\` = Control, \`10\` = Data.
-   - **Subtype (4 bits)**: Identifies the exact packet:
-     - \`0x80\` (Type 00, Subtype 1000): **Beacon Frame**.
-     - \`0x40\` (Type 00, Subtype 0100): **Probe Request**.
-     - \`0x50\` (Type 00, Subtype 0101): **Probe Response**.
-     - \`0xC0\` (Type 00, Subtype 1100): **Deauthentication Frame**.
-     - \`0x08\` (Type 10, Subtype 0000): **Data Frame**.
-2. **Address Fields (6 Bytes each)**:
-   - **Address 1**: Receiver MAC Address (RA / Destination).
-   - **Address 2**: Transmitter MAC Address (TA / Source AP or Client).
-   - **Address 3**: BSSID (Basic Service Set Identifier / AP hardware address).
+
+<details>
+<summary>Deep Dive: 802.11 Frame Control Bitmask & EAPOL 4-Way Handshake Cryptographic Math</summary>
+
+#### 16-Bit Frame Control Field Bitmask
+The first 2 bytes of every 802.11 packet dictate how the rest of the MAC header must be parsed:
+
+| Bit Range | Field Name | Meaning & Common Values |
+| :--- | :--- | :--- |
+| **B0 - B1** | Protocol Version | Always \`00\` in modern 802.11 networks. |
+| **B2 - B3** | Type | \`00\` = Management, \`01\` = Control, \`10\` = Data, \`11\` = Reserved. |
+| **B4 - B7** | Subtype | Detailed frame action (e.g. \`1000\` = Beacon, \`0100\` = Probe Req, \`1100\` = Deauth). |
+| **B8** | To DS | \`1\` if destination is the Distribution System (wired AP backbone). |
+| **B9** | From DS | \`1\` if frame originated from the Distribution System. |
+| **B10** | More Fragments | \`1\` if higher-layer packet was fragmented into multiple frames. |
+| **B11** | Retry | \`1\` if frame is a retransmission due to missing 802.11 ACK. |
+| **B12** | Power Mgmt | \`1\` if transmitter station is entering 802.11 Power Save mode. |
+| **B13** | More Data | \`1\` if AP has buffered frames ready for power-saving station. |
+| **B14** | Protected Frame | \`1\` if payload is encrypted (WEP, TKIP, CCMP AES, GCMP). |
+| **B15** | Order | \`1\` if StrictlyOrdered transmission service is requested. |
+
+#### EAPOL 4-Way Handshake Mathematical Key Derivation
+To authenticate and generate the session encryption keys without transmitting passwords over the air, WPA/WPA2 utilizes the 4-way handshake:
+
+1. **PMK (Pairwise Master Key)**: Derived from the WPA passphrase and SSID using PBKDF2:
+   \`\`\`text
+   PMK = PBKDF2(HMAC-SHA1, Passphrase, SSID, 4096 iterations, 256 bits)
+   \`\`\`
+2. **Message 1 (AP -> Station)**: The AP generates a 256-bit random number called the **ANonce** and transmits it with a Key Replay Counter.
+3. **Message 2 (Station -> AP)**: The station generates its own 256-bit random number called the **SNonce**. The station now has all 5 inputs to derive the **PTK (Pairwise Transient Key)**:
+   \`\`\`text
+   PTK = PRF-512(PMK, "Pairwise key expansion", Min(AA,SPA) || Max(AA,SPA) || Min(ANonce,SNonce) || Max(ANonce,SNonce))
+   \`\`\`
+   - \`AA\`: Access Point MAC Address (6 bytes).
+   - \`SPA\`: Station Supplicant MAC Address (6 bytes).
+   - The station calculates a **MIC (Message Integrity Code)** using the KCK (Key Confirmation Key, bits 0-127 of PTK) and attaches it to Message 2.
+4. **Message 3 (AP -> Station)**: The AP verifies the MIC, increments the replay counter, and transmits the **GTK (Group Temporal Key)** encrypted with the KEK (Key Encryption Key).
+5. **Message 4 (Station -> AP)**: Final confirmation MIC from the station. Both sides now activate AES-CCMP encryption.
+
+</details>
+
+<details>
+<summary>Custom Protocol Framer: SLIP, COBS & Byte Stuffing Algorithms</summary>
+
+When transmitting binary packets across raw serial channels without hardware flow control, embedded engineers use byte stuffing algorithms to prevent binary data from colliding with packet framing markers:
+
+#### 1. SLIP (Serial Line Internet Protocol — RFC 1055)
+- **Frame End**: \`0xC0\` (Octal \`0300\`).
+- **Frame Escape**: \`0xDB\` (Octal \`0333\`).
+- If data byte is \`0xC0\`, replace with \`0xDB 0xDC\`.
+- If data byte is \`0xDB\`, replace with \`0xDB 0xDD\`.
+- Widely used by ESP-IDF ROM bootloader and IP-over-serial stacks.
+
+#### 2. COBS (Consistent Overhead Byte Stuffing)
+- Encodes a packet of *N* bytes with at most $\lfloor N/254 \rfloor + 1$ bytes of overhead.
+- Completely eliminates all zero (\`0x00\`) bytes from the payload.
+- This allows \`0x00\` to serve as an infallible, self-synchronizing packet boundary delimiter in industrial telemetry and drone telemetry links.
+
+</details>
 
 ---
 
@@ -77,15 +124,6 @@ Every raw Wi-Fi frame conforms to this binary format:
    - SSID Name (for Beacons and Probes).
 5. **EAPOL Handshake Alert**: When a client connects or reconnects to an AP, the tool isolates the EAPOL 4-way handshake frames (Messages 1, 2, 3, and 4) and flashes a green **Handshake Captured** banner.
 6. **Export PCAP**: Click **Export PCAP** to download a standard Libpcap \`.pcap\` file. Open this file in **Wireshark** to inspect full decryptable payloads.
-
----
-
-### 5. Custom Packet Framer (Embedded Serial Protocols)
-
-Switch to the **Packet Framer** tab to test custom binary micro-controller protocols (such as drones, telemetry links, or medical sensors):
-- **SLIP (Serial Line Internet Protocol)**: Delimits packets with \`0xC0\` and escapes collisions with \`0xDB 0xDC\`.
-- **COBS (Consistent Overhead Byte Stuffing)**: Removes all \`0x00\` bytes from the payload, using \`0x00\` as an unambiguous packet delimiter.
-- **Header-Length-Payload-CRC**: Define custom sync bytes (e.g. \`0xAA 0x55\`), payload length offsets, and CRC-16 / CRC-32 verification algorithms.
 `
   },
   {
@@ -95,7 +133,7 @@ Switch to the **Packet Framer** tab to test custom binary micro-controller proto
     title: '24MHz Logic Analyzer — 8-Channel Waveforms & Protocol Decoders',
     summary: 'Hardware digital signal analysis up to 24 MSps, edge triggers, protocol decoders for UART/SPI/I2C, sample buffers, and VCD export for Sigrok.',
     tags: ['Logic Analyzer', '24MHz', 'Waveforms', 'Protocol Decoder', 'Sigrok', 'VCD', 'SPI', 'I2C', 'UART'],
-    readTime: '14 min read',
+    readTime: '16 min read',
     content: `
 # 24MHz Logic Analyzer — Digital Signal Workbench
 
@@ -126,11 +164,53 @@ An oscilloscope displays analog voltages, but a **Logic Analyzer** records the d
 | **CH4 - CH7**| Green/Blue/Violet/Grey | 0V to 5.5V TTL | Interrupt lines, PWM motor signals, GPIO triggers |
 | **GND** | Black | **0V Reference** | **MANDATORY**: Must connect to target board ground! |
 
-> **Nyquist Sampling Theorem Rule**:
-> To reliably reconstruct a digital square wave, you must sample at least **4x to 10x faster** than the signal frequency:
-> - For **115,200 baud UART**: Use at least **1 MSps** or **2 MSps**.
-> - For **400 kHz Fast-Mode I2C**: Use at least **4 MSps** or **8 MSps**.
-> - For **2 MHz SPI**: Use the maximum **16 MSps** or **24 MSps**.
+<details>
+<summary>Hardware Architecture: Cypress FX2LP GPIF Engine & 24 MSps Nyquist Limits</summary>
+
+#### Cypress FX2LP (CY7C68013A) Streaming Architecture
+Low-cost $8 USB logic analyzers utilize the Cypress FX2LP microcontroller running custom open-source Sigrok firmware:
+- **General Programmable Interface (GPIF)**: Bypasses the 8051 CPU core entirely. It latches Port B/D pins directly into internal FIFO buffers at 24 MHz driven by a 48 MHz crystal oscillator.
+- **USB 2.0 High-Speed Bulk Streaming**: Pours uncompressed 8-bit samples across USB Bulk Endpoint 2 (512-byte packets) at up to **192 Mbps** ($24 \text{ MSps} \times 8 \text{ bits}$).
+- **Host-Side Ring Buffer**: Skon's USB Tool ingests these bulk byte streams over WebUSB and queues them into a circular memory buffer rendered via an offscreen HTML5 canvas.
+
+#### Nyquist-Shannon Sampling Constraints
+To faithfully reconstruct digital square pulses without aliasing:
+$$\text{Sample Rate} \ge 4 \times f_{\text{signal}}$$
+- **115,200 baud UART**: Bit duration is $8.68\,\mu\text{s}$. At 2 MSps, each bit has 17 samples, providing excellent timing margin.
+- **400 kHz Fast-Mode I2C**: Clock half-period is $1.25\,\mu\text{s}$. Requires at least 8 MSps (10 samples per half-period) to verify clock stretching and setup/hold times.
+- **SPI at 4 MHz**: Requires the maximum 24 MSps rate (6 samples per clock cycle).
+
+</details>
+
+<details>
+<summary>Sigrok / PulseView VCD File Format Specification</summary>
+
+When clicking **Export VCD**, the analyzer generates standard IEEE 1364 **Value Change Dump** files compatible with Sigrok, PulseView, and GTKWave:
+
+\`\`\`text
+$date 2026-10-24 00:00:00 $end
+$version Skon's USB Tool VCD Generator $end
+$timescale 1ns $end
+$scope module logic $end
+$var wire 1 ! ch0 $end
+$var wire 1 " ch1 $end
+$var wire 1 # ch2 $end
+$var wire 1 $ ch3 $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+0"
+1#
+1$
+#41
+1!
+#83
+0!
+\`\`\`
+Every transition records the nanosecond timestamp (\`#41\`) followed by the logic state and channel token (\`1!\`), minimizing file sizes compared to raw CSV dumps.
+
+</details>
 
 ---
 
@@ -148,7 +228,6 @@ An oscilloscope displays analog voltages, but a **Logic Analyzer** records the d
 6. **Activate Protocol Decoders**:
    - **I2C Decoder**: Assign SCL to CH0, SDA to CH1. The tool overlays green START markers, 7-bit hex addresses, ACK/NACK badges, and data payload bytes.
    - **UART Decoder**: Assign RX to CH1, set 115200 baud, 8-N-1. The tool renders ASCII characters directly inside the waveform pulses.
-7. **Export to VCD**: Click **Export VCD** to save the capture in standard Value Change Dump format for deep analysis in **PulseView / Sigrok**.
 `
   },
   {
@@ -158,7 +237,7 @@ An oscilloscope displays analog voltages, but a **Logic Analyzer** records the d
     title: 'CAN Bus & OBD-II Scanner — Automotive Diagnostics & Reverse Engineering',
     summary: 'Comprehensive vehicle network reverse engineering, SLCAN packet monitor, standard 11-bit and extended 29-bit CAN IDs, live OBD-II PID polling, and DTC clearing.',
     tags: ['CAN Bus', 'OBD-II', 'Automotive', 'SLCAN', 'TWAI', 'Vehicle Diagnostics', 'ECU', 'DTC', 'PID'],
-    readTime: '16 min read',
+    readTime: '18 min read',
     content: `
 # CAN Bus & OBD-II Scanner — Automotive Workbench
 
@@ -188,10 +267,73 @@ CAN communicates over a twisted pair of copper wires:
   - Dominant (\`0\`): \`Vdiff = 3.5V - 1.5V = 2.0V\`.
   - This differential noise immunity is what allows CAN to operate in electrically noisy engine bays.
 
-#### Termination Resistors (60 Ohms Total)
-Both ends of the physical CAN bus MUST terminate with a **120-ohm resistor** placed across CAN_H and CAN_L:
-- \`120 ohms // 120 ohms = 60 ohms total bus resistance\`.
-- If bench testing with a standalone ECU or gauge cluster, you MUST enable or wire a 120-ohm resistor, or signal reflections will corrupt the bus and trigger passive error frames.
+<details>
+<summary>CAN 2.0A & 2.0B Frame Bitfield Specification (SOF, Arbitration, Control, CRC, ACK)</summary>
+
+Every physical CAN frame transmitted across the wire contains strict synchronization and error checking fields:
+
+#### Standard 11-Bit Frame (CAN 2.0A)
+\`\`\`
++-----+----------------+-----+-----+----+---------+-------------+--------+-----+-----+------+
+| SOF | Identifier(11) | RTR | IDE | r0 | DLC (4) | Data (0-8B) | CRC(15)| CDel| ACK | EOF  |
++-----+----------------+-----+-----+----+---------+-------------+--------+-----+-----+------+
+\`\`\`
+
+1. **SOF (Start of Frame)**: 1 dominant bit (\`0\`) that synchronizes all node oscillator PLLs.
+2. **Arbitration Field**:
+   - **Identifier (11 bits)**: Sets packet priority. Lower numerical values have higher priority! Because \`0\` is dominant, a transmitter outputting a \`0\` will override a transmitter outputting a \`1\` during simultaneous transmission (lossless non-destructive bitwise arbitration).
+   - **RTR (Remote Transmission Request)**: \`0\` for data frames, \`1\` to request data from another ECU.
+3. **Control Field**:
+   - **IDE (Identifier Extension Bit)**: \`0\` specifies standard 11-bit ID; \`1\` specifies extended 29-bit ID (CAN 2.0B).
+   - **r0 (Reserved Bit)**: Transmitted as dominant \`0\`.
+   - **DLC (Data Length Code, 4 bits)**: Binary count of payload bytes ($0$ to $8$).
+4. **Data Field**: 0 to 8 bytes of application payload.
+5. **CRC Field**: 15-bit CRC calculation followed by a 1-bit recessive CRC Delimiter.
+6. **ACK Field**:
+   - **ACK Slot**: The transmitter outputs a recessive \`1\`. Any ECU on the bus that received the frame without a CRC error pulls this line down to dominant \`0\` to acknowledge!
+   - **ACK Delimiter**: 1 recessive bit.
+7. **EOF (End of Frame)**: 7 consecutive recessive bits (\`1111111\`).
+8. **Bit Stuffing Rule**: To guarantee edge transitions for clock recovery, the hardware CAN controller automatically inserts 1 stuffed bit of opposite polarity after every 5 consecutive identical bits.
+
+</details>
+
+<details>
+<summary>Complete SLCAN ASCII Command Protocol Reference</summary>
+
+The Lawicel SLCAN protocol is the universal ASCII standard for serial CAN adapters:
+
+| Command | Syntax | Meaning & Example |
+| :--- | :--- | :--- |
+| **Open Bus** | \`O\\r\` | Puts CAN controller in active operational mode. |
+| **Close Bus** | \`C\\r\` | Puts CAN controller in standby/sleep mode. |
+| **Set Baud** | \`S<0-8>\\r\` | \`S4\`=125k, \`S5\`=250k, \`S6\`=500k (Standard Car), \`S8\`=1000k. |
+| **Tx Standard** | \`t<id><len><data>\\r\` | \`t123411223344\\r\` transmits 11-bit ID 0x123 with 4 bytes. |
+| **Tx Extended** | \`T<id><len><data>\\r\` | \`T0000123481122334455667788\\r\` transmits 29-bit extended ID. |
+| **Rx Frame** | \`t<id><len><data>\\r\` | Incoming frames formatted identically for client parsing. |
+| **Read Flags** | \`F\\r\` | Returns error status flags (bit 0=RX FIFO full, bit 2=Error passive, bit 7=Bus-off). |
+| **Version** | \`V\\r\` | Queries hardware and firmware build version. |
+
+</details>
+
+<details>
+<summary>Standard SAE J1979 OBD-II Diagnostic PIDs Master Table</summary>
+
+When communicating with vehicles on Mode 01 (Live Current Data), broadcast requests are addressed to ECU \`0x7DF\`. The engine computer answers from \`0x7E8\`:
+
+| PID (Hex) | Parameter Name | Formula / Scaling | Units | Typical Normal Range |
+| :--- | :--- | :--- | :--- | :--- |
+| **\`0x04\`** | Calculated Engine Load | \`A * 100 / 255\` | % | 15% - 35% (Idle) |
+| **\`0x05\`** | Engine Coolant Temp | \`A - 40\` | °C | 85°C - 105°C |
+| **\`0x0C\`** | Engine RPM | \`((A * 256) + B) / 4\` | RPM | 650 - 850 (Idle) |
+| **\`0x0D\`** | Vehicle Speed | \`A\` | km/h | 0 - 250 km/h |
+| **\`0x0F\`** | Intake Air Temp (IAT) | \`A - 40\` | °C | Ambient + 5°C to 15°C |
+| **\`0x11\`** | Absolute Throttle Position | \`A * 100 / 255\` | % | 10% - 15% (Closed) |
+| **\`0x1F\`** | Run Time Since Engine Start | \`(A * 256) + B\` | Seconds | 0 - 65,535 s |
+| **\`0x2F\`** | Fuel Tank Level Input | \`A * 100 / 255\` | % | 0% - 100% |
+| **\`0x33\`** | Absolute Barometric Pressure | \`A\` | kPa | 90 - 105 kPa |
+| **\`0x42\`** | Control Module Voltage | \`((A * 256) + B) / 1000\`| Volts | 13.8V - 14.6V (Alternator running) |
+
+</details>
 
 ---
 
@@ -220,14 +362,9 @@ Under the steering wheel of any 2008+ car:
 
 #### B. Live OBD-II Engine Diagnostics
 1. Click the **OBD-II Telemetry** tab.
-2. Click **Scan Supported PIDs**. The tool broadcasts a request to functional address \`0x7DF\`:
-   - \`0x02 0x01 0x00\`: Mode 01, PID 00 (Requests supported PIDs bitmap).
+2. Click **Scan Supported PIDs**. The tool broadcasts a request to functional address \`0x7DF\`.
 3. The engine ECU responds with its capability bitmap.
-4. The scanner automatically polls:
-   - **Engine RPM (PID 0x0C)**: Computed as \`((A * 256) + B) / 4\`.
-   - **Vehicle Speed (PID 0x0D)**: Value of \`A\` in km/h.
-   - **Coolant Temperature (PID 0x05)**: \`A - 40\` in °C.
-   - **Throttle Position (PID 0x11)**: \`A * 100 / 255\` in %.
+4. The scanner automatically polls Engine RPM, Vehicle Speed, Coolant Temperature, and Throttle Position.
 5. **Read Trouble Codes (Mode 03)**: Queries stored Diagnostic Trouble Codes (e.g. \`P0171\` System Too Lean).
 6. **Clear Trouble Codes (Mode 04)**: Sends \`0x01 0x04\` to clear DTCs and turn off the Check Engine light.
 `
@@ -239,7 +376,7 @@ Under the steering wheel of any 2008+ car:
     title: 'I2C & SPI Bus Explorer — 1-Click Chip Identification & Registers',
     summary: 'Hardware bus interrogation, 7-bit I2C address scanner 0x08-0x77, known chip dictionary lookup, SPI mode 0-3 register watch, and memory dump.',
     tags: ['I2C', 'SPI', 'Bus Explorer', 'Chip Identification', 'Sensors', 'Registers', 'EEPROM', 'OLED'],
-    readTime: '13 min read',
+    readTime: '15 min read',
     content: `
 # I2C & SPI Bus Explorer — Hardware Reverse Engineering
 
@@ -258,31 +395,52 @@ Both SDA and SCL are **open-drain** lines. A connected chip can only pull a line
 - You **MUST** have pull-up resistors (typically **4.7kΩ** for 100kHz standard mode, or **2.2kΩ** for 400kHz fast mode) tied from SDA and SCL to +3.3V.
 - Without pull-ups, the lines float near 0V and the bus locks permanently in a NACK state.
 
----
+<details>
+<summary>Complete 7-Bit I2C Address Register Map & Silicon Identifiers</summary>
 
-### 2. 1-Click I2C Address Scanner
+When performing a bus sweep, cross-reference responding addresses against this silicon dictionary:
 
-When you click **Scan I2C Bus**, the tool sweeps all valid 7-bit addresses from \`0x08\` to \`0x77\`:
-1. Emits an I2C **START** condition (SDA pulled LOW while SCL is HIGH).
-2. Sends the 7-bit address followed by the **Write** bit (\`ADDR << 1 | 0\`).
-3. Releases SDA and pulses SCL to sample the 9th clock bit:
-   - If the slave pulls SDA LOW: **ACK (Acknowledge)** — Device is physically present!
-   - If SDA remains HIGH: **NACK (No Acknowledge)** — No device at this address.
-4. Emits an I2C **STOP** condition (SDA rising while SCL is HIGH).
-
-#### The Embedded Chip Signature Dictionary
-When an ACK is received, the tool cross-references the address against its silicon database:
-| I2C Address | Common Silicon Identified | Description |
+| Address Range | Common Silicon Identified | Description & Default WHO_AM_I Registers |
 | :--- | :--- | :--- |
-| **\`0x3C\` / \`0x3D\`** | SSD1306 / SH1106 | 128x64 or 128x32 Monochrome OLED Display |
-| **\`0x48\` - \`0x4B\`** | ADS1115 / TMP102 | 16-Bit High Precision ADC or Temperature Sensor |
-| **\`0x50\` - \`0x57\`** | AT24Cxx Series | 24-Series I2C Serial EEPROM (24C02 to 24C512) |
-| **\`0x68\`** | MPU-6050 / DS3231 | 6-Axis Gyro/Accelerometer or Real-Time Clock |
-| **\`0x76\` / \`0x77\`** | Bosch BMP280 / BME280 | Digital Barometric Pressure & Humidity Sensor |
+| **\`0x00\` - \`0x07\`** | **Reserved** | General Call (\`0x00\`), START byte (\`0x01\`), CBUS, High-speed master codes. |
+| **\`0x18\` - \`0x1E\`** | LIS3DH / HMC5883L | 3-axis accelerometer (\`0x18\`/\`0x19\`) or 3-axis compass (\`0x1E\`). |
+| **\`0x20\` - \`0x27\`** | PCF8574 / MCP23008 | 8-bit GPIO port expanders (often found driving 1602 LCD backboards). |
+| **\`0x38\` - \`0x39\`** | AHT10 / AHT20 | High-precision digital temperature and humidity sensor. |
+| **\`0x3C\` / \`0x3D\`** | SSD1306 / SH1106 | 128x64 or 128x32 Monochrome OLED Display controller. |
+| **\`0x40\` - \`0x45\`** | INA219 / INA226 | High-side DC current and power sensor shunt monitor. |
+| **\`0x48\` - \`0x4B\`** | ADS1115 / TMP102 | 16-Bit High Precision 4-Channel ADC or digital temperature sensor. |
+| **\`0x50\` - \`0x57\`** | 24C02 - 24C512 | I2C Serial EEPROMs (Address set by A0, A1, A2 strapping pins). |
+| **\`0x5C\`** | DHT12 / AM2320 | Digital temperature and humidity sensor. |
+| **\`0x68\`** | MPU-6050 / DS3231 | 6-Axis Gyro/Accelerometer (\`WHO_AM_I\` reg \`0x75\` = \`0x68\`) or Precision RTC. |
+| **\`0x76\` / \`0x77\`** | Bosch BMP280 / BME280 | Barometric pressure & humidity sensor (\`ID\` reg \`0xD0\` = \`0x58\` or \`0x60\`). |
+| **\`0x78\` - \`0x7F\`** | **Reserved** | 10-bit slave addressing prefix bytes. |
+
+</details>
+
+<details>
+<summary>SPI Protocol Timing & Mode Selection (Modes 0 to 3)</summary>
+
+Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Communication requires setting the matching **CPOL (Clock Polarity)** and **CPHA (Clock Phase)** mode:
+
+| SPI Mode | CPOL (Idle State) | CPHA (Sample Edge) | Description & Typical Silicon |
+| :--- | :--- | :--- | :--- |
+| **Mode 0** | \`0\` (Idle Low) | \`0\` (Leading / Rising) | Standard for SD cards, Winbond NOR flash, ST7789 displays. |
+| **Mode 1** | \`0\` (Idle Low) | \`1\` (Trailing / Falling) | Used by specialized ADCs and motor drivers. |
+| **Mode 2** | \`1\` (Idle High) | \`0\` (Leading / Falling) | Inverted clock baseline. |
+| **Mode 3** | \`1\` (Idle High) | \`1\` (Trailing / Rising) | Alternative mode supported by most SPI NOR flash memories. |
+
+#### SPI Flash Memory Basic Opcode Commands
+- **\`0x9F\`**: Read JEDEC Identification (Returns Manufacturer ID, Memory Type, Capacity).
+- **\`0x06\`**: Write Enable (WREN - Must precede every write/erase operation).
+- **\`0x05\`**: Read Status Register 1 (Bit 0 = \`WIP\` Write-In-Progress).
+- **\`0x03\`**: Read Data Bytes at 24-bit address.
+- **\`0x02\`**: Page Program (Writes up to 256 bytes to flash).
+
+</details>
 
 ---
 
-### 3. Interactive Register Read & Write
+### 2. Interactive Register Read & Write
 
 Once a chip is located:
 1. Select the discovered device address.
@@ -291,19 +449,6 @@ Once a chip is located:
    - For an MPU-6050, it returns \`0x68\` (**WHO_AM_I** verification confirmed!).
 3. **Write Register**: Enter target register and new byte value (e.g. writing \`0x00\` to register \`0x6B\` clears the sleep bit and wakes up the sensor).
 4. **Live Register Watch**: Set up periodic polling (50ms to 1000ms) on data registers (such as Accelerometer X-axis high/low bytes at \`0x3B\` and \`0x3C\`) to see real-time sensor measurements update live on the screen!
-
----
-
-### 4. SPI Bus Mode Explorer (Modes 0, 1, 2, 3)
-
-For SPI devices (flash chips, SD cards, RF transceivers):
-Configure **CPOL (Clock Polarity)** and **CPHA (Clock Phase)**:
-- **Mode 0 (CPOL=0, CPHA=0)**: Clock idle LOW, data sampled on rising edge (Standard for SD cards & flash).
-- **Mode 1 (CPOL=0, CPHA=1)**: Clock idle LOW, data sampled on falling edge.
-- **Mode 2 (CPOL=1, CPHA=0)**: Clock idle HIGH, data sampled on falling edge.
-- **Mode 3 (CPOL=1, CPHA=1)**: Clock idle HIGH, data sampled on rising edge.
-
-Send hex byte strings (e.g. \`0x9F 0x00 0x00 0x00\`) to read JEDEC IDs or dump SPI flash memory.
 `
   },
   {
@@ -313,7 +458,7 @@ Send hex byte strings (e.g. \`0x9F 0x00 0x00 0x00\`) to read JEDEC IDs or dump S
     title: 'Modbus RTU & RS-485 — Industrial Telemetry & Holding Registers',
     summary: 'Master industrial RS-485 differential signaling, Modbus RTU framing, CRC-16 calculation, slave address polling, function codes 01-16, and endianness conversions.',
     tags: ['Modbus', 'RS-485', 'Industrial', 'Holding Registers', 'PLC', 'CRC-16', 'Inverter', 'Telemetry'],
-    readTime: '14 min read',
+    readTime: '16 min read',
     content: `
 # Modbus RTU & RS-485 — Industrial Diagnostics
 
@@ -341,11 +486,52 @@ A Modbus RTU frame has no text delimiters. Instead, message boundaries are delim
 +---------------------+-------------------+------------------+------------------+
 \`\`\`
 
-#### The CRC-16-IBM Checksum
-Every packet concludes with a 16-bit Cyclic Redundancy Check:
-- Calculated with polynomial \`0xA001\` and initial value \`0xFFFF\`.
-- Transmitted **Low-Byte First (Little-Endian)**.
-- The workbench automatically computes and verifies this checksum on every transmitted and received packet.
+<details>
+<summary>Modbus RTU CRC-16 Calculation Algorithm (JavaScript & C Reference)</summary>
+
+Every Modbus RTU packet must conclude with an inverted polynomial CRC-16-IBM checksum transmitted Little-Endian (Low-Byte First):
+
+\`\`\`javascript
+/**
+ * Calculates Modbus RTU CRC-16
+ * @param {Uint8Array} buffer - Frame bytes excluding last 2 CRC bytes
+ * @returns {number} 16-bit CRC integer
+ */
+function calculateModbusCRC(buffer) {
+  let crc = 0xFFFF;
+  for (let i = 0; i < buffer.length; i++) {
+    crc ^= buffer[i];
+    for (let j = 0; j < 8; j++) {
+      if ((crc & 0x0001) !== 0) {
+        crc = (crc >> 1) ^ 0xA001;
+      } else {
+        crc = crc >> 1;
+      }
+    }
+  }
+  return crc; // Low byte: crc & 0xFF, High byte: (crc >> 8) & 0xFF
+}
+\`\`\`
+If a received response fails this mathematical check, the workbench drops the packet and warns of RS-485 bus noise or loose cabling.
+
+</details>
+
+<details>
+<summary>Master Exception Response Codes & Troubleshooting</summary>
+
+When a slave device cannot fulfill a master request, it returns the requested Function Code with the highest bit set (\`FunctionCode | 0x80\`) followed by an **Exception Code**:
+
+| Exception Code | Name | Cause & Recovery Action |
+| :--- | :--- | :--- |
+| **\`0x01\`** | Illegal Function | The function code received is not supported by the slave (e.g. attempting to write registers on a read-only sensor). |
+| **\`0x02\`** | Illegal Data Address | The register address queried does not exist on this device. Double check manual for 0-based vs 1-based indexing! |
+| **\`0x03\`** | Illegal Data Value | The quantity of registers requested exceeds maximum (typically max 125 registers), or write data is out of bounds. |
+| **\`0x04\`** | Slave Device Failure | An unrecoverable error occurred while the slave was attempting to perform the requested action. |
+| **\`0x05\`** | Acknowledge | The slave accepted request but needs significant time to process (used in programming cycles). |
+| **\`0x06\`** | Slave Device Busy | The slave is currently executing a long-duration command; retry request later. |
+| **\`0x0A\`** | Gateway Path Unavailable | Misconfigured RS-485 to Ethernet gateway bridge. |
+
+</details>
 
 ---
 
@@ -372,15 +558,6 @@ Because the original 1979 Modbus specification didn't define 32-bit float order,
 2. **Little-Endian (CD AB)**: Low word first, high word second.
 3. **Mid-Big / Byte Swap (BA DC)**: High word first, but bytes inside each word swapped.
 4. **Mid-Little / Word Swap (DC BA)**: Standard for Eastron / Chint energy meters.
-
----
-
-### 5. Step-by-Step Usage Guide
-
-1. **Connect Hardware**: Plug your USB-to-RS485 dongle into your PC. Connect **A** to slave **A (D+)**, **B** to slave **B (D-)**, and **GND** to slave ground.
-2. **Scan for Slaves**: If you don't know the unit's slave ID, click **Scan Slave IDs (1-247)**. The tool pings each address with a Read Holding Register command until a device responds.
-3. **Poll Registers**: Enter the starting register address (e.g. \`0x0000\`) and quantity of registers to read (e.g. \`10\`).
-4. **Inspect Live Table**: The results table displays Register Offset, Hex Value, Signed 16-bit Int, Unsigned 16-bit Int, and Converted Float32.
 `
   },
   {
@@ -390,7 +567,7 @@ Because the original 1979 Modbus specification didn't define 32-bit float order,
     title: 'Oscilloscope Plotter — Multi-Channel Real-Time Waveforms',
     summary: 'High-speed 60 FPS real-time serial waveform grapher, auto-scaling, CSV telemetry parsers, multi-channel color assignment, and data logging.',
     tags: ['Plotter', 'Oscilloscope', 'Waveforms', 'ADC', 'Telemetry', 'Sensors', 'Graphing', 'CSV'],
-    readTime: '10 min read',
+    readTime: '12 min read',
     content: `
 # Oscilloscope Plotter — Live Waveform Visualizer
 
@@ -426,6 +603,18 @@ voltage:3.31 current:0.42 temp:24.8\r\n
 \`\`\`
 The plotter extracts the variable labels (\`voltage\`, \`current\`, \`temp\`) and automatically assigns them to the legend!
 
+<details>
+<summary>Advanced Real-Time Signal Processing: FFT & Rolling Statistics</summary>
+
+The oscilloscope plotter computes dynamic statistics over the sliding sample window:
+- **Peak-to-Peak ($V_{pp}$)**: $V_{\max} - V_{\min}$, highlighting power rail ripple voltage.
+- **Root-Mean-Square ($V_{rms}$)**:
+  $$V_{rms} = \sqrt{\frac{1}{N}\sum_{i=1}^N x_i^2}$$
+- **Moving Average Filter**: Smooths high-frequency ADC quantization jitter over an adjustable 5 to 50 sample rolling window.
+- **Frequency Counter**: Automatically measures signal cycle frequency by detecting upward zero/mean-crossing thresholds.
+
+</details>
+
 ---
 
 ### 3. Interactive Controls & Features
@@ -446,7 +635,7 @@ The plotter extracts the variable labels (\`voltage\`, \`current\`, \`temp\`) an
     title: 'MitM Serial Bridge — Dual-Port Pass-Through & Sniffer',
     summary: 'Connect two WebSerial ports concurrently to inspect, log, filter, and inject traffic between a master controller and slave device.',
     tags: ['Serial Bridge', 'MitM', 'Sniffer', 'Dual Port', 'Pass-Through', 'Injection', 'Reverse Engineering'],
-    readTime: '11 min read',
+    readTime: '13 min read',
     content: `
 # MitM Serial Bridge — Dual-Port Interceptor
 
@@ -464,6 +653,16 @@ The **MitM Serial Bridge** solves this by inserting your computer between them:
 [Device A: Controller] <---USB-UART A---> [Skon's USB Tool] <---USB-UART B---> [Device B: Display]
 \`\`\`
 Traffic from Device A is displayed in the browser and transparently forwarded to Device B, and vice versa.
+
+<details>
+<summary>Baud Rate Matching & Latency Tuning for Dual-Port Bridges</summary>
+
+#### Asynchronous Forwarding & Microsecond Latency
+1. **Baud Rate Translation**: Port A and Port B do **not** need to operate at the same speed. You can bridge a legacy 9600 baud device on Port A to a 115200 baud modem on Port B.
+2. **Buffer Overrun Protection**: When forwarding from a high-speed port to a low-speed port, the bridge implements FIFO backpressure to prevent packet loss.
+3. **USB Frame Scheduling**: Modern USB host controllers poll bulk endpoints at 1 ms intervals. For high-speed packet exchanges, Skon's USB Tool utilizes zero-copy ArrayBuffer piping to minimize browser thread latency to under $1.5\,\text{ms}$.
+
+</details>
 
 ---
 
@@ -488,3 +687,4 @@ You need **two** USB-UART adapters connected to your computer:
 `
   }
 ];
+

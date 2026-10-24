@@ -287,6 +287,43 @@ export default function WikiApp() {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
+      // Expandable details disclosure
+      if (line.trim().startsWith('<details>')) {
+        flushTable();
+        flushCode();
+        let summaryText = 'Click to expand technical details';
+        const innerLines = [];
+        i++;
+        while (i < lines.length) {
+          const innerLine = lines[i];
+          if (innerLine.trim().startsWith('</details>')) {
+            break;
+          }
+          if (innerLine.trim().startsWith('<summary>') && innerLine.trim().endsWith('</summary>')) {
+            summaryText = innerLine.trim().replace('<summary>', '').replace('</summary>', '');
+          } else {
+            innerLines.push(innerLine);
+          }
+          i++;
+        }
+
+        elements.push(
+          <details key={`details-${keyIdx++}`} className="group my-4 rounded-xl border border-[#272e42] bg-[#0c0f18] overflow-hidden transition-all shadow-md">
+            <summary className="cursor-pointer select-none px-4 py-3 font-mono font-bold text-xs text-amber-300 hover:text-amber-200 bg-[#141824] hover:bg-[#1a2030] transition-colors flex items-center justify-between border-b border-transparent group-open:border-[#272e42]">
+              <span className="flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>{renderInline(summaryText)}</span>
+              </span>
+              <ChevronDown className="w-4 h-4 text-slate-400 transition-transform duration-200 group-open:rotate-180 shrink-0" />
+            </summary>
+            <div className="p-4 sm:p-5 bg-[#0a0d15] text-slate-300 text-xs sm:text-sm space-y-3">
+              {renderMarkdown(innerLines.join('\n'))}
+            </div>
+          </details>
+        );
+        continue;
+      }
+
       // Code blocks
       if (line.startsWith('```')) {
         if (inCodeBlock) {

