@@ -289,10 +289,10 @@ export default function CmsisDapDebugger() {
                     return (
                       <tr key={item.address} className="hover:bg-slate-900/40">
                         <td className="py-1 px-2.5 text-slate-500">
-                          0x{item.address.toString(16).padStart(8, '0').toUpperCase()}
+                          0x{(item.address ?? 0).toString(16).padStart(8, '0').toUpperCase()}
                         </td>
                         <td className="py-1 px-2.5 font-bold text-cyan-300">
-                          0x{(item.value >>> 0).toString(16).padStart(8, '0').toUpperCase()}
+                          0x{((item.value ?? 0) >>> 0).toString(16).padStart(8, '0').toUpperCase()}
                         </td>
                         <td className="py-1 px-2.5 text-slate-400">
                           {item.value >>> 0}

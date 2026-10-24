@@ -333,7 +333,7 @@ export default function LogicAnalyzerWorkbench() {
                     : 'bg-slate-900 text-cyan-300 border border-slate-800'
                 }`}
               >
-                {pkt.type === 'DATA' ? `0x${pkt.byte.toString(16).toUpperCase().padStart(2, '0')} (${pkt.ack ? 'ACK' : 'NACK'})` : pkt.type}
+                {pkt.type === 'DATA' ? `0x${(pkt.byte ?? 0).toString(16).toUpperCase().padStart(2, '0')} (${pkt.ack ? 'ACK' : 'NACK'})` : pkt.type}
               </span>
             ))}
           </div>
@@ -357,7 +357,7 @@ export default function LogicAnalyzerWorkbench() {
                 key={idx}
                 className="px-2 py-1 rounded font-bold text-[11px] bg-slate-900 text-amber-300 border border-slate-800"
               >
-                '{pkt.char}' (0x{pkt.byte.toString(16).toUpperCase()})
+                '{pkt.char}' (0x{(pkt.byte ?? 0).toString(16).toUpperCase()})
               </span>
             ))}
           </div>

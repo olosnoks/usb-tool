@@ -440,6 +440,8 @@ export class ProxmarkDevice {
             packet: {
               magic: 0x43334d50,
               cmd: options.cmd,
+              status: 0,
+              ng: true,
               length: options.payload ? options.payload.length : 0,
               flags: options.flags ?? 0,
               arg0: options.arg0 ?? 0,

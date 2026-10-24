@@ -161,7 +161,7 @@ export default function JtagWorkbench() {
                   DEVICE #{dev.index}: {dev.mfr} {dev.part}
                 </span>
                 <span className="text-[10px] text-cyan-400 font-mono font-bold">
-                  IDCODE: 0x{dev.idcode.toString(16).padStart(8, '0').toUpperCase()}
+                  IDCODE: 0x{(dev.idcode ?? 0).toString(16).padStart(8, '0').toUpperCase()}
                 </span>
               </div>
 

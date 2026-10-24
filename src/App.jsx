@@ -30,7 +30,6 @@ const BusExplorerWorkbench = React.lazy(() => import('./components/tools/BusExpl
 const JtagWorkbench = React.lazy(() => import('./components/tools/JtagWorkbench'));
 const ModbusWorkbench = React.lazy(() => import('./components/tools/ModbusWorkbench'));
 const AvrIspWorkbench = React.lazy(() => import('./components/tools/AvrIspWorkbench'));
-const RfidNfcWorkbench = React.lazy(() => import('./components/tools/RfidNfcWorkbench'));
 const PortapackWorkbench = React.lazy(() => import('./components/tools/PortapackWorkbench'));
 const FlipperWorkbench = React.lazy(() => import('./components/tools/flipper/FlipperWorkbench'));
 const ProxmarkWorkbench = React.lazy(() => import('./components/tools/proxmark/ProxmarkWorkbench'));
@@ -372,12 +371,6 @@ function AppContent() {
               </div>
             )}
 
-            {activeTool === 'rfid-nfc' && (
-              <div className="w-full">
-                <RfidNfcWorkbench />
-              </div>
-            )}
-
             {activeTool === 'mayhem' && (
               <div className="w-full">
                 <PortapackWorkbench />
@@ -390,7 +383,7 @@ function AppContent() {
               </div>
             )}
 
-            {activeTool === 'proxmark' && (
+            {(activeTool === 'proxmark' || activeTool === 'rfid-nfc') && (
               <div className="w-full">
                 <ProxmarkWorkbench />
               </div>

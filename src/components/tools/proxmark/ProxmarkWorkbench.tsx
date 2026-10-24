@@ -137,7 +137,7 @@ export default function ProxmarkWorkbench() {
       const res = await device.executeCommand(commandPayload);
       addLog(
         'rx',
-        `Command ${commandPayload.actionName} successful! Response Arg0: 0x${res.arg0.toString(16)}, Length: ${res.length} bytes`
+        `Command ${commandPayload.actionName} successful! Response Arg0: 0x${(res?.arg0 ?? 0).toString(16)}, Length: ${res?.length ?? 0} bytes`
       );
     } catch (err: any) {
       addLog('error', `Command failed: ${err.message}`);

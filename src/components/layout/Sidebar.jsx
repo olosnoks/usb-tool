@@ -59,7 +59,6 @@ export const SIDEBAR_SECTIONS = [
       { id: 'flipper', name: 'Flipper Zero Suite', icon: Bot, accent: 'amber', desc: 'qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC & SD' },
       { id: 'proxmark', name: 'Proxmark3 / PM5 Suite', icon: Radio, accent: 'cyan', desc: '13.56MHz & 125kHz RFID cloner, raw NG framing & WebFlash' },
       { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF Sub-GHz RF deck, LCD screen & FREQMAN' },
-      { id: 'rfid-nfc', name: 'RFID & NFC Card Deck', icon: Radio, accent: 'purple', desc: '125kHz badge cloner & Mifare sector dump' },
       { id: 'wardrive', name: 'GPS & Wardrive Suite', icon: Compass, accent: 'emerald', desc: 'NMEA sentence tracker, live map & u-blox UBX' }
     ]
   },

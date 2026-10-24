@@ -149,7 +149,7 @@ export default function BusExplorerWorkbench() {
           {selectedChipInfo && (
             <div className="flex items-center gap-2 bg-slate-950 px-3 py-1 rounded-lg border border-slate-800">
               <span className="text-[10px] text-slate-500 uppercase font-bold">Selected Target:</span>
-              <span className="font-extrabold text-amber-300">0x{selectedAddr.toString(16).toUpperCase()}</span>
+              <span className="font-extrabold text-amber-300">0x{(selectedAddr ?? 0).toString(16).toUpperCase()}</span>
               <span className="text-slate-400">• {selectedChipInfo.name}</span>
             </div>
           )}
@@ -231,7 +231,7 @@ export default function BusExplorerWorkbench() {
                 <Sparkles className="w-4 h-4 text-amber-400" />
                 <span>CHIP INTELLIGENCE</span>
               </span>
-              <span className="text-[10px] text-cyan-400 font-mono">0x{selectedAddr.toString(16).toUpperCase()}</span>
+              <span className="text-[10px] text-cyan-400 font-mono">0x{(selectedAddr ?? 0).toString(16).toUpperCase()}</span>
             </div>
 
             {selectedChipInfo ? (

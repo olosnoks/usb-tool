@@ -184,8 +184,9 @@ export default function CanBusWorkbench() {
   };
 
   const filteredMessageList = Object.values(messages).filter(m => {
+    if (!m) return false;
     if (!idFilter) return true;
-    const hex = m.id.toString(16).toUpperCase();
+    const hex = (m.id ?? 0).toString(16).toUpperCase();
     return hex.includes(idFilter.toUpperCase());
   });
 
@@ -329,7 +330,7 @@ export default function CanBusWorkbench() {
                     filteredMessageList.map((m) => (
                       <tr key={m.id} className="hover:bg-slate-900/40">
                         <td className="py-2 px-3 font-bold text-amber-300">
-                          0x{m.id.toString(16).toUpperCase().padStart(m.isExtended ? 8 : 3, '0')}
+                          0x{(m.id ?? 0).toString(16).toUpperCase().padStart(m.isExtended ? 8 : 3, '0')}
                         </td>
                         <td className="py-2 px-3 text-[10px] text-slate-400">
                           {m.isExtended ? 'EXT (29b)' : 'STD (11b)'}
@@ -337,8 +338,8 @@ export default function CanBusWorkbench() {
                         <td className="py-2 px-3 text-slate-300 font-bold">{m.dlc}</td>
                         <td className="py-2 px-3">
                           <div className="flex items-center gap-1.5 font-bold">
-                            {Array.from(m.data).map((b, idx) => {
-                              const isDiff = m.diffs.has(idx);
+                            {Array.from(m.data || []).map((b, idx) => {
+                              const isDiff = m.diffs?.has?.(idx);
                               return (
                                 <span
                                   key={idx}
@@ -348,7 +349,7 @@ export default function CanBusWorkbench() {
                                       : 'bg-slate-950 text-cyan-300 border border-slate-850'
                                   }`}
                                 >
-                                  {b.toString(16).padStart(2, '0').toUpperCase()}
+                                  {(b ?? 0).toString(16).padStart(2, '0').toUpperCase()}
                                 </span>
                               );
                             })}

@@ -124,7 +124,7 @@ export default function AvrIspWorkbench() {
             <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
               <span className="text-[10px] text-slate-500 uppercase font-bold block">Signature (0x30)</span>
               <span className="font-extrabold text-cyan-300 text-sm font-mono">
-                0x{chipInfo.signature.toString(16).toUpperCase()}
+                0x{(chipInfo.signature ?? 0).toString(16).toUpperCase()}
               </span>
               <span className="text-[10px] text-slate-400 block">3-Byte Hardware ID</span>
             </div>
@@ -163,14 +163,14 @@ export default function AvrIspWorkbench() {
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
               <span className="text-[10px] text-slate-500 uppercase font-bold block">LOW FUSE (LFUSE)</span>
               <div className="text-xl font-mono font-extrabold text-amber-300">
-                0x{fuses.lfuse.toString(16).padStart(2, '0').toUpperCase()}
+                0x{(fuses.lfuse ?? 0).toString(16).padStart(2, '0').toUpperCase()}
               </div>
               <p className="text-[10px] text-slate-400">
                 Clock select: 16MHz External Crystal (CKSEL=1111, SUT=11)
               </p>
               <input
                 type="text"
-                value={`0x${fuses.lfuse.toString(16).padStart(2, '0').toUpperCase()}`}
+                value={`0x${(fuses.lfuse ?? 0).toString(16).padStart(2, '0').toUpperCase()}`}
                 onChange={(e) => handleUpdateFuse('lfuse', e.target.value)}
                 className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 font-mono text-xs"
               />
@@ -180,14 +180,14 @@ export default function AvrIspWorkbench() {
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
               <span className="text-[10px] text-slate-500 uppercase font-bold block">HIGH FUSE (HFUSE)</span>
               <div className="text-xl font-mono font-extrabold text-cyan-300">
-                0x{fuses.hfuse.toString(16).padStart(2, '0').toUpperCase()}
+                0x{(fuses.hfuse ?? 0).toString(16).padStart(2, '0').toUpperCase()}
               </div>
               <p className="text-[10px] text-slate-400">
                 Bootloader size: 512B (BOOTSZ=11), SPI Programming enabled (SPIEN=0)
               </p>
               <input
                 type="text"
-                value={`0x${fuses.hfuse.toString(16).padStart(2, '0').toUpperCase()}`}
+                value={`0x${(fuses.hfuse ?? 0).toString(16).padStart(2, '0').toUpperCase()}`}
                 onChange={(e) => handleUpdateFuse('hfuse', e.target.value)}
                 className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 font-mono text-xs"
               />
@@ -197,14 +197,14 @@ export default function AvrIspWorkbench() {
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
               <span className="text-[10px] text-slate-500 uppercase font-bold block">EXTENDED (EFUSE)</span>
               <div className="text-xl font-mono font-extrabold text-emerald-300">
-                0x{fuses.efuse.toString(16).padStart(2, '0').toUpperCase()}
+                0x{(fuses.efuse ?? 0).toString(16).padStart(2, '0').toUpperCase()}
               </div>
               <p className="text-[10px] text-slate-400">
                 Brown-out detector: 2.7V trigger level (BODLEVEL=101)
               </p>
               <input
                 type="text"
-                value={`0x${fuses.efuse.toString(16).padStart(2, '0').toUpperCase()}`}
+                value={`0x${(fuses.efuse ?? 0).toString(16).padStart(2, '0').toUpperCase()}`}
                 onChange={(e) => handleUpdateFuse('efuse', e.target.value)}
                 className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 font-mono text-xs"
               />
@@ -214,14 +214,14 @@ export default function AvrIspWorkbench() {
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
               <span className="text-[10px] text-slate-500 uppercase font-bold block">LOCK BITS</span>
               <div className="text-xl font-mono font-extrabold text-purple-300">
-                0x{fuses.lock.toString(16).padStart(2, '0').toUpperCase()}
+                0x{(fuses.lock ?? 0).toString(16).padStart(2, '0').toUpperCase()}
               </div>
               <p className="text-[10px] text-slate-400">
                 Memory protection: Unlocked R/W for Flash & Bootloader
               </p>
               <input
                 type="text"
-                value={`0x${fuses.lock.toString(16).padStart(2, '0').toUpperCase()}`}
+                value={`0x${(fuses.lock ?? 0).toString(16).padStart(2, '0').toUpperCase()}`}
                 onChange={(e) => handleUpdateFuse('lock', e.target.value)}
                 className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 font-mono text-xs"
               />
