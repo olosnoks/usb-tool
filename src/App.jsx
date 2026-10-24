@@ -20,29 +20,24 @@ import UbxConfigDeck from './components/UbxConfigDeck';
 import MicroPythonFileManager from './components/MicroPythonFileManager';
 import ImprovWifiDeck from './components/ImprovWifiDeck';
 import TelemetryDashboard from './components/TelemetryDashboard';
-import GpsWardriverDeck from './components/GpsWardriverDeck';
-import CrashAlertDeck from './components/CrashAlertDeck';
-import ScriptRunner from './components/ScriptRunner';
-import UsbReconDeck from './components/UsbReconDeck';
-import EspMemoryInspector from './components/EspMemoryInspector';
-
-// New Advanced Hardware & Protocol Workbenches
-import Ch341aProgrammer from './components/tools/Ch341aProgrammer';
-import CmsisDapDebugger from './components/tools/CmsisDapDebugger';
-import CanBusWorkbench from './components/tools/CanBusWorkbench';
-import LogicAnalyzerWorkbench from './components/tools/LogicAnalyzerWorkbench';
-import UsbPdWorkbench from './components/tools/UsbPdWorkbench';
-import BusExplorerWorkbench from './components/tools/BusExplorerWorkbench';
-import JtagWorkbench from './components/tools/JtagWorkbench';
-import ModbusWorkbench from './components/tools/ModbusWorkbench';
-import AvrIspWorkbench from './components/tools/AvrIspWorkbench';
-import RfidNfcWorkbench from './components/tools/RfidNfcWorkbench';
-import PortapackWorkbench from './components/tools/PortapackWorkbench';
-import FlipperWorkbench from './components/tools/flipper/FlipperWorkbench';
-import ProxmarkWorkbench from './components/tools/proxmark/ProxmarkWorkbench';
-import CyberChefWorkbench from './components/tools/CyberChefWorkbench';
-import DuckyScriptStudio from './components/tools/DuckyScriptStudio';
-import PacketAnalyzerWorkbench from './components/tools/PacketAnalyzerWorkbench';
+// Lazy-loaded Specialized Workbenches to keep initial load lightweight
+const Ch341aProgrammer = React.lazy(() => import('./components/tools/Ch341aProgrammer'));
+const CmsisDapDebugger = React.lazy(() => import('./components/tools/CmsisDapDebugger'));
+const CanBusWorkbench = React.lazy(() => import('./components/tools/CanBusWorkbench'));
+const LogicAnalyzerWorkbench = React.lazy(() => import('./components/tools/LogicAnalyzerWorkbench'));
+const UsbPdWorkbench = React.lazy(() => import('./components/tools/UsbPdWorkbench'));
+const BusExplorerWorkbench = React.lazy(() => import('./components/tools/BusExplorerWorkbench'));
+const JtagWorkbench = React.lazy(() => import('./components/tools/JtagWorkbench'));
+const ModbusWorkbench = React.lazy(() => import('./components/tools/ModbusWorkbench'));
+const AvrIspWorkbench = React.lazy(() => import('./components/tools/AvrIspWorkbench'));
+const RfidNfcWorkbench = React.lazy(() => import('./components/tools/RfidNfcWorkbench'));
+const PortapackWorkbench = React.lazy(() => import('./components/tools/PortapackWorkbench'));
+const FlipperWorkbench = React.lazy(() => import('./components/tools/flipper/FlipperWorkbench'));
+const ProxmarkWorkbench = React.lazy(() => import('./components/tools/proxmark/ProxmarkWorkbench'));
+const CyberChefWorkbench = React.lazy(() => import('./components/tools/CyberChefWorkbench'));
+const DuckyScriptStudio = React.lazy(() => import('./components/tools/DuckyScriptStudio'));
+const PacketAnalyzerWorkbench = React.lazy(() => import('./components/tools/PacketAnalyzerWorkbench'));
+const GpsWardriverDeck = React.lazy(() => import('./components/GpsWardriverDeck'));
 
 // Common & Guide Components
 import ToolGuide from './components/common/ToolGuide';
@@ -182,10 +177,16 @@ function AppContent() {
             {/* Contextual How-To Dropdown Guide for Active Tool */}
             <ToolGuide toolId={activeTool} />
 
-            {activeTool === 'flasher' && <FlasherTab />}
-            {activeTool === 'terminal' && <TerminalTab />}
-            {activeTool === 'hardware' && <HardwareControlsTab />}
-            {activeTool === 'setup' && <HelpTroubleshootingTab />}
+            <React.Suspense fallback={
+              <div className="py-20 flex flex-col items-center justify-center text-slate-400 font-mono text-xs space-y-3">
+                <div className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-cyan-300 tracking-wider">LOADING WORKBENCH MODULE...</span>
+              </div>
+            }>
+              {activeTool === 'flasher' && <FlasherTab />}
+              {activeTool === 'terminal' && <TerminalTab />}
+              {activeTool === 'hardware' && <HardwareControlsTab />}
+              {activeTool === 'setup' && <HelpTroubleshootingTab />}
 
             {/* Specialized Modules direct rendering */}
             {activeTool === 'plotter' && (
@@ -436,6 +437,7 @@ function AppContent() {
                 <PacketAnalyzerWorkbench />
               </div>
             )}
+            </React.Suspense>
           </main>
 
           {/* Persistent Live Terminal Drawer (Docked to bottom) */}

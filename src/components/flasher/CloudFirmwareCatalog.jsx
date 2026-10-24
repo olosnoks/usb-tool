@@ -16,11 +16,12 @@ import {
   Sliders,
   ChevronRight
 } from 'lucide-react';
-import { fetchFirmwareCatalog, BUNDLED_FALLBACK_PRESETS } from '../../services/firmwareCatalogService';
+import { fetchFirmwareCatalog, getCachedCatalogSync, BUNDLED_FALLBACK_PRESETS } from '../../services/firmwareCatalogService';
 
 export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
-  const [catalog, setCatalog] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [catalog, setCatalog] = useState(() => getCachedCatalogSync() || BUNDLED_FALLBACK_PRESETS);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasLoadedRemote, setHasLoadedRemote] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedChip, setSelectedChip] = useState('ALL');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
@@ -31,17 +32,23 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
     setIsLoading(true);
     try {
       const res = await fetchFirmwareCatalog(force);
-      setCatalog(res.options || BUNDLED_FALLBACK_PRESETS);
+      if (res && res.options && res.options.length > 0) {
+        setCatalog(res.options);
+        setHasLoadedRemote(true);
+      }
     } catch (e) {
-      setCatalog(BUNDLED_FALLBACK_PRESETS);
+      console.warn('Catalog load notice:', e);
     } finally {
       setIsLoading(false);
     }
   };
 
+  // If user enters a search query and hasn't loaded remote catalog yet, trigger background load
   useEffect(() => {
-    loadCatalog();
-  }, []);
+    if (searchQuery.trim().length > 1 && !hasLoadedRemote && !isLoading) {
+      loadCatalog(false);
+    }
+  }, [searchQuery, hasLoadedRemote, isLoading]);
 
   // Filter chips
   const CHIP_FILTERS = ['ALL', 'ESP32', 'ESP32-S3', 'ESP32-S2', 'ESP32-C3', 'ESP32-C5', 'ESP32-C6', 'ESP8266', 'BW16'];

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'skons-flasher-v2.0';
+const CACHE_NAME = 'skons-flasher-v2.1';
 const ASSETS_TO_CACHE = [
   './favicon.svg',
   './manifest.json'
@@ -63,6 +63,9 @@ self.addEventListener('fetch', (event) => {
           cache.put(event.request, responseToCache);
         });
         return networkResponse;
+      }).catch((err) => {
+        console.warn('PWA static asset fetch failed:', err);
+        return cachedResponse;
       });
     })
   );

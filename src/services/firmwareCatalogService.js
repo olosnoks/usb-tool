@@ -96,42 +96,44 @@ export const BUNDLED_FALLBACK_PRESETS = [
   }
 ];
 
+let inMemoryCatalog = null;
+
+export function getCachedCatalogSync() {
+  if (inMemoryCatalog && inMemoryCatalog.length > 0) {
+    return inMemoryCatalog;
+  }
+  return null;
+}
+
 export async function fetchFirmwareCatalog(forceRefresh = false) {
-  // Check local cache
-  if (!forceRefresh) {
-    try {
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) {
-        const { timestamp, options } = JSON.parse(cached);
-        if (Date.now() - timestamp < CACHE_EXPIRY_MS && Array.isArray(options) && options.length > 0) {
-          return { options, fromCache: true, total: options.length };
-        }
-      }
-    } catch (e) {
-      console.warn('Catalog cache read error:', e);
-    }
+  // Check in-memory cache first
+  if (!forceRefresh && inMemoryCatalog && inMemoryCatalog.length > 0) {
+    return { options: inMemoryCatalog, fromCache: true, total: inMemoryCatalog.length };
   }
 
   // Fetch remote manifest
   try {
-    const res = await fetch(REMOTE_MANIFEST_URL, { cache: 'no-cache' });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout guard
+
+    const res = await fetch(REMOTE_MANIFEST_URL, { 
+      cache: 'default',
+      signal: controller.signal 
+    });
+    clearTimeout(timeoutId);
+
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     const data = await res.json();
     const options = Array.isArray(data.options) ? data.options : [];
     
-    // Save to cache
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({
-        timestamp: Date.now(),
-        options
-      }));
-    } catch (storageErr) {
-      console.warn('Failed to cache catalog to localStorage:', storageErr);
+    if (options.length > 0) {
+      inMemoryCatalog = options;
     }
 
-    return { options, fromCache: false, total: options.length };
+    return { options: options.length > 0 ? options : BUNDLED_FALLBACK_PRESETS, fromCache: false, total: options.length };
   } catch (err) {
-    console.warn('Remote manifest fetch failed, utilizing bundled fallback presets:', err);
+    console.warn('Remote manifest fetch failed/timed out, utilizing bundled fallback presets:', err);
+    inMemoryCatalog = BUNDLED_FALLBACK_PRESETS;
     return { options: BUNDLED_FALLBACK_PRESETS, fromCache: true, total: BUNDLED_FALLBACK_PRESETS.length, error: err.message };
   }
 }

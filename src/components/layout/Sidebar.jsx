@@ -25,7 +25,8 @@ import {
   Radio,
   Sparkles,
   Zap,
-  ShieldCheck
+  ShieldCheck,
+  Keyboard
 } from 'lucide-react';
 
 export const SIDEBAR_SECTIONS = [
