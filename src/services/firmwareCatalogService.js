@@ -360,6 +360,21 @@ export const BUNDLED_FALLBACK_PRESETS = [
     features: ['Dual-Band 2.4/5GHz Wi-Fi 6', 'RISC-V High Speed Capture', 'Compact Form Factor', 'Raw Frame Injection'],
     flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: false }
   },
+  {
+    name: 'Marauder WROOM (RocketGod Pack)',
+    device: 'ESP32',
+    type: 'marauder',
+    version: 'v1.10 (RocketGod)',
+    description: "ESP32 Marauder Wi-Fi/BLE pentesting firmware from RocketGod's FZ Marauder Flasher suite (tuned for ESP32-WROOM modules).",
+    websiteUrl: 'https://github.com/RocketGod-git/Flipper_Zero/tree/main/Wifi_DevBoard/FZ_Marauder_Flasher/ESP32-WROOM',
+    repoUrl: 'https://github.com/RocketGod-git/Flipper_Zero',
+    downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_old_hardware.bin',
+    files: [
+      { name: 'esp32_marauder_wroom_v1_10.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_old_hardware.bin' }
+    ],
+    features: ['WROOM Pinout Compatible', 'Wi-Fi Deauth Engine', 'Probe Sniffer', 'Flipper Zero Companion'],
+    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: false }
+  },
 
   // Bruce Multi-Tool (pr3y/Bruce v1.16.1)
   {
@@ -497,6 +512,149 @@ export const BUNDLED_FALLBACK_PRESETS = [
     isMergedBinary: true,
     features: ['Native USB CDC REPL', 'ESP32-S3 Dual Core', 'Python 3 Standard Library'],
     flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
+  },
+
+  // --- RocketGod ESP Firmwares & Toolkits ---
+  // Evil Portal (Flipper Zero WiFi Dev Board & ESP32-WROOM)
+  {
+    name: 'Evil Portal — Flipper WiFi Dev Board (ESP32-S2)',
+    device: 'ESP32-S2',
+    type: 'evilportal',
+    version: 'v1.0 (RocketGod)',
+    description: 'Official Evil Portal captive portal firmware for Flipper Zero WiFi Dev Board (ESP32-S2). Single merged 0x0 binary packaged by RocketGod.',
+    websiteUrl: 'https://github.com/RocketGod-git/flipper-zero-evil-portal',
+    repoUrl: 'https://github.com/RocketGod-git/flipper-zero-evil-portal',
+    downloadUrl: 'https://raw.githubusercontent.com/RocketGod-git/flipper-zero-evil-portal/main/Single%20File%20Bins/Evil%20Portal%20WiFi%20Board%20or%20S2.bin',
+    files: [
+      { name: 'Evil Portal WiFi Board or S2.bin', address: '0x0', downloadUrl: 'https://raw.githubusercontent.com/RocketGod-git/flipper-zero-evil-portal/main/Single%20File%20Bins/Evil%20Portal%20WiFi%20Board%20or%20S2.bin' }
+    ],
+    isMergedBinary: true,
+    features: ['Captive Portal Phishing AP', 'Flipper Zero App Sync', 'Single Merged 0x0 Bin', 'RocketGod Single-File Pack'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: false }
+  },
+  {
+    name: 'Evil Portal — ESP32-WROOM Generic',
+    device: 'ESP32',
+    type: 'evilportal',
+    version: 'v1.0 (RocketGod)',
+    description: 'Official Evil Portal captive portal firmware for standalone ESP32-WROOM boards. Single merged 0x0 binary packaged by RocketGod.',
+    websiteUrl: 'https://github.com/RocketGod-git/flipper-zero-evil-portal',
+    repoUrl: 'https://github.com/RocketGod-git/flipper-zero-evil-portal',
+    downloadUrl: 'https://raw.githubusercontent.com/RocketGod-git/flipper-zero-evil-portal/main/Single%20File%20Bins/Evil%20Portal%20WROOM.bin',
+    files: [
+      { name: 'Evil Portal WROOM.bin', address: '0x0', downloadUrl: 'https://raw.githubusercontent.com/RocketGod-git/flipper-zero-evil-portal/main/Single%20File%20Bins/Evil%20Portal%20WROOM.bin' }
+    ],
+    isMergedBinary: true,
+    features: ['Captive Portal Phishing AP', 'Standalone ESP32-WROOM', 'Single Merged 0x0 Bin', 'RocketGod Single-File Pack'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: false }
+  },
+
+  // Minino ESP32-C6 (RocketGod / ElectronicCats)
+  {
+    name: 'Minino ESP32-C6 Multi-Protocol',
+    device: 'ESP32-C6',
+    type: 'minino',
+    version: 'v1.1.7.1',
+    description: 'ESP32-C6 multiprotocol and multiband firmware for sniffing, communicating, and attacking IoT devices with GPS, microSD, and OLED support.',
+    websiteUrl: 'https://github.com/ElectronicCats/Minino',
+    repoUrl: 'https://github.com/RocketGod-git/Minino',
+    downloadUrl: 'https://github.com/ElectronicCats/Minino/releases/download/v1.1.7.1/minino_v1.1.7.1.bin',
+    files: [
+      { name: 'minino_v1.1.7.1.bin', address: '0x0', downloadUrl: 'https://github.com/ElectronicCats/Minino/releases/download/v1.1.7.1/minino_v1.1.7.1.bin' }
+    ],
+    isMergedBinary: true,
+    features: ['ESP32-C6 Wi-Fi 6 & 802.15.4', 'GPS Wardriving Support', 'OLED Display UI', 'microSD Logging', 'IoT Security Auditing'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true }
+  },
+
+  // ESP32 Wi-Fi Penetration Tool (RocketGod Flipper Edition)
+  {
+    name: 'ESP32 Wi-Fi Penetration Tool (RocketGod)',
+    device: 'ESP32',
+    type: 'wifipentool',
+    version: 'flipper-edition',
+    description: 'Wi-Fi penetration testing and DoS tool for ESP32 and Flipper Zero WiFi Dev Board with automated deauth, beacon flood, and PMKID capture.',
+    websiteUrl: 'https://github.com/RocketGod-git/ESP32-Wi-Fi-Penetration-Tool',
+    repoUrl: 'https://github.com/RocketGod-git/ESP32-Wi-Fi-Penetration-Tool',
+    downloadUrl: 'https://github.com/risinek/esp32-wifi-penetration-tool/releases/download/v0.3.3/esp32-wifi-penetration-tool-v0.3.3.bin',
+    files: [
+      { name: 'esp32-wifi-penetration-tool.bin', address: '0x0', downloadUrl: 'https://github.com/risinek/esp32-wifi-penetration-tool/releases/download/v0.3.3/esp32-wifi-penetration-tool-v0.3.3.bin' }
+    ],
+    isMergedBinary: true,
+    features: ['Web-Based Control Panel', 'Wi-Fi Rogue AP / Deauth', 'PMKID EAPOL Handshake Capture', 'RocketGod Flipper Serial Support'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true }
+  },
+
+  // ESP32 WiFi Hash Monster (RocketGod Fork)
+  {
+    name: 'ESP32 WiFi Hash Monster',
+    device: 'ESP32',
+    type: 'hashmonster',
+    version: 'master',
+    description: 'WiFi Hash Monster for ESP32 & M5Stack — captures EAPOL and PMKID 4-way handshakes directly to SD card with graphical monster animations.',
+    websiteUrl: 'https://github.com/RocketGod-git/ESP32-WiFi-Hash-Monster',
+    repoUrl: 'https://github.com/RocketGod-git/ESP32-WiFi-Hash-Monster',
+    downloadUrl: 'https://raw.githubusercontent.com/RocketGod-git/ESP32-WiFi-Hash-Monster/master/images/Hash_Monster_Preview.png',
+    files: [
+      { name: 'Hash_Monster_Preview.png', address: '0x0', downloadUrl: 'https://raw.githubusercontent.com/RocketGod-git/ESP32-WiFi-Hash-Monster/master/images/Hash_Monster_Preview.png' }
+    ],
+    isMergedBinary: true,
+    features: ['EAPOL 4-Way Handshake Sniffer', 'PMKID Capture to SD', 'Animated Monster Moods', 'M5Stack / ESP32 Hardware'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: false }
+  },
+
+  // ESP8266 Deauther (RocketGod Fork)
+  {
+    name: 'ESP8266 Deauther (RocketGod Fork)',
+    device: 'ESP8266',
+    type: 'deauther',
+    version: 'v2.6.1',
+    description: 'ESP8266 Wi-Fi auditing platform for deauthentication attacks, beacon flooding, and probe request tracking.',
+    websiteUrl: 'https://github.com/RocketGod-git/esp8266_deauther',
+    repoUrl: 'https://github.com/RocketGod-git/esp8266_deauther',
+    downloadUrl: 'https://github.com/SpacehuhnTech/esp8266_deauther/releases/download/v2.6.1/esp8266_deauther_2.6.1.bin',
+    files: [
+      { name: 'esp8266_deauther_2.6.1.bin', address: '0x0', downloadUrl: 'https://github.com/SpacehuhnTech/esp8266_deauther/releases/download/v2.6.1/esp8266_deauther_2.6.1.bin' }
+    ],
+    isMergedBinary: true,
+    features: ['ESP8266 Deauth Attack', 'Beacon Flood Engine', 'Web Interface Admin', 'Probe Request Scanner'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true }
+  },
+
+  // FZ Easy Marauder Flash (RocketGod Tool Suite)
+  {
+    name: 'FZ Easy Marauder Flasher',
+    device: 'ESP32',
+    type: 'fzeasymarauder',
+    version: 'main',
+    description: 'Python cross-platform GUI & CLI flasher tool to easily flash ESP32 Marauder onto the Flipper Zero WiFi Dev Board or any ESP32.',
+    websiteUrl: 'https://github.com/RocketGod-git/FZEasyMarauderFlash',
+    repoUrl: 'https://github.com/RocketGod-git/FZEasyMarauderFlash',
+    downloadUrl: 'https://raw.githubusercontent.com/RocketGod-git/FZEasyMarauderFlash/main/EasyInstall_Screenshot.png',
+    files: [
+      { name: 'EasyInstall_Screenshot.png', address: '0x0', downloadUrl: 'https://raw.githubusercontent.com/RocketGod-git/FZEasyMarauderFlash/main/EasyInstall_Screenshot.png' }
+    ],
+    isMergedBinary: true,
+    features: ['Automated COM Port Detection', 'Cross-Platform Windows/macOS/Linux', 'Official Firmware Retrieval'],
+    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: false }
+  },
+
+  // Evil Portal HTML Squash (RocketGod Tool)
+  {
+    name: 'Evil Portal HTMLSquash Tool',
+    device: 'ESP32',
+    type: 'htmlsquash',
+    version: 'main',
+    description: 'HTML Squasher optimization and minification script for Evil Portal captive pages on the Flipper Zero WiFi Dev Board to meet the 20KB limit.',
+    websiteUrl: 'https://github.com/RocketGod-git/evilportal-htmlsquash',
+    repoUrl: 'https://github.com/RocketGod-git/evilportal-htmlsquash',
+    downloadUrl: 'https://raw.githubusercontent.com/RocketGod-git/evilportal-htmlsquash/main/README.md',
+    files: [
+      { name: 'README.md', address: '0x0', downloadUrl: 'https://raw.githubusercontent.com/RocketGod-git/evilportal-htmlsquash/main/README.md' }
+    ],
+    isMergedBinary: true,
+    features: ['HTML & Inline CSS/JS Minifier', 'Chrome SingleFile Compressor', 'Under 20KB ESP32 Portal Optimizer'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: false }
   }
 ];
 
@@ -782,9 +940,40 @@ export const SUITE_METADATA = {
     defaultBaud: 115200
   },
   evilportal: {
-    name: 'Evil Portal Suite',
-    repoUrl: 'https://github.com/bigbrodude6119/flipper-zero-evil-portal',
-    websiteUrl: 'https://github.com/bigbrodude6119/flipper-zero-evil-portal',
+    name: 'Evil Portal (RocketGod)',
+    repoUrl: 'https://github.com/RocketGod-git/flipper-zero-evil-portal',
+    websiteUrl: 'https://github.com/RocketGod-git/flipper-zero-evil-portal',
+    defaultBaud: 115200
+  },
+  minino: {
+    name: 'Minino IoT Multi-Protocol',
+    repoUrl: 'https://github.com/RocketGod-git/Minino',
+    upstreamRepoUrl: 'https://github.com/ElectronicCats/Minino',
+    websiteUrl: 'https://github.com/ElectronicCats/Minino',
+    defaultBaud: 115200
+  },
+  wifipentool: {
+    name: 'ESP32 Wi-Fi Penetration Tool',
+    repoUrl: 'https://github.com/RocketGod-git/ESP32-Wi-Fi-Penetration-Tool',
+    websiteUrl: 'https://github.com/RocketGod-git/ESP32-Wi-Fi-Penetration-Tool',
+    defaultBaud: 115200
+  },
+  hashmonster: {
+    name: 'ESP32 WiFi Hash Monster',
+    repoUrl: 'https://github.com/RocketGod-git/ESP32-WiFi-Hash-Monster',
+    websiteUrl: 'https://github.com/RocketGod-git/ESP32-WiFi-Hash-Monster',
+    defaultBaud: 115200
+  },
+  fzeasymarauder: {
+    name: 'FZ Easy Marauder Flasher',
+    repoUrl: 'https://github.com/RocketGod-git/FZEasyMarauderFlash',
+    websiteUrl: 'https://github.com/RocketGod-git/FZEasyMarauderFlash',
+    defaultBaud: 921600
+  },
+  htmlsquash: {
+    name: 'Evil Portal HTMLSquash Tool',
+    repoUrl: 'https://github.com/RocketGod-git/evilportal-htmlsquash',
+    websiteUrl: 'https://github.com/RocketGod-git/evilportal-htmlsquash',
     defaultBaud: 115200
   }
 };
@@ -834,7 +1023,22 @@ export function getFirmwareFamily(item) {
     return { id: 'ghostesp', name: 'GhostESP Multi-Tool', type: 'ghostesp' };
   }
   if (lowerName.includes('evil portal') || lowerType === 'evilportal') {
-    return { id: 'evilportal', name: 'Evil Portal Suite', type: 'evilportal' };
+    return { id: 'evilportal', name: 'Evil Portal (RocketGod)', type: 'evilportal' };
+  }
+  if (lowerName.includes('minino') || lowerType === 'minino') {
+    return { id: 'minino', name: 'Minino IoT Multi-Protocol', type: 'minino' };
+  }
+  if (lowerName.includes('penetration tool') || lowerType === 'wifipentool') {
+    return { id: 'wifipentool', name: 'ESP32 Wi-Fi Penetration Tool', type: 'wifipentool' };
+  }
+  if (lowerName.includes('hash monster') || lowerType === 'hashmonster') {
+    return { id: 'hashmonster', name: 'ESP32 WiFi Hash Monster', type: 'hashmonster' };
+  }
+  if (lowerName.includes('easy marauder') || lowerType === 'fzeasymarauder') {
+    return { id: 'fzeasymarauder', name: 'FZ Easy Marauder Flasher', type: 'fzeasymarauder' };
+  }
+  if (lowerName.includes('htmlsquash') || lowerType === 'htmlsquash') {
+    return { id: 'htmlsquash', name: 'Evil Portal HTMLSquash Tool', type: 'htmlsquash' };
   }
   if (lowerName.includes('deauther') || lowerType === 'deauther') {
     return { id: 'deauther', name: 'ESP8266 Deauther', type: 'deauther' };

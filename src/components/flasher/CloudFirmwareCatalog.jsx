@@ -69,8 +69,11 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
   const CATEGORY_FILTERS = [
     { id: 'ALL', label: 'All Categories' },
     { id: 'piglet', label: 'Piglet Wardriver' },
+    { id: 'evilportal', label: 'Evil Portal' },
     { id: 'marauder', label: 'Marauder' },
     { id: 'bruce', label: 'Bruce' },
+    { id: 'minino', label: 'Minino IoT' },
+    { id: 'rocketgod', label: 'RocketGod' },
     { id: 'iot', label: 'IoT / WLED' },
     { id: 'interpreter', label: 'MicroPython' },
   ];
@@ -101,10 +104,12 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
       const matchesSearch = !q || 
         suite.familyName?.toLowerCase().includes(q) ||
         suite.type?.toLowerCase().includes(q) ||
+        suite.repoUrl?.toLowerCase().includes(q) ||
         suite.boards?.some(b => 
           b.name?.toLowerCase().includes(q) ||
           b.description?.toLowerCase().includes(q) ||
-          b.device?.toLowerCase().includes(q)
+          b.device?.toLowerCase().includes(q) ||
+          b.repoUrl?.toLowerCase().includes(q)
         );
 
       const matchesChip = selectedChip === 'ALL' ||
@@ -113,7 +118,11 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
           (selectedChip === 'ESP32' && b.device?.toUpperCase() === 'ESP32')
         );
 
+      const isRocketGod = suite.repoUrl?.toLowerCase().includes('rocketgod') ||
+        suite.boards?.some(b => b.repoUrl?.toLowerCase().includes('rocketgod'));
+
       const matchesCategory = selectedCategory === 'ALL' ||
+        (selectedCategory === 'rocketgod' && isRocketGod) ||
         suite.type?.toLowerCase() === selectedCategory.toLowerCase() ||
         suite.familyName?.toLowerCase().includes(selectedCategory.toLowerCase());
 

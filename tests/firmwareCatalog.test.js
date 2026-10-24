@@ -33,13 +33,19 @@ describe('Piglet and Firmware Catalog Presets', () => {
       'github.com/Aircoookie/WLED',
       'micropython.org',
       'github.com/Hamspiced/piglet',
-      'olosnoks.github.io/piglet'
+      'olosnoks.github.io/piglet',
+      'github.com/RocketGod-git',
+      'raw.githubusercontent.com/RocketGod-git',
+      'github.com/ElectronicCats/Minino',
+      'github.com/risinek/esp32-wifi-penetration-tool',
+      'github.com/SpacehuhnTech/esp8266_deauther',
+      'github.com/G4lile0/ESP32-WiFi-Hash-Monster'
     ];
 
     BUNDLED_FALLBACK_PRESETS.forEach(preset => {
       expect(preset.downloadUrl).toMatch(/^https:\/\//);
       const isOfficial = officialHosts.some(host => 
-        preset.downloadUrl.includes(host) || preset.websiteUrl?.includes(host)
+        preset.downloadUrl.includes(host) || preset.websiteUrl?.includes(host) || preset.repoUrl?.includes(host)
       );
       expect(isOfficial).toBe(true);
     });
@@ -47,12 +53,19 @@ describe('Piglet and Firmware Catalog Presets', () => {
 
   it('groups multiple board entries into unified suites with dropdowns', () => {
     const suites = groupFirmwareCatalog(BUNDLED_FALLBACK_PRESETS);
-    // Piglet, Marauder, Bruce, WLED, MicroPython
-    expect(suites.length).toBe(5);
+    // Piglet, Marauder, Bruce, WLED, MicroPython, Evil Portal, Minino, Wi-Fi Pen Tool, Hash Monster, Deauther, FZ Easy Marauder, HTMLSquash
+    expect(suites.length).toBe(12);
 
     const marauderSuite = suites.find(s => s.id === 'marauder');
     expect(marauderSuite).toBeDefined();
-    expect(marauderSuite.boards.length).toBe(5); // Flipper WiFi, S3 Multiboard, CYD, Generic, Dual Mini C5
+    expect(marauderSuite.boards.length).toBe(6); // Flipper WiFi, S3 Multiboard, CYD, Generic, Dual Mini C5, WROOM (RocketGod)
+
+    const evilPortalSuite = suites.find(s => s.id === 'evilportal');
+    expect(evilPortalSuite).toBeDefined();
+    expect(evilPortalSuite.boards.length).toBe(2); // Flipper WiFi Dev Board, WROOM Generic
+
+    const mininoSuite = suites.find(s => s.id === 'minino');
+    expect(mininoSuite).toBeDefined();
 
     const bruceSuite = suites.find(s => s.id === 'bruce');
     expect(bruceSuite).toBeDefined();
