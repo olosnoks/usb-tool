@@ -53,6 +53,15 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
   // Filter chips
   const CHIP_FILTERS = ['ALL', 'ESP32', 'ESP32-S3', 'ESP32-S2', 'ESP32-C3', 'ESP32-C5', 'ESP32-C6', 'ESP8266', 'BW16'];
 
+  const CATEGORY_FILTERS = [
+    { id: 'ALL', label: 'All Categories' },
+    { id: 'piglet', label: 'Piglet Wardriver' },
+    { id: 'marauder', label: 'Marauder' },
+    { id: 'bruce', label: 'Bruce' },
+    { id: 'iot', label: 'IoT / WLED' },
+    { id: 'interpreter', label: 'MicroPython' },
+  ];
+
   const filteredFirmware = useMemo(() => {
     return catalog.filter(item => {
       const q = searchQuery.toLowerCase();
@@ -60,13 +69,21 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
         item.name?.toLowerCase().includes(q) || 
         item.description?.toLowerCase().includes(q) ||
         item.device?.toLowerCase().includes(q) ||
-        item.type?.toLowerCase().includes(q);
+        item.type?.toLowerCase().includes(q) ||
+        (q.includes('piglet') && (item.type === 'piglet' || item.name?.toLowerCase().includes('piglet'))) ||
+        (q.includes('skon') && item.name?.toLowerCase().includes('skon')) ||
+        (q.includes('ham') && item.name?.toLowerCase().includes('ham'));
 
       const matchesChip = selectedChip === 'ALL' || 
         item.device?.toUpperCase().includes(selectedChip) ||
         (selectedChip === 'ESP32' && item.device?.toUpperCase() === 'ESP32');
 
-      const matchesCategory = selectedCategory === 'ALL' || item.type?.toLowerCase() === selectedCategory.toLowerCase();
+      const matchesCategory = selectedCategory === 'ALL' || 
+        item.type?.toLowerCase() === selectedCategory.toLowerCase() ||
+        (selectedCategory.toLowerCase() === 'piglet' && (
+          item.type?.toLowerCase() === 'piglet' ||
+          item.name?.toLowerCase().includes('piglet')
+        ));
 
       return matchesSearch && matchesChip && matchesCategory;
     });
@@ -148,7 +165,7 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
           </div>
         </div>
 
-        {/* Chip Category Filters */}
+        {/* Chip Target Filters */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px] font-mono">
           <span className="text-slate-500 mr-1 flex items-center gap-1"><Cpu className="w-3 h-3" /> Target:</span>
           {CHIP_FILTERS.map(chip => (
@@ -162,6 +179,27 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
               }`}
             >
               {chip}
+            </button>
+          ))}
+        </div>
+
+        {/* Category Filters */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px] font-mono border-t border-[#232733] pt-2">
+          <span className="text-slate-500 mr-1 flex items-center gap-1"><Layers className="w-3 h-3" /> Category:</span>
+          {CATEGORY_FILTERS.map(cat => (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCategory(cat.id)}
+              className={`px-2.5 py-1 rounded-lg border transition whitespace-nowrap flex items-center gap-1.5 ${
+                selectedCategory === cat.id 
+                  ? cat.id === 'piglet'
+                    ? 'bg-pink-500/25 border-pink-500/50 text-pink-300 font-bold shadow-sm shadow-pink-500/20'
+                    : 'bg-amber-500/20 border-amber-500/40 text-amber-300 font-bold' 
+                  : 'bg-[#1e212b] border-[#2b303c] text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {cat.id === 'piglet' && <span>🐽</span>}
+              <span>{cat.label}</span>
             </button>
           ))}
         </div>
@@ -208,6 +246,12 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
                       <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold">
                         {fw.device || 'ESP32'}
                       </span>
+                      {fw.type === 'piglet' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-pink-500/20 text-pink-300 font-mono font-bold flex items-center gap-1">
+                          <span>🐽</span>
+                          <span>{fw.name.includes("skon") ? "skon's fork" : "Ham's official"}</span>
+                        </span>
+                      )}
                       {fw.version && (
                         <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
                           {fw.version}
@@ -215,7 +259,7 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
                       )}
                       {fw.isMergedBinary && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono">
-                          Factory Merged
+                          Merged 0x0
                         </span>
                       )}
                     </div>
