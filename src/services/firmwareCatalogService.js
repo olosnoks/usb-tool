@@ -435,35 +435,70 @@ export async function fetchFirmwareCatalog(forceRefresh = false) {
     return { options: inMemoryCatalog, fromCache: true, total: inMemoryCatalog.length };
   }
 
-  // Fetch remote manifest
+  // 1. Try local bundled manifest first (same-origin, 0 CORS issues, instant load)
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout guard
-
-    const res = await fetch(REMOTE_MANIFEST_URL, { 
-      cache: 'default',
-      signal: controller.signal 
-    });
-    clearTimeout(timeoutId);
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    const data = await res.json();
-    const remoteOptions = Array.isArray(data.options) ? data.options : [];
+    const baseUrl = (typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || './';
+    const localManifestUrl = `${baseUrl.replace(/\/$/, '')}/firmware-manifest.json`;
     
-    // Always preserve curated presets (Piglet, Marauder, Bruce, etc.) at the top of the catalog
-    const existingNames = new Set(BUNDLED_FALLBACK_PRESETS.map(p => p.name.toLowerCase()));
-    const merged = [
-      ...BUNDLED_FALLBACK_PRESETS,
-      ...remoteOptions.filter(opt => !existingNames.has(opt.name?.toLowerCase()))
-    ];
+    const localRes = await fetch(localManifestUrl, { cache: 'default' });
+    if (localRes.ok) {
+      const data = await localRes.json();
+      const remoteOptions = Array.isArray(data.options) ? data.options : [];
+      if (remoteOptions.length > 0) {
+        const existingNames = new Set(BUNDLED_FALLBACK_PRESETS.map(p => p.name.toLowerCase()));
+        const merged = [
+          ...BUNDLED_FALLBACK_PRESETS,
+          ...remoteOptions.filter(opt => !existingNames.has(opt.name?.toLowerCase()))
+        ];
 
-    inMemoryCatalog = merged;
-    return { options: merged, fromCache: false, total: merged.length };
-  } catch (err) {
-    console.warn('Remote manifest fetch failed/timed out, utilizing bundled fallback presets:', err);
-    inMemoryCatalog = BUNDLED_FALLBACK_PRESETS;
-    return { options: BUNDLED_FALLBACK_PRESETS, fromCache: true, total: BUNDLED_FALLBACK_PRESETS.length, error: err.message };
+        inMemoryCatalog = merged;
+        return { options: merged, fromCache: false, total: merged.length };
+      }
+    }
+  } catch (localErr) {
+    console.warn('Local manifest fetch notice:', localErr.message);
   }
+
+  // 2. Fallback to proxy mirror or direct remote URL
+  const manifestMirrors = [
+    `https://corsproxy.io/?${encodeURIComponent(REMOTE_MANIFEST_URL)}`,
+    `https://proxy.espterminator.com/?url=${encodeURIComponent(REMOTE_MANIFEST_URL)}`,
+    REMOTE_MANIFEST_URL
+  ];
+
+  for (const mirrorUrl of manifestMirrors) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout guard
+
+      const res = await fetch(mirrorUrl, { 
+        cache: 'default',
+        signal: controller.signal 
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) continue;
+      const data = await res.json();
+      const remoteOptions = Array.isArray(data.options) ? data.options : [];
+      
+      if (remoteOptions.length > 0) {
+        const existingNames = new Set(BUNDLED_FALLBACK_PRESETS.map(p => p.name.toLowerCase()));
+        const merged = [
+          ...BUNDLED_FALLBACK_PRESETS,
+          ...remoteOptions.filter(opt => !existingNames.has(opt.name?.toLowerCase()))
+        ];
+
+        inMemoryCatalog = merged;
+        return { options: merged, fromCache: false, total: merged.length };
+      }
+    } catch (err) {
+      console.warn(`Manifest mirror ${mirrorUrl.slice(0, 45)} notice:`, err.message);
+    }
+  }
+
+  // 3. Fallback to bundled fallback presets
+  inMemoryCatalog = BUNDLED_FALLBACK_PRESETS;
+  return { options: BUNDLED_FALLBACK_PRESETS, fromCache: true, total: BUNDLED_FALLBACK_PRESETS.length };
 }
 
 /**

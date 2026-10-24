@@ -51,6 +51,11 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
     }
   };
 
+  // Automatically load the full catalog manifest on mount
+  useEffect(() => {
+    loadCatalog(false);
+  }, []);
+
   // If user enters a search query and hasn't loaded remote catalog yet, trigger background load
   useEffect(() => {
     if (searchQuery.trim().length > 1 && !hasLoadedRemote && !isLoading) {
