@@ -91,4 +91,33 @@ describe('Piglet and Firmware Catalog Presets', () => {
       global.fetch = originalFetch;
     }
   });
+
+  it('guarantees 0 duplicate suite cards and 0 duplicate suite names across catalog', () => {
+    // Simulate catalog containing duplicate piglet entries, duplicate board names, and mixed case types
+    const mockCatalog = [
+      ...BUNDLED_FALLBACK_PRESETS,
+      { name: 'Piglet Mesh Node (ESP32-C5)', device: 'ESP32-C5', type: 'piglet' },
+      { name: 'Piglet Wardriver (T-Dongle C5)', device: 'ESP32-C5', type: 'piglet' },
+      { name: 'CYD 2432S028 (Bruce)', device: 'ESP32', type: 'bruce' },
+      { name: 'M5Cardputer (M5PORKCHOP)', device: 'ESP32-S3', type: 'm5porkchop' }
+    ];
+
+    const grouped = groupFirmwareCatalog(mockCatalog);
+    const suiteNames = grouped.map(g => g.familyName);
+    const suiteIds = grouped.map(g => g.id);
+
+    // Assert strictly no duplicates
+    expect(new Set(suiteNames).size).toBe(suiteNames.length);
+    expect(new Set(suiteIds).size).toBe(suiteIds.length);
+
+    // Piglet suite must be exactly 1 card
+    const pigletCards = grouped.filter(g => g.familyName.includes('Piglet') || g.id.includes('piglet'));
+    expect(pigletCards.length).toBe(1);
+
+    // Board entries inside Bruce must be deduplicated
+    const bruceGroup = grouped.find(g => g.id === 'bruce');
+    const cydBoards = bruceGroup.boards.filter(b => b.name === 'CYD 2432S028 (Bruce)');
+    expect(cydBoards.length).toBe(1);
+  });
 });
+

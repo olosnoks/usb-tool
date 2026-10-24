@@ -501,17 +501,58 @@ export async function fetchFirmwareCatalog(forceRefresh = false) {
   return { options: BUNDLED_FALLBACK_PRESETS, fromCache: true, total: BUNDLED_FALLBACK_PRESETS.length };
 }
 
+const KNOWN_TYPE_NAMES = {
+  awokxdag: 'AxD / AWOK Suite',
+  biscuit: 'Biscuit OS',
+  bruce: 'Bruce Multi-Tool',
+  buspirate: 'Bus Pirate ESP32-S3',
+  bw16: 'Evil-BW16 Suite',
+  chimerable: 'ChimeraBLE Suite',
+  crosspoint: 'CrossPoint Suite',
+  cym: 'CYD / Cheap Yellow Monster',
+  deauther: 'ESP8266 Deauther',
+  deskbuddy: 'DeskBuddy Suite',
+  eli: 'Eli Firmware',
+  esphoneypot: 'ESP Honeypot',
+  evilm5: 'Evil-M5Project Suite',
+  evilportal: 'Evil Portal Suite',
+  flipperhttp: 'FlipperHTTP Suite',
+  ghostesp: 'GhostESP Multi-Tool',
+  hamqso: 'HamQSO Suite',
+  jcmkwardriver: 'JCMK Wardriver',
+  launcher: 'M5Launcher Suite',
+  m5porkchop: 'M5PorkChop Suite',
+  marauder: 'ESP32 Marauder',
+  meshtastic: 'Meshtastic Mesh Radio',
+  micropython: 'MicroPython REPL',
+  mimiclaw: 'MimiClaw Suite',
+  momentum: 'Flipper Zero Momentum',
+  monstatek: 'MonstaTek Suite',
+  official: 'Flipper Zero Official',
+  piglet: 'Piglet Wardriver Suite',
+  radioink: 'RadioInk Suite',
+  roguemaster: 'Flipper Zero RogueMaster',
+  squachwatch: 'SquachWatch Wardriver',
+  sticksandstones: 'Sticks & Stones',
+  unleashed: 'Flipper Zero Unleashed',
+  wled: 'WLED Lighting Controller'
+};
+
 /**
  * Resolves a firmware item into its primary project family/suite.
  */
 export function getFirmwareFamily(item) {
-  if (item.isPigletSuite || item.type === 'piglet') {
+  if (item.isPigletSuite || item.type === 'piglet' || (item.name || '').toLowerCase().includes('piglet')) {
     return { id: 'piglet', name: 'Piglet Wardriver Suite', type: 'piglet' };
   }
 
   const name = item.name || '';
   const lowerName = name.toLowerCase();
   const lowerType = (item.type || '').toLowerCase();
+
+  if (KNOWN_TYPE_NAMES[lowerType]) {
+    return { id: lowerType, name: KNOWN_TYPE_NAMES[lowerType], type: item.type };
+  }
 
   if (lowerName.includes('marauder') || lowerType === 'marauder') {
     return { id: 'marauder', name: 'ESP32 Marauder', type: 'marauder' };
@@ -547,8 +588,9 @@ export function getFirmwareFamily(item) {
   // Generic prefix grouping: e.g. "Heltec V3", "LilyGO T-Beam", "M5Cardputer", etc.
   const match = name.match(/^([A-Za-z0-9_-]+)/);
   const prefix = match ? match[1] : name;
+  const normalizedId = (item.type && item.type !== 'other') ? item.type.toLowerCase() : prefix.toLowerCase();
   return { 
-    id: (item.type && item.type !== 'other') ? item.type : prefix.toLowerCase(), 
+    id: normalizedId, 
     name: prefix, 
     type: item.type || 'other' 
   };
@@ -560,33 +602,44 @@ export function getFirmwareFamily(item) {
 export function groupFirmwareCatalog(catalog = []) {
   const groupsMap = new Map();
   const result = [];
+  let pigletSuiteGroup = null;
 
   for (const item of catalog) {
-    if (item.isPigletSuite) {
-      result.push({
-        id: 'piglet-suite',
-        isPigletSuite: true,
-        familyName: 'Piglet Wardriver Suite',
-        type: 'piglet',
-        item
-      });
+    if (item.isPigletSuite || item.type === 'piglet' || (item.name || '').toLowerCase().includes('piglet')) {
+      if (!pigletSuiteGroup) {
+        pigletSuiteGroup = {
+          id: 'piglet-suite',
+          isPigletSuite: true,
+          familyName: 'Piglet Wardriver Suite',
+          type: 'piglet',
+          item: item.isPigletSuite ? item : (catalog.find(c => c.isPigletSuite) || item)
+        };
+        result.push(pigletSuiteGroup);
+        groupsMap.set('piglet', pigletSuiteGroup);
+        groupsMap.set('piglet-suite', pigletSuiteGroup);
+      }
       continue;
     }
 
     const { id, name: familyName, type } = getFirmwareFamily(item);
+    const normalizedId = (id || 'other').toLowerCase();
     
-    if (!groupsMap.has(id)) {
+    if (!groupsMap.has(normalizedId)) {
       const newGroup = {
-        id,
+        id: normalizedId,
         familyName,
         type,
         boards: []
       };
-      groupsMap.set(id, newGroup);
+      groupsMap.set(normalizedId, newGroup);
       result.push(newGroup);
     }
 
-    groupsMap.get(id).boards.push(item);
+    const existingBoards = groupsMap.get(normalizedId).boards;
+    const boardKey = (item.name || '').trim().toLowerCase();
+    if (!existingBoards.some(b => (b.name || '').trim().toLowerCase() === boardKey)) {
+      existingBoards.push(item);
+    }
   }
 
   return result;
