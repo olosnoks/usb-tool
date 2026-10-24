@@ -78,8 +78,17 @@ function AppContent() {
     setActiveBoardId
   } = useSerial();
 
-  // Active Tool identifier (defaults to 'flasher')
-  const [activeTool, setActiveTool] = useState('flasher');
+  // Active Tool identifier (defaults to 'flasher' or ?tool= param)
+  const [activeTool, setActiveTool] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlTool = params.get('tool');
+      if (urlTool && !urlTool.endsWith('-modal')) return urlTool;
+      const hash = window.location.hash.replace('#', '');
+      if (hash.startsWith('tool=')) return hash.replace('tool=', '');
+    } catch (e) {}
+    return 'flasher';
+  });
 
   // Sidebar collapse state (persisted)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
@@ -104,6 +113,16 @@ function AppContent() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isHardwareIntelOpen, setIsHardwareIntelOpen] = useState(false);
   const [isPinoutModalOpen, setIsPinoutModalOpen] = useState(false);
+
+  // Check URL params for modal triggers
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlTool = params.get('tool');
+      if (urlTool === 'pinouts-modal') setIsPinoutModalOpen(true);
+      if (urlTool === 'intel-modal') setIsHardwareIntelOpen(true);
+    } catch (e) {}
+  }, []);
 
   // Global hotkeys (Ctrl+K, Ctrl+`, Alt+1..6)
   useEffect(() => {
