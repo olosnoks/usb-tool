@@ -16,8 +16,15 @@ import {
   Sliders,
   ChevronRight
 } from 'lucide-react';
-import { fetchFirmwareCatalog, getCachedCatalogSync, downloadFirmwareBinary, BUNDLED_FALLBACK_PRESETS } from '../../services/firmwareCatalogService';
+import { 
+  fetchFirmwareCatalog, 
+  getCachedCatalogSync, 
+  downloadFirmwareBinary, 
+  BUNDLED_FALLBACK_PRESETS,
+  groupFirmwareCatalog 
+} from '../../services/firmwareCatalogService';
 import PigletUnifiedCard from './PigletUnifiedCard';
+import FirmwareGroupCard from './FirmwareGroupCard';
 
 export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
   const [catalog, setCatalog] = useState(() => getCachedCatalogSync() || BUNDLED_FALLBACK_PRESETS);
@@ -63,33 +70,58 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
     { id: 'interpreter', label: 'MicroPython' },
   ];
 
-  const filteredFirmware = useMemo(() => {
-    return catalog.filter(item => {
+  // Group flat firmware catalog into consolidated suites with board & version dropdowns
+  const groupedSuites = useMemo(() => {
+    return groupFirmwareCatalog(catalog);
+  }, [catalog]);
+
+  const filteredSuites = useMemo(() => {
+    return groupedSuites.filter(suite => {
       const q = searchQuery.toLowerCase();
+
+      if (suite.isPigletSuite) {
+        const matchesSearch = !q || 
+          q.includes('piglet') || 
+          q.includes('skon') || 
+          q.includes('ham') || 
+          q.includes('wardrive') || 
+          q.includes('cyd') || 
+          q.includes('xiao');
+        const matchesChip = selectedChip === 'ALL' || 
+          ['ESP32', 'ESP32-S3', 'ESP32-C3', 'ESP32-C5', 'ESP32-C6'].includes(selectedChip);
+        const matchesCategory = selectedCategory === 'ALL' || selectedCategory.toLowerCase() === 'piglet';
+        return matchesSearch && matchesChip && matchesCategory;
+      }
+
       const matchesSearch = !q || 
-        item.name?.toLowerCase().includes(q) || 
-        item.description?.toLowerCase().includes(q) ||
-        item.device?.toLowerCase().includes(q) ||
-        item.type?.toLowerCase().includes(q) ||
-        (q.includes('piglet') && (item.type === 'piglet' || item.name?.toLowerCase().includes('piglet'))) ||
-        (q.includes('skon') && item.name?.toLowerCase().includes('skon')) ||
-        (q.includes('ham') && item.name?.toLowerCase().includes('ham'));
+        suite.familyName?.toLowerCase().includes(q) ||
+        suite.type?.toLowerCase().includes(q) ||
+        suite.boards?.some(b => 
+          b.name?.toLowerCase().includes(q) ||
+          b.description?.toLowerCase().includes(q) ||
+          b.device?.toLowerCase().includes(q)
+        );
 
-      const matchesChip = selectedChip === 'ALL' || 
-        (item.isPigletSuite && (item.supportedChips?.includes(selectedChip) || selectedChip === 'ESP32')) ||
-        item.device?.toUpperCase().includes(selectedChip) ||
-        (selectedChip === 'ESP32' && item.device?.toUpperCase() === 'ESP32');
+      const matchesChip = selectedChip === 'ALL' ||
+        suite.boards?.some(b => 
+          b.device?.toUpperCase().includes(selectedChip) ||
+          (selectedChip === 'ESP32' && b.device?.toUpperCase() === 'ESP32')
+        );
 
-      const matchesCategory = selectedCategory === 'ALL' || 
-        item.type?.toLowerCase() === selectedCategory.toLowerCase() ||
-        (selectedCategory.toLowerCase() === 'piglet' && (
-          item.type?.toLowerCase() === 'piglet' ||
-          item.name?.toLowerCase().includes('piglet')
-        ));
+      const matchesCategory = selectedCategory === 'ALL' ||
+        suite.type?.toLowerCase() === selectedCategory.toLowerCase() ||
+        suite.familyName?.toLowerCase().includes(selectedCategory.toLowerCase());
 
       return matchesSearch && matchesChip && matchesCategory;
     });
-  }, [catalog, searchQuery, selectedChip, selectedCategory]);
+  }, [groupedSuites, searchQuery, selectedChip, selectedCategory]);
+
+  const totalBoardsCount = useMemo(() => {
+    return filteredSuites.reduce((acc, s) => {
+      if (s.isPigletSuite) return acc + 9;
+      return acc + (s.boards?.length || 1);
+    }, 0);
+  }, [filteredSuites]);
 
   const handleDownloadAndFlash = async (firmware) => {
     if (!onSelectFirmwareForFlashing) return;
@@ -162,7 +194,7 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
               <span>Refresh Catalog</span>
             </button>
             <span className="text-[11px] font-mono text-slate-400 px-2 py-1 bg-[#101216] rounded-lg border border-[#232733]">
-              {filteredFirmware.length} Presets Available
+              {filteredSuites.length} Suites ({totalBoardsCount} Boards)
             </span>
           </div>
         </div>
@@ -221,20 +253,20 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
         </div>
       )}
 
-      {/* Grid of Firmware Options */}
+      {/* Grid of Unified Firmware Suites */}
       {isLoading ? (
         <div className="py-20 flex flex-col items-center justify-center text-slate-500 space-y-3 font-mono text-xs">
           <RefreshCw className="w-8 h-8 text-amber-400 animate-spin" />
           <span>Fetching cloud catalog manifest...</span>
         </div>
-      ) : filteredFirmware.length === 0 ? (
+      ) : filteredSuites.length === 0 ? (
         <div className="py-16 text-center text-slate-500 font-mono text-xs bg-[#171920] border border-[#2b303c] rounded-2xl">
           No firmware matched your search criteria.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {filteredFirmware.map((fw, idx) => {
-            if (fw.isPigletSuite) {
+          {filteredSuites.map((suite, idx) => {
+            if (suite.isPigletSuite) {
               return (
                 <PigletUnifiedCard
                   key="piglet-unified-suite-card"
@@ -246,94 +278,15 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
             }
 
             return (
-              <div
-                key={fw.name + idx}
-                className="bg-[#171920] hover:bg-[#1a1d26] border border-[#2b303c] hover:border-amber-500/40 rounded-2xl p-4 flex flex-col justify-between transition group space-y-3"
-              >
-              <div className="space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-0.5">
-                    <h4 className="text-sm font-bold text-slate-100 group-hover:text-amber-300 transition flex items-center gap-1.5">
-                      <span>{fw.name}</span>
-                    </h4>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold">
-                        {fw.device || 'ESP32'}
-                      </span>
-                      {fw.type === 'piglet' && (
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-pink-500/20 text-pink-300 font-mono font-bold flex items-center gap-1">
-                          <span>🐽</span>
-                          <span>{fw.name.includes("skon") ? "skon's fork" : "Ham's official"}</span>
-                        </span>
-                      )}
-                      {fw.version && (
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-                          {fw.version}
-                        </span>
-                      )}
-                      {fw.isMergedBinary && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono">
-                          Merged 0x0
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {fw.websiteUrl && (
-                    <a
-                      href={fw.websiteUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1.5 text-slate-400 hover:text-amber-400 bg-[#1e212b] rounded-lg border border-[#2b303c] transition"
-                      title="Documentation & Project Page"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  )}
-                </div>
-
-                <p className="text-xs text-slate-400 line-clamp-3 leading-relaxed">
-                  {fw.description}
-                </p>
-
-                {/* Features Badges */}
-                {fw.features && fw.features.length > 0 && (
-                  <div className="flex items-center gap-1 flex-wrap pt-1">
-                    {fw.features.slice(0, 3).map((feat, fIdx) => (
-                      <span key={fIdx} className="text-[9px] px-1.5 py-0.5 rounded bg-[#1e212b] text-slate-400 font-mono truncate max-w-[140px]">
-                        • {feat}
-                      </span>
-                    ))}
-                    {fw.features.length > 3 && (
-                      <span className="text-[9px] text-slate-500 font-mono">
-                        +{fw.features.length - 3} more
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Bottom Actions */}
-              <div className="pt-3 border-t border-[#232733] flex items-center justify-between">
-                <button
-                  onClick={() => setSelectedFirmware(fw)}
-                  className="text-xs text-slate-400 hover:text-slate-200 font-mono flex items-center gap-1 transition"
-                >
-                  <Info className="w-3.5 h-3.5" />
-                  <span>Inspect</span>
-                </button>
-
-                <button
-                  onClick={() => handleDownloadAndFlash(fw)}
-                  className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs font-mono shadow-md shadow-amber-500/10 flex items-center gap-1.5 transition active:scale-95"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Load Preset</span>
-                </button>
-              </div>
-            </div>
-          );
-        })}
+              <FirmwareGroupCard
+                key={suite.id + idx}
+                group={suite}
+                onSelectFirmwareForFlashing={handleDownloadAndFlash}
+                onInspect={setSelectedFirmware}
+                currentChipFilter={selectedChip}
+              />
+            );
+          })}
         </div>
       )}
 

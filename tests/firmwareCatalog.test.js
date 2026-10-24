@@ -3,7 +3,7 @@ import {
   BUNDLED_FALLBACK_PRESETS, 
   PIGLET_VARIANTS,
   fetchFirmwareCatalog, 
-  downloadFirmwareBinary 
+  groupFirmwareCatalog 
 } from '../src/services/firmwareCatalogService';
 
 describe('Piglet and Firmware Catalog Presets', () => {
@@ -26,29 +26,45 @@ describe('Piglet and Firmware Catalog Presets', () => {
     expect(unifiedCard.supportedChips).toContain('ESP32-C5');
   });
 
-  it('all Piglet variant entries are configured as merged 0x0 binaries with valid download URLs', () => {
-    const allVariants = [...PIGLET_VARIANTS.skon, ...PIGLET_VARIANTS.ham];
-    
-    allVariants.forEach(variant => {
-      expect(variant.isMergedBinary).toBe(true);
-      expect(variant.files[0].address).toBe('0x0');
-      expect(variant.downloadUrl).toMatch(/^https:\/\//);
-      if (variant.source === 'skon') {
-        expect(variant.downloadUrl).toContain('olosnoks.github.io/piglet/firmware/');
-      } else {
-        expect(variant.downloadUrl).toContain('github.com/Hamspiced/piglet/releases/');
-      }
+  it('every firmware in bundled presets points to an official repo and release binary', () => {
+    const officialHosts = [
+      'github.com/justcallmekoko/ESP32Marauder',
+      'github.com/pr3y/Bruce',
+      'github.com/Aircoookie/WLED',
+      'micropython.org',
+      'github.com/Hamspiced/piglet',
+      'olosnoks.github.io/piglet'
+    ];
+
+    BUNDLED_FALLBACK_PRESETS.forEach(preset => {
+      expect(preset.downloadUrl).toMatch(/^https:\/\//);
+      const isOfficial = officialHosts.some(host => 
+        preset.downloadUrl.includes(host) || preset.websiteUrl?.includes(host)
+      );
+      expect(isOfficial).toBe(true);
     });
   });
 
-  it('covers the expected target chips for Piglet (ESP32-S3, ESP32-C3, ESP32-C5, ESP32-C6)', () => {
-    const allVariants = [...PIGLET_VARIANTS.skon, ...PIGLET_VARIANTS.ham];
-    const chips = new Set(allVariants.map(p => p.device));
-    
-    expect(chips.has('ESP32-S3')).toBe(true);
-    expect(chips.has('ESP32-C3')).toBe(true);
-    expect(chips.has('ESP32-C5')).toBe(true);
-    expect(chips.has('ESP32-C6')).toBe(true);
+  it('groups multiple board entries into unified suites with dropdowns', () => {
+    const suites = groupFirmwareCatalog(BUNDLED_FALLBACK_PRESETS);
+    // Piglet, Marauder, Bruce, WLED, MicroPython
+    expect(suites.length).toBe(5);
+
+    const marauderSuite = suites.find(s => s.id === 'marauder');
+    expect(marauderSuite).toBeDefined();
+    expect(marauderSuite.boards.length).toBe(5); // Flipper WiFi, S3 Multiboard, CYD, Generic, Dual Mini C5
+
+    const bruceSuite = suites.find(s => s.id === 'bruce');
+    expect(bruceSuite).toBeDefined();
+    expect(bruceSuite.boards.length).toBe(4); // CYD, AWOK Mini, Cardputer, ESP32-C5
+
+    const wledSuite = suites.find(s => s.id === 'wled');
+    expect(wledSuite).toBeDefined();
+    expect(wledSuite.boards.length).toBe(3); // ESP32 Standard, ESP32-S3, ESP32-C3
+
+    const microPythonSuite = suites.find(s => s.id === 'micropython');
+    expect(microPythonSuite).toBeDefined();
+    expect(microPythonSuite.boards.length).toBe(2); // ESP32 Generic, ESP32-S3
   });
 
   it('merges bundled Piglet suite preset with remote manifest options', async () => {

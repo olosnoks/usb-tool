@@ -208,13 +208,15 @@ export const BUNDLED_FALLBACK_PRESETS = [
     flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
   },
 
-  // --- Upstream Featured Multi-Tools ---
+  // --- Upstream Featured Multi-Tools (All Official Repos & Latest Releases) ---
+  // ESP32 Marauder (justcallmekoko/ESP32Marauder v1.19.2)
   {
     name: 'Flipper WiFi Dev Board (Marauder)',
     device: 'ESP32-S2',
     type: 'marauder',
     version: 'v1.19.2',
-    description: 'Upstream ESP32 Marauder Wi-Fi & BLE pentesting suite compiled for Flipper Zero WiFi Dev Board.',
+    description: 'Official ESP32 Marauder Wi-Fi & BLE pentesting suite compiled for Flipper Zero WiFi Dev Board.',
+    websiteUrl: 'https://github.com/justcallmekoko/ESP32Marauder',
     downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_flipper.bin',
     files: [
       { name: 'esp32_marauder_v1_19_2_flipper.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_flipper.bin' }
@@ -223,24 +225,12 @@ export const BUNDLED_FALLBACK_PRESETS = [
     flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: false }
   },
   {
-    name: 'Generic ESP32 (Marauder)',
-    device: 'ESP32',
-    type: 'marauder',
-    version: 'v1.19.2',
-    description: 'Official ESP32 Marauder firmware for generic NodeMCU / WROOM boards with OLED & SD card support.',
-    downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_old_hardware.bin',
-    files: [
-      { name: 'esp32_marauder_v1_19_2_generic.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_old_hardware.bin' }
-    ],
-    features: ['Wi-Fi Packet Sniffer', 'Deauth Attack Engine', 'Probe Request Monitor', 'BLE Spam & Detection'],
-    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: false }
-  },
-  {
     name: 'ESP32-S3 Multiboard (Marauder)',
     device: 'ESP32-S3',
     type: 'marauder',
     version: 'v1.19.2',
-    description: 'Official Marauder for ESP32-S3 and Flipper Zero Multiboard S3 modules.',
+    description: 'Official Marauder for ESP32-S3 and Flipper Zero Multiboard S3 modules with dual-core acceleration.',
+    websiteUrl: 'https://github.com/justcallmekoko/ESP32Marauder',
     downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_multiboardS3.bin',
     files: [
       { name: 'esp32_marauder_v1_19_2_multiboardS3.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_multiboardS3.bin' }
@@ -249,52 +239,162 @@ export const BUNDLED_FALLBACK_PRESETS = [
     flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: false }
   },
   {
-    name: 'AWOK Mini (Bruce)',
+    name: 'CYD 2432S028 (Marauder)',
     device: 'ESP32',
-    type: 'bruce',
-    version: '1.16.1',
-    description: 'Multi-tool firmware for ESP32 with RF, IR, Wi-Fi, and BLE capabilities. Complete factory-merged binary for 0x0.',
-    downloadUrl: 'https://github.com/BruceDevices/firmware/releases/download/1.16.1/Bruce-Awok-Mini.bin',
+    type: 'marauder',
+    version: 'v1.19.2',
+    description: 'Official Marauder compiled for the Cheap Yellow Display (CYD 2.8" Touch Screen).',
+    websiteUrl: 'https://github.com/justcallmekoko/ESP32Marauder',
+    downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_cyd_2432S028.bin',
     files: [
-      { name: 'Bruce-Awok-Mini.bin', address: '0x0', downloadUrl: 'https://github.com/BruceDevices/firmware/releases/download/1.16.1/Bruce-Awok-Mini.bin' }
+      { name: 'esp32_marauder_v1_19_2_cyd_2432S028.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_cyd_2432S028.bin' }
     ],
-    isMergedBinary: true,
-    features: ['Sub-GHz & IR Control', 'Wi-Fi & BLE Toolkit', 'M5Stack / Cardputer / AWOK Support', 'SD File Explorer'],
-    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
+    features: ['Touchscreen GUI', 'Packet Monitor', 'Deauth & Probe Sniffer', 'SD Card PCAP'],
+    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: false }
   },
+  {
+    name: 'Generic ESP32 (Marauder)',
+    device: 'ESP32',
+    type: 'marauder',
+    version: 'v1.19.2',
+    description: 'Official ESP32 Marauder firmware for generic NodeMCU / WROOM boards with OLED & SD card support.',
+    websiteUrl: 'https://github.com/justcallmekoko/ESP32Marauder',
+    downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_old_hardware.bin',
+    files: [
+      { name: 'esp32_marauder_v1_19_2_generic.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_old_hardware.bin' }
+    ],
+    features: ['Wi-Fi Packet Sniffer', 'Deauth Attack Engine', 'Probe Request Monitor', 'BLE Spam & Detection'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: false }
+  },
+  {
+    name: 'Dual Mini C5 (Marauder)',
+    device: 'ESP32-C5',
+    type: 'marauder',
+    version: 'v1.19.2',
+    description: 'Official ESP32 Marauder Wi-Fi 6 & dual-band pentesting firmware for ESP32-C5 Dual Mini.',
+    websiteUrl: 'https://github.com/justcallmekoko/ESP32Marauder',
+    downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_dual_mini_c5.bin',
+    files: [
+      { name: 'esp32_marauder_v1_19_2_dual_mini_c5.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_dual_mini_c5.bin' }
+    ],
+    features: ['Dual-Band 2.4/5GHz Wi-Fi 6', 'RISC-V High Speed Capture', 'Compact Form Factor', 'Raw Frame Injection'],
+    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: false }
+  },
+
+  // Bruce Multi-Tool (pr3y/Bruce v1.16.1)
   {
     name: 'CYD 2432S028 (Bruce)',
     device: 'ESP32',
     type: 'bruce',
     version: '1.16.1',
-    description: 'Bruce portable RF/BLE multi-tool for the Cheap Yellow Display (ESP32 2.8" Touch TFT). Factory merged for 0x0.',
-    downloadUrl: 'https://github.com/BruceDevices/firmware/releases/download/1.16.1/Bruce-CYD-2432S028.bin',
+    description: 'Official Bruce multi-tool firmware for Cheap Yellow Display (ESP32 2.8" Touch Screen). Factory merged for 0x0.',
+    websiteUrl: 'https://github.com/pr3y/Bruce',
+    downloadUrl: 'https://github.com/pr3y/Bruce/releases/download/1.16.1/Bruce-CYD-2432S028.bin',
     files: [
-      { name: 'Bruce-CYD-2432S028.bin', address: '0x0', downloadUrl: 'https://github.com/BruceDevices/firmware/releases/download/1.16.1/Bruce-CYD-2432S028.bin' }
+      { name: 'Bruce-CYD-2432S028.bin', address: '0x0', downloadUrl: 'https://github.com/pr3y/Bruce/releases/download/1.16.1/Bruce-CYD-2432S028.bin' }
     ],
     isMergedBinary: true,
     features: ['Full Touchscreen GUI', 'Sub-GHz / IR Transceiver', 'Wi-Fi Wardrive & Scan', 'RGB LED & Beeper'],
     flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
   },
   {
-    name: 'WLED ESP32',
+    name: 'AWOK Mini (Bruce)',
+    device: 'ESP32',
+    type: 'bruce',
+    version: '1.16.1',
+    description: 'Official Bruce multi-tool for AWOK Mini hardware with Sub-GHz RF, IR, Wi-Fi, and BLE capabilities.',
+    websiteUrl: 'https://github.com/pr3y/Bruce',
+    downloadUrl: 'https://github.com/pr3y/Bruce/releases/download/1.16.1/Bruce-Awok-Mini.bin',
+    files: [
+      { name: 'Bruce-Awok-Mini.bin', address: '0x0', downloadUrl: 'https://github.com/pr3y/Bruce/releases/download/1.16.1/Bruce-Awok-Mini.bin' }
+    ],
+    isMergedBinary: true,
+    features: ['Sub-GHz & IR Control', 'Wi-Fi & BLE Toolkit', 'SD File Explorer', 'Factory Merged 0x0'],
+    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
+  },
+  {
+    name: 'M5Stack Cardputer (Bruce)',
+    device: 'ESP32-S3',
+    type: 'bruce',
+    version: '1.16.1',
+    description: 'Official Bruce multi-tool compiled for M5Stack Cardputer with full keyboard, display, and speaker support.',
+    websiteUrl: 'https://github.com/pr3y/Bruce',
+    downloadUrl: 'https://github.com/pr3y/Bruce/releases/download/1.16.1/Bruce-m5stack-cardputer.bin',
+    files: [
+      { name: 'Bruce-m5stack-cardputer.bin', address: '0x0', downloadUrl: 'https://github.com/pr3y/Bruce/releases/download/1.16.1/Bruce-m5stack-cardputer.bin' }
+    ],
+    isMergedBinary: true,
+    features: ['Keyboard Driven UI', 'ESP32-S3 Performance', 'Wi-Fi / BLE Pentesting', 'Factory Merged 0x0'],
+    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
+  },
+  {
+    name: 'ESP32-C5 (Bruce)',
+    device: 'ESP32-C5',
+    type: 'bruce',
+    version: '1.16.1',
+    description: 'Official Bruce multi-tool for ESP32-C5 dual-band Wi-Fi 6 RISC-V targets.',
+    websiteUrl: 'https://github.com/pr3y/Bruce',
+    downloadUrl: 'https://github.com/pr3y/Bruce/releases/download/1.16.1/Bruce-esp32-c5.bin',
+    files: [
+      { name: 'Bruce-esp32-c5.bin', address: '0x0', downloadUrl: 'https://github.com/pr3y/Bruce/releases/download/1.16.1/Bruce-esp32-c5.bin' }
+    ],
+    isMergedBinary: true,
+    features: ['ESP32-C5 Dual-Band Support', 'RF Toolkit', 'Factory Merged 0x0'],
+    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+  },
+
+  // WLED Lighting (Aircoookie/WLED v16.0.1)
+  {
+    name: 'WLED ESP32 Standard',
     device: 'ESP32',
     type: 'iot',
-    version: 'v0.14.4',
-    description: 'Fast and feature-rich implementation of an ESP8266/ESP32 web server to control NeoPixel (WS2812B, WS2811, SK6812) LED strips.',
-    downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v0.14.4/WLED_0.14.4_ESP32.bin',
+    version: 'v16.0.1',
+    description: 'Official fast web server to control NeoPixel (WS2812B, WS2811, SK6812) LED strips with 100+ effects.',
+    websiteUrl: 'https://github.com/Aircoookie/WLED',
+    downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v16.0.1/WLED_16.0.1_ESP32.bin',
     files: [
-      { name: 'WLED_0.14.4_ESP32.bin', address: '0x10000', downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v0.14.4/WLED_0.14.4_ESP32.bin' }
+      { name: 'WLED_16.0.1_ESP32.bin', address: '0x10000', downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v16.0.1/WLED_16.0.1_ESP32.bin' }
     ],
     features: ['100+ Visual Effects', 'E1.31 / DMX / Art-Net Sync', 'Home Assistant & Alexa Support', 'Web UI Controller'],
     flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: false }
   },
   {
-    name: 'MicroPython ESP32',
+    name: 'WLED ESP32-S3',
+    device: 'ESP32-S3',
+    type: 'iot',
+    version: 'v16.0.1',
+    description: 'Official WLED firmware optimized for high-performance ESP32-S3 boards with 8MB flash.',
+    websiteUrl: 'https://github.com/Aircoookie/WLED',
+    downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v16.0.1/WLED_16.0.1_ESP32-S3_8MB_qspi.bin',
+    files: [
+      { name: 'WLED_16.0.1_ESP32-S3_8MB_qspi.bin', address: '0x10000', downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v16.0.1/WLED_16.0.1_ESP32-S3_8MB_qspi.bin' }
+    ],
+    features: ['High-Performance S3', 'Multi-Strip Parallel Output', 'Sound Reactive Audio Sync'],
+    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: false }
+  },
+  {
+    name: 'WLED ESP32-C3',
+    device: 'ESP32-C3',
+    type: 'iot',
+    version: 'v16.0.1',
+    description: 'Official WLED firmware for ultra-compact ESP32-C3 RISC-V smart home LED controllers.',
+    websiteUrl: 'https://github.com/Aircoookie/WLED',
+    downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v16.0.1/WLED_16.0.1_ESP32-C3.bin',
+    files: [
+      { name: 'WLED_16.0.1_ESP32-C3.bin', address: '0x10000', downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v16.0.1/WLED_16.0.1_ESP32-C3.bin' }
+    ],
+    features: ['Compact RISC-V C3', 'Ultra Low Power', 'Full WLED Web Interface'],
+    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: false }
+  },
+
+  // MicroPython (micropython/micropython v1.23.0)
+  {
+    name: 'MicroPython ESP32 Generic',
     device: 'ESP32',
     type: 'interpreter',
     version: 'v1.23.0',
-    description: 'Official Python 3 runtime optimized to run on ESP32 boards with interactive hardware REPL.',
+    description: 'Official Python 3 runtime for standard ESP32 boards with interactive hardware REPL and filesystem.',
+    websiteUrl: 'https://micropython.org',
     downloadUrl: 'https://micropython.org/resources/firmware/ESP32_GENERIC-20240602-v1.23.0.bin',
     files: [
       { name: 'ESP32_GENERIC-v1.23.0.bin', address: '0x1000', downloadUrl: 'https://micropython.org/resources/firmware/ESP32_GENERIC-20240602-v1.23.0.bin' }
@@ -302,6 +402,21 @@ export const BUNDLED_FALLBACK_PRESETS = [
     isMergedBinary: true,
     features: ['Python 3 REPL over Serial', 'Hardware GPIO / SPI / I2C APIs', 'Micro-file System', 'Low Power Sleep'],
     flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+  },
+  {
+    name: 'MicroPython ESP32-S3',
+    device: 'ESP32-S3',
+    type: 'interpreter',
+    version: 'v1.23.0',
+    description: 'Official Python 3 runtime compiled for ESP32-S3 boards with USB CDC REPL and vector instructions.',
+    websiteUrl: 'https://micropython.org',
+    downloadUrl: 'https://micropython.org/resources/firmware/ESP32_GENERIC_S3-20240602-v1.23.0.bin',
+    files: [
+      { name: 'ESP32_GENERIC_S3-v1.23.0.bin', address: '0x0', downloadUrl: 'https://micropython.org/resources/firmware/ESP32_GENERIC_S3-20240602-v1.23.0.bin' }
+    ],
+    isMergedBinary: true,
+    features: ['Native USB CDC REPL', 'ESP32-S3 Dual Core', 'Python 3 Standard Library'],
+    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
   }
 ];
 
@@ -349,6 +464,97 @@ export async function fetchFirmwareCatalog(forceRefresh = false) {
     inMemoryCatalog = BUNDLED_FALLBACK_PRESETS;
     return { options: BUNDLED_FALLBACK_PRESETS, fromCache: true, total: BUNDLED_FALLBACK_PRESETS.length, error: err.message };
   }
+}
+
+/**
+ * Resolves a firmware item into its primary project family/suite.
+ */
+export function getFirmwareFamily(item) {
+  if (item.isPigletSuite || item.type === 'piglet') {
+    return { id: 'piglet', name: 'Piglet Wardriver Suite', type: 'piglet' };
+  }
+
+  const name = item.name || '';
+  const lowerName = name.toLowerCase();
+  const lowerType = (item.type || '').toLowerCase();
+
+  if (lowerName.includes('marauder') || lowerType === 'marauder') {
+    return { id: 'marauder', name: 'ESP32 Marauder', type: 'marauder' };
+  }
+  if (lowerName.includes('bruce') || lowerType === 'bruce') {
+    return { id: 'bruce', name: 'Bruce Multi-Tool', type: 'bruce' };
+  }
+  if (lowerName.includes('wled') || lowerType === 'wled' || lowerType === 'iot') {
+    return { id: 'wled', name: 'WLED Lighting Controller', type: 'iot' };
+  }
+  if (lowerName.includes('micropython') || lowerType === 'interpreter' || lowerName.includes('python')) {
+    return { id: 'micropython', name: 'MicroPython REPL', type: 'interpreter' };
+  }
+  if (lowerName.includes('axd') || lowerType === 'awokxdag' || lowerName.includes('awok')) {
+    return { id: 'awokxdag', name: 'AxD / AWOK Suite', type: 'awokxdag' };
+  }
+  if (lowerName.includes('flipperhttp') || lowerType === 'flipperhttp') {
+    return { id: 'flipperhttp', name: 'FlipperHTTP Suite', type: 'flipperhttp' };
+  }
+  if (lowerName.includes('meshtastic') || lowerType === 'meshtastic') {
+    return { id: 'meshtastic', name: 'Meshtastic Mesh Radio', type: 'meshtastic' };
+  }
+  if (lowerName.includes('ghostesp') || lowerType === 'ghostesp') {
+    return { id: 'ghostesp', name: 'GhostESP Multi-Tool', type: 'ghostesp' };
+  }
+  if (lowerName.includes('evil portal') || lowerType === 'evilportal') {
+    return { id: 'evilportal', name: 'Evil Portal Suite', type: 'evilportal' };
+  }
+  if (lowerName.includes('deauther') || lowerType === 'deauther') {
+    return { id: 'deauther', name: 'ESP8266 Deauther', type: 'deauther' };
+  }
+
+  // Generic prefix grouping: e.g. "Heltec V3", "LilyGO T-Beam", "M5Cardputer", etc.
+  const match = name.match(/^([A-Za-z0-9_-]+)/);
+  const prefix = match ? match[1] : name;
+  return { 
+    id: (item.type && item.type !== 'other') ? item.type : prefix.toLowerCase(), 
+    name: prefix, 
+    type: item.type || 'other' 
+  };
+}
+
+/**
+ * Collapses flat firmware presets into unified suites with boards and versions.
+ */
+export function groupFirmwareCatalog(catalog = []) {
+  const groupsMap = new Map();
+  const result = [];
+
+  for (const item of catalog) {
+    if (item.isPigletSuite) {
+      result.push({
+        id: 'piglet-suite',
+        isPigletSuite: true,
+        familyName: 'Piglet Wardriver Suite',
+        type: 'piglet',
+        item
+      });
+      continue;
+    }
+
+    const { id, name: familyName, type } = getFirmwareFamily(item);
+    
+    if (!groupsMap.has(id)) {
+      const newGroup = {
+        id,
+        familyName,
+        type,
+        boards: []
+      };
+      groupsMap.set(id, newGroup);
+      result.push(newGroup);
+    }
+
+    groupsMap.get(id).boards.push(item);
+  }
+
+  return result;
 }
 
 /**
