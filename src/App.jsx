@@ -221,10 +221,10 @@ function AppContent() {
               </div>
             )}
 
-            {['packet-analyzer', 'hex', 'packets'].includes(activeTool) && (
+            {['packet-analyzer', 'hex', 'packets', 'kismet'].includes(activeTool) && (
               <div className="w-full">
                 <ProtocolPacketLab
-                  initialTab={activeTool === 'hex' ? 'hex' : activeTool === 'packets' ? 'packets' : 'analyzer'}
+                  initialTab={activeTool === 'hex' ? 'hex' : activeTool === 'packets' ? 'packets' : activeTool === 'kismet' ? 'kismet' : 'analyzer'}
                   hexByteStream={hexByteStream}
                   onClearHex={clearHexStream}
                   isConnected={isConnected}

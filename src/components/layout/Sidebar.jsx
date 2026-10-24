@@ -205,7 +205,7 @@ export default function Sidebar({
                   const Icon = item.icon;
                   const isActive = 
                     activeTool === item.id ||
-                    (item.id === 'packet-analyzer' && ['packet-analyzer', 'hex', 'packets'].includes(activeTool)) ||
+                    (item.id === 'packet-analyzer' && ['packet-analyzer', 'hex', 'packets', 'kismet'].includes(activeTool)) ||
                     (item.id === 'ducky' && ['ducky', 'cyberchef'].includes(activeTool)) ||
                     (item.id === 'wardrive' && ['wardrive', 'ubx'].includes(activeTool)) ||
                     (item.id === 'programmers' && ['programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp'].includes(activeTool));

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Layers, Binary, Activity, Wifi, Filter, Terminal } from 'lucide-react';
+import { Layers, Binary, Activity, Wifi, Filter, Terminal, Radio } from 'lucide-react';
 import PacketAnalyzerWorkbench from './PacketAnalyzerWorkbench';
+import KismetStudioWorkbench from './KismetStudioWorkbench';
 import HexViewer from '../common/HexViewer';
 import PacketFramer from '../PacketFramer';
 
@@ -12,11 +13,11 @@ export default function ProtocolPacketLab({
   isConnected = false
 }) {
   const [activeSubTab, setActiveSubTab] = useState(
-    initialTab === 'hex' ? 'hex' : initialTab === 'packets' ? 'packets' : 'analyzer'
+    initialTab === 'hex' ? 'hex' : initialTab === 'packets' ? 'packets' : initialTab === 'kismet' ? 'kismet' : 'analyzer'
   );
 
   useEffect(() => {
-    if (initialTab === 'hex' || initialTab === 'packets' || initialTab === 'analyzer') {
+    if (initialTab === 'hex' || initialTab === 'packets' || initialTab === 'analyzer' || initialTab === 'kismet') {
       setActiveSubTab(initialTab);
     }
   }, [initialTab]);
@@ -56,6 +57,17 @@ export default function ProtocolPacketLab({
             <span>Wi-Fi & PCAP Analyzer</span>
           </button>
           <button
+            onClick={() => setActiveSubTab('kismet')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+              activeSubTab === 'kismet'
+                ? 'bg-gradient-to-r from-purple-500/30 to-indigo-500/30 text-purple-200 border border-purple-500/50 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Radio className="w-3.5 h-3.5 text-purple-400" />
+            <span>Kismet Studio (Alfa / 802.11)</span>
+          </button>
+          <button
             onClick={() => setActiveSubTab('hex')}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
               activeSubTab === 'hex'
@@ -83,6 +95,7 @@ export default function ProtocolPacketLab({
       {/* Active Tab View */}
       <div className="w-full">
         {activeSubTab === 'analyzer' && <PacketAnalyzerWorkbench />}
+        {activeSubTab === 'kismet' && <KismetStudioWorkbench />}
         {activeSubTab === 'hex' && (
           <HexViewer
             byteStream={hexByteStream}

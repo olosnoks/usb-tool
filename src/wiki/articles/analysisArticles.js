@@ -129,6 +129,64 @@ When transmitting binary packets across raw serial channels without hardware flo
 7. Click **Export PCAP** to save the file as \`capture.pcap\`.
 8. Open the PCAP file in Wireshark or pass it to \`aircrack-ng\` to verify cryptographic integrity!
 
+<details>
+<summary>Deep Dive: Alfa Network Wi-Fi Adapters & Kismet REST / WebSocket Architecture</summary>
+
+#### 1. Alfa Wi-Fi Adapter Chipset Matrix
+Alfa Network USB adapters are the global gold standard for 802.11 monitor mode, raw frame capture, and penetration auditing:
+
+| Model | Silicon Chipset | Frequency Bands | Max Radiated Power | Linux Kernel Driver | Special Characteristics |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **AWUS036ACH** | Realtek RTL8812AU | 2.4 GHz & 5 GHz (802.11ac) | Up to 1000 mW (30 dBm) | \`rtl8812au-dkms\` | 2x2 MIMO dual-dipole. The most widely deployed dual-band 802.11ac audit card. |
+| **AWUS1900** | Realtek RTL8814AU | 2.4 GHz & 5 GHz (802.11ac) | High Power (Quad Amp) | \`rtl8814au-dkms\` | 4T4R quad-antenna array for high-density enterprise 5GHz spectrum audits. |
+| **AWUS036NHA** | Qualcomm Atheros AR9271 | 2.4 GHz (802.11b/g/n) | 28 dBm | \`ath9k_htc\` (In-Tree) | 100% open-source firmware. Legendary frame injection and low-level MAC stability. |
+| **AWUS036AXM** | MediaTek MT7921AUN | 2.4, 5 & 6 GHz (Wi-Fi 6E) | Standard High Efficiency | \`mt7921u\` (Linux 5.18+) | Next-gen Wi-Fi 6E (802.11ax) capture supporting pristine 6GHz UNII-5 to UNII-8 channels. |
+| **AWUS036NH** | Ralink RT3070 | 2.4 GHz (802.11b/g/n) | 2000 mW (Ultra-High) | \`rt2800usb\` (In-Tree) | Exceptional receiver sensitivity for long-range rural or perimeter auditing. |
+
+#### 2. Kismet Daemon REST & WebSocket API Specification
+Kismet functions as a headless multi-threaded C++ RF capture engine serving real-time JSON and WebSockets on port \`2501\`:
+- \`GET /system/status.json\`: Server health, memory, thread pool, and total packets per second.
+- \`GET /devices/views/all/devices.json\`: Master device catalog containing BSSID, SSID, channel frequency, signal RSSI (min/max/current), cryptography types, associated clients, and OUI vendors.
+- \`GET /alerts/all_alerts.json\`: Wireless Intrusion Detection System (WIDS) alerts (Deauth floods, Rogue APs, Channel hop violations).
+- \`GET /channels/channels.json\`: Channel utilization and RF congestion across 2.4GHz and 5GHz bands.
+- \`GET /pcap/all.pcapng\`: Real-time streaming PCAP-NG capture file directly from monitor interfaces.
+- \`ws://localhost:2501/devices/views/all/devices.ws\`: High-throughput binary WebSocket stream pushing delta device updates without polling overhead.
+
+#### 3. WIDS Anomaly Detection Algorithms
+1. **Deauthentication Flood Detection**: Measures moving rate of 802.11 Reason Code 1/2/3/7 management frames. If >50 deauth frames arrive per second directed at a single BSSID, a Critical WIDS alarm is generated.
+2. **Rogue AP / Evil Twin Detection**: Flags when an established SSID suddenly broadcasts from an unfamiliar BSSID or with mismatched RSN/WPA capabilities.
+3. **Null Probe Response**: Identifies rogue or misconfigured APs answering wildcard probe requests with malformed information elements.
+
+</details>
+
+---
+
+### 4. Step-by-Step Engineering Walkthroughs
+
+#### Walkthrough A: Capturing a WPA2 Handshake with ESP32 Marauder
+1. Connect your ESP32 running Marauder firmware to Skon's USB Tool.
+2. Open the **Packet & Protocol Lab** and verify **Parser Mode** is set to **Wi-Fi 802.11**.
+3. In the terminal drawer, send \`channel -s 6\` to lock onto your target AP's channel.
+4. Send \`sniffraw\` or \`sniffpmkid\` to begin serial packet streaming.
+5. In the workbench, observe incoming beacon frames confirming signal strength and SSID.
+6. When a client reconnects, the green **Handshake Captured** banner illuminates.
+7. Click **Export PCAP** to save the file as \`capture.pcap\`.
+8. Open the PCAP file in Wireshark or pass it to \`aircrack-ng\` to verify cryptographic integrity!
+
+#### Walkthrough B: Dual-Band Auditing with Alfa AWUS036ACH & Kismet Studio
+1. Plug your Alfa AWUS036ACH or AWUS1900 adapter into your workstation USB 3.0 port.
+2. Open a terminal and put the Alfa adapter into monitor mode:
+   \`\`\`bash
+   sudo airmon-ng check kill && sudo airmon-ng start wlan1
+   kismet -c wlan1mon
+   \`\`\`
+3. In Skon's USB Tool, switch to the **Kismet Studio (Alfa / 802.11)** tab.
+4. Click **Connect Kismet** (or check **Simulate Alfa RF** if working offline).
+5. The device catalog immediately populates with dual-band 2.4 GHz and 5 GHz Access Points and client stations.
+6. Switch to **Channels & Congestion** to identify clear 5 GHz DFS channels or examine 2.4 GHz channel overlap on 1, 6, and 11.
+7. Check the **WIDS Intrusion Alerts** tab to monitor for deauth floods, rogue APs, or beacon injection attacks in real time!
+8. Click **WiGLE CSV** to export geolocated access points for wireless mapping submission.
+
 ---
 
 ### 5. Complete Troubleshooting & Diagnostic Matrix
@@ -136,7 +194,9 @@ When transmitting binary packets across raw serial channels without hardware flo
 | Error Message / Symptom | Root Cause | Engineering Solution |
 | :--- | :--- | :--- |
 | **No Packets Appearing in Table** | Firmware is not in raw packet streaming mode or wrong baud rate. | Ensure baud rate is 115200 or 921600. In Marauder, verify \`settings -s ForcePackets enable\`. |
-| **FCS (Checksum) Errors on All Frames** | RF multipath interference or antenna impedance mismatch. | Attach external 2.4GHz SMA antenna and keep sniffer at least 1 meter away from USB 3.0 cables. |
+| **Cannot Connect to Kismet (Port 2501)** | Kismet daemon is not running or blocked by local firewall. | Run \`kismet -c wlan1mon\` in terminal. Verify \`http://localhost:2501\` responds in browser. |
+| **Alfa Adapter Not Entering Monitor Mode** | NetworkManager or wpa_supplicant reclaiming USB interface. | Run \`sudo airmon-ng check kill\` prior to starting monitor mode. Ensure correct DKMS driver is installed. |
+| **FCS (Checksum) Errors on All Frames** | RF multipath interference or antenna impedance mismatch. | Attach external 2.4GHz/5GHz SMA antennas and keep adapter at least 1 meter away from USB 3.0 hubs. |
 | **Missing Handshake Message 4** | Client was too far away for the sniffer to receive the low-power station ACK. | Move the sniffing antenna physically closer to the client laptop or smartphone. |
 
 ---
@@ -145,6 +205,8 @@ When transmitting binary packets across raw serial channels without hardware flo
 
 | Standard / Component | Authoring Organization / Maintainers | Reference & Specification |
 | :--- | :--- | :--- |
+| **Kismet Wireless Network Detector & IDS** | Mike Kershaw (dragorn) & Kismet Wireless | [kismetwireless.net](https://www.kismetwireless.net) (GPL-2.0) |
+| **Alfa Network High-Gain Wireless Hardware** | Alfa Network Inc. (Taiwan) | [alfa.com.tw](https://www.alfa.com.tw) (Hardware Specs) |
 | **IEEE 802.11 Wireless LAN MAC Standard** | IEEE Computer Society LAN/MAN Standards Committee | [IEEE 802.11-2020](https://standards.ieee.org) |
 | **Libpcap / PCAP File Format Specification** | The Tcpdump & Libpcap Project (Van Jacobson, Craig Leres, Steven McCanne) | [tcpdump.org](https://www.tcpdump.org) (BSD 3-Clause) |
 | **Wireshark Packet Dissector Architecture** | The Wireshark Foundation & Gerald Combs | [wireshark.org](https://www.wireshark.org) (GPL-2.0) |
