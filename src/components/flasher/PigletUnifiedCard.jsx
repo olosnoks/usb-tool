@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Download, 
   ExternalLink, 
@@ -8,62 +8,88 @@ import {
   Layers, 
   Check, 
   Sparkles,
-  ChevronDown
+  ChevronDown,
+  AlertCircle,
+  Github
 } from 'lucide-react';
-import { PIGLET_VARIANTS } from '../../services/firmwareCatalogService';
+import { PIGLET_BOARDS } from '../../services/firmwareCatalogService';
 
 export default function PigletUnifiedCard({ 
   onSelectFirmwareForFlashing, 
   onInspect,
   currentChipFilter = 'ALL'
 }) {
+  // Selected Board from PIGLET_BOARDS
+  const [selectedBoardId, setSelectedBoardId] = useState('freenove-s3-cyd');
+  
   // 'skon' or 'ham'
   const [sourceType, setSourceType] = useState('skon');
-  
-  // Available list for active source
-  const variants = PIGLET_VARIANTS[sourceType] || [];
-  
-  // Selected variant ID
-  const [selectedVariantId, setSelectedVariantId] = useState(() => variants[0]?.id || 'freenove-s3-cyd');
 
-  // If user switches source, pick first available variant in that source
-  const handleSourceChange = (newSource) => {
-    setSourceType(newSource);
-    const newVariants = PIGLET_VARIANTS[newSource] || [];
-    if (newVariants.length > 0) {
-      // If current chip filter matches something in the new list, try to preserve chip
-      if (currentChipFilter !== 'ALL') {
-        const matchingChip = newVariants.find(v => v.device?.toUpperCase() === currentChipFilter.toUpperCase());
-        if (matchingChip) {
-          setSelectedVariantId(matchingChip.id);
-          return;
-        }
-      }
-      setSelectedVariantId(newVariants[0].id);
-    }
-  };
-
-  // If currentChipFilter changes to a specific chip, auto-adapt selection if possible
+  // Auto-adapt selected board if currentChipFilter changes to a specific chip
   useEffect(() => {
     if (currentChipFilter !== 'ALL') {
-      const matchInCurrent = variants.find(v => v.device?.toUpperCase() === currentChipFilter.toUpperCase());
-      if (matchInCurrent) {
-        setSelectedVariantId(matchInCurrent.id);
-      } else {
-        // check other source
-        const otherSource = sourceType === 'skon' ? 'ham' : 'skon';
-        const matchInOther = PIGLET_VARIANTS[otherSource]?.find(v => v.device?.toUpperCase() === currentChipFilter.toUpperCase());
-        if (matchInOther) {
-          setSourceType(otherSource);
-          setSelectedVariantId(matchInOther.id);
-        }
+      const match = PIGLET_BOARDS.find(b => b.device?.toUpperCase() === currentChipFilter.toUpperCase());
+      if (match) {
+        setSelectedBoardId(match.id);
       }
     }
   }, [currentChipFilter]);
 
-  const selectedFirmware = variants.find(v => v.id === selectedVariantId) || variants[0];
+  const currentBoard = useMemo(() => {
+    return PIGLET_BOARDS.find(b => b.id === selectedBoardId) || PIGLET_BOARDS[0];
+  }, [selectedBoardId]);
 
-  if (!selectedFirmware) return null;
+  // Check what firmware sources exist for the current board
+  const hasSkon = Boolean(currentBoard.builds.skon && currentBoard.builds.skon.length > 0);
+  const hasHam = Boolean(currentBoard.builds.ham && currentBoard.builds.ham.length > 0);
+
+  // If the active source is not available on this board, auto-switch to the available one
+  useEffect(() => {
+    if (sourceType === 'skon' && !hasSkon && hasHam) {
+      setSourceType('ham');
+    } else if (sourceType === 'ham' && !hasHam && hasSkon) {
+      setSourceType('skon');
+    }
+  }, [currentBoard, sourceType, hasSkon, hasHam]);
+
+  // Available builds strictly for this board and active source
+  const availableBuilds = useMemo(() => {
+    return currentBoard.builds[sourceType] || currentBoard.builds.skon || currentBoard.builds.ham || [];
+  }, [currentBoard, sourceType]);
+
+  // Selected build index within this board
+  const [selectedBuildIndex, setSelectedBuildIndex] = useState(0);
+
+  // Reset build index when board or source changes
+  useEffect(() => {
+    setSelectedBuildIndex(0);
+  }, [selectedBoardId, sourceType]);
+
+  const selectedBuild = availableBuilds[selectedBuildIndex] || availableBuilds[0];
+
+  if (!currentBoard || !selectedBuild) return null;
+
+  // Active firmware ready for flashing or inspecting
+  const activeFirmware = {
+    ...currentBoard,
+    ...selectedBuild,
+    name: selectedBuild.name,
+    device: currentBoard.device,
+    type: 'piglet',
+    source: sourceType,
+    version: selectedBuild.version,
+    description: selectedBuild.description || currentBoard.description,
+    note: currentBoard.note,
+    features: currentBoard.features,
+    downloadUrl: selectedBuild.downloadUrl,
+    files: selectedBuild.files,
+    isMergedBinary: selectedBuild.isMergedBinary,
+    flashConfig: selectedBuild.flashConfig || currentBoard.flashConfig,
+    websiteUrl: selectedBuild.websiteUrl,
+    repoUrl: selectedBuild.repoUrl
+  };
+
+  const baudRate = activeFirmware.flashConfig?.baudRate || 921600;
 
   return (
     <div className="bg-gradient-to-b from-[#1c1e27] to-[#15171f] border-2 border-pink-500/30 hover:border-pink-500/60 rounded-2xl p-4.5 flex flex-col justify-between transition-all duration-200 shadow-lg shadow-pink-950/10 group space-y-3.5">
@@ -81,59 +107,80 @@ export default function PigletUnifiedCard({
             {/* Quick Status Tags */}
             <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
               <span className="text-[10px] px-2 py-0.5 rounded bg-pink-500/20 text-pink-300 font-mono font-bold border border-pink-500/30">
-                {selectedFirmware.device}
+                {currentBoard.device}
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-                {selectedFirmware.version}
+                {activeFirmware.version}
               </span>
               <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono">
                 Merged 0x0
               </span>
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-mono">
-                {selectedFirmware.flashConfig?.baudRate || 921600} baud
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-mono font-bold">
+                {baudRate} baud
               </span>
             </div>
           </div>
 
-          {selectedFirmware.websiteUrl && (
-            <a
-              href={selectedFirmware.websiteUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-1.5 text-slate-400 hover:text-pink-400 bg-[#1e212b] rounded-lg border border-[#2b303c] transition shrink-0"
-              title="Documentation & Project Page"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {activeFirmware.repoUrl && (
+              <a
+                href={activeFirmware.repoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1.5 text-slate-400 hover:text-pink-400 bg-[#1e212b] rounded-lg border border-[#2b303c] transition"
+                title={`GitHub Source (${sourceType === 'skon' ? 'olosnoks/piglet' : 'Hamspiced/piglet'})`}
+              >
+                <Github className="w-3.5 h-3.5" />
+              </a>
+            )}
+            {activeFirmware.websiteUrl && (
+              <a
+                href={activeFirmware.websiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1.5 text-slate-400 hover:text-pink-400 bg-[#1e212b] rounded-lg border border-[#2b303c] transition"
+                title="Documentation & Web Flasher"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
+          </div>
         </div>
 
         {/* Fork / Official Toggle Button Group */}
         <div className="bg-[#12141a] p-1 rounded-xl border border-[#262a36] flex items-center gap-1 text-xs font-mono">
           <button
             type="button"
-            onClick={() => handleSourceChange('skon')}
+            disabled={!hasSkon}
+            onClick={() => hasSkon && setSourceType('skon')}
             className={`flex-1 py-1.5 px-2 rounded-lg text-center transition flex items-center justify-center gap-1.5 font-bold ${
-              sourceType === 'skon'
-                ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-sm shadow-pink-600/30'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-[#1a1d26]'
+              !hasSkon 
+                ? 'opacity-40 cursor-not-allowed text-slate-500' 
+                : sourceType === 'skon'
+                  ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-sm shadow-pink-600/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#1a1d26]'
             }`}
+            title={!hasSkon ? 'This board only tracks upstream official releases' : "skon's customized fork"}
           >
-            <span>skon's forks</span>
-            <span className="text-[9px] px-1.5 py-0.2 bg-black/30 rounded-full">6</span>
+            <span>skon's fork</span>
+            {hasSkon && <span className="text-[9px] px-1 py-0.2 bg-black/30 rounded">main+fe55704</span>}
           </button>
 
           <button
             type="button"
-            onClick={() => handleSourceChange('ham')}
+            disabled={!hasHam}
+            onClick={() => hasHam && setSourceType('ham')}
             className={`flex-1 py-1.5 px-2 rounded-lg text-center transition flex items-center justify-center gap-1.5 font-bold ${
-              sourceType === 'ham'
-                ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-sm shadow-pink-600/30'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-[#1a1d26]'
+              !hasHam 
+                ? 'opacity-40 cursor-not-allowed text-slate-500' 
+                : sourceType === 'ham'
+                  ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-sm shadow-pink-600/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-[#1a1d26]'
             }`}
+            title={!hasHam ? 'This board is exclusive to skon’s fork' : 'Hamspiced official v2.7 release'}
           >
             <span>Ham's official</span>
-            <span className="text-[9px] px-1.5 py-0.2 bg-black/30 rounded-full">3</span>
+            {hasHam && <span className="text-[9px] px-1 py-0.2 bg-black/30 rounded">v2.7</span>}
           </button>
         </div>
 
@@ -143,17 +190,17 @@ export default function PigletUnifiedCard({
           <div className="space-y-1">
             <label className="text-[10px] uppercase font-mono text-slate-400 flex items-center justify-between">
               <span>Target Hardware / Board:</span>
-              <span className="text-pink-400 font-semibold">{selectedFirmware.device}</span>
+              <span className="text-pink-400 font-semibold">{currentBoard.device} • {currentBoard.flashSize}</span>
             </label>
             <div className="relative">
               <select
-                value={selectedVariantId}
-                onChange={(e) => setSelectedVariantId(e.target.value)}
+                value={selectedBoardId}
+                onChange={(e) => setSelectedBoardId(e.target.value)}
                 className="w-full bg-[#1a1d27] border border-[#2b303c] rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-pink-400 transition cursor-pointer appearance-none pr-7"
               >
-                {variants.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.boardName} ({v.device})
+                {PIGLET_BOARDS.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.boardName} ({b.device})
                   </option>
                 ))}
               </select>
@@ -161,21 +208,21 @@ export default function PigletUnifiedCard({
             </div>
           </div>
 
-          {/* Firmware Build Flavor Dropdown */}
+          {/* Firmware Build Dropdown — ONLY builds for this board */}
           <div className="space-y-1">
             <label className="text-[10px] uppercase font-mono text-slate-400 flex items-center justify-between">
               <span>Firmware Build:</span>
-              <span className="text-slate-500 text-[9px]">{selectedFirmware.files[0]?.name}</span>
+              <span className="text-slate-400 text-[9px] font-mono">{selectedBuild.fileName}</span>
             </label>
             <div className="relative">
               <select
-                value={selectedVariantId}
-                onChange={(e) => setSelectedVariantId(e.target.value)}
+                value={selectedBuildIndex}
+                onChange={(e) => setSelectedBuildIndex(Number(e.target.value))}
                 className="w-full bg-[#1a1d27] border border-[#2b303c] rounded-lg px-2.5 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-pink-400 transition cursor-pointer appearance-none pr-7"
               >
-                {variants.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.fwName} [{v.version}]
+                {availableBuilds.map((build, idx) => (
+                  <option key={build.id || idx} value={idx}>
+                    {build.fwName} [{build.version}]
                   </option>
                 ))}
               </select>
@@ -184,25 +231,37 @@ export default function PigletUnifiedCard({
           </div>
         </div>
 
+        {/* Hardware & Flashing Notes (e.g. C5 USB-Serial stub note) */}
+        {currentBoard.note && (
+          <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-1">
+            <span className="font-bold text-amber-300 font-mono text-[10px] flex items-center gap-1">
+              <AlertCircle className="w-3 h-3 shrink-0" /> Hardware Flashing Note:
+            </span>
+            <p className="text-[10px] text-amber-200/90 leading-relaxed font-mono">
+              {currentBoard.note}
+            </p>
+          </div>
+        )}
+
         {/* Dynamic Description */}
-        <p className="text-xs text-slate-400 leading-relaxed min-h-[40px]">
-          {selectedFirmware.description}
+        <p className="text-xs text-slate-400 leading-relaxed min-h-[36px]">
+          {currentBoard.description}
         </p>
 
         {/* Feature Badges */}
-        {selectedFirmware.features && selectedFirmware.features.length > 0 && (
+        {currentBoard.features && currentBoard.features.length > 0 && (
           <div className="flex items-center gap-1 flex-wrap pt-0.5">
-            {selectedFirmware.features.slice(0, 3).map((feat, fIdx) => (
+            {currentBoard.features.slice(0, 3).map((feat, fIdx) => (
               <span 
                 key={fIdx} 
-                className="text-[9px] px-1.5 py-0.5 rounded bg-[#1e212b] text-slate-300 font-mono border border-[#2b303c]/60 truncate max-w-[150px]"
+                className="text-[9px] px-1.5 py-0.5 rounded bg-[#1e212b] text-slate-300 font-mono border border-[#2b303c]/60 truncate max-w-[160px]"
               >
                 • {feat}
               </span>
             ))}
-            {selectedFirmware.features.length > 3 && (
+            {currentBoard.features.length > 3 && (
               <span className="text-[9px] text-pink-400/80 font-mono">
-                +{selectedFirmware.features.length - 3} more
+                +{currentBoard.features.length - 3} more
               </span>
             )}
           </div>
@@ -213,7 +272,7 @@ export default function PigletUnifiedCard({
       <div className="pt-3 border-t border-[#232733] flex items-center justify-between gap-2">
         <button
           type="button"
-          onClick={() => onInspect && onInspect(selectedFirmware)}
+          onClick={() => onInspect && onInspect(activeFirmware)}
           className="text-xs text-slate-400 hover:text-pink-300 font-mono flex items-center gap-1 transition py-1"
         >
           <Info className="w-3.5 h-3.5" />
@@ -222,7 +281,7 @@ export default function PigletUnifiedCard({
 
         <button
           type="button"
-          onClick={() => onSelectFirmwareForFlashing && onSelectFirmwareForFlashing(selectedFirmware)}
+          onClick={() => onSelectFirmwareForFlashing && onSelectFirmwareForFlashing(activeFirmware)}
           className="px-3.5 py-1.5 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white font-bold rounded-xl text-xs font-mono shadow-md shadow-pink-500/20 flex items-center gap-1.5 transition active:scale-95"
         >
           <Download className="w-3.5 h-3.5" />

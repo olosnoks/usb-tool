@@ -119,5 +119,41 @@ describe('Piglet and Firmware Catalog Presets', () => {
     const cydBoards = bruceGroup.boards.filter(b => b.name === 'CYD 2432S028 (Bruce)');
     expect(cydBoards.length).toBe(1);
   });
+
+  it('guarantees accurate board-scoped builds, versions, baud rates, and repo links for Piglet', async () => {
+    const { PIGLET_BOARDS, SUITE_METADATA } = await import('../src/services/firmwareCatalogService');
+    expect(PIGLET_BOARDS.length).toBe(7);
+
+    // Freenove S3 CYD
+    const freenove = PIGLET_BOARDS.find(b => b.id === 'freenove-s3-cyd');
+    expect(freenove).toBeDefined();
+    expect(freenove.device).toBe('ESP32-S3');
+    expect(freenove.flashConfig.baudRate).toBe(921600);
+    expect(freenove.builds.skon[0].version).toBe('main+fe55704');
+    expect(freenove.builds.skon[0].downloadUrl).toContain('freenove-s3-cyd-ham-ui4.bin');
+
+    // Seeed Studio XIAO C5
+    const xiaoC5 = PIGLET_BOARDS.find(b => b.id === 'xiao-c5');
+    expect(xiaoC5).toBeDefined();
+    expect(xiaoC5.device).toBe('ESP32-C5');
+    expect(xiaoC5.flashConfig.baudRate).toBe(115200);
+    expect(xiaoC5.builds.skon[0].version).toBe('main+fe55704');
+    expect(xiaoC5.builds.ham[0].version).toBe('v2.7');
+
+    // LilyGo T-Dongle C5
+    const tdongle = PIGLET_BOARDS.find(b => b.id === 'tdongle-c5');
+    expect(tdongle).toBeDefined();
+    expect(tdongle.device).toBe('ESP32-C5');
+    expect(tdongle.flashConfig.baudRate).toBe(115200);
+    expect(tdongle.builds.ham[0].version).toBe('v2.7');
+    expect(tdongle.builds.ham[0].downloadUrl).toContain('TDongleC5_Piglet.ino.merged.bin');
+
+    // Check SUITE_METADATA has verified repo and website links
+    expect(SUITE_METADATA.marauder.repoUrl).toBe('https://github.com/justcallmekoko/ESP32Marauder');
+    expect(SUITE_METADATA.bruce.repoUrl).toBe('https://github.com/BruceDevices/firmware');
+    expect(SUITE_METADATA.wled.repoUrl).toBe('https://github.com/wled/WLED');
+    expect(SUITE_METADATA.launcher.repoUrl).toBe('https://github.com/bmorcelli/Launcher');
+  });
 });
+
 

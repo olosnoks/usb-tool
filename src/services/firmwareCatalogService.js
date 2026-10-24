@@ -8,183 +8,263 @@ const REMOTE_MANIFEST_URL = 'https://espterminator.com/firmware/manifest.json';
 const CACHE_KEY = 'skons_firmware_catalog_v1';
 const CACHE_EXPIRY_MS = 1000 * 60 * 60 * 6; // 6 hours
 
-// Structured Piglet firmware variants by author (skon's forks vs Hamspiced's official releases)
+/// Authoritative Piglet boards and builds directly verified against olosnoks.github.io/piglet and Hamspiced/piglet
+export const PIGLET_BOARDS = [
+  {
+    id: 'freenove-s3-cyd',
+    boardName: 'Freenove S3 CYD',
+    device: 'ESP32-S3',
+    flashSize: '16 MB',
+    display: '2.4" Touch Display',
+    description: "2.4 GHz scanning, GPS, SD logging, 2.4″ touch display. The main CYD build from olosnoks/piglet.",
+    features: ['HAM UI4 Modern Interface', '2.4" Touch Display', 'GPS Wardriving & WiGLE CSV', 'SD Card Logging', 'Merged 0x0 Binary'],
+    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true },
+    builds: {
+      skon: [
+        {
+          id: 'freenove-s3-cyd-ui4',
+          name: "Piglet — Freenove S3 CYD (HAM UI4)",
+          fwName: 'HAM UI4 Theme',
+          version: 'main+fe55704',
+          fileName: 'freenove-s3-cyd-ham-ui4.bin',
+          downloadUrl: 'https://olosnoks.github.io/piglet/firmware/freenove-s3-cyd-ham-ui4.bin',
+          manifestUrl: 'https://olosnoks.github.io/piglet/manifests/freenove-s3-cyd-ham-ui4.json',
+          repoUrl: 'https://github.com/olosnoks/piglet',
+          websiteUrl: 'https://olosnoks.github.io/piglet/',
+          isMergedBinary: true,
+          files: [{ name: 'freenove-s3-cyd-ham-ui4.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/freenove-s3-cyd-ham-ui4.bin' }],
+          flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
+        }
+      ]
+    }
+  },
+  {
+    id: 'guition-jc8048w550',
+    boardName: 'Guition JC8048W550',
+    device: 'ESP32-S3',
+    flashSize: '16 MB',
+    display: '5" 800x480 RGB IPS (GT911)',
+    description: "Same core as the Freenove build on a 5″ RGB IPS panel with GT911 touch.",
+    features: ['5" 800x480 High-Res IPS', 'GT911 Capacitive Touch', 'GPS Wardriving & WiGLE CSV', 'SD Card Logging', 'Merged 0x0 Binary'],
+    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true },
+    builds: {
+      skon: [
+        {
+          id: 'guition-jc8048w550-s3',
+          name: "Piglet — Guition JC8048W550 (5\" 800x480)",
+          fwName: '5" 800x480 RGB IPS GT911',
+          version: 'main+fe55704',
+          fileName: 'guition-jc8048w550.bin',
+          downloadUrl: 'https://olosnoks.github.io/piglet/firmware/guition-jc8048w550.bin',
+          manifestUrl: 'https://olosnoks.github.io/piglet/manifests/guition-jc8048w550.json',
+          repoUrl: 'https://github.com/olosnoks/piglet',
+          websiteUrl: 'https://olosnoks.github.io/piglet/',
+          isMergedBinary: true,
+          files: [{ name: 'guition-jc8048w550.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/guition-jc8048w550.bin' }],
+          flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
+        }
+      ]
+    }
+  },
+  {
+    id: 'xiao-c5',
+    boardName: 'Seeed Studio XIAO C5',
+    device: 'ESP32-C5',
+    flashSize: '8 MB',
+    display: 'Dual-Band 2.4/5GHz + GPS',
+    description: "Piglet Core — GPS, SD, WiGLE logging, mesh. Dual-band 2.4GHz & 5GHz Wi-Fi 6.",
+    note: "C5 Hardware Note: Flash at 115200 baud. The C5 USB-Serial/JTAG drops when the stub loader runs in WebSerial. If browser disconnects, flash in terminal: esptool --chip esp32c5 --no-stub write-flash 0x0 <file>.bin",
+    features: ['Dual-Band 2.4GHz & 5GHz Wi-Fi 6', 'GPS & WiGLE CSV Logging', 'ESP-Now Mesh Protocol', 'Merged 0x0 Binary'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true },
+    builds: {
+      skon: [
+        {
+          id: 'xiao-c5-skon',
+          name: "Piglet Core — XIAO C5 (skon's fork)",
+          fwName: "skon's fork (GPS + Mesh)",
+          version: 'main+fe55704',
+          fileName: 'xiao_c5.bin',
+          downloadUrl: 'https://olosnoks.github.io/piglet/firmware/xiao_c5.bin',
+          manifestUrl: 'https://olosnoks.github.io/piglet/manifests/xiao_c5.json',
+          repoUrl: 'https://github.com/olosnoks/piglet',
+          websiteUrl: 'https://olosnoks.github.io/piglet/',
+          isMergedBinary: true,
+          files: [{ name: 'xiao_c5.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/xiao_c5.bin' }],
+          flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true }
+        }
+      ],
+      ham: [
+        {
+          id: 'xiao-c5-ham',
+          name: "Piglet Core — XIAO C5 (Hamspiced Official v2.7)",
+          fwName: 'v2.7 Wardrift Official',
+          version: 'v2.7',
+          fileName: 'Piglet.ino.merged.bin',
+          downloadUrl: 'https://github.com/Hamspiced/piglet/releases/download/v2.7/Piglet.ino.merged.bin',
+          manifestUrl: 'https://olosnoks.github.io/piglet/manifests/xiao_c5-ham.json',
+          repoUrl: 'https://github.com/Hamspiced/piglet',
+          websiteUrl: 'https://github.com/Hamspiced/piglet',
+          isMergedBinary: true,
+          files: [{ name: 'Piglet.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/download/v2.7/Piglet.ino.merged.bin' }],
+          flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true }
+        }
+      ]
+    }
+  },
+  {
+    id: 'pigletnode-c5',
+    boardName: 'PigletNode C5',
+    device: 'ESP32-C5',
+    flashSize: '8 MB',
+    display: 'Headless Dual-Band Node',
+    description: "XIAO C5 mesh node — boots straight into ESP-Now node mode. Dual-band 2.4GHz & 5GHz, headless.",
+    note: "C5 Hardware Note: Flash at 115200 baud. If stub drops, run: esptool --chip esp32c5 --no-stub write-flash 0x0 pigletnode_c5.bin",
+    features: ['Dual-Band 2.4G/5G Mesh Node', 'Autonomous ESP-Now Boot', 'Headless Low-Power Sniffer', 'Merged 0x0 Binary'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true },
+    builds: {
+      skon: [
+        {
+          id: 'pigletnode-c5-skon',
+          name: "PigletNode C5 — (skon's fork)",
+          fwName: "skon's fork (Headless Mesh)",
+          version: 'main+fe55704',
+          fileName: 'pigletnode_c5.bin',
+          downloadUrl: 'https://olosnoks.github.io/piglet/firmware/pigletnode_c5.bin',
+          manifestUrl: 'https://olosnoks.github.io/piglet/manifests/pigletnode_c5.json',
+          repoUrl: 'https://github.com/olosnoks/piglet',
+          websiteUrl: 'https://olosnoks.github.io/piglet/',
+          isMergedBinary: true,
+          files: [{ name: 'pigletnode_c5.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/pigletnode_c5.bin' }],
+          flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true }
+        }
+      ],
+      ham: [
+        {
+          id: 'pigletnode-c5-ham',
+          name: "PigletNode C5 — (Hamspiced Official v2.7)",
+          fwName: 'v2.7 Official PigletNode',
+          version: 'v2.7',
+          fileName: 'PigletNode.ino.merged.bin',
+          downloadUrl: 'https://github.com/Hamspiced/piglet/releases/download/v2.7/PigletNode.ino.merged.bin',
+          manifestUrl: 'https://olosnoks.github.io/piglet/manifests/pigletnode_c5-ham.json',
+          repoUrl: 'https://github.com/Hamspiced/piglet',
+          websiteUrl: 'https://github.com/Hamspiced/piglet',
+          isMergedBinary: true,
+          files: [{ name: 'PigletNode.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/download/v2.7/PigletNode.ino.merged.bin' }],
+          flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true }
+        }
+      ]
+    }
+  },
+  {
+    id: 'tdongle-c5',
+    boardName: 'LilyGo T-Dongle C5',
+    device: 'ESP32-C5',
+    flashSize: '8 MB',
+    display: '0.96" ST7735 Color TFT + APA102 LED',
+    description: "USB-A dongle — 0.96″ ST7735 TFT, APA102 LED, GPS, SD, dual-band. Flashes the official Piglet T-Dongle build; the fork tracks upstream for this board.",
+    note: "C5 Hardware Note: Flash at 115200 baud. If stub drops, run: esptool --chip esp32c5 --no-stub write-flash 0x0 TDongleC5_Piglet.ino.merged.bin",
+    features: ['0.96" Color ST7735 TFT', 'APA102 Status RGB LED', 'USB-A Dongle Form Factor', 'Dual-Band 2.4G/5G', 'Merged 0x0 Binary'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true },
+    builds: {
+      ham: [
+        {
+          id: 'tdongle-c5-ham',
+          name: "Piglet — LilyGo T-Dongle C5 (Hamspiced Official v2.7)",
+          fwName: 'v2.7 Official T-Dongle USB',
+          version: 'v2.7',
+          fileName: 'TDongleC5_Piglet.ino.merged.bin',
+          downloadUrl: 'https://github.com/Hamspiced/piglet/releases/download/v2.7/TDongleC5_Piglet.ino.merged.bin',
+          manifestUrl: 'https://olosnoks.github.io/piglet/manifests/tdongle_c5-ham.json',
+          repoUrl: 'https://github.com/Hamspiced/piglet',
+          websiteUrl: 'https://github.com/Hamspiced/piglet',
+          isMergedBinary: true,
+          files: [{ name: 'TDongleC5_Piglet.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/download/v2.7/TDongleC5_Piglet.ino.merged.bin' }],
+          flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: true }
+        }
+      ]
+    }
+  },
+  {
+    id: 'esp32c3-oled',
+    boardName: 'PigletNode C3 (0.42" OLED)',
+    device: 'ESP32-C3',
+    flashSize: '4 MB',
+    display: '0.42" Mini OLED',
+    description: "Minimal mesh node — boots straight into ESP-Now node mode. No GPS/SD needed.",
+    features: ['0.42" OLED Status Screen', 'ESP32-C3 RISC-V Node', 'Autonomous ESP-Now Boot', 'Pocket Sensor Node', 'Merged 0x0 Binary'],
+    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true },
+    builds: {
+      skon: [
+        {
+          id: 'esp32c3-oled-skon',
+          name: "PigletNode C3 — 0.42\" OLED (skon's fork)",
+          fwName: '0.42" OLED Node',
+          version: 'main+fe55704',
+          fileName: 'esp32c3_oled.bin',
+          downloadUrl: 'https://olosnoks.github.io/piglet/firmware/esp32c3_oled.bin',
+          manifestUrl: 'https://olosnoks.github.io/piglet/manifests/esp32c3_oled.json',
+          repoUrl: 'https://github.com/olosnoks/piglet',
+          websiteUrl: 'https://olosnoks.github.io/piglet/',
+          isMergedBinary: true,
+          files: [{ name: 'esp32c3_oled.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/esp32c3_oled.bin' }],
+          flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+        }
+      ]
+    }
+  },
+  {
+    id: 'waveshare-c6',
+    boardName: 'Waveshare C6 Mini (1.47" LCD)',
+    device: 'ESP32-C6',
+    flashSize: '4 MB',
+    display: '1.47" Color LCD (ST7789)',
+    description: "Waveshare ESP32-C6 1.47″ LCD — ST7789 display, SD, GPS.",
+    features: ['1.47" Color ST7789 LCD', 'ESP32-C6 Wi-Fi 6 & BLE 5', 'GPS & SD Logging', 'Handheld Form Factor', 'Merged 0x0 Binary'],
+    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true },
+    builds: {
+      skon: [
+        {
+          id: 'waveshare-c6-skon',
+          name: "Piglet — Waveshare C6 Mini 1.47\" LCD (skon's fork)",
+          fwName: '1.47" LCD Handheld',
+          version: 'main+fe55704',
+          fileName: 'waveshare_c6.bin',
+          downloadUrl: 'https://olosnoks.github.io/piglet/firmware/waveshare_c6.bin',
+          manifestUrl: 'https://olosnoks.github.io/piglet/manifests/waveshare_c6.json',
+          repoUrl: 'https://github.com/olosnoks/piglet',
+          websiteUrl: 'https://olosnoks.github.io/piglet/',
+          isMergedBinary: true,
+          files: [{ name: 'waveshare_c6.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/waveshare_c6.bin' }],
+          flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+        }
+      ]
+    }
+  }
+];
+
+// Flat lookup variants by source for backwards-compatibility
 export const PIGLET_VARIANTS = {
-  skon: [
-    {
-      id: 'freenove-s3-cyd',
-      boardName: 'Freenove S3 CYD',
-      fwName: 'UI4 Theme + GPS Wardrive',
-      name: "Piglet — Freenove S3 CYD (skon's fork)",
-      device: 'ESP32-S3',
-      type: 'piglet',
-      source: 'skon',
-      version: 'v2.7-skon',
-      description: "skon's fork of Piglet Wardriver featuring UI4 interface tailored for Freenove ESP32-S3 Cheap Yellow Display. High-speed 2.4GHz Wi-Fi/BLE reconnaissance & GPS wardriving.",
-      websiteUrl: 'https://olosnoks.github.io/piglet/',
-      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/freenove-s3-cyd-ham-ui4.bin',
-      files: [
-        { name: 'freenove-s3-cyd-ham-ui4.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/freenove-s3-cyd-ham-ui4.bin' }
-      ],
-      isMergedBinary: true,
-      features: ['UI4 Modern Interface', 'GPS Wardriving & PCAP', 'Freenove S3 CYD Display', 'Wi-Fi & BLE Recon', 'Factory Merged 0x0'],
-      flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
-    },
-    {
-      id: 'guition-jc8048w550',
-      boardName: 'Guition JC8048W550',
-      fwName: '800x480 High-Res Cockpit',
-      name: "Piglet — Guition JC8048W550 (skon's fork)",
-      device: 'ESP32-S3',
-      type: 'piglet',
-      source: 'skon',
-      version: 'v2.7-skon',
-      description: "skon's fork of Piglet Wardriver compiled for Guition JC8048W550 (5.0\" / 7.0\" 800x480 S3 Display). Large format high-resolution wardriving cockpit.",
-      websiteUrl: 'https://olosnoks.github.io/piglet/',
-      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/guition-jc8048w550.bin',
-      files: [
-        { name: 'guition-jc8048w550.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/guition-jc8048w550.bin' }
-      ],
-      isMergedBinary: true,
-      features: ['800x480 Large Screen GUI', 'Guition JC8048W550 S3', 'GPS Map & Wardriving', 'Wi-Fi & BLE Recon', 'Factory Merged 0x0'],
-      flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
-    },
-    {
-      id: 'xiao-c5',
-      boardName: 'Seeed Studio XIAO ESP32-C5',
-      fwName: 'Dual-Band 2.4/5GHz Wi-Fi 6',
-      name: "Piglet Core — XIAO ESP32-C5 (skon's fork)",
-      device: 'ESP32-C5',
-      type: 'piglet',
-      source: 'skon',
-      version: 'v2.7-skon',
-      description: "skon's fork of Piglet Core for Seeed Studio XIAO ESP32-C5 (dual-band 2.4GHz & 5GHz Wi-Fi 6 RISC-V). Next-generation dual-band wardriving powerhouse.",
-      websiteUrl: 'https://olosnoks.github.io/piglet/',
-      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/xiao_c5.bin',
-      files: [
-        { name: 'xiao_c5.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/xiao_c5.bin' }
-      ],
-      isMergedBinary: true,
-      features: ['Dual-Band 2.4GHz & 5GHz', 'ESP32-C5 Wi-Fi 6 RISC-V', 'Seeed XIAO Micro Form Factor', 'GPS & Wardrive Support', 'Factory Merged 0x0'],
-      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-    },
-    {
-      id: 'pigletnode-c5',
-      boardName: 'PigletNode ESP32-C5',
-      fwName: 'Headless Mesh Recon Node',
-      name: "PigletNode C5 Mesh Node (skon's fork)",
-      device: 'ESP32-C5',
-      type: 'piglet',
-      source: 'skon',
-      version: 'v2.7-skon',
-      description: "skon's fork of PigletNode for ESP32-C5. Dual-band headless mesh and remote reconnaissance node for distributed wardriving networks.",
-      websiteUrl: 'https://olosnoks.github.io/piglet/',
-      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/pigletnode_c5.bin',
-      files: [
-        { name: 'pigletnode_c5.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/pigletnode_c5.bin' }
-      ],
-      isMergedBinary: true,
-      features: ['Dual-Band 2.4GHz/5GHz Node', 'Mesh Recon Integration', 'Low-Power Continuous Capture', 'Factory Merged 0x0'],
-      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-    },
-    {
-      id: 'esp32c3-oled',
-      boardName: 'ESP32-C3 0.42" OLED',
-      fwName: 'Ultra-Compact OLED Node',
-      name: "PigletNode C3 — 0.42\" OLED (skon's fork)",
-      device: 'ESP32-C3',
-      type: 'piglet',
-      source: 'skon',
-      version: 'v2.7-skon',
-      description: "skon's fork of PigletNode for ultra-compact ESP32-C3 RISC-V boards with 0.42\" mini OLED display. Portable sensor node for Wi-Fi & BLE logging.",
-      websiteUrl: 'https://olosnoks.github.io/piglet/',
-      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/esp32c3_oled.bin',
-      files: [
-        { name: 'esp32c3_oled.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/esp32c3_oled.bin' }
-      ],
-      isMergedBinary: true,
-      features: ['0.42" OLED Mini Display', 'Ultra-Compact RISC-V Node', 'Wi-Fi & BLE Sniffer', 'Wigle Compatible CSV', 'Factory Merged 0x0'],
-      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-    },
-    {
-      id: 'waveshare-c6',
-      boardName: 'Waveshare C6 Mini 1.47" LCD',
-      fwName: 'Wi-Fi 6 & BLE 5 Handheld',
-      name: "Piglet — Waveshare C6 Mini 1.47\" LCD (skon's fork)",
-      device: 'ESP32-C6',
-      type: 'piglet',
-      source: 'skon',
-      version: 'v2.7-skon',
-      description: "skon's fork of Piglet for Waveshare ESP32-C6 1.47\" LCD board (Wi-Fi 6 & BLE 5). Handheld color screen wardriving tool.",
-      websiteUrl: 'https://olosnoks.github.io/piglet/',
-      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/waveshare_c6.bin',
-      files: [
-        { name: 'waveshare_c6.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/waveshare_c6.bin' }
-      ],
-      isMergedBinary: true,
-      features: ['1.47" Color LCD Display', 'ESP32-C6 Wi-Fi 6 & BLE 5', 'Compact Handheld Wardrive', 'Factory Merged 0x0'],
-      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-    }
-  ],
-  ham: [
-    {
-      id: 'ham-xiao-c5',
-      boardName: 'Seeed Studio XIAO ESP32-C5',
-      fwName: 'Official Piglet Core Release',
-      name: "Piglet Core — XIAO ESP32-C5 (Ham's Official)",
-      device: 'ESP32-C5',
-      type: 'piglet',
-      source: 'ham',
-      version: 'v2.7',
-      description: "Hamspiced's official Piglet Core release for Seeed Studio XIAO ESP32-C5. Dual-band 2.4GHz & 5GHz wardriving with Wigle-compatible CSV and PCAP output.",
-      websiteUrl: 'https://github.com/Hamspiced/piglet',
-      downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/Piglet.ino.merged.bin',
-      files: [
-        { name: 'Piglet.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/Piglet.ino.merged.bin' }
-      ],
-      isMergedBinary: true,
-      features: ['Official Hamspiced Release', 'Dual-Band 2.4GHz / 5GHz C5', 'Wigle CSV & PCAP Logging', 'GPS Wardriving', 'Factory Merged 0x0'],
-      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-    },
-    {
-      id: 'ham-pigletnode-c5',
-      boardName: 'PigletNode ESP32-C5',
-      fwName: 'Official PigletNode Mesh Release',
-      name: "PigletNode C5 Mesh Node (Ham's Official)",
-      device: 'ESP32-C5',
-      type: 'piglet',
-      source: 'ham',
-      version: 'v2.7',
-      description: "Hamspiced's official PigletNode release for ESP32-C5. Autonomous dual-band reconnaissance sensor for distributed wardriving.",
-      websiteUrl: 'https://github.com/Hamspiced/piglet',
-      downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/PigletNode.ino.merged.bin',
-      files: [
-        { name: 'PigletNode.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/PigletNode.ino.merged.bin' }
-      ],
-      isMergedBinary: true,
-      features: ['Official Hamspiced Release', 'ESP32-C5 Autonomous Node', 'Dual-Band RF Sniffing', 'Wigle Sync', 'Factory Merged 0x0'],
-      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-    },
-    {
-      id: 'ham-tdongle-c5',
-      boardName: 'LilyGo T-Dongle C5',
-      fwName: 'Official T-Dongle USB Release',
-      name: "Piglet — LilyGo T-Dongle C5 (Ham's Official)",
-      device: 'ESP32-C5',
-      type: 'piglet',
-      source: 'ham',
-      version: 'v2.7',
-      description: "Hamspiced's official Piglet firmware for LilyGo T-Dongle ESP32-C5 with integrated color display and USB-A plug. Plug-and-play dual-band wardriving.",
-      websiteUrl: 'https://github.com/Hamspiced/piglet',
-      downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/TDongleC5_Piglet.ino.merged.bin',
-      files: [
-        { name: 'TDongleC5_Piglet.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/TDongleC5_Piglet.ino.merged.bin' }
-      ],
-      isMergedBinary: true,
-      features: ['Official Hamspiced Release', 'LilyGo T-Dongle C5 USB', 'Integrated Color LCD', 'Dual-Band 2.4G/5G', 'Factory Merged 0x0'],
-      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-    }
-  ]
+  skon: PIGLET_BOARDS.flatMap(b => (b.builds.skon || []).map(build => ({
+    ...b,
+    ...build,
+    source: 'skon',
+    boardName: b.boardName,
+    fwName: build.fwName,
+    name: build.name,
+    type: 'piglet',
+    note: b.note
+  }))),
+  ham: PIGLET_BOARDS.flatMap(b => (b.builds.ham || []).map(build => ({
+    ...b,
+    ...build,
+    source: 'ham',
+    boardName: b.boardName,
+    fwName: build.fwName,
+    name: build.name,
+    type: 'piglet',
+    note: b.note
+  })))
 };
 
 // Curated high-priority offline fallback presets pointing to real upstream releases
@@ -501,42 +581,217 @@ export async function fetchFirmwareCatalog(forceRefresh = false) {
   return { options: BUNDLED_FALLBACK_PRESETS, fromCache: true, total: BUNDLED_FALLBACK_PRESETS.length };
 }
 
-const KNOWN_TYPE_NAMES = {
-  awokxdag: 'AxD / AWOK Suite',
-  biscuit: 'Biscuit OS',
-  bruce: 'Bruce Multi-Tool',
-  buspirate: 'Bus Pirate ESP32-S3',
-  bw16: 'Evil-BW16 Suite',
-  chimerable: 'ChimeraBLE Suite',
-  crosspoint: 'CrossPoint Suite',
-  cym: 'CYD / Cheap Yellow Monster',
-  deauther: 'ESP8266 Deauther',
-  deskbuddy: 'DeskBuddy Suite',
-  eli: 'Eli Firmware',
-  esphoneypot: 'ESP Honeypot',
-  evilm5: 'Evil-M5Project Suite',
-  evilportal: 'Evil Portal Suite',
-  flipperhttp: 'FlipperHTTP Suite',
-  ghostesp: 'GhostESP Multi-Tool',
-  hamqso: 'HamQSO Suite',
-  jcmkwardriver: 'JCMK Wardriver',
-  launcher: 'M5Launcher Suite',
-  m5porkchop: 'M5PorkChop Suite',
-  marauder: 'ESP32 Marauder',
-  meshtastic: 'Meshtastic Mesh Radio',
-  micropython: 'MicroPython REPL',
-  mimiclaw: 'MimiClaw Suite',
-  momentum: 'Flipper Zero Momentum',
-  monstatek: 'MonstaTek Suite',
-  official: 'Flipper Zero Official',
-  piglet: 'Piglet Wardriver Suite',
-  radioink: 'RadioInk Suite',
-  roguemaster: 'Flipper Zero RogueMaster',
-  squachwatch: 'SquachWatch Wardriver',
-  sticksandstones: 'Sticks & Stones',
-  unleashed: 'Flipper Zero Unleashed',
-  wled: 'WLED Lighting Controller'
+export const SUITE_METADATA = {
+  piglet: {
+    name: 'Piglet Wardriver Suite',
+    repoUrl: 'https://github.com/olosnoks/piglet',
+    upstreamRepoUrl: 'https://github.com/Hamspiced/piglet',
+    websiteUrl: 'https://olosnoks.github.io/piglet/',
+    defaultBaud: 460800
+  },
+  marauder: {
+    name: 'ESP32 Marauder',
+    repoUrl: 'https://github.com/justcallmekoko/ESP32Marauder',
+    websiteUrl: 'https://github.com/justcallmekoko/ESP32Marauder',
+    defaultBaud: 921600
+  },
+  bruce: {
+    name: 'Bruce Multi-Tool',
+    repoUrl: 'https://github.com/BruceDevices/firmware',
+    websiteUrl: 'https://github.com/BruceDevices/firmware',
+    defaultBaud: 921600
+  },
+  wled: {
+    name: 'WLED Lighting Controller',
+    repoUrl: 'https://github.com/wled/WLED',
+    websiteUrl: 'https://kno.wled.ge',
+    defaultBaud: 921600
+  },
+  micropython: {
+    name: 'MicroPython REPL',
+    repoUrl: 'https://github.com/micropython/micropython',
+    websiteUrl: 'https://micropython.org',
+    defaultBaud: 460800
+  },
+  awokxdag: {
+    name: 'AxD / AWOK Suite',
+    repoUrl: 'https://github.com/dagnazty/awokxdag',
+    websiteUrl: 'https://dagnazty.github.io/awokxdag/control.html',
+    defaultBaud: 921600
+  },
+  launcher: {
+    name: 'M5Launcher Suite',
+    repoUrl: 'https://github.com/bmorcelli/Launcher',
+    websiteUrl: 'https://bmorcelli.github.io/M5Stick-Launcher/',
+    defaultBaud: 921600
+  },
+  meshtastic: {
+    name: 'Meshtastic Mesh Radio',
+    repoUrl: 'https://github.com/meshtastic/firmware',
+    websiteUrl: 'https://meshtastic.org',
+    defaultBaud: 115200
+  },
+  ghostesp: {
+    name: 'GhostESP Multi-Tool',
+    repoUrl: 'https://github.com/Spooks457/GhostESP',
+    websiteUrl: 'https://github.com/Spooks457/GhostESP',
+    defaultBaud: 115200
+  },
+  evilm5: {
+    name: 'Evil-M5Project Suite',
+    repoUrl: 'https://github.com/7h30th3r0n3/Evil-M5Project',
+    websiteUrl: 'https://github.com/7h30th3r0n3/Evil-M5Project',
+    defaultBaud: 115200
+  },
+  flipperhttp: {
+    name: 'FlipperHTTP Suite',
+    repoUrl: 'https://github.com/jblanked/FlipperHTTP',
+    websiteUrl: 'https://flipperhttp.click',
+    defaultBaud: 115200
+  },
+  esphoneypot: {
+    name: 'ESP Honeypot',
+    repoUrl: 'https://github.com/A-C-T-I-N-I-U-M/ESPHoneypot',
+    websiteUrl: 'https://github.com/A-C-T-I-N-I-U-M/ESPHoneypot',
+    defaultBaud: 921600
+  },
+  cym: {
+    name: 'CYD / Cheap Yellow Monster',
+    repoUrl: 'https://github.com/hexvalid/CYD-K-Menu',
+    websiteUrl: 'https://github.com/hexvalid/CYD-K-Menu',
+    defaultBaud: 921600
+  },
+  buspirate: {
+    name: 'Bus Pirate ESP32-S3',
+    repoUrl: 'https://github.com/DangerousPrototypes/BusPirate5-firmware',
+    websiteUrl: 'https://buspirate.com',
+    defaultBaud: 921600
+  },
+  chimerable: {
+    name: 'ChimeraBLE Suite',
+    repoUrl: 'https://github.com/dagnazty/chimerable',
+    websiteUrl: 'https://github.com/dagnazty/chimerable',
+    defaultBaud: 921600
+  },
+  biscuit: {
+    name: 'Biscuit OS',
+    repoUrl: 'https://github.com/Spooks457/BiscuitOS',
+    websiteUrl: 'https://github.com/Spooks457/BiscuitOS',
+    defaultBaud: 921600
+  },
+  squachwatch: {
+    name: 'SquachWatch Wardriver',
+    repoUrl: 'https://github.com/SquachWatch/SquachWatch',
+    websiteUrl: 'https://github.com/SquachWatch/SquachWatch',
+    defaultBaud: 921600
+  },
+  m5porkchop: {
+    name: 'M5PorkChop Suite',
+    repoUrl: 'https://github.com/m5porkchop/porkchop',
+    websiteUrl: 'https://github.com/m5porkchop/porkchop',
+    defaultBaud: 921600
+  },
+  crosspoint: {
+    name: 'CrossPoint Suite',
+    repoUrl: 'https://github.com/crosspoint-reader/crosspoint',
+    websiteUrl: 'https://github.com/crosspoint-reader/crosspoint',
+    defaultBaud: 460800
+  },
+  deskbuddy: {
+    name: 'DeskBuddy Suite',
+    repoUrl: 'https://github.com/Spooks457/DeskBuddy',
+    websiteUrl: 'https://github.com/Spooks457/DeskBuddy',
+    defaultBaud: 921600
+  },
+  eli: {
+    name: 'Eli Firmware',
+    repoUrl: 'https://github.com/dagnazty/eli-firmware',
+    websiteUrl: 'https://github.com/dagnazty/eli-firmware',
+    defaultBaud: 921600
+  },
+  bw16: {
+    name: 'Evil-BW16 Suite',
+    repoUrl: 'https://github.com/7h30th3r0n3/Evil-BW16',
+    websiteUrl: 'https://github.com/7h30th3r0n3/Evil-BW16',
+    defaultBaud: 1500000
+  },
+  hamqso: {
+    name: 'HamQSO Suite',
+    repoUrl: 'https://github.com/Hamspiced/HamQSO',
+    websiteUrl: 'https://github.com/Hamspiced/HamQSO',
+    defaultBaud: 921600
+  },
+  jcmkwardriver: {
+    name: 'JCMK Wardriver',
+    repoUrl: 'https://github.com/justcallmekoko/ESP32Marauder',
+    websiteUrl: 'https://github.com/justcallmekoko/ESP32Marauder',
+    defaultBaud: 921600
+  },
+  mimiclaw: {
+    name: 'MimiClaw Suite',
+    repoUrl: 'https://github.com/mimiclaw/firmware',
+    websiteUrl: 'https://github.com/mimiclaw/firmware',
+    defaultBaud: 460800
+  },
+  momentum: {
+    name: 'Flipper Zero Momentum',
+    repoUrl: 'https://github.com/Next-Flip/Momentum-Firmware',
+    websiteUrl: 'https://momentum-fw.dev',
+    defaultBaud: 115200
+  },
+  monstatek: {
+    name: 'MonstaTek Suite',
+    repoUrl: 'https://github.com/MonstaTek/firmware',
+    websiteUrl: 'https://github.com/MonstaTek/firmware',
+    defaultBaud: 921600
+  },
+  official: {
+    name: 'Flipper Zero Official',
+    repoUrl: 'https://github.com/flipperdevices/flipperzero-firmware',
+    websiteUrl: 'https://flipperzero.one',
+    defaultBaud: 115200
+  },
+  radioink: {
+    name: 'RadioInk Suite',
+    repoUrl: 'https://github.com/p1x31/radioink',
+    websiteUrl: 'https://github.com/p1x31/radioink',
+    defaultBaud: 921600
+  },
+  roguemaster: {
+    name: 'Flipper Zero RogueMaster',
+    repoUrl: 'https://github.com/RogueMaster/flipperzero-firmware-wPlugins',
+    websiteUrl: 'https://github.com/RogueMaster/flipperzero-firmware-wPlugins',
+    defaultBaud: 115200
+  },
+  sticksandstones: {
+    name: 'Sticks & Stones',
+    repoUrl: 'https://github.com/Hamspiced/sticks_and_stones',
+    websiteUrl: 'https://github.com/Hamspiced/sticks_and_stones',
+    defaultBaud: 460800
+  },
+  unleashed: {
+    name: 'Flipper Zero Unleashed',
+    repoUrl: 'https://github.com/DarkFlippers/unleashed-firmware',
+    websiteUrl: 'https://github.com/DarkFlippers/unleashed-firmware',
+    defaultBaud: 115200
+  },
+  deauther: {
+    name: 'ESP8266 Deauther',
+    repoUrl: 'https://github.com/SpacehuhnTech/esp8266_deauther',
+    websiteUrl: 'https://deauther.com',
+    defaultBaud: 115200
+  },
+  evilportal: {
+    name: 'Evil Portal Suite',
+    repoUrl: 'https://github.com/bigbrodude6119/flipper-zero-evil-portal',
+    websiteUrl: 'https://github.com/bigbrodude6119/flipper-zero-evil-portal',
+    defaultBaud: 115200
+  }
 };
+
+const KNOWN_TYPE_NAMES = Object.fromEntries(
+  Object.entries(SUITE_METADATA).map(([k, v]) => [k, v.name])
+);
 
 /**
  * Resolves a firmware item into its primary project family/suite.
@@ -623,22 +878,36 @@ export function groupFirmwareCatalog(catalog = []) {
 
     const { id, name: familyName, type } = getFirmwareFamily(item);
     const normalizedId = (id || 'other').toLowerCase();
+    const meta = SUITE_METADATA[normalizedId] || {};
     
     if (!groupsMap.has(normalizedId)) {
       const newGroup = {
         id: normalizedId,
         familyName,
         type,
+        websiteUrl: meta.websiteUrl,
+        repoUrl: meta.repoUrl,
+        defaultBaud: meta.defaultBaud,
         boards: []
       };
       groupsMap.set(normalizedId, newGroup);
       result.push(newGroup);
     }
 
+    const itemWithMeta = {
+      ...item,
+      websiteUrl: item.websiteUrl || meta.websiteUrl,
+      repoUrl: item.repoUrl || meta.repoUrl,
+      flashConfig: {
+        ...item.flashConfig,
+        baudRate: item.flashConfig?.baudRate || meta.defaultBaud || 921600
+      }
+    };
+
     const existingBoards = groupsMap.get(normalizedId).boards;
     const boardKey = (item.name || '').trim().toLowerCase();
     if (!existingBoards.some(b => (b.name || '').trim().toLowerCase() === boardKey)) {
-      existingBoards.push(item);
+      existingBoards.push(itemWithMeta);
     }
   }
 

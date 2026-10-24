@@ -4,9 +4,10 @@ import {
   ExternalLink, 
   Info, 
   Cpu, 
-  ChevronDown,
-  Layers,
-  Sparkles
+  ChevronDown, 
+  Layers, 
+  Sparkles,
+  Github
 } from 'lucide-react';
 
 /**
@@ -131,17 +132,30 @@ export default function FirmwareGroupCard({
             </div>
           </div>
 
-          {activeFirmware.websiteUrl && (
-            <a
-              href={activeFirmware.websiteUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-1.5 text-slate-400 hover:text-amber-400 bg-[#1e212b] rounded-lg border border-[#2b303c] transition shrink-0"
-              title="Documentation & Project Page"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {(activeFirmware.repoUrl || group.repoUrl) && (
+              <a
+                href={activeFirmware.repoUrl || group.repoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1.5 text-slate-400 hover:text-amber-400 bg-[#1e212b] rounded-lg border border-[#2b303c] transition"
+                title="Official GitHub Repository"
+              >
+                <Github className="w-3.5 h-3.5" />
+              </a>
+            )}
+            {(activeFirmware.websiteUrl || group.websiteUrl) && (
+              <a
+                href={activeFirmware.websiteUrl || group.websiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1.5 text-slate-400 hover:text-amber-400 bg-[#1e212b] rounded-lg border border-[#2b303c] transition"
+                title="Official Documentation & Project Page"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
+          </div>
         </div>
 
         {/* Dropdowns Section */}
