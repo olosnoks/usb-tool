@@ -124,6 +124,16 @@ When transmitting binary packets across raw serial channels without hardware flo
    - SSID Name (for Beacons and Probes).
 5. **EAPOL Handshake Alert**: When a client connects or reconnects to an AP, the tool isolates the EAPOL 4-way handshake frames (Messages 1, 2, 3, and 4) and flashes a green **Handshake Captured** banner.
 6. **Export PCAP**: Click **Export PCAP** to download a standard Libpcap \`.pcap\` file. Open this file in **Wireshark** to inspect full decryptable payloads.
+
+---
+
+### 7. Upstream Standards & Engineering Attribution
+
+| Standard / Component | Authoring Organization / Maintainers | Reference & Specification |
+| :--- | :--- | :--- |
+| **IEEE 802.11 Wireless LAN MAC Standard** | IEEE Computer Society LAN/MAN Standards Committee | [IEEE 802.11-2020](https://standards.ieee.org) |
+| **Libpcap / PCAP File Format Specification** | The Tcpdump & Libpcap Project (Van Jacobson, Craig Leres, Steven McCanne) | [tcpdump.org](https://www.tcpdump.org) (BSD 3-Clause) |
+| **Wireshark Packet Dissector Architecture** | The Wireshark Foundation & Gerald Combs | [wireshark.org](https://www.wireshark.org) (GPL-2.0) |
 `
   },
   {
@@ -228,6 +238,17 @@ Every transition records the nanosecond timestamp (\`#41\`) followed by the logi
 6. **Activate Protocol Decoders**:
    - **I2C Decoder**: Assign SCL to CH0, SDA to CH1. The tool overlays green START markers, 7-bit hex addresses, ACK/NACK badges, and data payload bytes.
    - **UART Decoder**: Assign RX to CH1, set 115200 baud, 8-N-1. The tool renders ASCII characters directly inside the waveform pulses.
+
+---
+
+### 7. Upstream Project & Engineering Attribution
+
+| Project / Component | Author(s) / Organization | Repository & Reference | License |
+| :--- | :--- | :--- | :--- |
+| **The sigrok Project (libsigrok, PulseView)** | Uwe Hermann, Bert Vermeulen, and sigrok contributors | [sigrok.org](https://sigrok.org) | GPL-3.0 |
+| **fx2lafw Open-Source Logic Analyzer Firmware** | The sigrok Project (Cypress FX2LP GPIF streaming engine) | [sigrok.org/wiki/Fx2lafw](https://sigrok.org/wiki/Fx2lafw) | GPL-2.0 |
+| **Value Change Dump (VCD) Standard** | IEEE 1364-1995 / IEEE 1800 SystemVerilog specification | [IEEE Verilog Spec](https://standards.ieee.org) | Open IEEE Standard |
+| **EZ-USB FX2LP Microcontroller Silicon** | Cypress Semiconductor / Infineon Technologies | [CY7C68013A Datasheet](https://www.infineon.com) | Hardware Silicon |
 `
   },
   {
@@ -367,6 +388,16 @@ Under the steering wheel of any 2008+ car:
 4. The scanner automatically polls Engine RPM, Vehicle Speed, Coolant Temperature, and Throttle Position.
 5. **Read Trouble Codes (Mode 03)**: Queries stored Diagnostic Trouble Codes (e.g. \`P0171\` System Too Lean).
 6. **Clear Trouble Codes (Mode 04)**: Sends \`0x01 0x04\` to clear DTCs and turn off the Check Engine light.
+
+---
+
+### 6. Upstream Standards & Engineering Attribution
+
+| Standard / Protocol | Authoring Organization / Creator | Specification & Reference |
+| :--- | :--- | :--- |
+| **CAN Specification 2.0A / 2.0B & ISO 11898** | Robert Bosch GmbH & ISO Technical Committee | [Bosch CAN Specification](https://www.bosch-semiconductors.com) |
+| **Lawicel SLCAN Serial Protocol** | Lars Wictorsson (Lawicel AB, Sweden) | [CAN232 / Lawicel ASCII Commands](https://www.can232.com) |
+| **SAE J1979 / ISO 15031-5 OBD-II Standard** | SAE International (Society of Automotive Engineers) | [SAE J1979 Diagnostic Test Modes](https://www.sae.org) |
 `
   },
   {
@@ -449,6 +480,16 @@ Once a chip is located:
    - For an MPU-6050, it returns \`0x68\` (**WHO_AM_I** verification confirmed!).
 3. **Write Register**: Enter target register and new byte value (e.g. writing \`0x00\` to register \`0x6B\` clears the sleep bit and wakes up the sensor).
 4. **Live Register Watch**: Set up periodic polling (50ms to 1000ms) on data registers (such as Accelerometer X-axis high/low bytes at \`0x3B\` and \`0x3C\`) to see real-time sensor measurements update live on the screen!
+
+---
+
+### 5. Upstream Standards & Engineering Attribution
+
+| Bus Architecture | Originator / Creator | Specification & Reference |
+| :--- | :--- | :--- |
+| **I2C (Inter-Integrated Circuit) Bus Specification** | Philips Semiconductors (now NXP Semiconductors) | [NXP UM10204 I2C Manual](https://www.nxp.com) |
+| **SPI (Serial Peripheral Interface) Bus** | Motorola Semiconductor Products Sector (now NXP / Freescale) | [Motorola SPI Block Guide](https://www.nxp.com) |
+| **i2c-tools / Bus Pirate Interrogation Architecture** | Linux i2c-tools maintainers & Dangerous Prototypes | [kernel.org i2c-tools](https://git.kernel.org/pub/scm/utils/i2c-tools/i2c-tools.git) |
 `
   },
   {
@@ -558,6 +599,16 @@ Because the original 1979 Modbus specification didn't define 32-bit float order,
 2. **Little-Endian (CD AB)**: Low word first, high word second.
 3. **Mid-Big / Byte Swap (BA DC)**: High word first, but bytes inside each word swapped.
 4. **Mid-Little / Word Swap (DC BA)**: Standard for Eastron / Chint energy meters.
+
+---
+
+### 5. Upstream Standards & Engineering Attribution
+
+| Standard / Organization | Role & Contribution | Reference & License |
+| :--- | :--- | :--- |
+| **Modbus Organization, Inc.** | Modbus Application Protocol Specification V1.1b3 and Modbus over Serial Line Specification V1.02. | [modbus.org](https://modbus.org) (Royalty-Free Open Standard) |
+| **Modicon (Schneider Electric)** | Original creator of the Modbus industrial communication protocol (1979). | [Schneider Electric Industrial Automation](https://www.se.com) |
+| **TIA/EIA-485-A (RS-485) Standard** | Telecommunications Industry Association differential balanced multi-point electrical standard. | [TIA Standards](https://global.ihs.com) |
 `
   },
   {
@@ -626,6 +677,15 @@ The oscilloscope plotter computes dynamic statistics over the sliding sample win
 - **Buffer Depth Slider**: Adjust the horizontal time window from 100 historical points up to 5,000 points.
 - **Freeze & Crosshair Inspection**: Click **Pause** to freeze the waveform. Hovering your mouse over the canvas displays exact time offsets and numeric values.
 - **Export CSV**: Download the captured buffer as a \`.csv\` spreadsheet ready for MATLAB, Python pandas, or Excel.
+
+---
+
+### 4. Upstream Standards & Engineering Attribution
+
+| Standard / Component | Authoring Entity | Purpose & Reference |
+| :--- | :--- | :--- |
+| **W3C WebSerial API** | W3C Web Incubator Community Group (WICG) | Standardized browser streaming endpoint for real-time binary telemetry. [W3C Spec](https://wicg.github.io/serial/) |
+| **HTML5 Canvas 2D Rendering Context** | W3C / WHATWG | High-performance 60 FPS hardware-accelerated immediate-mode waveform rendering pipeline. |
 `
   },
   {
@@ -684,6 +744,15 @@ You need **two** USB-UART adapters connected to your computer:
    - Packets arriving on Port B are displayed with a green **B -> A** arrow and immediately forwarded to Port A.
 4. **Packet Injection**: Type a custom command into the injection bar and select whether to inject it towards Device A or Device B.
 5. **Drop / Mangle Rules**: Define pattern match rules to drop specific packets (e.g. dropping speed limit commands) or replace bytes on the fly.
+
+---
+
+### 4. Upstream Architecture & Engineering Attribution
+
+| Technique / Device Class | Historical Precedent & Tools | Reference |
+| :--- | :--- | :--- |
+| **Hardware Serial TAPs & MitM Bridges** | Bus Pirate (Dangerous Prototypes), GreatFET (Great Scott Gadgets), and hardware serial packet sniffers. | [Dangerous Prototypes Bus Pirate](http://dangerousprototypes.com/docs/Bus_Pirate) |
+| **W3C Multi-Port WebSerial Implementation** | W3C WICG Serial API concurrent device claim specification. | [W3C WebSerial](https://wicg.github.io/serial/) |
 `
   }
 ];

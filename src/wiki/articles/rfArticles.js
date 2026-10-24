@@ -177,6 +177,16 @@ TE: 400
 5. Use your keyboard arrow keys or click on-screen D-pad buttons to navigate menus.
 6. Switch to the **Storage** tab to browse folders, download recorded card dumps, or drag-and-drop BadUSB \`.txt\` payloads.
 7. Click **Take Screenshot** to capture a pixel-perfect PNG of the Flipper LCD canvas!
+
+---
+
+### 9. Upstream Project & Engineering Attribution
+
+| Project / Component | Author(s) / Organization | Repository & Reference | License |
+| :--- | :--- | :--- | :--- |
+| **Flipper Zero Firmware & Protobuf RPC** | Pavel Zhovner, Alexander Kulagin, and Flipper Devices Inc. | [github.com/flipperdevices/flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware) | GPL-3.0 |
+| **qFlipper Desktop Architecture** | Flipper Devices Inc. (Protocol Buffers \`PB_Main\` schema) | [github.com/flipperdevices/qFlipper](https://github.com/flipperdevices/qFlipper) | GPL-3.0 |
+| **ST7567 Monochrome Display Architecture** | Sitronix Technology Corp. (128x64 dot matrix LCD controller specification) | [Sitronix ST7567 Datasheet](https://www.sitronix.com.tw) | Hardware Spec |
 `
   },
   {
@@ -305,6 +315,16 @@ If your Proxmark3 is bricked or stuck in bootloader mode (e.g. following a faile
    - \`PM3GENERIC\`: Proxmark3 Easy (512k or 256k AT91SAM7S).
 3. The tool loads the verified firmware manifest from \`manifest.ts\` with SHA-256 integrity validation.
 4. Click **Flash Bootrom & Fullimage**. The service streams the binaries over the bootloader protocol and restarts the device!
+
+---
+
+### 11. Upstream Project & Engineering Attribution
+
+| Project / Component | Author(s) / Organization | Repository & Reference | License |
+| :--- | :--- | :--- | :--- |
+| **Proxmark3 RDV4 & Iceman Repository** | Jonathan Westhues (creator), Christian Herrmann (@iceman1001), and RFID Research Group (RRG) | [github.com/RfidResearchGroup/proxmark3](https://github.com/RfidResearchGroup/proxmark3) | GPL-3.0 |
+| **Proxmark3 NG Framing Protocol (\`0x424D5033\`)** | Proxmark3 Core Firmware Team | [Proxmark3 Protocol Docs](https://github.com/RfidResearchGroup/proxmark3/blob/master/doc/new_framing.md) | GPL-3.0 |
+| **NXP Mifare & Atmel T5577 RFID Standards** | NXP Semiconductors (Mifare Classic / Crypto-1) & Microchip / Atmel (ATA5577 LF Transponder) | [NXP Application Notes](https://www.nxp.com) | Industry Standard |
 `
   },
   {
@@ -418,6 +438,17 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 | **\`aprs-2m\`** | 144.390 MHz | NFM (12.5 kHz) | Ham Radio | Automatic Packet Reporting System |
 | **\`iss-down\`** | 145.800 MHz | NFM (12.5 kHz) | Satellite | International Space Station FM downlink / SSTV |
 | **\`subghz-315\`**| 315.000 MHz | ASK (50.0 kHz) | Automotive | North American car keyfobs & tire sensors |
+
+---
+
+### 8. Upstream Project & Engineering Attribution
+
+| Project / Component | Author(s) / Organization | Repository & Reference | License |
+| :--- | :--- | :--- | :--- |
+| **PortaPack Mayhem Firmware** | Jared Boone (ShareBrained), Furrtek, gullradriel, and PortaPack Mayhem Team | [github.com/portapack-mayhem/mayhem-firmware](https://github.com/portapack-mayhem/mayhem-firmware) | GPL-2.0 |
+| **HackRF One Software Defined Radio** | Michael Ossmann and Great Scott Gadgets | [github.com/greatscottgadgets/hackrf](https://github.com/greatscottgadgets/hackrf) | GPL-2.0 |
+| **RocketGod Mayhem Sub-GHz & Tactical Modules** | RocketGod (@RocketGod-git) | [github.com/RocketGod-git](https://github.com/RocketGod-git) | Open Source Community |
+| **dump1090 ADS-B Decoder Architecture** | Salvatore Sanfilippo (antirez) & FlightAware | [github.com/flightaware/dump1090](https://github.com/flightaware/dump1090) | BSD 3-Clause |
 `
   },
   {
@@ -501,6 +532,16 @@ for (let i = 2; i < buffer.length - 2; i++) {
   - Reconfigures the receiver's UART baud rate from 9600 to **115200 bps** to prevent high-speed NMEA sentences from overflowing the receiver's internal transmit FIFO.
 - **UBX-CFG-NAV5 (Class \`0x06\`, ID \`0x24\`)**:
   - Sets dynamic platform model: \`0\` Portable, \`2\` Stationary, \`3\` Pedestrian, \`4\` **Automotive** (enables Kalman velocity filtering for moving vehicles).
+
+---
+
+### 7. Upstream Project & Engineering Attribution
+
+| Project / Component | Author(s) / Organization | Repository & Reference | License |
+| :--- | :--- | :--- | :--- |
+| **WiGLE.net (Wireless Geographic Logging Engine)** | Bobzilla & Arkasha (WiGLE project founders) | [wigle.net](https://wigle.net) | Open WiGLE CSV Spec |
+| **u-blox UBX Binary Protocol** | u-blox AG (Thalwil, Switzerland) | [u-blox M8 Receiver Description](https://www.u-blox.com) | Proprietary Open Spec |
+| **NMEA 0183 Standard** | National Marine Electronics Association | [nmea.org](https://www.nmea.org) | Maritime & GNSS Standard |
 `
   },
   {
@@ -584,6 +625,16 @@ AA:BB:CC:DD:EE:FF,CoffeeShop,[WPA2-PSK-CCMP],2024-03-23 12:45:10,6,-68,48.123456
 3. Click **Uploads** -> **Upload a file**.
 4. Select your \`piglet_wardrive_YYYYMMDD.csv\` file.
 5. Your discovered access points will be added to the global wireless map and your user rank will increase!
+
+---
+
+### 5. Upstream Project & Engineering Attribution
+
+| Project / Component | Author(s) / Organization | Repository & Reference | License |
+| :--- | :--- | :--- | :--- |
+| **ESP32-Piglet Wardriver** | JustCallMeKoko (@JustCallMeKoko) | [github.com/JustCallMeKoko/ESP32-Piglet](https://github.com/JustCallMeKoko/ESP32-Piglet) | GPL-3.0 |
+| **CYD (Cheap Yellow Display) Community** | Brian Lough and the ESP32-2432S028R developer community | [github.com/witnessmenow/ESP32-Cheap-Yellow-Display](https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display) | Open Hardware |
+| **WiGLE Wireless Mapping Standard** | WiGLE.net team | [wigle.net](https://wigle.net) | Public Format |
 `
   },
   {
@@ -653,6 +704,16 @@ After running \`scanap\`:
 - \`channel -s <1-14>\`: Locks the radio to a specific channel (e.g. \`channel -s 6\`).
 - \`settings\`: Displays all internal settings (auto-save PCAP, LED color, force packets).
 - \`settings -s ForcePackets enable\`: Forces raw packet streaming over UART into Skon's Packet Lab!
+
+---
+
+### 6. Upstream Project & Engineering Attribution
+
+| Project / Component | Author(s) / Organization | Repository & Reference | License |
+| :--- | :--- | :--- | :--- |
+| **ESP32 Marauder** | JustCallMeKoko (@JustCallMeKoko) | [github.com/JustCallMeKoko/ESP32Marauder](https://github.com/JustCallMeKoko/ESP32Marauder) | GPL-3.0 / MIT |
+| **Espressif Wi-Fi Promiscuous Mode API** | Espressif Systems (ESP-IDF \`esp_wifi_set_promiscuous\`) | [docs.espressif.com](https://docs.espressif.com) | Apache-2.0 |
+| **IEEE 802.11 Protocol Standard** | IEEE Computer Society LAN/MAN Standards Committee | [IEEE 802.11-2020 Standard](https://standards.ieee.org) | International Standard |
 `
   }
 ];

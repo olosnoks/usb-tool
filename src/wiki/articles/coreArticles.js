@@ -87,7 +87,6 @@ If connecting an external USB-to-UART bridge (CH340, CP2102, FT232R) to a bare m
    - For GPS modules: Select **9600** (default NMEA) or **115200**.
    - For 3D Printers (Marlin/Klipper): Select **115200** or **250000**.
 3. **Open Port**: Click the glowing **CONNECT** button.
-4. **Grant Browser Permission**: A browser prompt will appear listing all detected serial devices. Select your device (e.g., *USB-Serial Controller*, *CP2102 USB to UART Bridge*, or *USB JTAG/serial debug unit*) and click **Connect**.
 5. **Observe Real-Time Stream**: The terminal displays incoming data instantly with millisecond timestamps and ANSI syntax highlighting.
 
 ---
@@ -108,6 +107,38 @@ When you click **Baud Hunter**, the engine executes a multi-stage heuristic anal
 4. The candidate with the highest ASCII density and lowest framing error count is automatically locked and set as active!
 </details>
 
+<details>
+<summary>Complete ANSI / VT100 Terminal Control Sequences (CSI & TrueColor)</summary>
+
+Skon's USB Tool embeds a full ECMA-48 / VT100 ANSI terminal emulator supporting cursor control, screen clearing, and 24-bit RGB TrueColor palettes:
+
+| Control Sequence | Function | Description |
+| :--- | :--- | :--- |
+| **\`\\x1b[2J\`** | Clear Entire Screen | Clears the terminal buffer without resetting cursor. |
+| **\`\\x1b[H\`** / **\`\\x1b[1;1H\`** | Cursor Home | Moves cursor to row 1, column 1 (top-left). |
+| **\`\\x1b[K\`** | Clear Line to Right | Erases characters from active cursor position to end of line. |
+| **\`\\x1b[0m\`** | Reset All Attributes | Returns text styling to default grey-on-dark. |
+| **\`\\x1b[1m\`** | Bold / Bright | Enhances font weight and luminance. |
+| **\`\\x1b[31m\` - \`\\x1b[37m\`** | 16-Color Palette | Red (31), Green (32), Yellow (33), Blue (34), Magenta (35), Cyan (36), White (37). |
+| **\`\\x1b[38;2;R;G;Bm\`** | 24-Bit RGB TrueColor | Sets 16.7 million color foreground (e.g. \`\\x1b[38;2;0;255;255m\` for Neon Cyan). |
+| **\`\\x1b[48;2;R;G;Bm\`** | 24-Bit Background | Sets 24-bit background fill color. |
+
+</details>
+
+<details>
+<summary>Hardware vs Software Flow Control & Line Break Signaling</summary>
+
+High-speed serial streams (>230,400 baud) can overflow microcontroller internal ring buffers:
+1. **Hardware Flow Control (RTS / CTS)**:
+   - **RTS (Request To Send)**: Output from computer. Asserted LOW when the PC is ready to receive data.
+   - **CTS (Clear To Send)**: Input to computer from device. Target drives LOW when its internal FIFO has free space.
+2. **Software Flow Control (XON / XOFF)**:
+   - Transmits in-band ASCII control codes: \`0x13\` (XOFF / DC3) commands the sender to halt; \`0x11\` (XON / DC1) resumes transmission.
+3. **Serial Line Break Signaling**:
+   - Holding the TXD line LOW (Space condition) for longer than one full character frame (typically **250ms**) asserts a hardware BREAK. Used to enter bootloader ROMs or reset microcontrollers without toggling DTR/RTS.
+
+</details>
+
 #### Line Endings (CR / LF / CRLF / HEX)
 When typing commands into the bottom input bar, choose the appropriate terminator for your firmware:
 - **CRLF (\\r\\n - 0x0D 0x0A)**: Required by AT command cellular/Wi-Fi modems and ESP-IDF CLI.
@@ -125,6 +156,16 @@ When typing commands into the bottom input bar, choose the appropriate terminato
 | Prompt says "No compatible devices found" | Missing USB driver or charge-only cable | Replace cable with a verified data cable; install CH340 / CP2102 drivers. |
 | Terminal prints initial boot messages, then freezes | Firmware entered deep sleep or crashed | Press EN/RESET button on the board; check power supply current. |
 | "Failed to open serial port: Access denied" | Port open in another app | Close Arduino IDE, VS Code serial monitor, or PuTTY. |
+
+---
+
+### 7. Upstream Standards & Project Attribution
+
+| Entity / Project | Role & Contribution | Upstream Reference / Specification |
+| :--- | :--- | :--- |
+| **W3C WebSerial API** | W3C Community Group standard enabling direct asynchronous bidirectional serial communication between web applications and USB/UART devices. | [W3C WebSerial Spec](https://wicg.github.io/serial/) |
+| **Digital Equipment Corp (DEC) & ANSI** | Creators of the VT100 / ANSI X3.64 (ECMA-48) terminal control escape sequences implemented in the WebGL/Canvas rendering pipeline. | [ECMA-48 Standard](https://www.ecma-international.org/publications-and-standards/standards/ecma-48/) |
+| **xterm.js Project** | Industry-standard web terminal rendering architecture and ANSI parsing semantics upon which modern browser-based serial consoles are patterned. | [xtermjs.org](https://xtermjs.org/) |
 `
   },
   {
@@ -134,7 +175,7 @@ When typing commands into the bottom input bar, choose the appropriate terminato
     title: 'Firmware Flasher — ESP32 & ESP8266 Memory Partition Studio',
     summary: 'Master ESP-IDF ROM bootloader synchronization, high-speed baud auto-negotiation, partition tables, factory offsets, and unbricking stubs.',
     tags: ['Flasher', 'ESP32', 'ROM Bootloader', 'Partitions', 'esptool', 'Flash Memory', 'Firmware'],
-    readTime: '17 min read',
+    readTime: '20 min read',
     content: `
 # Firmware Flasher — Memory Partition Studio
 
@@ -159,7 +200,7 @@ The **Firmware Flasher** handles all of this automatically in your browser. It a
 ### 2. Supported Silicon Families
 
 | Silicon Family | CPU Architecture | Max Flashing Baud | Bootloader Offset | App0 Offset |
-| :--- | :--- | :--- | :--- | :--- |
+| :--- | :--- | :--- | :--- | :--- | :--- |
 | **ESP32 Classic** | Dual-Core Xtensa LX6 @ 240MHz | 921,600 bps | \`0x1000\` | \`0x10000\` |
 | **ESP32-S2** | Single-Core Xtensa LX7 (USB OTG) | 921,600 bps | \`0x1000\` | \`0x10000\` |
 | **ESP32-S3** | Dual-Core Xtensa LX7 + Vector AI | 921,600 bps | \`0x0000\` | \`0x10000\` |
@@ -213,6 +254,45 @@ All communication with the ESP32 ROM bootloader uses **SLIP (Serial Line Interne
 | **\`0x13\`** | **SPI_ATTACH** | Initializes hardware SPI pins for flash communication |
 </details>
 
+<details>
+<summary>ESP-IDF Partition Table Binary Format & Custom partitions.csv Syntax</summary>
+
+The partition table stored at \`0x8000\` consists of 32-byte binary structures defining every zone in flash memory:
+
+\`\`\`csv
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  ota_0,   0x10000, 0x180000,
+app1,     app,  ota_1,   0x190000,0x180000,
+spiffs,   data, spiffs,  0x310000,0xE0000,
+coredump, data, coredump,0x3F0000,0x10000,
+\`\`\`
+
+#### 32-Byte Partition Record Bitfields:
+- **Bytes 0 - 1**: Magic Word (\`0xAA 0x50\`).
+- **Byte 2**: Type (\`0x00\` = App, \`0x01\` = Data).
+- **Byte 3**: Subtype (\`0x00\` = Factory App, \`0x10\` = OTA_0, \`0x01\` = OTA Data, \`0x82\` = SPIFFS, \`0x02\` = NVS).
+- **Bytes 4 - 7**: 32-bit Starting Flash Offset (4KB aligned).
+- **Bytes 8 - 11**: 32-bit Partition Size in bytes (4KB aligned).
+- **Bytes 12 - 27**: Label string (Null-terminated ASCII, max 16 chars).
+- **Bytes 28 - 31**: Flags (Bit 0 = \`1\` for Encrypted with hardware AES-256).
+
+</details>
+
+<details>
+<summary>Flash Memory Clock Dividers & SPI Transfer Modes (QIO, QOUT, DIO, DOUT)</summary>
+
+Choosing the wrong SPI transfer mode in your flasher settings will cause the microcontroller to boot-loop with \`flash read err, 1000\`!
+
+| SPI Mode | Data Pins Used | Max Frequency | Description & Safety Rule |
+| :--- | :--- | :--- | :--- |
+| **QIO (Quad I/O)** | 4 lines (D0, D1, D2, D3) | 80 MHz | Fastest read speed. Requires WP and HOLD pins to be routed to flash. |
+| **QOUT (Quad Output)**| 4 lines (Data only) | 80 MHz | Command & address sent over 1 line; data returned over 4 lines. |
+| **DIO (Dual I/O)** | 2 lines (MOSI, MISO) | 40 MHz / 80 MHz | **Standard Safe Default** for 99% of ESP32 modules (ESP-WROOM-32). |
+| **DOUT (Dual Output)**| 2 lines (Data only) | 40 MHz | Fallback mode for legacy or low-cost flash chips. |
+</details>
+
 ---
 
 ### 4. Step-by-Step Usage Guide
@@ -251,6 +331,16 @@ Connecting... (Timed out waiting for packet header)
 4. Release the **BOOT button**.
 5. Your board is now locked in ROM download mode. Click **Connect & Flash** in the web tool, and it will sync immediately!
 </details>
+
+---
+
+### 6. Upstream Project & Engineering Attribution
+
+| Project / Entity | Role & Contribution | Repository / License |
+| :--- | :--- | :--- |
+| **esptool-js (Espressif Systems)** | Official JavaScript implementation of the Espressif ROM bootloader protocol. Implements SLIP framing, high-speed baud switching, MD5 verification, and stub execution. | [github.com/espressif/esptool-js](https://github.com/espressif/esptool-js) (Apache-2.0) |
+| **esptool.py (Espressif Systems)** | Foundational Python flash utility authored by Fredrik Ahlberg, Angus Gratton, and Espressif Systems contributors. Established ROM command opcodes, partition table specs, and register addresses. | [github.com/espressif/esptool](https://github.com/espressif/esptool) (GPL-2.0) |
+| **ESP-IDF Partition Table Architecture** | The binary 32-byte partition record specification, MD5 checksum format, and SPI flash mapping defined by Espressif Systems. | [Espressif ESP-IDF Docs](https://docs.espressif.com/projects/esp-idf/) |
 `
   },
   {
@@ -349,6 +439,34 @@ When working with Linux Single Board Computers (Raspberry Pi, Orange Pi, Banana 
 - The U-Boot bootloader provides a recovery shell to re-flash Linux kernels, dump flash memory, or bypass root passwords.
 - U-Boot only pauses autoboot if it receives a keypress (Space, Enter, or \`Ctrl+C\`) within a narrow 1-second countdown window after power-on.
 - **How to Use**: Click **Start U-Boot Interrupter**. Power cycle or reset your board. The tool spams interrupt characters 50 times per second until U-Boot halts and opens the \`=>\` prompt!
+
+<details>
+<summary>U-Boot Command Prompt Environment Variable Reference & Kernel Boot Commands</summary>
+
+Once halted at the \`=>\` prompt, engineers use these low-level U-Boot commands to recover routers and single-board computers:
+
+| Command | Action & Example | Diagnostic Purpose |
+| :--- | :--- | :--- |
+| **\`printenv\`** | Dumps all active bootloader environment variables. | Inspects kernel boot arguments, MAC addresses, and memory load addresses. |
+| **\`setenv bootargs\`** | \`setenv bootargs "console=ttyS0,115200 root=/dev/mmcblk0p2 rw init=/bin/sh"\` | Bypasses Linux password authentication by booting directly into root single-user shell. |
+| **\`md.b <addr> <count>\`** | \`md.b 0x20000000 0x100\` | Memory Dump: Reads and prints raw hexadecimal bytes directly from physical RAM. |
+| **\`mw.b <addr> <val> <cnt>\`**| \`mw.b 0x20000000 0x00 0x100\` | Memory Write: Writes byte values directly to peripheral registers or SRAM. |
+| **\`tftpboot <addr> <file>\`** | \`tftpboot 0x82000000 uImage\` | Downloads recovery kernel image over Ethernet via TFTP without booting operating system. |
+| **\`bootm <addr>\`** | \`bootm 0x82000000\` | Executes application or Linux kernel residing at the specified memory address. |
+| **\`reset\`** | Restarts CPU and re-executes cold hardware initialization. | Reboot target. |
+
+</details>
+
+---
+
+### 5. Upstream Project & Engineering Attribution
+
+| Project / Hardware Standard | Role & Contribution | Reference & License |
+| :--- | :--- | :--- |
+| **NodeMCU & Espressif Dual-BJT Auto-Reset Circuit** | Open-source hardware circuit design utilizing cross-coupled NPN transistors (Q1/Q2) on DTR/RTS lines to automate EN/GPIO0 sequencing without manual button interaction. | [NodeMCU Hardware DevKit](https://github.com/nodemcu/nodemcu-devkit-v1.0) (MIT / OSHWA) |
+| **Das U-Boot (Universal Boot Loader)** | The embedded Linux bootloader created by Wolfgang Denk and maintained by DENX Software Engineering. Defines the autoboot countdown interruption sequence (\`Space\` / \`Enter\` / \`Ctrl+C\`) and environment manipulation shell. | [source.denx.de/u-boot/u-boot](https://source.denx.de/u-boot/u-boot) (GPL-2.0) |
+| **W3C WebSerial Signal Control API** | The \`SerialPort.prototype.setSignals()\` specification allowing direct software manipulation of DTR and RTS modem control lines from the browser. | [W3C Serial API Signals Spec](https://wicg.github.io/serial/#dom-serialport-setsignals) |
 `
   }
 ];
+

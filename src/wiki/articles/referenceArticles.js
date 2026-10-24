@@ -95,6 +95,16 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 ### 3. macOS Device Nodes
 On macOS, WebSerial displays devices with paths like \`/dev/cu.usbserial-*\` and \`/dev/tty.usbserial-*\`. Always select the \`cu.*\` (Call-Up) device node for reliable bidirectional streaming.
+
+---
+
+### 4. Upstream Standards & Engineering Attribution
+
+| Standard / System | Authoring Body / Maintainers | Reference & Specification |
+| :--- | :--- | :--- |
+| **Linux udev / systemd Device Management** | The Linux Foundation & systemd Project | [systemd.io/udev](https://systemd.io/) (LGPL-2.1) |
+| **Microsoft WinUSB / USB-CDC (usbser.sys)** | Microsoft Corporation | [Microsoft Windows Driver Documentation](https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/) |
+| **WCH / Silicon Labs / FTDI USB Drivers** | Nanjing Qinheng Microelectronics, Silicon Labs, and Future Technology Devices Intl. | Official Manufacturer Port Drivers |
 `
   },
   {
@@ -141,6 +151,15 @@ If a development board refuses to enumerate or communicate:
    - A reading of \`0.000V\` (short) or \`OL\` (open) confirms blown protection diodes.
 
 </details>
+
+---
+
+### 3. Upstream Standards & Engineering Attribution
+
+| Engineering Discipline | Standards Body & Best Practices | Reference |
+| :--- | :--- | :--- |
+| **Open Source Hardware Bench Diagnostics** | Open Source Hardware Association (OSHWA) & IEEE Reliability Society | [oshwa.org](https://www.oshwa.org) / [IEEE Xplore](https://ieeexplore.ieee.org) |
+| **IPC-A-610 Acceptability of Electronic Assemblies** | IPC (Association Connecting Electronics Industries) | [ipc.org](https://www.ipc.org) |
 `
   },
   {
@@ -200,6 +219,17 @@ When designing custom ESP32 boards with a USB-C receptacle:
   - Tying CC1 and CC2 together shorts $V_{conn}$ to the configuration line, violating USB-IF specs and causing smart chargers (Apple, Anker PD, Baseus) to deliver 0 Volts!
 
 </details>
+
+---
+
+### 3. Upstream Hardware & Engineering Attribution
+
+| Silicon Vendor / Organization | Component / Reference | Official Documentation |
+| :--- | :--- | :--- |
+| **Espressif Systems** | ESP32, ESP32-S3, ESP32-C3, and ESP32-C6 Pinout & Hardware Design Guidelines | [espressif.com Hardware Design Guides](https://www.espressif.com) |
+| **USB Implementers Forum (USB-IF)** | USB Type-C Cable and Connector Specification Revision 2.2 | [usb.org/type-c](https://www.usb.org/type-c) |
+| **Flipper Devices Inc.** | Flipper Zero 18-Pin GPIO Header Hardware Interface Specification | [docs.flipper.net](https://docs.flipper.net) |
+| **Raspberry Pi Ltd** | Raspberry Pi Pico RP2040 Pinout & Hardware Reference | [raspberrypi.com](https://www.raspberrypi.com) |
 `
   },
   {
@@ -233,6 +263,16 @@ Every USB peripheral announces a 16-bit **Vendor ID (VID)** and 16-bit **Product
 | **\`0x1D50\`** | **\`0x6089\`** | Great Scott Gadgets HackRF One | PortaPack SDR radio transceiver USB interface |
 | **\`0x20A0\`** | **\`0x415A\`** | Flipper Devices Flipper Zero | Flipper Zero USB virtual communication port & RPC interface |
 | **\`0x9AC4\`** | **\`0x4B8F\`** | Proxmark3 RDV4 / Easy | RFID & NFC research and emulation instrument |
+
+---
+
+### 2. Upstream Standards & Engineering Attribution
+
+| Database / Standard | Maintainer & Authority | Reference |
+| :--- | :--- | :--- |
+| **USB Implementers Forum (USB-IF) Vendor ID Registry** | USB-IF Board of Directors | [usb.org/developers](https://www.usb.org/developers) |
+| **The Linux USB ID Repository (\`usb.ids\`)** | Stephen J. Gowdy & The Linux Kernel Organization | [linux-usb.org/usb.ids](http://www.linux-usb.org/usb.ids) |
+| **Silicon Decapping & Reverse Engineering Archives** | Zeptobars Silicon Photography & SparkFun Electronics Counterfeit IC Archives | [zeptobars.com](https://zeptobars.com) / [sparkfun.com](https://www.sparkfun.com) |
 `
   }
 ];

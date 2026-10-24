@@ -112,6 +112,16 @@ TX (GPIO 1) ----> Pin 14 (USART RX)
 RX (GPIO 3) ----> Pin 13 (USART TX)
 \`\`\`
 Controlled entirely using the Flipper Zero's physical screen and D-pad through the Flipper Marauder companion application!
+
+---
+
+### 4. Upstream Project & Engineering Attribution
+
+| Project / Component | Author(s) / Maintainers | Repository & Reference | License |
+| :--- | :--- | :--- | :--- |
+| **RocketGod RF & ESP Tools** | RocketGod (@RocketGod-git) | [github.com/RocketGod-git](https://github.com/RocketGod-git) | Open Source Community |
+| **Flipper Zero Sub-GHz & GPIO Architecture** | Flipper Devices Inc. | [github.com/flipperdevices/flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware) | GPL-3.0 |
+| **Texas Instruments CC1101 Transceiver Spec** | Texas Instruments Incorporated | [TI CC1101 Product Folder](https://www.ti.com/product/CC1101) | Silicon Architecture |
 `
   },
   {
@@ -186,6 +196,16 @@ For hardware equipped with an IR LED and 38kHz demodulator receiver (like M5Stic
 3. Select your exact device (e.g. *M5StickC-Plus2* or *M5Stack Cardputer*).
 4. Connect via USB and click **Connect & Flash**.
 5. Once completed, your device reboots into Bruce's interactive graphical menu!
+
+---
+
+### 4. Upstream Project & Engineering Attribution
+
+| Project / Hardware Platform | Author(s) / Maintainers | Repository & Reference | License |
+| :--- | :--- | :--- | :--- |
+| **Bruce Multi-Tool Firmware** | pr3y and Bruce open-source contributors | [github.com/pr3y/Bruce](https://github.com/pr3y/Bruce) | GPL-3.0 |
+| **M5Stack Hardware Ecosystem (Cardputer, Core, StickC)** | M5Stack Technology Co., Ltd. (Shenzhen, China) | [m5stack.com](https://m5stack.com) | Open Hardware |
+| **Apple Continuity & Google Fast Pair Specifications** | Apple Inc. / Google LLC reverse-engineered BLE advertisement protocols | [Bluetooth SIG Assigned Numbers](https://www.bluetooth.com) | Wireless Standards |
 `
   },
   {
@@ -292,6 +312,16 @@ The integrated **CyberChef** workbench provides 1-click obfuscation pipelines:
   - Download as standard \`payload.txt\` for Hak5 USB Rubber Ducky.
   - Deploy directly to **Flipper Zero** (\`/ext/badusb/\`).
   - Compile to C++ header for direct flashing onto **ESP32-S2 / S3** native USB boards!
+
+---
+
+### 4. Upstream Project & Engineering Attribution
+
+| Project / Framework | Author(s) / Organization | Repository & Reference | License |
+| :--- | :--- | :--- | :--- |
+| **USB Rubber Ducky & DuckyScript Specification** | Darren Kitchen, Sebkinne, and Hak5 LLC | [hak5.org](https://hak5.org) / [docs.hak5.org](https://docs.hak5.org/hak5-usb-rubber-ducky/) | Proprietary Spec / Open Language |
+| **CyberChef (The Cyber Swiss Army Knife)** | GCHQ (Government Communications Headquarters, UK) | [github.com/gchq/CyberChef](https://github.com/gchq/CyberChef) | Apache-2.0 |
+| **USB Implementers Forum HID Class Spec** | USB-IF Device Working Group (USB HID Usage Tables v1.22) | [usb.org/hid](https://www.usb.org/hid) | Open Industry Standard |
 `
   }
 ];

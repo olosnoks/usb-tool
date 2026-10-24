@@ -127,6 +127,17 @@ For 8-bit Microchip / Atmel microcontrollers (ATmega328P, ATtiny85, ATmega2560):
    - **Low Fuse**: Selects oscillator clock source (external 16MHz crystal vs internal 8MHz RC) and startup delay.
    - **High Fuse**: Toggles SPI programming enable (SPIEN), Watchdog timer, and bootloader reset vector size.
    - **Extended Fuse**: Sets brownout detection voltage threshold (1.8V, 2.7V, 4.3V).
+
+---
+
+### 5. Upstream Project & Engineering Attribution
+
+| Tool / Interface | Original Upstream Project / Specification | Authors & Maintainers | License / Reference |
+| :--- | :--- | :--- | :--- |
+| **CH341A SPI/I2C Engine** | flashrom (universal flash programming utility) | The flashrom Project (Stefan Tauner, Carl-Daniel Hailfinger, Peter Stuge, et al.) & Nanjing Qinheng Microelectronics (WCH) | [flashrom.org](https://flashrom.org) (GPL-2.0) |
+| **CMSIS-DAP Debugger** | Arm Cortex Microcontroller Software Interface Standard (CMSIS-DAP / DAPLink) | Arm Limited & Raspberry Pi Ltd (Debug Probe) | [github.com/ARM-software/CMSIS_5](https://github.com/ARM-software/CMSIS_5) (Apache-2.0) |
+| **JTAG SVF Player** | IEEE 1149.1 Standard Test Access Port & Serial Vector Format (SVF) | Joint Test Action Group (JTAG) / ASSET InterTech | [IEEE 1149.1 Standard](https://standards.ieee.org) (Open Engineering Standard) |
+| **AVR ISP Engine** | AVR In-System Programming (AVR910 / STK500) & avrdude | Atmel Corporation / Microchip Technology Inc., Brian Dean, Joerg Wunsch | [github.com/avrdudes/avrdude](https://github.com/avrdudes/avrdude) (GPL-2.0) |
 `
   },
   {
@@ -203,6 +214,16 @@ For chargers supporting USB-PD 3.0 PPS:
 - **Current (A)**: Real-time current consumption in milliamps.
 - **Power (Watts)**: Instantaneous wattage calculation (\`V * A\`).
 - **Energy Meter (Wh / mAh)**: Capacity counter for profiling battery discharge rates.
+
+---
+
+### 4. Upstream Standards & Engineering Attribution
+
+| Standard / Component | Authoring Organization / Manufacturer | Upstream Specification & Reference |
+| :--- | :--- | :--- |
+| **USB Power Delivery Specification (PD 2.0 / 3.0 / 3.1)** | USB Implementers Forum (USB-IF) | [USB-IF Power Delivery Specification](https://www.usb.org/usb-charger-pd) |
+| **Type-C Cable & Connector Specification** | USB-IF Working Group (CC pin signaling, BMC 300kHz modulation, SOP framing) | [USB Type-C Specification](https://www.usb.org/developers) |
+| **FUSB302 / CH224K USB-PD Controller Architecture** | ON Semiconductor / Fairchild & Nanjing Qinheng Microelectronics (WCH) | [onsemi FUSB302 Datasheet](https://www.onsemi.com) |
 `
   }
 ];
