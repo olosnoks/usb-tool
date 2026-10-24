@@ -17,6 +17,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { fetchFirmwareCatalog, getCachedCatalogSync, downloadFirmwareBinary, BUNDLED_FALLBACK_PRESETS } from '../../services/firmwareCatalogService';
+import PigletUnifiedCard from './PigletUnifiedCard';
 
 export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
   const [catalog, setCatalog] = useState(() => getCachedCatalogSync() || BUNDLED_FALLBACK_PRESETS);
@@ -75,6 +76,7 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
         (q.includes('ham') && item.name?.toLowerCase().includes('ham'));
 
       const matchesChip = selectedChip === 'ALL' || 
+        (item.isPigletSuite && (item.supportedChips?.includes(selectedChip) || selectedChip === 'ESP32')) ||
         item.device?.toUpperCase().includes(selectedChip) ||
         (selectedChip === 'ESP32' && item.device?.toUpperCase() === 'ESP32');
 
@@ -231,11 +233,23 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-          {filteredFirmware.map((fw, idx) => (
-            <div
-              key={fw.name + idx}
-              className="bg-[#171920] hover:bg-[#1a1d26] border border-[#2b303c] hover:border-amber-500/40 rounded-2xl p-4 flex flex-col justify-between transition group space-y-3"
-            >
+          {filteredFirmware.map((fw, idx) => {
+            if (fw.isPigletSuite) {
+              return (
+                <PigletUnifiedCard
+                  key="piglet-unified-suite-card"
+                  onSelectFirmwareForFlashing={handleDownloadAndFlash}
+                  onInspect={setSelectedFirmware}
+                  currentChipFilter={selectedChip}
+                />
+              );
+            }
+
+            return (
+              <div
+                key={fw.name + idx}
+                className="bg-[#171920] hover:bg-[#1a1d26] border border-[#2b303c] hover:border-amber-500/40 rounded-2xl p-4 flex flex-col justify-between transition group space-y-3"
+              >
               <div className="space-y-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="space-y-0.5">
@@ -318,7 +332,8 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
                 </button>
               </div>
             </div>
-          ))}
+          );
+        })}
         </div>
       )}
 

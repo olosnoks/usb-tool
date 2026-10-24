@@ -8,145 +8,204 @@ const REMOTE_MANIFEST_URL = 'https://espterminator.com/firmware/manifest.json';
 const CACHE_KEY = 'skons_firmware_catalog_v1';
 const CACHE_EXPIRY_MS = 1000 * 60 * 60 * 6; // 6 hours
 
+// Structured Piglet firmware variants by author (skon's forks vs Hamspiced's official releases)
+export const PIGLET_VARIANTS = {
+  skon: [
+    {
+      id: 'freenove-s3-cyd',
+      boardName: 'Freenove S3 CYD',
+      fwName: 'UI4 Theme + GPS Wardrive',
+      name: "Piglet — Freenove S3 CYD (skon's fork)",
+      device: 'ESP32-S3',
+      type: 'piglet',
+      source: 'skon',
+      version: 'v2.7-skon',
+      description: "skon's fork of Piglet Wardriver featuring UI4 interface tailored for Freenove ESP32-S3 Cheap Yellow Display. High-speed 2.4GHz Wi-Fi/BLE reconnaissance & GPS wardriving.",
+      websiteUrl: 'https://olosnoks.github.io/piglet/',
+      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/freenove-s3-cyd-ham-ui4.bin',
+      files: [
+        { name: 'freenove-s3-cyd-ham-ui4.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/freenove-s3-cyd-ham-ui4.bin' }
+      ],
+      isMergedBinary: true,
+      features: ['UI4 Modern Interface', 'GPS Wardriving & PCAP', 'Freenove S3 CYD Display', 'Wi-Fi & BLE Recon', 'Factory Merged 0x0'],
+      flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
+    },
+    {
+      id: 'guition-jc8048w550',
+      boardName: 'Guition JC8048W550',
+      fwName: '800x480 High-Res Cockpit',
+      name: "Piglet — Guition JC8048W550 (skon's fork)",
+      device: 'ESP32-S3',
+      type: 'piglet',
+      source: 'skon',
+      version: 'v2.7-skon',
+      description: "skon's fork of Piglet Wardriver compiled for Guition JC8048W550 (5.0\" / 7.0\" 800x480 S3 Display). Large format high-resolution wardriving cockpit.",
+      websiteUrl: 'https://olosnoks.github.io/piglet/',
+      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/guition-jc8048w550.bin',
+      files: [
+        { name: 'guition-jc8048w550.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/guition-jc8048w550.bin' }
+      ],
+      isMergedBinary: true,
+      features: ['800x480 Large Screen GUI', 'Guition JC8048W550 S3', 'GPS Map & Wardriving', 'Wi-Fi & BLE Recon', 'Factory Merged 0x0'],
+      flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
+    },
+    {
+      id: 'xiao-c5',
+      boardName: 'Seeed Studio XIAO ESP32-C5',
+      fwName: 'Dual-Band 2.4/5GHz Wi-Fi 6',
+      name: "Piglet Core — XIAO ESP32-C5 (skon's fork)",
+      device: 'ESP32-C5',
+      type: 'piglet',
+      source: 'skon',
+      version: 'v2.7-skon',
+      description: "skon's fork of Piglet Core for Seeed Studio XIAO ESP32-C5 (dual-band 2.4GHz & 5GHz Wi-Fi 6 RISC-V). Next-generation dual-band wardriving powerhouse.",
+      websiteUrl: 'https://olosnoks.github.io/piglet/',
+      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/xiao_c5.bin',
+      files: [
+        { name: 'xiao_c5.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/xiao_c5.bin' }
+      ],
+      isMergedBinary: true,
+      features: ['Dual-Band 2.4GHz & 5GHz', 'ESP32-C5 Wi-Fi 6 RISC-V', 'Seeed XIAO Micro Form Factor', 'GPS & Wardrive Support', 'Factory Merged 0x0'],
+      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+    },
+    {
+      id: 'pigletnode-c5',
+      boardName: 'PigletNode ESP32-C5',
+      fwName: 'Headless Mesh Recon Node',
+      name: "PigletNode C5 Mesh Node (skon's fork)",
+      device: 'ESP32-C5',
+      type: 'piglet',
+      source: 'skon',
+      version: 'v2.7-skon',
+      description: "skon's fork of PigletNode for ESP32-C5. Dual-band headless mesh and remote reconnaissance node for distributed wardriving networks.",
+      websiteUrl: 'https://olosnoks.github.io/piglet/',
+      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/pigletnode_c5.bin',
+      files: [
+        { name: 'pigletnode_c5.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/pigletnode_c5.bin' }
+      ],
+      isMergedBinary: true,
+      features: ['Dual-Band 2.4GHz/5GHz Node', 'Mesh Recon Integration', 'Low-Power Continuous Capture', 'Factory Merged 0x0'],
+      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+    },
+    {
+      id: 'esp32c3-oled',
+      boardName: 'ESP32-C3 0.42" OLED',
+      fwName: 'Ultra-Compact OLED Node',
+      name: "PigletNode C3 — 0.42\" OLED (skon's fork)",
+      device: 'ESP32-C3',
+      type: 'piglet',
+      source: 'skon',
+      version: 'v2.7-skon',
+      description: "skon's fork of PigletNode for ultra-compact ESP32-C3 RISC-V boards with 0.42\" mini OLED display. Portable sensor node for Wi-Fi & BLE logging.",
+      websiteUrl: 'https://olosnoks.github.io/piglet/',
+      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/esp32c3_oled.bin',
+      files: [
+        { name: 'esp32c3_oled.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/esp32c3_oled.bin' }
+      ],
+      isMergedBinary: true,
+      features: ['0.42" OLED Mini Display', 'Ultra-Compact RISC-V Node', 'Wi-Fi & BLE Sniffer', 'Wigle Compatible CSV', 'Factory Merged 0x0'],
+      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+    },
+    {
+      id: 'waveshare-c6',
+      boardName: 'Waveshare C6 Mini 1.47" LCD',
+      fwName: 'Wi-Fi 6 & BLE 5 Handheld',
+      name: "Piglet — Waveshare C6 Mini 1.47\" LCD (skon's fork)",
+      device: 'ESP32-C6',
+      type: 'piglet',
+      source: 'skon',
+      version: 'v2.7-skon',
+      description: "skon's fork of Piglet for Waveshare ESP32-C6 1.47\" LCD board (Wi-Fi 6 & BLE 5). Handheld color screen wardriving tool.",
+      websiteUrl: 'https://olosnoks.github.io/piglet/',
+      downloadUrl: 'https://olosnoks.github.io/piglet/firmware/waveshare_c6.bin',
+      files: [
+        { name: 'waveshare_c6.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/waveshare_c6.bin' }
+      ],
+      isMergedBinary: true,
+      features: ['1.47" Color LCD Display', 'ESP32-C6 Wi-Fi 6 & BLE 5', 'Compact Handheld Wardrive', 'Factory Merged 0x0'],
+      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+    }
+  ],
+  ham: [
+    {
+      id: 'ham-xiao-c5',
+      boardName: 'Seeed Studio XIAO ESP32-C5',
+      fwName: 'Official Piglet Core Release',
+      name: "Piglet Core — XIAO ESP32-C5 (Ham's Official)",
+      device: 'ESP32-C5',
+      type: 'piglet',
+      source: 'ham',
+      version: 'v2.7',
+      description: "Hamspiced's official Piglet Core release for Seeed Studio XIAO ESP32-C5. Dual-band 2.4GHz & 5GHz wardriving with Wigle-compatible CSV and PCAP output.",
+      websiteUrl: 'https://github.com/Hamspiced/piglet',
+      downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/Piglet.ino.merged.bin',
+      files: [
+        { name: 'Piglet.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/Piglet.ino.merged.bin' }
+      ],
+      isMergedBinary: true,
+      features: ['Official Hamspiced Release', 'Dual-Band 2.4GHz / 5GHz C5', 'Wigle CSV & PCAP Logging', 'GPS Wardriving', 'Factory Merged 0x0'],
+      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+    },
+    {
+      id: 'ham-pigletnode-c5',
+      boardName: 'PigletNode ESP32-C5',
+      fwName: 'Official PigletNode Mesh Release',
+      name: "PigletNode C5 Mesh Node (Ham's Official)",
+      device: 'ESP32-C5',
+      type: 'piglet',
+      source: 'ham',
+      version: 'v2.7',
+      description: "Hamspiced's official PigletNode release for ESP32-C5. Autonomous dual-band reconnaissance sensor for distributed wardriving.",
+      websiteUrl: 'https://github.com/Hamspiced/piglet',
+      downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/PigletNode.ino.merged.bin',
+      files: [
+        { name: 'PigletNode.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/PigletNode.ino.merged.bin' }
+      ],
+      isMergedBinary: true,
+      features: ['Official Hamspiced Release', 'ESP32-C5 Autonomous Node', 'Dual-Band RF Sniffing', 'Wigle Sync', 'Factory Merged 0x0'],
+      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+    },
+    {
+      id: 'ham-tdongle-c5',
+      boardName: 'LilyGo T-Dongle C5',
+      fwName: 'Official T-Dongle USB Release',
+      name: "Piglet — LilyGo T-Dongle C5 (Ham's Official)",
+      device: 'ESP32-C5',
+      type: 'piglet',
+      source: 'ham',
+      version: 'v2.7',
+      description: "Hamspiced's official Piglet firmware for LilyGo T-Dongle ESP32-C5 with integrated color display and USB-A plug. Plug-and-play dual-band wardriving.",
+      websiteUrl: 'https://github.com/Hamspiced/piglet',
+      downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/TDongleC5_Piglet.ino.merged.bin',
+      files: [
+        { name: 'TDongleC5_Piglet.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/TDongleC5_Piglet.ino.merged.bin' }
+      ],
+      isMergedBinary: true,
+      features: ['Official Hamspiced Release', 'LilyGo T-Dongle C5 USB', 'Integrated Color LCD', 'Dual-Band 2.4G/5G', 'Factory Merged 0x0'],
+      flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
+    }
+  ]
+};
+
 // Curated high-priority offline fallback presets pointing to real upstream releases
 export const BUNDLED_FALLBACK_PRESETS = [
-  // --- Piglet Wardriver (skon's forks) ---
+  // --- 1 Unified Interactive Piglet Wardriver Card ---
   {
-    name: 'Piglet — Freenove S3 CYD (skon\'s fork)',
-    device: 'ESP32-S3',
+    name: 'Piglet Wardriver Suite',
+    isPigletSuite: true,
+    device: 'ESP32-S3 / C5 / C3 / C6',
+    supportedChips: ['ESP32-S3', 'ESP32-C5', 'ESP32-C3', 'ESP32-C6', 'ESP32'],
     type: 'piglet',
-    version: 'v2.7-skon',
-    description: 'skon\'s fork of Piglet Wardriver featuring UI4 interface tailored for Freenove ESP32-S3 Cheap Yellow Display. High-speed 2.4GHz Wi-Fi/BLE reconnaissance & GPS wardriving.',
+    version: 'v2.7',
+    description: "Next-generation Wi-Fi & BLE wardriving firmware suite with GPS tracking, WiGLE CSV, and PCAP capture. Toggle between skon's customized forks and Hamspiced's official releases across all supported boards.",
     websiteUrl: 'https://olosnoks.github.io/piglet/',
     downloadUrl: 'https://olosnoks.github.io/piglet/firmware/freenove-s3-cyd-ham-ui4.bin',
     files: [
       { name: 'freenove-s3-cyd-ham-ui4.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/freenove-s3-cyd-ham-ui4.bin' }
     ],
     isMergedBinary: true,
-    features: ['UI4 Modern Interface', 'GPS Wardriving & PCAP', 'Freenove S3 CYD Display', 'Wi-Fi & BLE Recon', 'Factory Merged 0x0'],
+    features: ['GPS Wardriving & WiGLE CSV', 'Wi-Fi & BLE Recon', 'Dual-Band 2.4/5GHz (C5)', 'PCAP Packet Capture', 'Merged 0x0 Binary'],
     flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
-  },
-  {
-    name: 'Piglet — Guition JC8048W550 (skon\'s fork)',
-    device: 'ESP32-S3',
-    type: 'piglet',
-    version: 'v2.7-skon',
-    description: 'skon\'s fork of Piglet Wardriver compiled for Guition JC8048W550 (5.0" / 7.0" 800x480 S3 Display). Large format high-resolution wardriving cockpit.',
-    websiteUrl: 'https://olosnoks.github.io/piglet/',
-    downloadUrl: 'https://olosnoks.github.io/piglet/firmware/guition-jc8048w550.bin',
-    files: [
-      { name: 'guition-jc8048w550.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/guition-jc8048w550.bin' }
-    ],
-    isMergedBinary: true,
-    features: ['800x480 Large Screen GUI', 'Guition JC8048W550 S3', 'GPS Map & Wardriving', 'Wi-Fi & BLE Recon', 'Factory Merged 0x0'],
-    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
-  },
-  {
-    name: 'PigletNode C3 — 0.42" OLED (skon\'s fork)',
-    device: 'ESP32-C3',
-    type: 'piglet',
-    version: 'v2.7-skon',
-    description: 'skon\'s fork of PigletNode for ultra-compact ESP32-C3 RISC-V boards with 0.42" mini OLED display. Portable sensor node for Wi-Fi & BLE logging.',
-    websiteUrl: 'https://olosnoks.github.io/piglet/',
-    downloadUrl: 'https://olosnoks.github.io/piglet/firmware/esp32c3_oled.bin',
-    files: [
-      { name: 'esp32c3_oled.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/esp32c3_oled.bin' }
-    ],
-    isMergedBinary: true,
-    features: ['0.42" OLED Mini Display', 'Ultra-Compact RISC-V Node', 'Wi-Fi & BLE Sniffer', 'Wigle Compatible CSV', 'Factory Merged 0x0'],
-    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-  },
-  {
-    name: 'Piglet Core — XIAO ESP32-C5 (skon\'s fork)',
-    device: 'ESP32-C5',
-    type: 'piglet',
-    version: 'v2.7-skon',
-    description: 'skon\'s fork of Piglet Core for Seeed Studio XIAO ESP32-C5 (dual-band 2.4GHz & 5GHz Wi-Fi 6 RISC-V). Next-generation dual-band wardriving powerhouse.',
-    websiteUrl: 'https://olosnoks.github.io/piglet/',
-    downloadUrl: 'https://olosnoks.github.io/piglet/firmware/xiao_c5.bin',
-    files: [
-      { name: 'xiao_c5.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/xiao_c5.bin' }
-    ],
-    isMergedBinary: true,
-    features: ['Dual-Band 2.4GHz & 5GHz', 'ESP32-C5 Wi-Fi 6 RISC-V', 'Seeed XIAO Micro Form Factor', 'GPS & Wardrive Support', 'Factory Merged 0x0'],
-    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-  },
-  {
-    name: 'PigletNode C5 Mesh Node (skon\'s fork)',
-    device: 'ESP32-C5',
-    type: 'piglet',
-    version: 'v2.7-skon',
-    description: 'skon\'s fork of PigletNode for ESP32-C5. Dual-band headless mesh and remote reconnaissance node for distributed wardriving networks.',
-    websiteUrl: 'https://olosnoks.github.io/piglet/',
-    downloadUrl: 'https://olosnoks.github.io/piglet/firmware/pigletnode_c5.bin',
-    files: [
-      { name: 'pigletnode_c5.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/pigletnode_c5.bin' }
-    ],
-    isMergedBinary: true,
-    features: ['Dual-Band 2.4GHz/5GHz Node', 'Mesh Recon Integration', 'Low-Power Continuous Capture', 'Factory Merged 0x0'],
-    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-  },
-  {
-    name: 'Piglet — Waveshare C6 Mini 1.47" LCD (skon\'s fork)',
-    device: 'ESP32-C6',
-    type: 'piglet',
-    version: 'v2.7-skon',
-    description: 'skon\'s fork of Piglet for Waveshare ESP32-C6 1.47" LCD board (Wi-Fi 6 & BLE 5). Handheld color screen wardriving tool.',
-    websiteUrl: 'https://olosnoks.github.io/piglet/',
-    downloadUrl: 'https://olosnoks.github.io/piglet/firmware/waveshare_c6.bin',
-    files: [
-      { name: 'waveshare_c6.bin', address: '0x0', downloadUrl: 'https://olosnoks.github.io/piglet/firmware/waveshare_c6.bin' }
-    ],
-    isMergedBinary: true,
-    features: ['1.47" Color LCD Display', 'ESP32-C6 Wi-Fi 6 & BLE 5', 'Compact Handheld Wardrive', 'Factory Merged 0x0'],
-    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-  },
-
-  // --- Piglet Wardriver (Hamspiced Official Releases) ---
-  {
-    name: 'Piglet Core — XIAO ESP32-C5 (Ham\'s Official)',
-    device: 'ESP32-C5',
-    type: 'piglet',
-    version: 'v2.7',
-    description: 'Hamspiced\'s official Piglet Core release for Seeed Studio XIAO ESP32-C5. Dual-band 2.4GHz & 5GHz wardriving with Wigle-compatible CSV and PCAP output.',
-    websiteUrl: 'https://github.com/Hamspiced/piglet',
-    downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/Piglet.ino.merged.bin',
-    files: [
-      { name: 'Piglet.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/Piglet.ino.merged.bin' }
-    ],
-    isMergedBinary: true,
-    features: ['Official Hamspiced Release', 'Dual-Band 2.4GHz / 5GHz C5', 'Wigle CSV & PCAP Logging', 'GPS Wardriving', 'Factory Merged 0x0'],
-    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-  },
-  {
-    name: 'PigletNode C5 Mesh Node (Ham\'s Official)',
-    device: 'ESP32-C5',
-    type: 'piglet',
-    version: 'v2.7',
-    description: 'Hamspiced\'s official PigletNode release for ESP32-C5. Autonomous dual-band reconnaissance sensor for distributed wardriving.',
-    websiteUrl: 'https://github.com/Hamspiced/piglet',
-    downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/PigletNode.ino.merged.bin',
-    files: [
-      { name: 'PigletNode.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/PigletNode.ino.merged.bin' }
-    ],
-    isMergedBinary: true,
-    features: ['Official Hamspiced Release', 'ESP32-C5 Autonomous Node', 'Dual-Band RF Sniffing', 'Wigle Sync', 'Factory Merged 0x0'],
-    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
-  },
-  {
-    name: 'Piglet — LilyGo T-Dongle C5 (Ham\'s Official)',
-    device: 'ESP32-C5',
-    type: 'piglet',
-    version: 'v2.7',
-    description: 'Hamspiced\'s official Piglet firmware for LilyGo T-Dongle ESP32-C5 with integrated color display and USB-A plug. Plug-and-play dual-band wardriving.',
-    websiteUrl: 'https://github.com/Hamspiced/piglet',
-    downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/TDongleC5_Piglet.ino.merged.bin',
-    files: [
-      { name: 'TDongleC5_Piglet.ino.merged.bin', address: '0x0', downloadUrl: 'https://github.com/Hamspiced/piglet/releases/latest/download/TDongleC5_Piglet.ino.merged.bin' }
-    ],
-    isMergedBinary: true,
-    features: ['Official Hamspiced Release', 'LilyGo T-Dongle C5 USB', 'Integrated Color LCD', 'Dual-Band 2.4G/5G', 'Factory Merged 0x0'],
-    flashConfig: { flashMode: 'keep', baudRate: 460800, eraseAll: true }
   },
 
   // --- Upstream Featured Multi-Tools ---
