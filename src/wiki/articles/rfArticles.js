@@ -12,7 +12,7 @@ export const RF_ARTICLES = [
     title: 'Flipper Zero Suite — WebSerial Protobuf RPC, Framebuffer Streaming & Storage',
     summary: 'Exhaustive companion manual: Google Protocol Buffers (PB_Main) RPC session negotiation, ST7567 1024-byte monochrome LCD mirroring, virtual D-pad keystrokes, storage operations, and Sub-GHz replay.',
     tags: ['Flipper Zero', 'RPC', 'Protobuf', 'Screen Streaming', 'BadUSB', 'Sub-GHz', 'qFlipper', 'NFC', 'RFID', 'ST7567', 'STM32WB55'],
-    readTime: '22 min read',
+    readTime: '26 min read',
     content: `
 # Flipper Zero Suite — RPC Bridge, Screen Stream & Storage Manual
 
@@ -23,9 +23,9 @@ The **Flipper Zero Suite** communicates directly with your Flipper Zero device o
 ### 1. What Is This Tool & Why Do You Need It?
 
 The **Flipper Zero** is an open-source multi-tool based on the **STMicroelectronics STM32WB55RG** dual-core ARM Cortex-M4/M0+ microcontroller. While the device features a physical 1.4-inch display and five-button navigation pad, operating it on a workbench or lab bench has significant limitations:
-- The tiny display is hard to monitor during bench testing.
-- Typing text or developing BadUSB scripts requires tedious on-screen keyboard navigation.
-- Managing files on the microSD card usually requires taking the card out or installing qFlipper.
+- The tiny physical screen is difficult to monitor during multi-meter probing or antenna bench testing.
+- Typing text or developing BadUSB scripts requires tedious, slow on-screen keyboard navigation with physical buttons.
+- Managing files on the microSD card usually requires taking the card out, inserting it into a reader, or installing heavy desktop applications like qFlipper.
 
 The **Flipper Zero Suite** turns your browser into an interactive hardware workbench. It mirrors the physical LCD screen at up to 30 FPS, routes keyboard arrow keys to the Flipper operating system, uploads/downloads files to the microSD card, and triggers Sub-GHz and NFC replays over a single WebSerial connection.
 
@@ -69,6 +69,46 @@ Every packet exchanged in RPC mode adheres to this binary structure:
    - \`has_next\` (bool): True if the command payload spans multiple sequential frames (e.g. file streaming or screen streaming).
    - \`command_status\` (enum): Returned by Flipper (\`OK\`, \`ERROR_STORAGE_NOT_READY\`, \`ERROR_INVALID_PARAMETERS\`, etc.).
    - **Specific Sub-Message Payload**: One of 50+ specialized Protobuf messages.
+
+<details>
+<summary>Deep Dive: Google Protobuf RPC Wire Protocol & Varint Math</summary>
+
+#### Protobuf Varint Decoding Algorithm
+Protocol Buffers encode variable-length integers using 7 bits per byte. The most significant bit (MSB, bit 7) indicates whether more bytes follow:
+
+\`\`\`javascript
+function readVarint(bytes, offset) {
+  let result = 0;
+  let shift = 0;
+  let bytesRead = 0;
+  while (offset + bytesRead < bytes.length) {
+    const byte = bytes[offset + bytesRead];
+    bytesRead++;
+    result |= (byte & 0x7F) << shift;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  return { value: result, bytesRead };
+}
+\`\`\`
+
+#### Complete PB_Main Sub-Message Registry Supported by Skon's USB Tool:
+| Sub-Message Name | Payload Type | Direction | Description |
+| :--- | :--- | :--- | :--- |
+| \`system_ping_request\` | Empty | Browser -> Flipper | Round-trip keepalive ping. |
+| \`system_device_info_request\` | Empty | Browser -> Flipper | Queries hardware target, firmware version, and battery metrics. |
+| \`system_get_datetime_request\` | Empty | Browser -> Flipper | Reads internal RTC clock. |
+| \`storage_list_request\` | \`path\` (string) | Browser -> Flipper | Reads directory listings on microSD. |
+| \`storage_read_request\` | \`path\` (string) | Browser -> Flipper | Streams file contents in 512-byte binary chunks. |
+| \`storage_write_request\` | \`path\` + \`data\` | Browser -> Flipper | Writes binary chunks to target file on microSD. |
+| \`storage_delete_request\` | \`path\` + \`recursive\` | Browser -> Flipper | Deletes file or directory subtree. |
+| \`storage_mkdir_request\` | \`path\` (string) | Browser -> Flipper | Creates folder on microSD. |
+| \`gui_start_screen_stream_request\` | Empty | Browser -> Flipper | Subscribes browser to 30 FPS LCD frame buffer stream. |
+| \`gui_stop_screen_stream_request\` | Empty | Browser -> Flipper | Stops active screen streaming task. |
+| \`gui_screen_frame\` | 1024-byte payload | Flipper -> Browser | Raw monochrome ST7567 display buffer. |
+| \`gui_send_input_event_request\` | \`key\` + \`type\` | Browser -> Flipper | Injects virtual navigation pad keypresses. |
+
+</details>
 
 ---
 
@@ -148,39 +188,56 @@ The Flipper Zero mounts standard FAT32 / exFAT microSD cards under the root moun
 
 ---
 
-### 7. Anatomy of a Flipper \`.sub\` Radio File
+### 7. Complete UI Control Mapping
 
-When reviewing or creating Sub-GHz files in the storage manager:
-\`\`\`text
-Filetype: Flipper SubGhz Key File
-Version: 1
-Frequency: 433920000
-Preset: FuriHalSubGhzPreset2FSKDev47k6
-Protocol: Princeton
-Bit: 24
-Key: 00 00 00 00 00 A1 B2 C3
-TE: 400
-\`\`\`
-- **Frequency**: Center frequency in Hertz (\`433920000\` = 433.92 MHz).
-- **Preset**: Modulation profile configured in the CC1101 transceiver chip (\`FuriHalSubGhzPresetOok650KhzAsync\`, \`FuriHalSubGhzPreset2FSKDev47k6\`).
-- **Protocol**: Decoding protocol (\`Princeton\`, \`Nice FLO\`, \`Came\`, \`Linear\`, or \`RAW\`).
-- **Key**: Hexadecimal transmitter ID and button payload.
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Connect Flipper** | Button | Requests WebSerial port matching VID \`0x20A0\`, issues \`start_rpc_session\`, queries device identity, and starts screen stream. |
+| **Disconnect** | Button | Stops screen streaming, gracefully tears down RPC session, and releases serial port locks. |
+| **Screen Canvas** | Canvas | Interactive $128 \times 64$ display viewport rendered with custom CRT scanline and orange backlight shaders. |
+| **Scale Toggle** | Buttons | Switches display magnification between 1x ($128 \times 64$), 2x ($256 \times 128$), and 3x ($384 \times 192$). |
+| **Color Theme** | Dropdown | Selects color palettes: Classic Orange (\`#FF8200\`), Monochrome Green (\`#00FF66\`), OLED White (\`#FFFFFF\`), or Inverted Dark. |
+| **Virtual D-Pad** | Buttons | On-screen navigation buttons triggering \`gui_send_input_event_request\` for Up, Down, Left, Right, OK, Back. |
+| **Storage Tab** | Tab | Switches view to the remote file manager for browsing \`/ext\` microSD card folders. |
+| **Upload File** | Button / Dropzone | Uploads arbitrary local files directly to the selected directory on the Flipper's microSD card. |
+| **Download File** | Button | Streams the selected file in 512-byte blocks and saves it to your local browser downloads. |
+| **Delete File** | Button | Permanently deletes the selected file or folder on the microSD card. |
+| **Take Screenshot** | Button | Captures the current LCD canvas and exports a pixel-perfect PNG file. |
+| **Battery & Health Pill** | Status Badge | Displays live battery charge percentage, voltage in mV, and FreeRTOS heap memory metrics. |
 
 ---
 
-### 8. Step-by-Step Usage Walkthrough
+### 8. Step-by-Step Engineering Walkthroughs
 
-1. Connect your Flipper Zero via USB-C to your computer.
+#### Walkthrough A: Remote Screen Streaming & Menu Navigation
+1. Connect the Flipper Zero via USB-C to your workstation.
 2. In the Flipper Zero Suite, click **Connect Flipper**.
-3. Select your Flipper in the browser serial prompt.
-4. The workbench will initialize the RPC session, query device identity (Device Nickname, Firmware Version, Battery Level, Hardware Target), and render the live display.
-5. Use your keyboard arrow keys or click on-screen D-pad buttons to navigate menus.
-6. Switch to the **Storage** tab to browse folders, download recorded card dumps, or drag-and-drop BadUSB \`.txt\` payloads.
-7. Click **Take Screenshot** to capture a pixel-perfect PNG of the Flipper LCD canvas!
+3. Select the Flipper device from the browser permission prompt.
+4. The workbench negotiates the RPC session, reads device telemetry, and immediately begins rendering the live screen buffer.
+5. Use your keyboard's arrow keys or click the on-screen D-pad buttons to navigate into **Sub-GHz** -> **Read**.
+6. The on-screen canvas updates in real time, matching the physical LCD with zero perceptible lag.
+
+#### Walkthrough B: Deploying a BadUSB Payload to MicroSD Card
+1. Click the **Storage** tab in the workbench toolbar.
+2. Navigate to the \`/ext/badusb/\` directory in the folder tree.
+3. Drag and drop your compiled DuckyScript \`payload.txt\` file into the dropzone.
+4. The tool sends sequential \`storage_write_request\` blocks with verified CRC checks.
+5. Once complete, switch back to the **Screen** tab, navigate to **Bad USB**, select your newly uploaded script, and execute it!
 
 ---
 
-### 9. Upstream Project & Engineering Attribution
+### 9. Complete Troubleshooting & Diagnostic Matrix
+
+| Error Message / Symptom | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **\`RPC session failed to start\`** | Serial port is occupied by another process or CLI mode is busy. | Close desktop qFlipper or other serial terminals. Disconnect and reconnect USB cable, then click **Connect Flipper**. |
+| **\`Device not found (VID 0x20A0)\`** | Flipper is powered off, in DFU recovery mode, or bad USB cable. | Verify Flipper display is on. If screen shows "DFU Mode", hold Left + Back to restart into normal OS. Use a verified data cable. |
+| **\`ERROR_STORAGE_NOT_READY\`** | MicroSD card is not inserted, corrupt, or unformatted. | Re-seat the microSD card. Open Settings -> Storage on Flipper and verify format is FAT32 or exFAT. |
+| **Garbled / Tilted Screen Mirror** | Dropped serial bytes during high-load frame transmission. | The driver automatically re-synchronizes on the next \`gui_screen_frame\` envelope. Lower canvas scale or close background serial tabs if CPU is throttled. |
+
+---
+
+### 10. Upstream Project & Engineering Attribution
 
 | Project / Component | Author(s) / Organization | Repository & Reference | License |
 | :--- | :--- | :--- | :--- |
@@ -196,7 +253,7 @@ TE: 400
     title: 'Proxmark3 / PM5 Suite — RFID & NFC Auditing Laboratory & Flasher',
     summary: 'Exhaustive Proxmark3 guide: PM3 NG framing protocol (magic 0x424d5033), CommandTree schema, risk classification, HF 14A card analysis, LF EM410x/T5577 cloning, and WebFlash firmware burning.',
     tags: ['Proxmark3', 'RFID', 'NFC', 'Mifare', '125kHz', '13.56MHz', 'T5577', 'EM4100', 'Iceman', 'WebFlash', 'PM3RDV4'],
-    readTime: '24 min read',
+    readTime: '28 min read',
     content: `
 # Proxmark3 / PM5 Suite — RFID & NFC Laboratory Manual
 
@@ -277,6 +334,29 @@ To prevent accidental hardware damage or card corruption, every action in the **
 5. In the CommandTree, select **EM410x Clone to T5577**, input the 10-digit hex string (\`0102030405\`), and click **Execute**.
 6. **Under the Hood**: The PM3 programs Block 0 with configuration word \`0x00148040\` (configuring T5577 for RF/64, Manchester, MaxBlock 2) and writes the decoded bits into Blocks 1 and 2. Your clone badge is ready!
 
+<details>
+<summary>Deep Dive: Atmel / Microchip T5577 Configuration Block 0 Architecture</summary>
+
+The **ATA5577** is an analog contactless R/W transponder IC with 330 bits of EEPROM arranged as 10 blocks of 33 bits each (32 data bits + 1 lock bit).
+Block 0 controls the analog RF frontend, modulation type, bit rate, and maximum readable block:
+
+| Bit Range | Field Name | Setting for EM410x Emulation |
+| :--- | :--- | :--- |
+| **B0** | Lock Bit | \`0\` (Unlocked). |
+| **B1 - B2** | Reserved | \`00\`. |
+| **B3** | Fast Write | \`0\` (Disabled). |
+| **B4** | Inverse Data | \`0\` (Normal). |
+| **B5 - B7** | Max Block | \`010\` (Block 2 is highest transmitted block). |
+| **B8 - B11**| Bit Rate / Clock | \`0100\` = **RF/64** (64 carrier clocks per bit = ~1953 bps). |
+| **B12 - B15**| Modulation | \`0001\` = **Manchester** encoding. |
+| **B16 - B19**| PSK Clock Ref | \`0000\` (Not applicable for ASK). |
+| **B20 - B27**| AFE / Delay | \`00000000\`. |
+| **B28 - B31**| Password Mode | \`0000\` (No password required to read). |
+
+**Resulting 32-bit Hex Config Word**: \`0x00148040\`. If this word is accidentally modified to an invalid configuration, the tag will cease modulating its carrier and become unresponsive to standard LF readers.
+
+</details>
+
 ---
 
 ### 5. High Frequency (13.56MHz) Mifare Classic Security Analysis
@@ -318,7 +398,55 @@ If your Proxmark3 is bricked or stuck in bootloader mode (e.g. following a faile
 
 ---
 
-### 11. Upstream Project & Engineering Attribution
+### 7. Complete UI Control Mapping
+
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Connect PM3** | Button | Connects WebSerial at 115200 or 460800 baud and executes initial \`CMD_PING\` (\`0x0100\`). |
+| **Target Selector** | Dropdown | Switches hardware profiles: Proxmark3 RDV4 vs Generic Easy (512k/256k). |
+| **CommandTree Accordion** | Tree View | Structured directory of all available PM3 routines categorized by RF band and subsystem. |
+| **Risk Level Badge** | Pill | Displays safety color-coding: Safe (Blue), Read (Green), Raw (Amber), Dangerous (Red). |
+| **Parameter Form** | Input Fields | Auto-generated input fields matching required uint64 arguments and hex payload buffers. |
+| **Execute Command** | Button | Serializes NG frame and transmits to hardware with timeout watchdog. |
+| **Raw Hex Sender** | Input + Button | Transmits raw hex frames directly to the Proxmark3 firmware for manual testing. |
+| **Console View** | Viewport | Displays parsed responses, hex dumps, and ASCII translations returned by PM3 ARM firmware. |
+| **WebFlash Tab** | Tab | Switches view to the recovery firmware flasher with SHA-256 verification. |
+
+---
+
+### 8. Step-by-Step Engineering Walkthroughs
+
+#### Walkthrough A: Auditing and Cloning a 125kHz Facility Badge
+1. Connect your Proxmark3 via USB and click **Connect PM3**.
+2. Select **Low Frequency (125 / 134 kHz)** -> **EM410x 125kHz Tags** -> **EM410x Read / Search**.
+3. Place the target badge flat onto the circular LF coil. Click **Execute Command**.
+4. Read the decoded 40-bit ID from the console (e.g. \`01 0A 2B 3C 4D\`).
+5. Remove the source badge and place a blank T5577 blue fob on the antenna.
+6. Select **EM410x Clone to T5577**, enter \`010A2B3C4D\` into the ID parameter field, and click **Execute Command**.
+7. Run **EM410x Read / Search** again on the blue fob to verify identical credentials.
+
+#### Walkthrough B: Recovering Mifare Classic Keys with Nested Attack
+1. Place a 13.56MHz transit card or door key on the rectangular HF antenna.
+2. In the CommandTree, execute **High Frequency (13.56 MHz)** -> **ISO 14443A** -> **Search & Read UID**.
+3. Note the 4-byte or 7-byte UID and verify the card acknowledges ATQA and SAK \`0x08\` (Mifare Classic 1K).
+4. Run **Mifare Classic** -> **Check Default Keys**.
+5. Once at least one default key is located, execute **Mifare Classic** -> **Nested Attack**.
+6. The Proxmark3 will exploit PRNG predictability and report all 16 sector keys in under 60 seconds!
+
+---
+
+### 9. Complete Troubleshooting & Diagnostic Matrix
+
+| Error Message / Symptom | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **\`PM3 not responding to CMD_PING\`** | Baud rate mismatch or device is in bootloader mode. | Check if red/orange LEDs are solid. If in bootloader mode, use the WebFlash tab to burn fullimage. |
+| **\`Antenna voltage too low\` (LF < 20V)** | Antenna coil detuned or metal workbench surface absorbing RF. | Elevate the Proxmark off metal benches. Run \`hw tune\` to measure LF and HF resonance peaks. |
+| **\`Tag not found / communication timeout\`** | Tag is placed outside antenna sweet spot or uses different frequency. | Center tag over coil. For dual-frequency cards, check if tag is 125kHz HID Prox rather than ISO 14443A. |
+| **\`Flash verify failed (SHA-256 mismatch)\`** | Corrupted download or wrong hardware target selected. | Re-select correct hardware target (RDV4 vs Generic Easy) and ensure reliable internet connectivity. |
+
+---
+
+### 10. Upstream Project & Engineering Attribution
 
 | Project / Component | Author(s) / Organization | Repository & Reference | License |
 | :--- | :--- | :--- | :--- |
@@ -334,7 +462,7 @@ If your Proxmark3 is bricked or stuck in bootloader mode (e.g. following a faile
     title: 'PortaPack Mayhem SDR — Tactical Radar, ADS-B, FREQMAN & Spectrum Studio',
     summary: 'Exhaustive SDR companion guide: ADS-B 1090MHz Mode-S aircraft radar with TacticalMapDeck, LookingGlass wideband spectrum sweeper, SensorHub weather/TPMS decoders, HamRadio CTCSS repeaters, and FREQMAN editor.',
     tags: ['PortaPack', 'Mayhem', 'HackRF', 'SDR', 'FREQMAN', 'ADS-B', 'TacticalMap', 'LookingGlass', 'HamRadio', 'SensorHub'],
-    readTime: '25 min read',
+    readTime: '28 min read',
     content: `
 # PortaPack Mayhem SDR — Tactical Radar & Spectrum Studio
 
@@ -387,9 +515,21 @@ The workbench includes a Mode-S ADS-B (Automatic Dependent Surveillance-Broadcas
   - **Type Code 9-18**: Airborne Position (Decoded using Compact Position Reporting / CPR math to compute exact latitude and longitude).
   - **Type Code 19**: Airborne Velocity (Ground speed in knots, heading in degrees, vertical climb/descent rate in feet/minute).
 
-#### TacticalMapDeck Display:
-- Real-time OpenStreetMap canvas plotting all tracked aircraft with direction vectors.
-- Altitude flight levels (e.g. \`FL350\` = 35,000 feet) and squawk codes (e.g. \`7700\` Emergency, \`7600\` Radio Failure, \`7500\` Hijack).
+<details>
+<summary>Deep Dive: ADS-B Compact Position Reporting (CPR) Mathematical Formulation</summary>
+
+ADS-B compresses 24-bit latitude and longitude into 17-bit fractional representations using **Compact Position Reporting (CPR)**. Two consecutive frames—one **Even** (CPRe=0) and one **Odd** (CPRe=1)—are combined to resolve position without ambiguity:
+
+1. **Latitude Zones**: The globe is divided into $N_L = 60$ latitude zones:
+   - Zone size for Even frame: $\Delta Lat_0 = \frac{360^\circ}{4 \times N_L} = 6.0^\circ$
+   - Zone size for Odd frame: $\Delta Lat_1 = \frac{360^\circ}{4 \times N_L - 1} = 6.101695^\circ$
+2. **Zone Index $j$**:
+   $$j = \left\lfloor \frac{59 \times Y_{even} - 60 \times Y_{odd}}{131072} + \frac{1}{2} \right\rfloor$$
+3. **Recovered Latitude**:
+   $$Lat_{even} = \Delta Lat_0 \times \left( (j \pmod{60}) + \frac{Y_{even}}{131072} \right)$$
+4. **Longitude Zones $NL(Lat)$**: The number of longitude zones varies from 59 at the equator down to 1 at the poles, ensuring equal square surface resolution across spherical coordinates.
+
+</details>
 
 ---
 
@@ -441,7 +581,52 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 
 ---
 
-### 8. Upstream Project & Engineering Attribution
+### 8. Complete UI Control Mapping
+
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Connect Mayhem** | Button | Connects WebSerial at 115200 baud to HackRF/PortaPack serial interface. |
+| **Frequency Input** | Numeric Box | Configures target center tuning frequency in Hertz or Megahertz (1 MHz to 6 GHz). |
+| **LNA Gain Slider** | Slider | Steps low-noise front-end amplifier from 0 dB to 40 dB in 8 dB increments. |
+| **VGA Gain Slider** | Slider | Steps baseband variable amplifier from 0 dB to 62 dB in 2 dB increments. |
+| **AMP Toggle** | Switch | Engages or disengages the 14 dB front-end RF preamplifier. |
+| **TacticalMapDeck Tab** | Tab | Opens real-time Leaflet OpenStreetMap view tracking ADS-B aircraft squitters. |
+| **LookingGlassDeck Tab** | Tab | Opens wideband fast-sweep panoramic spectrum analyzer and waterfall. |
+| **SensorHubDeck Tab** | Tab | Opens environmental telemetry decoder for weather sensors and automotive TPMS. |
+| **HamRadioDeck Tab** | Tab | Opens repeater controller with CTCSS tone generator and offset calculator. |
+| **FREQMAN Manager** | Panel | Reads, edits, and writes channel frequency files on the PortaPack microSD card. |
+
+---
+
+### 9. Step-by-Step Engineering Walkthroughs
+
+#### Walkthrough A: Setting Up Mode-S ADS-B Aviation Radar
+1. Attach a tuned 1090 MHz antenna (or standard telescopic antenna extended to ~6.8 cm for quarter-wave resonance) to the HackRF SMA jack.
+2. In the workbench, click **Connect Mayhem**.
+3. Switch to the **TacticalMapDeck** tab.
+4. Set **Frequency** to \`1090.000 MHz\`, **LNA Gain** to \`32 dB\`, and **VGA Gain** to \`40 dB\`.
+5. Keep **AMP** OFF to prevent saturation.
+6. As aircraft transmit Mode-S squitters, their ICAO hex addresses, flight callsigns, altitudes, and GPS vectors appear on the interactive map canvas.
+
+#### Walkthrough B: Panoramic Wideband Spectrum Surveillance
+1. Switch to the **LookingGlassDeck** tab.
+2. Set **Start Frequency** to \`400.000 MHz\` and **Stop Frequency** to \`500.000 MHz\`.
+3. Select an FFT resolution of 1024 bins.
+4. Click **Start Sweep**. The HackRF retunes rapidly across the 100 MHz band, plotting peak signal spikes and waterfalling RF activity over time.
+
+---
+
+### 10. Complete Troubleshooting & Diagnostic Matrix
+
+| Error Message / Symptom | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **No ADS-B Aircraft Appearing** | Insufficient gain or incorrect antenna length. | Extend antenna to 6.8 cm. Raise LNA to 32 dB and VGA to 40 dB. Ensure line of sight to open sky. |
+| **LookingGlass Showing Ghost Spikes** | Front-end amplifier saturation causing intermodulation products. | Turn off the 14 dB AMP switch. Lower LNA gain by 8–16 dB. |
+| **WebSerial Buffer Overrun** | Browser tab throttled in background or high system load. | Keep browser tab active. Disable high-resolution waterfall rendering if CPU load exceeds 80%. |
+
+---
+
+### 11. Upstream Project & Engineering Attribution
 
 | Project / Component | Author(s) / Organization | Repository & Reference | License |
 | :--- | :--- | :--- | :--- |
@@ -458,7 +643,7 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
     title: 'GPS & Wardrive Suite — NMEA 0183 Sentences, UBX Binary Protocol & Tactical Map',
     summary: 'Master GPS/GNSS receiver integration: decode NMEA 0183 sentences ($GPGGA, $GPRMC), configure u-blox binary rates (UBX-CFG-RATE, UBX-CFG-PRT) with Fletcher-8 checksums, and track live coordinates on OpenStreetMap.',
     tags: ['GPS', 'Wardrive', 'NMEA', 'u-blox', 'UBX', 'Leaflet Map', 'WiGLE', 'Satellites', 'GNSS', 'Fletcher-8'],
-    readTime: '20 min read',
+    readTime: '24 min read',
     content: `
 # GPS & Wardrive Suite — NMEA Sentences & UBX Binary Manual
 
@@ -535,6 +720,41 @@ for (let i = 2; i < buffer.length - 2; i++) {
 
 ---
 
+### 4. Complete UI Control Mapping
+
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Connect GPS** | Button | Connects WebSerial to GPS UART at selectable baud rates (9600 to 115200). |
+| **Baud Rate Dropdown** | Dropdown | Selects initial connection speed: 9600 (factory default), 38400, or 115200 bps. |
+| **UBX Turbo (5Hz / 10Hz)** | Toggle | Sends binary UBX-CFG-RATE and UBX-CFG-PRT packets to boost update rates. |
+| **OpenStreetMap View** | Map Canvas | Real-time Leaflet map tracking current fix, GPS accuracy circle, and vehicle path. |
+| **Satellites In View Table**| Table | Displays active satellite IDs (PRN), constellation origin, elevation, azimuth, and SNR bars. |
+| **NMEA Raw Stream** | Drawer | Collapsible raw ASCII terminal displaying incoming sentences with checksum verification. |
+| **Export WiGLE CSV** | Button | Converts live geolocated survey points into official WiGLE CSV format for global submission. |
+
+---
+
+### 5. Step-by-Step Engineering Walkthroughs
+
+#### Walkthrough A: Configuring a u-blox NEO-8M for 10Hz Vehicle Tracking
+1. Connect the NEO-8M module via a USB-to-UART adapter (TX to RX, RX to TX, 3.3V, GND).
+2. Click **Connect GPS** at **9600 baud**.
+3. Once valid NMEA sentences appear in the raw stream, click the **UBX Turbo (10Hz)** button.
+4. The tool sends \`UBX-CFG-PRT\` to step the baud rate to 115,200 bps, immediately shifts the browser serial port baud rate, and sends \`UBX-CFG-RATE\` configured for 100ms.
+5. The map marker updates smoothly 10 times per second with ultra-precise vehicle heading interpolation!
+
+---
+
+### 6. Complete Troubleshooting & Diagnostic Matrix
+
+| Error Message / Symptom | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **No GPS Fix / 0 Satellites** | Receiver is indoors or antenna has no clear view of the sky. | Move antenna near a window or outdoors. First cold-start acquisition takes 2–5 minutes. |
+| **Raw Terminal Shows Garbled Text** | Baud rate mismatch between browser and GPS module. | Cycle baud rate between 9600, 38400, and 115200 until readable \`$GP\` sentences appear. |
+| **UBX Commands Ignored** | GPS receiver is a clone chip (e.g. ATGM336H) that does not support u-blox binary commands. | ATGM336H modules use CASIC binary commands (\`$PCAS\`) rather than UBX. Stick to standard NMEA mode. |
+
+---
+
 ### 7. Upstream Project & Engineering Attribution
 
 | Project / Component | Author(s) / Organization | Repository & Reference | License |
@@ -551,7 +771,7 @@ for (let i = 2; i < buffer.length - 2; i++) {
     title: 'Piglet Wardriver Suite — Full Setup Guide for All 7 Boards',
     summary: 'The ultimate guide to configuring, flashing, and running Piglet Wardriver across all 7 supported boards with GPS wiring, C5 stub bypass, and WiGLE CSV.',
     tags: ['Piglet', 'Wardriver', 'ESP32-S3', 'ESP32-C5', 'WiGLE', 'GPS', 'NEO-6M', 'CYD', 'T-Display', 'M5StickC'],
-    readTime: '20 min read',
+    readTime: '24 min read',
     content: `
 # Piglet Wardriver Suite — Complete Hardware & Firmware Guide
 
@@ -628,7 +848,7 @@ AA:BB:CC:DD:EE:FF,CoffeeShop,[WPA2-PSK-CCMP],2024-03-23 12:45:10,6,-68,48.123456
 
 ---
 
-### 5. Upstream Project & Engineering Attribution
+### 6. Upstream Project & Engineering Attribution
 
 | Project / Component | Author(s) / Organization | Repository & Reference | License |
 | :--- | :--- | :--- | :--- |
@@ -644,7 +864,7 @@ AA:BB:CC:DD:EE:FF,CoffeeShop,[WPA2-PSK-CCMP],2024-03-23 12:45:10,6,-68,48.123456
     title: 'ESP32 Marauder CLI Manual — Wi-Fi & Bluetooth Auditing',
     summary: 'Complete command manual for JustCallMeKoko’s ESP32 Marauder: target discovery, raw promiscuous sniffing, beacon flooding, deauth testing, and pcap save.',
     tags: ['Marauder', 'CLI', 'Wi-Fi Audit', 'Beacon', 'Deauth', 'PMKID', 'pcap', 'Bluetooth', 'Sniffing'],
-    readTime: '18 min read',
+    readTime: '22 min read',
     content: `
 # ESP32 Marauder CLI Manual
 

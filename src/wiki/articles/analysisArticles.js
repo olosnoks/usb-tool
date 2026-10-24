@@ -11,7 +11,7 @@ export const ANALYSIS_ARTICLES = [
     title: 'Packet & Protocol Lab — 802.11 Dissector, PCAP & Packet Framer',
     summary: 'Master raw 802.11 Wi-Fi promiscuous frame capture, EAPOL 4-way handshakes, PCAP export for Wireshark, hex stream slicing, and custom serial protocol framing.',
     tags: ['Wi-Fi', '802.11', 'PCAP', 'Packet Framer', 'Hex Stream', 'Dissector', 'EAPOL', 'Handshake', 'Wireshark'],
-    readTime: '18 min read',
+    readTime: '24 min read',
     content: `
 # Packet & Protocol Lab — 802.11 Dissector & PCAP Studio
 
@@ -103,31 +103,45 @@ When transmitting binary packets across raw serial channels without hardware flo
 
 ---
 
-### 3. Hardware Setup & Connection Guide
+### 3. Complete UI Control Mapping
 
-1. **Hardware Required**: Any ESP32 or ESP8266 flashed with a sniffer firmware (e.g. **ESP32 Marauder**, **Wi-Fi Pen Tool**, or the **ESP-IDF Sniffer Example**).
-2. **Wiring**: Connect via USB directly. Ensure baud rate is set to **115200** (or **921600** for high-volume promiscuous captures).
-3. **Antenna Positioning**: For maximum packet range, use an ESP32 board equipped with an external SMA antenna connector (like the ESP32-WROVER-IB or LilyGO T-Display S3) rather than an onboard PCB trace antenna.
-
----
-
-### 4. Step-by-Step Walkthrough in Skon's USB Tool
-
-1. Connect to your sniffer board in the **Terminal** or open the **Packet & Protocol Lab** directly.
-2. In the Packet Lab toolbar, ensure the **Parser Mode** is set to **Wi-Fi 802.11**.
-3. Issue a sniffing command in your firmware (e.g. \`sniffraw\` or \`sniffpmkid\` in Marauder).
-4. Watch the packet table populate with real-time rows showing:
-   - Packet Index.
-   - Signal Strength (RSSI badge with green/amber/red indicator).
-   - Frame Type & Subtype.
-   - Source MAC & Destination MAC (with vendor OUI manufacturer lookup).
-   - SSID Name (for Beacons and Probes).
-5. **EAPOL Handshake Alert**: When a client connects or reconnects to an AP, the tool isolates the EAPOL 4-way handshake frames (Messages 1, 2, 3, and 4) and flashes a green **Handshake Captured** banner.
-6. **Export PCAP**: Click **Export PCAP** to download a standard Libpcap \`.pcap\` file. Open this file in **Wireshark** to inspect full decryptable payloads.
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Parser Mode** | Dropdown | Selects active protocol dissector: 802.11 Wi-Fi, Raw Hex Stream, SLIP Framer, or COBS Framer. |
+| **Clear Buffer** | Button | Resets packet capture table and frees internal memory buffers. |
+| **Filter by MAC / SSID** | Text Input | Live search filter isolating packets matching specific BSSID, client MAC, or network name. |
+| **Filter by Frame Type** | Dropdown | Isolates Management (Beacons, Probes, Deauths), Control (ACKs, RTS/CTS), or Data frames. |
+| **Handshake Alert Banner**| Status Pill | Flashes green when a full or partial EAPOL 4-way handshake (or PMKID) is captured. |
+| **Export PCAP** | Button | Generates standard Libpcap \`.pcap\` binary file containing all captured 802.11 frames with nanosecond timestamps. |
+| **Packet Detail Drawer** | Drawer | Displays hierarchical tree decomposition of the selected packet down to individual bitfields. |
 
 ---
 
-### 7. Upstream Standards & Engineering Attribution
+### 4. Step-by-Step Engineering Walkthroughs
+
+#### Walkthrough A: Capturing a WPA2 Handshake with ESP32 Marauder
+1. Connect your ESP32 running Marauder firmware to Skon's USB Tool.
+2. Open the **Packet & Protocol Lab** and verify **Parser Mode** is set to **Wi-Fi 802.11**.
+3. In the terminal drawer, send \`channel -s 6\` to lock onto your target AP's channel.
+4. Send \`sniffraw\` or \`sniffpmkid\` to begin serial packet streaming.
+5. In the workbench, observe incoming beacon frames confirming signal strength and SSID.
+6. When a client reconnects, the green **Handshake Captured** banner illuminates.
+7. Click **Export PCAP** to save the file as \`capture.pcap\`.
+8. Open the PCAP file in Wireshark or pass it to \`aircrack-ng\` to verify cryptographic integrity!
+
+---
+
+### 5. Complete Troubleshooting & Diagnostic Matrix
+
+| Error Message / Symptom | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **No Packets Appearing in Table** | Firmware is not in raw packet streaming mode or wrong baud rate. | Ensure baud rate is 115200 or 921600. In Marauder, verify \`settings -s ForcePackets enable\`. |
+| **FCS (Checksum) Errors on All Frames** | RF multipath interference or antenna impedance mismatch. | Attach external 2.4GHz SMA antenna and keep sniffer at least 1 meter away from USB 3.0 cables. |
+| **Missing Handshake Message 4** | Client was too far away for the sniffer to receive the low-power station ACK. | Move the sniffing antenna physically closer to the client laptop or smartphone. |
+
+---
+
+### 6. Upstream Standards & Engineering Attribution
 
 | Standard / Component | Authoring Organization / Maintainers | Reference & Specification |
 | :--- | :--- | :--- |
@@ -143,7 +157,7 @@ When transmitting binary packets across raw serial channels without hardware flo
     title: '24MHz Logic Analyzer — 8-Channel Waveforms & Protocol Decoders',
     summary: 'Hardware digital signal analysis up to 24 MSps, edge triggers, protocol decoders for UART/SPI/I2C, sample buffers, and VCD export for Sigrok.',
     tags: ['Logic Analyzer', '24MHz', 'Waveforms', 'Protocol Decoder', 'Sigrok', 'VCD', 'SPI', 'I2C', 'UART'],
-    readTime: '16 min read',
+    readTime: '22 min read',
     content: `
 # 24MHz Logic Analyzer — Digital Signal Workbench
 
@@ -224,24 +238,46 @@ Every transition records the nanosecond timestamp (\`#41\`) followed by the logi
 
 ---
 
-### 3. Step-by-Step Usage Guide
+### 3. Complete UI Control Mapping
 
-1. **Connect Ground First**: Always connect the analyzer's GND pin to the target board's GND before plugging in any channel leads to avoid static discharge damage.
-2. **Attach Probe Leads**: Connect CH0 to your clock line (e.g. SCL) and CH1 to your data line (e.g. SDA).
-3. **Select Sample Rate & Depth**:
-   - Choose **Sample Rate** from 20 kHz up to 24 MHz.
-   - Choose **Sample Depth** (e.g. 100k to 1M samples).
-4. **Configure Trigger**:
-   - Without a trigger, the analyzer captures immediately when you click start.
-   - To catch a specific event, set **Trigger Channel** to CH3 (SPI Chip Select) and select **Falling Edge**. The analyzer will idle silently until the chip select line drops low to initiate a transfer!
-5. **Click Capture**: The canvas renders all 8 channels with timing grid lines, pan/zoom controls, and delta time measurement cursors.
-6. **Activate Protocol Decoders**:
-   - **I2C Decoder**: Assign SCL to CH0, SDA to CH1. The tool overlays green START markers, 7-bit hex addresses, ACK/NACK badges, and data payload bytes.
-   - **UART Decoder**: Assign RX to CH1, set 115200 baud, 8-N-1. The tool renders ASCII characters directly inside the waveform pulses.
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Connect Analyzer** | Button | Connects WebUSB device matching Cypress FX2LP VID \`0x04B4\` / PID \`0x8613\` or Sigrok VID \`0x0925\`. |
+| **Sample Rate** | Dropdown | Selects acquisition sampling frequency from 20 kHz up to 24 MHz. |
+| **Sample Depth** | Dropdown | Configures acquisition buffer size from 10k samples up to 10M samples. |
+| **Trigger Channel** | Dropdown | Designates which channel initiates capture (None, CH0 through CH7). |
+| **Trigger Type** | Dropdown | Selects trigger condition: Rising Edge (↑), Falling Edge (↓), or High/Low level. |
+| **Start Capture** | Button | Arms the trigger and begins continuous or triggered data acquisition. |
+| **Waveform Canvas** | Viewport | Interactive 8-channel timing diagram with zoom in/out (<kbd>+</kbd>/<kbd>-</kbd>) and pan controls. |
+| **Decoder Selector** | Dropdown | Adds protocol decoders: I2C, SPI, or UART directly mapped to selected channels. |
+| **Export VCD** | Button | Downloads capture session as an IEEE 1364 Value Change Dump for Sigrok/PulseView. |
 
 ---
 
-### 7. Upstream Project & Engineering Attribution
+### 4. Step-by-Step Engineering Walkthroughs
+
+#### Walkthrough A: Decoding an I2C Sensor Bus
+1. Connect **GND** to target board ground. Connect **CH0** to SCL (Clock) and **CH1** to SDA (Data).
+2. Set **Sample Rate** to **8 MHz** and **Sample Depth** to **1M samples**.
+3. Set **Trigger Channel** to **CH1** and **Trigger Type** to **Falling Edge** (catches the I2C START condition).
+4. Click **Start Capture**.
+5. Once data is captured, open the **Decoders** panel and select **I2C Decoder**.
+6. Map SCL to CH0 and SDA to CH1.
+7. The canvas instantly renders green START flags, hex address badges (e.g. \`0x68 [W]\`), ACK/NACK status, and hexadecimal register payloads!
+
+---
+
+### 5. Complete Troubleshooting & Diagnostic Matrix
+
+| Error Message / Symptom | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **\`USB Transfer Failed: Overflow\`** | Host computer USB bus cannot sustain 192 Mbps bulk transfer. | Lower sample rate from 24 MHz to 16 MHz or 12 MHz, or unplug other high-bandwidth USB 3 devices. |
+| **Signals Always Read High (3.3V / 5V)** | Ground reference is not connected between analyzer and target. | Connect the black GND pin directly to the microcontroller or sensor ground plane. |
+| **Decoded UART Characters are Gibberish** | Sample rate is too low or baud rate parameter in decoder is incorrect. | Ensure sample rate is at least 4x baud rate (e.g. at least 1 MHz sample rate for 115200 baud). |
+
+---
+
+### 6. Upstream Project & Engineering Attribution
 
 | Project / Component | Author(s) / Organization | Repository & Reference | License |
 | :--- | :--- | :--- | :--- |
@@ -258,7 +294,7 @@ Every transition records the nanosecond timestamp (\`#41\`) followed by the logi
     title: 'CAN Bus & OBD-II Scanner — Automotive Diagnostics & Reverse Engineering',
     summary: 'Comprehensive vehicle network reverse engineering, SLCAN packet monitor, standard 11-bit and extended 29-bit CAN IDs, live OBD-II PID polling, and DTC clearing.',
     tags: ['CAN Bus', 'OBD-II', 'Automotive', 'SLCAN', 'TWAI', 'Vehicle Diagnostics', 'ECU', 'DTC', 'PID'],
-    readTime: '18 min read',
+    readTime: '24 min read',
     content: `
 # CAN Bus & OBD-II Scanner — Automotive Workbench
 
@@ -358,36 +394,42 @@ When communicating with vehicles on Mode 01 (Live Current Data), broadcast reque
 
 ---
 
-### 3. OBD-II Port Pinout Guide
+### 3. Complete UI Control Mapping
 
-Under the steering wheel of any 2008+ car:
-- **Pin 4**: Chassis Ground.
-- **Pin 5**: Signal Ground.
-- **Pin 6**: **CAN High (CAN_H)** (ISO 15765-4 High Speed).
-- **Pin 14**: **CAN Low (CAN_L)** (ISO 15765-4 High Speed).
-- **Pin 16**: **Battery Power (+12V DC)**.
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Connect Adapter** | Button | Connects WebSerial to SLCAN hardware (CANable, Candlelight, ESP32 TWAI). |
+| **CAN Bitrate** | Dropdown | Selects network baud rate: 125 kbps, 250 kbps, 500 kbps (Standard OBD-II), or 1 Mbps. |
+| **Listen-Only Mode** | Toggle | Disables ACK generation, ensuring 100% passive sniffing without altering vehicle bus state. |
+| **CAN Sniffer Table** | Table | Displays live IDs, period (ms), count, and payload bytes with byte-diff highlighting. |
+| **Filter by CAN ID** | Input | Isolates specific 11-bit or 29-bit identifiers. |
+| **Send CAN Frame** | Inputs + Button | Transmits custom arbitrary standard or extended frames onto the bus. |
+| **OBD-II Telemetry Tab**| Tab | Switches to active diagnostic dashboard with virtual gauges (RPM, Speed, Temp). |
+| **Read Fault Codes** | Button | Issues Mode 03 request to retrieve stored Diagnostic Trouble Codes (DTCs). |
+| **Clear Fault Codes** | Button | Issues Mode 04 request to clear DTCs and extinguish the Check Engine MIL light. |
 
 ---
 
-### 4. Step-by-Step Usage Guide
+### 4. Step-by-Step Engineering Walkthroughs
 
-#### A. Live CAN Packet Sniffer & Reverse Engineering
-1. Connect your CAN adapter to the OBD-II port and select the baud rate (usually **500 kbps** for modern cars, **250 kbps** for trucks/older cars).
-2. Click **Start Sniffing**.
-3. Watch hundreds of packets stream in.
-4. **Delta Highlighting**: Bytes that change value flash orange/red. To find a steering wheel control or door lock ID:
-   - Keep the car still.
-   - Press the steering wheel volume button or lock the doors.
-   - Observe which ID flashes in the table!
-5. **ID Masking**: Enter the discovered ID (e.g. \`0x1E5\`) in the filter bar to isolate that specific computer.
+#### Walkthrough A: Reverse Engineering Steering Wheel Controls
+1. Connect your CANable adapter to the vehicle's OBD-II port (Pins 6 and 14).
+2. Set **CAN Bitrate** to **500 kbps** and enable **Listen-Only Mode**.
+3. Click **Connect Adapter**. Packets will begin streaming into the sniffer table.
+4. Keep the vehicle idling and do not touch any controls. Let the packet counts stabilize.
+5. Repeatedly press the **Volume Up** button on the steering wheel while watching the screen.
+6. The byte-diff highlighter will flash red on the exact CAN ID and byte offset transmitting the button press!
+7. Record the CAN ID (e.g. \`0x2C4\`) and payload byte pattern to integrate into your custom embedded steering wheel controller project!
 
-#### B. Live OBD-II Engine Diagnostics
-1. Click the **OBD-II Telemetry** tab.
-2. Click **Scan Supported PIDs**. The tool broadcasts a request to functional address \`0x7DF\`.
-3. The engine ECU responds with its capability bitmap.
-4. The scanner automatically polls Engine RPM, Vehicle Speed, Coolant Temperature, and Throttle Position.
-5. **Read Trouble Codes (Mode 03)**: Queries stored Diagnostic Trouble Codes (e.g. \`P0171\` System Too Lean).
-6. **Clear Trouble Codes (Mode 04)**: Sends \`0x01 0x04\` to clear DTCs and turn off the Check Engine light.
+---
+
+### 5. Complete Troubleshooting & Diagnostic Matrix
+
+| Error Message / Symptom | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **\`SLCAN Error: Bus-Off (Flag 0x80)\`** | Bitrate mismatch or missing $120\Omega$ termination resistor. | Verify vehicle CAN speed (500 kbps for cars, 250 kbps for heavy trucks). Enable adapter termination jumper. |
+| **No Packets on 2008+ Vehicle OBD-II Port**| Vehicle gateway ECU isolating OBD-II port from powertrain CAN. | Some modern vehicles require an active wakeup frame or direct tapping behind the gateway module. |
+| **OBD-II PIDs Return No Response** | Ignition is off or vehicle uses non-standard diagnostic address. | Turn ignition to **ON / RUN** position (engine can be off). Ensure request is addressed to \`0x7DF\`. |
 
 ---
 
@@ -407,7 +449,7 @@ Under the steering wheel of any 2008+ car:
     title: 'I2C & SPI Bus Explorer — 1-Click Chip Identification & Registers',
     summary: 'Hardware bus interrogation, 7-bit I2C address scanner 0x08-0x77, known chip dictionary lookup, SPI mode 0-3 register watch, and memory dump.',
     tags: ['I2C', 'SPI', 'Bus Explorer', 'Chip Identification', 'Sensors', 'Registers', 'EEPROM', 'OLED'],
-    readTime: '15 min read',
+    readTime: '22 min read',
     content: `
 # I2C & SPI Bus Explorer — Hardware Reverse Engineering
 
@@ -471,15 +513,43 @@ Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Commu
 
 ---
 
-### 2. Interactive Register Read & Write
+### 2. Complete UI Control Mapping
 
-Once a chip is located:
-1. Select the discovered device address.
-2. **Read Register**: Enter register offset in hex (e.g. \`0x75\` on address \`0x68\`).
-   - The tool sends a Write with register \`0x75\`, issues a repeated START, and reads 1 byte.
-   - For an MPU-6050, it returns \`0x68\` (**WHO_AM_I** verification confirmed!).
-3. **Write Register**: Enter target register and new byte value (e.g. writing \`0x00\` to register \`0x6B\` clears the sleep bit and wakes up the sensor).
-4. **Live Register Watch**: Set up periodic polling (50ms to 1000ms) on data registers (such as Accelerometer X-axis high/low bytes at \`0x3B\` and \`0x3C\`) to see real-time sensor measurements update live on the screen!
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Connect Bridge** | Button | Connects WebSerial to hardware adapter (Bus Pirate, ESP32 Bridge, or CH341A). |
+| **Protocol Mode** | Selector | Toggles between I2C Mode and SPI Mode. |
+| **I2C Clock Speed** | Dropdown | Selects bus frequency: Standard Mode (100 kHz) or Fast Mode (400 kHz). |
+| **Scan I2C Bus** | Button | Sweeps all 120 possible 7-bit addresses (\`0x08\` to \`0x77\`) and marks responding nodes. |
+| **Address Grid** | Hex Matrix | 16x8 visual matrix highlighting responding I2C addresses with chip identification badges. |
+| **Register Address**| Input | Hexadecimal byte offset of target register to read or write. |
+| **Read Register** | Button | Sends repeated START sequence to read target register value. |
+| **Write Register** | Button | Transmits new byte value to target register. |
+| **Live Register Watch**| Toggle | Periodically polls register at selectable intervals (50ms–1000ms) to display live changes. |
+
+---
+
+### 3. Step-by-Step Engineering Walkthroughs
+
+#### Walkthrough A: Interrogating an Unknown I2C Sensor
+1. Connect SDA, SCL, 3.3V, and GND from your bridge adapter to the sensor breakout.
+2. Ensure pull-up resistors are installed (or enabled via software on the bridge).
+3. In Skon's USB Tool, click **Connect Bridge** and set Mode to **I2C**.
+4. Click **Scan I2C Bus**.
+5. Address \`0x68\` responds with an ACK! The tool matches it against the built-in dictionary: *MPU-6050 6-Axis IMU or DS3231 RTC*.
+6. In **Register Address**, enter \`0x75\` and click **Read Register**.
+7. The sensor returns \`0x68\`. This confirms beyond doubt that the chip is an **InvenSense MPU-6050**!
+8. Enter \`0x6B\` (Power Management 1) and write \`0x00\` to wake the accelerometer from sleep mode.
+
+---
+
+### 4. Complete Troubleshooting & Diagnostic Matrix
+
+| Error Message / Symptom | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **All Addresses Report ACK (Ghost Devices)** | SDA or SCL line shorted to GND or missing pull-up resistors. | Inspect wiring with a multimeter. Verify both lines sit at 3.3V when idle. |
+| **No Addresses Respond to Scan** | Inverted SDA/SCL lines or chip powered by wrong voltage rail. | Swap SDA and SCL connections. Check VCC voltage with a voltmeter. |
+| **Bus Hangs After Register Read** | Slave device performing clock stretching or master failed to issue STOP. | Send 9 manual clock pulses on SCL to clear slave shift register, then issue a clean STOP condition. |
 
 ---
 
@@ -499,7 +569,7 @@ Once a chip is located:
     title: 'Modbus RTU & RS-485 — Industrial Telemetry & Holding Registers',
     summary: 'Master industrial RS-485 differential signaling, Modbus RTU framing, CRC-16 calculation, slave address polling, function codes 01-16, and endianness conversions.',
     tags: ['Modbus', 'RS-485', 'Industrial', 'Holding Registers', 'PLC', 'CRC-16', 'Inverter', 'Telemetry'],
-    readTime: '16 min read',
+    readTime: '22 min read',
     content: `
 # Modbus RTU & RS-485 — Industrial Diagnostics
 
@@ -602,7 +672,45 @@ Because the original 1979 Modbus specification didn't define 32-bit float order,
 
 ---
 
-### 5. Upstream Standards & Engineering Attribution
+### 5. Complete UI Control Mapping
+
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Connect RS-485** | Button | Connects WebSerial to USB-to-RS485 adapter at configured baud rate (e.g. 9600, 19200, 115200). |
+| **Slave ID Input** | Number | Target industrial node address ($1$ to $247$). Address $0$ is broadcast. |
+| **Function Code** | Dropdown | Selects active Modbus action (Read Holding Registers, Read Input Registers, Write Single/Multiple). |
+| **Start Address** | Number | Memory register offset ($0$ to $65535$). |
+| **Register Quantity** | Number | Number of contiguous 16-bit words to query ($1$ to $125$). |
+| **Execute Query** | Button | Packages frame, computes CRC-16, transmits over RS-485, and parses response. |
+| **Float Endianness** | Dropdown | Decodes 32-bit float pairs using AB CD, CD AB, BA DC, or DC BA word layouts. |
+| **Poll Rate (ms)** | Slider | Sets automatic recurring query cycle from 100ms to 10,000ms. |
+
+---
+
+### 6. Step-by-Step Engineering Walkthroughs
+
+#### Walkthrough A: Polling an Industrial 3-Phase Energy Meter
+1. Connect RS-485 **A** to meter **A+** and RS-485 **B** to meter **B-**.
+2. Connect your USB-RS485 adapter and click **Connect RS-485** at **9600 baud, 8-N-1**.
+3. Set **Slave ID** to \`1\`. Set **Function Code** to \`0x04 (Read Input Registers)\`.
+4. Set **Start Address** to \`0x0000\` and **Quantity** to \`2\` (reading Voltage across registers 0 and 1).
+5. Set **Float Endianness** to **Big-Endian (AB CD)**.
+6. Click **Execute Query**. The workbench unpacks the IEEE 754 float: \`230.45 Volts AC\`!
+7. Engage **Auto-Poll** to monitor real-time mains line voltage fluctuations.
+
+---
+
+### 7. Complete Troubleshooting & Diagnostic Matrix
+
+| Error Message / Symptom | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| **\`Timeout: No response from slave\`** | Inverted A/B differential polarity or wrong slave address. | Swap wires A and B. Verify slave address configured in physical meter menu. |
+| **\`Modbus CRC Mismatch\`** | RS-485 bus reflections or missing $120\Omega$ termination resistors. | Install a $120\Omega$ resistor across lines A and B at both physical ends of the cable run. |
+| **Float Value Displays \`NaN\`** | Word endianness mismatch between master and slave PLC. | Toggle between Big-Endian, Mid-Little (Word Swap), and Little-Endian in the settings dropdown. |
+
+---
+
+### 8. Upstream Standards & Engineering Attribution
 
 | Standard / Organization | Role & Contribution | Reference & License |
 | :--- | :--- | :--- |
@@ -618,7 +726,7 @@ Because the original 1979 Modbus specification didn't define 32-bit float order,
     title: 'Oscilloscope Plotter — Multi-Channel Real-Time Waveforms',
     summary: 'High-speed 60 FPS real-time serial waveform grapher, auto-scaling, CSV telemetry parsers, multi-channel color assignment, and data logging.',
     tags: ['Plotter', 'Oscilloscope', 'Waveforms', 'ADC', 'Telemetry', 'Sensors', 'Graphing', 'CSV'],
-    readTime: '12 min read',
+    readTime: '18 min read',
     content: `
 # Oscilloscope Plotter — Live Waveform Visualizer
 
@@ -668,19 +776,38 @@ The oscilloscope plotter computes dynamic statistics over the sliding sample win
 
 ---
 
-### 3. Interactive Controls & Features
+### 3. Complete UI Control Mapping
 
-- **Channel Palette**: Automatically color-codes channels using high-contrast neon cyber colors (Cyan, Amber, Emerald, Rose, Purple).
-- **Auto-Scale vs Fixed Range**:
-  - **Auto-Scale**: Continuously expands and contracts the Y-axis to fit incoming data peaks.
-  - **Fixed Range**: Lock the Y-axis bounds (e.g. \`0\` to \`4095\` for a 12-bit ESP32 ADC, or \`-16.0\` to \`+16.0\` for a ±16g accelerometer).
-- **Buffer Depth Slider**: Adjust the horizontal time window from 100 historical points up to 5,000 points.
-- **Freeze & Crosshair Inspection**: Click **Pause** to freeze the waveform. Hovering your mouse over the canvas displays exact time offsets and numeric values.
-- **Export CSV**: Download the captured buffer as a \`.csv\` spreadsheet ready for MATLAB, Python pandas, or Excel.
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Connect Serial** | Button | Connects WebSerial to microcontroller streaming numeric values. |
+| **Canvas Viewport** | Canvas | Hardware-accelerated 60 FPS oscilloscope trace viewport with grid lines. |
+| **Auto-Scale Y-Axis** | Toggle | Automatically adjusts minimum and maximum vertical bounds to fit signal peaks. |
+| **Fixed Bounds Min/Max** | Inputs | Manually pins the vertical scale (e.g. \`0\` to \`4095\` for a 12-bit ADC). |
+| **Time Window (Samples)**| Slider | Adjusts visible historical sample depth from 100 points up to 5,000 points. |
+| **Pause / Inspect** | Button | Freezes canvas drawing and activates cursor inspection for delta voltage/time measurements. |
+| **Export CSV** | Button | Downloads captured time-series buffer into a formatted CSV spreadsheet for Python/MATLAB. |
 
 ---
 
-### 4. Upstream Standards & Engineering Attribution
+### 4. Step-by-Step Engineering Walkthroughs
+
+#### Walkthrough A: Visualizing an Analog Light Sensor on an ESP32
+1. Flash your ESP32 with a simple loop:
+   \`\`\`cpp
+   void loop() {
+     Serial.printf("%d\\n", analogRead(36));
+     delay(10);
+   }
+   \`\`\`
+2. Open the **Oscilloscope Plotter** and connect at **115,200 baud**.
+3. The canvas immediately starts plotting the analog value at 100 Hz.
+4. Wave your hand over the photodiode and observe the immediate real-time voltage dip.
+5. Click **Pause** and hover over the peak and trough to measure exact response rise time!
+
+---
+
+### 5. Upstream Standards & Engineering Attribution
 
 | Standard / Component | Authoring Entity | Purpose & Reference |
 | :--- | :--- | :--- |
@@ -695,7 +822,7 @@ The oscilloscope plotter computes dynamic statistics over the sliding sample win
     title: 'MitM Serial Bridge — Dual-Port Pass-Through & Sniffer',
     summary: 'Connect two WebSerial ports concurrently to inspect, log, filter, and inject traffic between a master controller and slave device.',
     tags: ['Serial Bridge', 'MitM', 'Sniffer', 'Dual Port', 'Pass-Through', 'Injection', 'Reverse Engineering'],
-    readTime: '13 min read',
+    readTime: '18 min read',
     content: `
 # MitM Serial Bridge — Dual-Port Interceptor
 
@@ -735,19 +862,34 @@ You need **two** USB-UART adapters connected to your computer:
 
 ---
 
-### 3. Step-by-Step Usage Guide
+### 3. Complete UI Control Mapping
 
-1. Open **Port A** and set the baud rate matching Device A (e.g. 115,200).
-2. Open **Port B** and set the baud rate matching Device B.
-3. Toggle **Bridge Active**:
-   - Packets arriving on Port A are displayed with a blue **A -> B** arrow and immediately forwarded to Port B.
-   - Packets arriving on Port B are displayed with a green **B -> A** arrow and immediately forwarded to Port A.
-4. **Packet Injection**: Type a custom command into the injection bar and select whether to inject it towards Device A or Device B.
-5. **Drop / Mangle Rules**: Define pattern match rules to drop specific packets (e.g. dropping speed limit commands) or replace bytes on the fly.
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Port A Connect** | Button + Dropdown | Connects first WebSerial port with independent baud rate and flow control options. |
+| **Port B Connect** | Button + Dropdown | Connects second WebSerial port with independent baud rate and flow control options. |
+| **Bridge Active Toggle** | Switch | Engages or disengages bidirectional automatic packet forwarding. |
+| **Stream Viewer** | Viewport | Split-column traffic log color-coding packets as \`A -> B\` (Blue) or \`B -> A\` (Green). |
+| **Inject to Port A** | Input + Button | Transmits custom hex or ASCII string towards Device A. |
+| **Inject to Port B** | Input + Button | Transmits custom hex or ASCII string towards Device B. |
+| **Packet Filter / Mangle**| Panel | Regex rules to drop specific packets or alter payload bytes on the fly. |
 
 ---
 
-### 4. Upstream Architecture & Engineering Attribution
+### 4. Step-by-Step Engineering Walkthroughs
+
+#### Walkthrough A: Intercepting Scooter Dashboard Communications
+1. Unplug the 4-wire waterproof connector between the scooter handlebar dashboard and motor controller.
+2. Connect Adapter A to the dashboard harness and Adapter B to the controller harness.
+3. In Skon's USB Tool, connect Port A at **115,200 baud** and Port B at **115,200 baud**.
+4. Enable **Bridge Active**. The scooter powers on normally!
+5. In the stream viewer, observe periodic 100ms packets flowing back and forth.
+6. Pull the brake lever: observe which byte flips value in the \`A -> B\` stream.
+7. Use the **Inject to Port B** bar to send modified speed limit bytes to unlock higher acceleration modes!
+
+---
+
+### 5. Upstream Architecture & Engineering Attribution
 
 | Technique / Device Class | Historical Precedent & Tools | Reference |
 | :--- | :--- | :--- |
@@ -756,4 +898,3 @@ You need **two** USB-UART adapters connected to your computer:
 `
   }
 ];
-
