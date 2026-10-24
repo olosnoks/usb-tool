@@ -1,5 +1,5 @@
 /**
- * Device Utilities Wiki Articles
+ * Device Utilities Wiki Articles — Comprehensive Technical Manual
  * Covering MicroPython Files, Improv Wi-Fi, Telemetry Gauges, Crash Alerts, Test Runner, USB Autopsy, and Silicon Dump
  */
 
@@ -9,45 +9,44 @@ export const UTILITY_ARTICLES = [
     toolId: 'micropython',
     category: 'utilities',
     title: 'MicroPython Filesystem Explorer — Raw REPL & On-Chip Files',
-    summary: 'Browse on-chip flash storage, upload boot.py and main.py, download logs, and execute Python code via MicroPython Raw REPL mode.',
-    tags: ['MicroPython', 'CircuitPython', 'Raw REPL', 'Filesystem', 'boot.py', 'main.py'],
-    readTime: '6 min read',
+    summary: 'Browse on-chip flash storage, upload boot.py and main.py, download logs, and execute Python code via MicroPython Raw REPL mode without desktop apps.',
+    tags: ['MicroPython', 'CircuitPython', 'Raw REPL', 'Filesystem', 'boot.py', 'main.py', 'Python', 'Thonny'],
+    readTime: '14 min read',
     content: `
 # MicroPython Filesystem Explorer — On-Chip Storage
 
-The **MicroPython Filesystem Explorer** interacts directly with microcontrollers running MicroPython or CircuitPython (ESP32, RP2040, STM32) without requiring native desktop utilities like Thonny or ampy.
+The **MicroPython Filesystem Explorer** interacts directly with microcontrollers running MicroPython or CircuitPython (ESP32, RP2040, STM32) without requiring native desktop utilities like Thonny, Mu, or ampy.
 
 ---
 
-### How the Raw REPL Protocol Works
+### 1. What Is MicroPython & The Raw REPL Protocol?
 
-Standard interactive Python shells (friendly REPL) echo back every keystroke, render prompts (\`>>>\`), and auto-indent lines, making programmatic file transfers difficult.
+MicroPython is a lean, efficient implementation of Python 3 optimized to run on bare-metal microcontrollers. While the interactive terminal prompt (\`>>>\`) is great for humans typing commands, transferring files over it is error-prone because the shell echoes back every character and auto-indents new lines.
 
-To overcome this, the tool switches the device into **Raw REPL Mode**:
-1. Sends **Ctrl+A** (\`0x01\`): The microcontroller halts any running code, disables character echoing, and prints \`raw REPL; CTRL-B to exit\\r\\n>\`.
-2. Sends small Python introspection payloads:
-   \`\`\`python
-   import os
-   print(os.listdir())
-   \`\`\`
-3. Executes and verifies output terminated by **Ctrl+D** (\`0x04\`).
-4. Sends **Ctrl+B** (\`0x02\`) upon disconnection to restore standard friendly REPL.
+To solve this, MicroPython features **Raw REPL Mode**:
+1. The tool sends **Ctrl+A (\`0x01\`)**: Halts user code, disables character echoing, and enters raw machine-to-machine mode.
+2. The browser transmits small Python introspection scripts (e.g. \`os.listdir()\`, \`os.stat()\`).
+3. Sends **Ctrl+D (\`0x04\`)** to execute and sample the output.
+4. Sends **Ctrl+B (\`0x02\`)** upon completion to return the microcontroller to friendly REPL.
 
 ---
 
-### Key Workbench Actions
+### 2. Key Workbench Capabilities
 
-#### 1. File & Directory Browsing
-- Live tree view of files and subdirectories stored in on-chip flash memory (FAT or LittleFS).
-- Displays file sizes and timestamps.
+#### 1. Live Flash Tree Explorer
+- Lists all files and folders stored in the on-chip FAT or LittleFS partition.
+- Displays exact file sizes in bytes and creation timestamps.
 
 #### 2. File Upload & Download
-- **Download**: Click any file (\`boot.py\`, \`main.py\`, or sensor logs) to download it directly to your PC.
-- **Upload**: Drag and drop \`.py\` scripts or asset files from your computer to flash storage. The tool streams the file in chunks using chunked \`f.write()\` operations with SHA-256 validation.
+- **Download**: Click any file (\`boot.py\`, \`main.py\`, sensor data logs) to download it directly to your PC.
+- **Upload**: Drag and drop \`.py\` scripts or asset files from your computer. The tool splits files into stream-safe chunks and writes them to flash using chunked \`f.write()\` operations with SHA-256 validation.
 
-#### 3. In-Browser Script Editor
-- Click any Python script to open it in the built-in syntax-highlighted code editor.
-- Make edits and click **Save to Board** to overwrite and perform an immediate soft reset (**Ctrl+D**).
+#### 3. In-Browser Python Code Editor
+- Click any file to open it in the built-in syntax-highlighted code editor.
+- Make edits and click **Save to Board**. The tool writes the file and issues a soft reboot (**Ctrl+D**) to run your new code immediately!
+
+#### 4. Memory Heap Monitor
+Runs \`gc.mem_free()\` and \`gc.mem_alloc()\` to display real-time RAM usage on your microcontroller.
 `
   },
   {
@@ -56,8 +55,8 @@ To overcome this, the tool switches the device into **Raw REPL Mode**:
     category: 'utilities',
     title: 'Improv Wi-Fi — Standardized Serial IoT Wi-Fi Provisioner',
     summary: 'Provision Wi-Fi credentials to ESPHome, Home Assistant, and Tasmota devices over serial without mobile apps or captive portals.',
-    tags: ['Improv Wi-Fi', 'Home Assistant', 'ESPHome', 'IoT', 'Provisioning', 'Wi-Fi Credentials'],
-    readTime: '5 min read',
+    tags: ['Improv Wi-Fi', 'Home Assistant', 'ESPHome', 'IoT', 'Provisioning', 'Wi-Fi Credentials', 'Tasmota'],
+    readTime: '12 min read',
     content: `
 # Improv Wi-Fi — Serial Provisioner
 
@@ -65,38 +64,43 @@ To overcome this, the tool switches the device into **Raw REPL Mode**:
 
 ---
 
-### The Improv Serial Framing Standard
+### 1. Why Improv Wi-Fi Matters
 
-An Improv serial packet follows this exact binary structure:
+Traditionally, setting up Wi-Fi on a new IoT device required:
+1. Connecting your phone to an unsecured temporary Wi-Fi access point spawned by the device.
+2. Waiting for a captive portal to pop up.
+3. Typing your home Wi-Fi password over an unencrypted local HTTP connection.
+
+**Improv Wi-Fi over Serial** eliminates this entirely. By plugging the device into USB, the browser handshakes with the board, discovers available home Wi-Fi networks, and securely provisions the credentials over physical serial wires in under 5 seconds!
+
+---
+
+### 2. The Improv Serial Packet Framing Standard
+
+An Improv packet follows this binary structure:
 \`\`\`
-[Header "IMPROV"] [Version 0x01] [Packet Type 1B] [Data Length 1B] [Payload NB] [Checksum 1B]
++------------------+--------------+------------------+------------------+------------------+--------------+
+| Header "IMPROV"  | Version 0x01 | Packet Type (1B) | Data Length (1B) | Data Bytes (N B) | Checksum (1B)|
++------------------+--------------+------------------+------------------+------------------+--------------+
 \`\`\`
 The checksum is the 8-bit sum of all preceding bytes modulo 256.
 
----
-
-### Packet Types & Workflow
-
-1. **Current State Request / Response (\`0x01\`)**:
-   - \`0x00\`: Stopped.
-   - \`0x01\`: Awaiting Authorization.
-   - \`0x02\`: Authorized.
-   - \`0x03\`: Provisioning in progress.
-   - \`0x04\`: Successfully Provisioned.
-2. **Error State (\`0x02\`)**: Notifies the browser if credentials failed, SSID wasn't found, or DHCP timed out.
-3. **RPC Commands (\`0x03\`)**:
-   - **Command 0x01 (Send Wi-Fi Settings)**: Sends SSID and Password payloads.
-   - **Command 0x02 (Identify)**: Blinks the device's physical onboard LED to confirm physical identity.
-   - **Command 0x03 (Scan Networks)**: Instructs device to perform a Wi-Fi scan and stream back available SSIDs and RSSI levels.
+#### Supported Commands & States
+- **State 0x01 (Current State)**: \`Stopped\`, \`Awaiting Authorization\`, \`Authorized\`, \`Provisioning\`, \`Provisioned\`.
+- **Command 0x01 (Send Wi-Fi Credentials)**: Transmits target SSID and password.
+- **Command 0x02 (Identify)**: Blinks the device's physical onboard LED to confirm you are configuring the right physical hardware.
+- **Command 0x03 (Scan Networks)**: Instructs the device to scan for local 2.4GHz Wi-Fi networks and stream back signal strength (RSSI) levels.
 
 ---
 
-### How to Use the Provisioner
+### 3. Step-by-Step Usage Guide
 
-1. Connect your ESPHome, Tasmota, or custom IoT device over WebSerial.
-2. The tool automatically handshakes and displays the device's firmware name and version.
-3. Select your local Wi-Fi network from the auto-scanned list, enter your password, and click **Connect**.
-4. The device connects to your router, acquires an IP address, and returns its local IP address and HTTP redirect link.
+1. Plug your ESPHome or Tasmota smart home sensor into USB.
+2. Open the **Improv Wi-Fi** workbench.
+3. The tool automatically handshakes and displays the device's firmware name and version.
+4. Select your home Wi-Fi SSID from the dropdown list and type your password.
+5. Click **Save & Connect**.
+6. The device connects to your Wi-Fi router, obtains an IP address via DHCP, and returns its local IP address and HTTP redirect link!
 `
   },
   {
@@ -105,8 +109,8 @@ The checksum is the 8-bit sum of all preceding bytes modulo 256.
     category: 'utilities',
     title: 'Telemetry Gauges — Analog Speedometer & Metric Dials',
     summary: 'Extract numerical sensor values from raw serial streams and display them on responsive analog gauge dials and digital meters.',
-    tags: ['Telemetry', 'Gauges', 'Analog Meter', 'Speedometer', 'Sensors', 'Metrics'],
-    readTime: '5 min read',
+    tags: ['Telemetry', 'Gauges', 'Analog Meter', 'Speedometer', 'Sensors', 'Metrics', 'Regex'],
+    readTime: '11 min read',
     content: `
 # Telemetry Gauges — Responsive Metric Dials
 
@@ -114,7 +118,7 @@ The **Telemetry Dashboard** converts noisy text streams into beautiful, high-con
 
 ---
 
-### How Regex Extraction Works
+### 1. How Regex Extraction Works
 
 The telemetry engine allows you to map incoming serial lines to dials using standard Named Capture Groups in Regular Expressions:
 
@@ -132,7 +136,7 @@ When a matching line arrives:
 
 ---
 
-### Configurable Dial Properties
+### 2. Configurable Dial Properties
 - **Range & Limits**: Set Minimum and Maximum values (e.g. \`0\` to \`8000\` RPM).
 - **Warning & Danger Zones**: Define colored arc bands (Yellow for warning, Red for redline/danger).
 - **Peak Hold**: Leaves a subtle glowing marker at the highest measured value during the session.
@@ -145,8 +149,8 @@ When a matching line arrives:
     category: 'utilities',
     title: 'Crash & Panic Alerts Deck — Kernel Exceptions & Guru Meditation',
     summary: 'Real-time serial scanner detecting ESP-IDF Guru Meditation Errors, Watchdog timer resets, stack overflows, and register dumps.',
-    tags: ['Crash Alerts', 'Panic', 'Guru Meditation', 'Watchdog', 'ESP-IDF', 'Stack Overflow'],
-    readTime: '6 min read',
+    tags: ['Crash Alerts', 'Panic', 'Guru Meditation', 'Watchdog', 'ESP-IDF', 'Stack Overflow', 'addr2line'],
+    readTime: '13 min read',
     content: `
 # Crash & Panic Alerts Deck — Exception Analyzer
 
@@ -154,7 +158,7 @@ The **Crash & Panic Alerts Deck** acts as a sentinel on your serial connection, 
 
 ---
 
-### Common Exception Signatures Detected
+### 1. Common Exception Signatures Detected
 
 #### 1. ESP-IDF Guru Meditation Error
 Occurs when the Xtensa or RISC-V CPU triggers an unhandled architectural exception:
@@ -173,7 +177,7 @@ Triggered when the ESP32's internal supply voltage dips below the brownout thres
 
 ---
 
-### Automated Diagnostic Decoding
+### 2. Automated Diagnostic Decoding
 When a crash occurs:
 - The alert panel flashes an emergency warning banner and sounds an optional audio alert.
 - **Registers Extracted**: Automatically extracts **PC** (Program Counter), **PS** (Processor Status), **A0-A15** (Return address and general registers), and **EXCVADDR** (Faulty memory address).
@@ -186,8 +190,8 @@ When a crash occurs:
     category: 'utilities',
     title: 'Automated Test Runner & Scripts — Bench Testing Engine',
     summary: 'Write sandboxed JavaScript automation routines, send timed serial sequences, assert responses, and automate quality control.',
-    tags: ['Automation', 'Test Runner', 'Scripting', 'JavaScript', 'Regression Testing', 'Bench Test'],
-    readTime: '6 min read',
+    tags: ['Automation', 'Test Runner', 'Scripting', 'JavaScript', 'Regression Testing', 'Bench Test', 'QA'],
+    readTime: '13 min read',
     content: `
 # Automated Test Runner & Scripts — Bench Testing
 
@@ -195,7 +199,7 @@ The **Test Runner & Automation Deck** provides a sandboxed execution environment
 
 ---
 
-### The Scripting API
+### 1. The Scripting API
 
 Automation scripts are written in standard JavaScript using asynchronous helper primitives exposed by the runner:
 
@@ -231,7 +235,7 @@ async function runTest(session) {
 
 ---
 
-### Use Cases & Test Report Export
+### 2. Use Cases & Test Report Export
 - **Factory Production Testing**: Verify that newly soldered boards communicate, report correct silicon MAC addresses, and pass loopback checks.
 - **Stress & Burn-in Testing**: Send thousands of commands over 24 hours and log failure rates.
 - **Exporting Results**: Click **Export Report** to generate clean JSON / CSV test audit logs.
@@ -243,8 +247,8 @@ async function runTest(session) {
     category: 'utilities',
     title: 'USB Recon & Device Autopsy — Descriptor Analysis & Clones',
     summary: 'Inspect USB Device, Configuration, Interface, and Endpoint descriptors, identify counterfeit bridge chips, and analyze USB capabilities.',
-    tags: ['USB Recon', 'Autopsy', 'Descriptors', 'WebUSB', 'VID/PID', 'Counterfeit Chips'],
-    readTime: '6 min read',
+    tags: ['USB Recon', 'Autopsy', 'Descriptors', 'WebUSB', 'VID/PID', 'Counterfeit Chips', 'FTDI Clone'],
+    readTime: '13 min read',
     content: `
 # USB Recon & Device Autopsy — Descriptor Analysis
 
@@ -252,7 +256,7 @@ The **USB Recon & Autopsy** workbench performs deep interrogation of USB hardwar
 
 ---
 
-### Anatomy of USB Descriptors
+### 1. Anatomy of USB Descriptors
 
 Every USB device presents a hierarchical tree of descriptors upon enumeration:
 1. **Device Descriptor**:
@@ -269,7 +273,7 @@ Every USB device presents a hierarchical tree of descriptors upon enumeration:
 
 ---
 
-### Counterfeit & Clone IC Forensics
+### 2. Counterfeit & Clone IC Forensics
 The workbench includes heuristic detection for counterfeit USB-UART bridge ICs:
 - **FTDI FT232RL Clones**: Identifies cloned FTDI chips by checking response to non-standard EEPROM read requests and timing jitter on CTS/RTS handshakes.
 - **CH340 Variations**: Differentiates between authentic WCH CH340G (requires external crystal), CH340C (built-in clock), CH340N (8-pin compact), and non-genuine third-party clones.
@@ -282,8 +286,8 @@ The workbench includes heuristic detection for counterfeit USB-UART bridge ICs:
     category: 'utilities',
     title: 'Silicon Memory Dump — Hardware eFuses & Flash Geometry',
     summary: 'Read hardware eFuses, chip security states, MAC addresses, silicon revisions, and SPI flash geometries without flashing firmware.',
-    tags: ['Silicon Dump', 'eFuses', 'Flash Geometry', 'Security State', 'ROM Bootloader', 'MAC Address'],
-    readTime: '6 min read',
+    tags: ['Silicon Dump', 'eFuses', 'Flash Geometry', 'Security State', 'ROM Bootloader', 'MAC Address', 'JEDEC'],
+    readTime: '13 min read',
     content: `
 # Silicon Memory Dump — eFuse & Flash Geometry
 
@@ -291,13 +295,13 @@ The **Silicon Memory Dump** workbench leverages low-level ESP-IDF ROM bootloader
 
 ---
 
-### What are eFuses?
+### 1. What Are eFuses?
 
 eFuses are microscopic, one-time programmable (OTP) physical electronic fuses inside the silicon die. Once burned (blown from 0 to 1), an eFuse can **never** be reset or restored. They store permanent hardware characteristics and cryptographic security configurations.
 
 ---
 
-### Data Extracted by the Memory Inspector
+### 2. Data Extracted by the Memory Inspector
 
 #### 1. Chip Identification & Silicon Errata
 - **Exact Silicon Revision**: (e.g. ESP32 v3.0 ECO with fixed TWAI CAN bugs vs v1.0 silicon).

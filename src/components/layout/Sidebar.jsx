@@ -107,8 +107,11 @@ export default function Sidebar({
   const [filterQuery, setFilterQuery] = useState('');
 
   const handleItemClick = (item) => {
-    if (item.href) {
-      window.open(item.href, '_blank', 'noopener,noreferrer');
+    if (item.id === 'wiki-external' || item.href) {
+      const targetUrl = item.id === 'wiki-external' 
+        ? `./wiki/?tool=${activeTool || 'flasher'}` 
+        : item.href;
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
       return;
     }
     if (item.id === 'pinouts-modal') {

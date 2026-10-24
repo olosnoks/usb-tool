@@ -1,5 +1,5 @@
 /**
- * Setup, Reference & Troubleshooting Wiki Articles
+ * Setup, Reference & Troubleshooting Wiki Articles — Comprehensive Technical Manual
  * Covering Linux Setup & Drivers, Troubleshooting Matrix, Pinouts Reference, and Chip Intelligence
  */
 
@@ -10,8 +10,8 @@ export const REFERENCE_ARTICLES = [
     category: 'reference',
     title: 'Linux Setup & Drivers — udev Rules, Permissions & Serial Bridges',
     summary: 'Configure Linux udev permissions, Windows VCP drivers, and macOS serial port nodes for seamless WebSerial connectivity.',
-    tags: ['Linux', 'udev', 'Drivers', 'Permissions', 'dialout', 'Windows', 'macOS'],
-    readTime: '6 min read',
+    tags: ['Linux', 'udev', 'Drivers', 'Permissions', 'dialout', 'Windows', 'macOS', 'CH340', 'CP2102'],
+    readTime: '13 min read',
     content: `
 # Linux Setup & Drivers — Permissions & udev Guide
 
@@ -19,7 +19,7 @@ When using WebSerial with development hardware on Linux, Windows, and macOS, ope
 
 ---
 
-### Linux Permission Architecture
+### 1. Linux Permission Architecture & Group Membership
 
 On Linux distributions (Ubuntu, Debian, Fedora, Arch, Mint), the kernel creates device nodes like \`/dev/ttyUSB0\` or \`/dev/ttyACM0\` when a USB bridge connects. By default, these nodes belong to the \`root\` user and the \`dialout\` or \`uucp\` system group with mode \`0660\` (read/write only for owner and group).
 
@@ -66,14 +66,14 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 ---
 
-### Windows Driver Checklist
+### 2. Windows Driver Checklist
 - **CH340 / CH341**: Requires the official WCH CH341SER Windows driver. If Windows Device Manager shows a yellow exclamation mark on "USB-SERIAL CH340", download and run the installer.
 - **CP2102 / CP2104**: Windows Update usually downloads the Silicon Labs driver automatically; standalone VCP drivers are available if needed.
 - **CDC ACM (ESP32 Native USB)**: Modern Windows 10/11 includes the native \`usbser.sys\` driver and requires no third-party installation.
 
 ---
 
-### macOS Device Nodes
+### 3. macOS Device Nodes
 On macOS, WebSerial displays devices with paths like \`/dev/cu.usbserial-*\` and \`/dev/tty.usbserial-*\`. Always select the \`cu.*\` (Call-Up) device node for reliable bidirectional streaming.
 `
   },
@@ -82,9 +82,9 @@ On macOS, WebSerial displays devices with paths like \`/dev/cu.usbserial-*\` and
     toolId: 'troubleshooting',
     category: 'reference',
     title: 'Troubleshooting & Error Matrix — Root Causes & Exact Fixes',
-    summary: 'Comprehensive diagnostics matrix resolving packet header timeouts, access denied errors, framing gibberish, and brownouts.',
-    tags: ['Troubleshooting', 'Error Matrix', 'Timeout', 'Access Denied', 'Framing Error', 'Brownout'],
-    readTime: '8 min read',
+    summary: 'Comprehensive diagnostics matrix resolving packet header timeouts, access denied errors, framing gibberish, brownouts, and port lockups.',
+    tags: ['Troubleshooting', 'Error Matrix', 'Timeout', 'Access Denied', 'Framing Error', 'Brownout', 'Diagnostics'],
+    readTime: '15 min read',
     content: `
 # Troubleshooting & Error Matrix
 
@@ -110,9 +110,9 @@ This reference table outlines every common failure state encountered during seri
     toolId: 'pinouts-modal',
     category: 'reference',
     title: 'Pinouts Reference — ESP32, S3, C3, C6 & USB Wiring Maps',
-    summary: 'Hardware pinout diagrams, SPI/I2C/UART pin assignments, strapping pins, and USB Type-A / Type-C pinout specifications.',
-    tags: ['Pinouts', 'Wiring', 'ESP32', 'ESP32-S3', 'ESP32-C3', 'ESP32-C6', 'USB-C'],
-    readTime: '6 min read',
+    summary: 'Hardware pinout diagrams, SPI/I2C/UART pin assignments, strapping pins, and USB Type-A / Type-C CC resistor specifications.',
+    tags: ['Pinouts', 'Wiring', 'ESP32', 'ESP32-S3', 'ESP32-C3', 'ESP32-C6', 'USB-C', 'Hardware'],
+    readTime: '13 min read',
     content: `
 # Pinouts Reference — Microcontrollers & USB Wiring
 
@@ -154,8 +154,8 @@ When designing custom ESP32 boards with a USB-C receptacle:
     category: 'reference',
     title: 'Chip Intelligence — VID/PID Hardware Identification Database',
     summary: 'Lookup USB Vendor IDs (VID) and Product IDs (PID) to identify mystery boards, USB-UART bridge ICs, and development hardware.',
-    tags: ['Chip Intel', 'VID/PID', 'USB IDs', 'WCH', 'Silicon Labs', 'FTDI', 'Espressif'],
-    readTime: '5 min read',
+    tags: ['Chip Intel', 'VID/PID', 'USB IDs', 'WCH', 'Silicon Labs', 'FTDI', 'Espressif', 'Identification'],
+    readTime: '12 min read',
     content: `
 # Chip Intelligence — USB Hardware Identification
 

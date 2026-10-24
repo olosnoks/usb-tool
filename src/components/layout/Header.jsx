@@ -19,9 +19,9 @@ import {
 import { useSerial } from '../../context/SerialContext';
 import { identifyUsbChip } from '../../utils/usbDatabase';
 import StatusBadge from '../common/StatusBadge';
-import WorkspacePresets from './WorkspacePresets';
 
 export default function Header({
+  activeTool = 'flasher',
   activePreset,
   onSelectPreset,
   isDrawerOpen,
@@ -110,16 +110,6 @@ export default function Header({
             )}
           </div>
         </div>
-
-        {/* 1-Click Workspace Presets Switcher */}
-        {onSelectPreset && (
-          <div className="hidden md:flex items-center">
-            <WorkspacePresets
-              activePreset={activePreset}
-              onSelectPreset={onSelectPreset}
-            />
-          </div>
-        )}
 
         {/* Port, Baud & Connection Controls */}
         <div className="flex items-center gap-2">
@@ -212,12 +202,12 @@ export default function Header({
             </button>
           )}
 
-          {/* Standalone Wiki Link */}
+          {/* Standalone Wiki Link (Deep-linked to current active tool) */}
           <a
-            href="./wiki/"
+            href={`./wiki/?tool=${activeTool || 'flasher'}`}
             target="_blank"
             rel="noopener noreferrer"
-            title="Open Standalone Hardware Hacker Wiki & Documentation"
+            title={`Open Wiki Documentation for ${activeTool}`}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold font-mono transition-all active:scale-95 shadow-sm shadow-indigo-500/10"
           >
             <BookOpen className="w-3.5 h-3.5 text-indigo-400" />

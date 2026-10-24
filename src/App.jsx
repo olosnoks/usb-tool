@@ -171,6 +171,7 @@ function AppContent() {
     <div className="h-screen bg-[#020617] text-slate-200 flex flex-col font-mono selection:bg-cyan-500/30 selection:text-cyan-300 overflow-hidden">
       {/* 1. Global Persistent Header */}
       <Header
+        activeTool={activeTool}
         activePreset={currentActivePreset}
         onSelectPreset={handleSelectPreset}
         isDrawerOpen={isDrawerOpen}

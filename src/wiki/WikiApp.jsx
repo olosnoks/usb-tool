@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, 
   BookOpen, 
@@ -49,10 +49,68 @@ const CATEGORY_ICONS = {
 
 export default function WikiApp() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [selectedArticleId, setSelectedArticleId] = useState(WIKI_ARTICLES[0].id);
+  
+  // Parse tool or article parameter from URL on load
+  const [selectedArticleId, setSelectedArticleId] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlTool = params.get('tool');
+      const urlArticle = params.get('article');
+      if (urlArticle) {
+        const found = WIKI_ARTICLES.find(a => a.id === urlArticle);
+        if (found) return found.id;
+      }
+      if (urlTool) {
+        const found = WIKI_ARTICLES.find(a => a.toolId === urlTool || a.id === urlTool);
+        if (found) return found.id;
+      }
+      const hash = window.location.hash.replace('#', '');
+      if (hash.startsWith('tool=')) {
+        const t = hash.replace('tool=', '');
+        const found = WIKI_ARTICLES.find(a => a.toolId === t || a.id === t);
+        if (found) return found.id;
+      }
+      if (hash) {
+        const found = WIKI_ARTICLES.find(a => a.id === hash || a.toolId === hash);
+        if (found) return found.id;
+      }
+    } catch (e) {}
+    return WIKI_ARTICLES[0].id;
+  });
+
+  const [selectedCategory, setSelectedCategory] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlTool = params.get('tool');
+      const urlArticle = params.get('article');
+      const target = urlArticle || urlTool;
+      if (target) {
+        const found = WIKI_ARTICLES.find(a => a.id === target || a.toolId === target);
+        if (found) return found.category;
+      }
+    } catch (e) {}
+    return 'all';
+  });
+
   const [copiedCodeSnippet, setCopiedCodeSnippet] = useState(null);
   const [collapsedCategories, setCollapsedCategories] = useState({});
+
+  // When article changes, keep URL search parameter in sync
+  const handleSelectArticle = (articleId) => {
+    setSelectedArticleId(articleId);
+    try {
+      const art = WIKI_ARTICLES.find(a => a.id === articleId);
+      if (art) {
+        const url = new URL(window.location.href);
+        if (art.toolId) {
+          url.searchParams.set('tool', art.toolId);
+        } else {
+          url.searchParams.set('article', art.id);
+        }
+        window.history.replaceState(null, '', url.toString());
+      }
+    } catch (e) {}
+  };
 
   // Filter articles by category and search query
   const filteredArticles = useMemo(() => {
@@ -100,6 +158,50 @@ export default function WikiApp() {
     return map;
   }, [filteredArticles]);
 
+  // Inline formatting helper for bold, code snippets, and links
+  const renderInline = (text) => {
+    if (!text || typeof text !== 'string') return text;
+    const parts = [];
+    const regex = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g;
+    let lastIdx = 0;
+    let match;
+    let partKey = 0;
+
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        parts.push(text.substring(lastIdx, match.index));
+      }
+      const token = match[0];
+      if (token.startsWith('`') && token.endsWith('`')) {
+        parts.push(
+          <code key={`code-${partKey++}`} className="px-1.5 py-0.5 rounded bg-[#181d2a] text-amber-300 font-mono text-[11px] border border-[#262f44]">
+            {token.slice(1, -1)}
+          </code>
+        );
+      } else if (token.startsWith('**') && token.endsWith('**')) {
+        parts.push(
+          <strong key={`bold-${partKey++}`} className="font-bold text-slate-100">
+            {token.slice(2, -2)}
+          </strong>
+        );
+      } else if (token.startsWith('[') && token.includes('](') && token.endsWith(')')) {
+        const linkMatch = token.match(/\[([^\]]+)\]\(([^)]+)\)/);
+        if (linkMatch) {
+          parts.push(
+            <a key={`link-${partKey++}`} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">
+              {linkMatch[1]}
+            </a>
+          );
+        }
+      }
+      lastIdx = regex.lastIndex;
+    }
+    if (lastIdx < text.length) {
+      parts.push(text.substring(lastIdx));
+    }
+    return parts.length > 0 ? parts : text;
+  };
+
   // Markdown renderer for headings, code blocks, tables, callout blocks, and lists
   const renderMarkdown = (content) => {
     const lines = content.trim().split('\n');
@@ -122,7 +224,7 @@ export default function WikiApp() {
               <tr>
                 {headerRow.map((col, idx) => (
                   <th key={idx} className="px-3.5 py-2.5 font-bold uppercase tracking-wider text-[11px] text-amber-400">
-                    {col.trim()}
+                    {renderInline(col.trim())}
                   </th>
                 ))}
               </tr>
@@ -132,7 +234,7 @@ export default function WikiApp() {
                 <tr key={rIdx} className="hover:bg-[#151926] transition-colors">
                   {row.map((cell, cIdx) => (
                     <td key={cIdx} className="px-3.5 py-2.5 leading-relaxed">
-                      {cell.trim()}
+                      {renderInline(cell.trim())}
                     </td>
                   ))}
                 </tr>
@@ -215,38 +317,38 @@ export default function WikiApp() {
       if (line.startsWith('# ')) {
         elements.push(
           <h1 key={`h1-${keyIdx++}`} className="text-2xl sm:text-3xl font-extrabold text-slate-100 tracking-tight mt-2 mb-4 pb-2 border-b border-[#222736]">
-            {line.replace('# ', '')}
+            {renderInline(line.replace('# ', ''))}
           </h1>
         );
       } else if (line.startsWith('### ')) {
         elements.push(
           <h3 key={`h3-${keyIdx++}`} className="text-base sm:text-lg font-bold text-amber-300 mt-6 mb-2 flex items-center gap-2">
             <Hash className="w-4 h-4 text-amber-500 shrink-0" />
-            <span>{line.replace('### ', '')}</span>
+            <span>{renderInline(line.replace('### ', ''))}</span>
           </h3>
         );
       } else if (line.startsWith('#### ')) {
         elements.push(
           <h4 key={`h4-${keyIdx++}`} className="text-sm font-bold text-slate-200 mt-4 mb-1">
-            {line.replace('#### ', '')}
+            {renderInline(line.replace('#### ', ''))}
           </h4>
         );
       } else if (line.startsWith('> ')) {
         elements.push(
           <div key={`quote-${keyIdx++}`} className="my-3 p-3.5 rounded-xl bg-amber-500/10 border-l-4 border-amber-500 text-xs text-amber-200 leading-relaxed font-mono">
-            {line.replace('> ', '')}
+            {renderInline(line.replace('> ', ''))}
           </div>
         );
       } else if (line.startsWith('- ')) {
         elements.push(
           <li key={`li-${keyIdx++}`} className="text-xs sm:text-sm text-slate-300 ml-4 list-disc mb-1 leading-relaxed">
-            {line.replace('- ', '')}
+            {renderInline(line.replace('- ', ''))}
           </li>
         );
       } else if (/^\d+\.\s*/.test(line)) {
         elements.push(
           <li key={`oli-${keyIdx++}`} className="text-xs sm:text-sm text-slate-300 ml-4 list-decimal mb-1.5 leading-relaxed">
-            {line.replace(/^\d+\.\s*/, '')}
+            {renderInline(line.replace(/^\d+\.\s*/, ''))}
           </li>
         );
       } else if (line.trim() === '---') {
@@ -254,7 +356,7 @@ export default function WikiApp() {
       } else if (line.trim().length > 0) {
         elements.push(
           <p key={`p-${keyIdx++}`} className="text-xs sm:text-sm text-slate-300 mb-3 leading-relaxed">
-            {line}
+            {renderInline(line)}
           </p>
         );
       }
@@ -273,7 +375,7 @@ export default function WikiApp() {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <a 
-              href="../" 
+              href={`../?tool=${activeArticle?.toolId || 'flasher'}`} 
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#141722] hover:bg-[#1e2333] text-slate-300 hover:text-white border border-[#252a3a] text-xs font-mono transition shadow-sm"
               title="Return to Skon's USB Tool"
             >
@@ -402,7 +504,7 @@ export default function WikiApp() {
                         return (
                           <button
                             key={article.id}
-                            onClick={() => setSelectedArticleId(article.id)}
+                            onClick={() => handleSelectArticle(article.id)}
                             className={`w-full text-left px-2.5 py-2 rounded-lg transition flex flex-col gap-0.5 border ${
                               isSelected
                                 ? 'bg-gradient-to-r from-amber-500/20 to-transparent border-amber-500/40 text-amber-200 shadow-sm'
