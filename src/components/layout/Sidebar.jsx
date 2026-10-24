@@ -87,6 +87,7 @@ export const SIDEBAR_SECTIONS = [
     id: 'setup',
     title: 'SETUP & REFERENCE',
     items: [
+      { id: 'wiki-external', name: 'Knowledge Base Wiki', icon: BookOpen, href: './wiki/', accent: 'amber', desc: 'Standalone documentation & firmware manual' },
       { id: 'setup', name: 'Linux Setup & Drivers', icon: HelpCircle, accent: 'purple', desc: 'udev rules & USB-UART drivers' },
       { id: 'esp-dump', name: 'Silicon Memory Dump', icon: Cpu, accent: 'amber', desc: 'Direct eFuse and flash reader' },
       { id: 'pinouts-modal', name: 'Pinouts Reference', icon: BookOpen, isModal: true, accent: 'cyan', desc: 'ESP32 & USB wiring diagrams' },
@@ -106,6 +107,10 @@ export default function Sidebar({
   const [filterQuery, setFilterQuery] = useState('');
 
   const handleItemClick = (item) => {
+    if (item.href) {
+      window.open(item.href, '_blank', 'noopener,noreferrer');
+      return;
+    }
     if (item.id === 'pinouts-modal') {
       onOpenPinouts?.();
     } else if (item.id === 'intel-modal') {

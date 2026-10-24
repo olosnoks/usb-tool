@@ -212,6 +212,18 @@ export default function Header({
             </button>
           )}
 
+          {/* Standalone Wiki Link */}
+          <a
+            href="./wiki/"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open Standalone Hardware Hacker Wiki & Documentation"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold font-mono transition-all active:scale-95 shadow-sm shadow-indigo-500/10"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="hidden md:inline">WIKI</span>
+          </a>
+
           {/* Command Palette Trigger */}
           {onOpenCommandPalette && (
             <button
