@@ -78,7 +78,7 @@ export default function CommandTreeForm({
   };
 
   // Determine if device can execute the current action
-  const canRun = device ? device.canExecute(currentAction.risk) : false;
+  const canRun = (device && currentAction) ? device.canExecute(currentAction.risk) : false;
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -194,31 +194,33 @@ export default function CommandTreeForm({
         </div>
 
         {/* Action Details & Risk Indicator */}
-        <div className="p-3 bg-slate-950/70 border border-slate-800/80 rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-slate-200">{currentAction.name}</span>
-              <span
-                className={`text-[11px] font-mono px-2 py-0.5 rounded-full border uppercase ${getRiskBadgeColor(
-                  currentAction.risk
-                )}`}
-              >
-                Risk: {currentAction.risk}
-              </span>
-              <span className="text-xs font-mono text-slate-400">
-                Opcode: 0x{currentAction.cmd.toString(16).padStart(4, '0')}
-              </span>
+        {currentAction && (
+          <div className="p-3 bg-slate-950/70 border border-slate-800/80 rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-slate-200">{currentAction.name}</span>
+                <span
+                  className={`text-[11px] font-mono px-2 py-0.5 rounded-full border uppercase ${getRiskBadgeColor(
+                    currentAction.risk
+                  )}`}
+                >
+                  Risk: {currentAction.risk}
+                </span>
+                <span className="text-xs font-mono text-slate-400">
+                  Opcode: 0x{(currentAction.cmd != null ? currentAction.cmd.toString(16) : '0000').padStart(4, '0')}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">{currentAction.description}</p>
             </div>
-            <p className="text-xs text-slate-400">{currentAction.description}</p>
-          </div>
 
-          {!canRun && (
-            <div className="flex items-center gap-1.5 text-xs text-rose-400 bg-rose-950/40 border border-rose-900/40 px-2.5 py-1 rounded">
-              <Lock className="w-3.5 h-3.5 flex-shrink-0" />
-              <span>Execution Locked</span>
-            </div>
-          )}
-        </div>
+            {!canRun && (
+              <div className="flex items-center gap-1.5 text-xs text-rose-400 bg-rose-950/40 border border-rose-900/40 px-2.5 py-1 rounded">
+                <Lock className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>Execution Locked</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Level 4: Dependent Parameters */}
         {currentAction.parameters && currentAction.parameters.length > 0 && (

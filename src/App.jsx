@@ -43,6 +43,12 @@ const ScriptRunner = React.lazy(() => import('./components/ScriptRunner'));
 const UsbReconDeck = React.lazy(() => import('./components/UsbReconDeck'));
 const EspMemoryInspector = React.lazy(() => import('./components/EspMemoryInspector'));
 
+// Composite Tool Suites
+const BadUsbPayloadSuite = React.lazy(() => import('./components/tools/BadUsbPayloadSuite'));
+const ProtocolPacketLab = React.lazy(() => import('./components/tools/ProtocolPacketLab'));
+const GpsNavigationSuite = React.lazy(() => import('./components/tools/GpsNavigationSuite'));
+const HardwareProgrammersSuite = React.lazy(() => import('./components/tools/HardwareProgrammersSuite'));
+
 // Common & Guide Components
 import ToolGuide from './components/common/ToolGuide';
 
@@ -202,20 +208,12 @@ function AppContent() {
               </div>
             )}
 
-            {activeTool === 'hex' && (
+            {['packet-analyzer', 'hex', 'packets'].includes(activeTool) && (
               <div className="w-full">
-                <HexViewer
-                  byteStream={hexByteStream}
-                  onClear={clearHexStream}
-                  maxDisplayBytes={4096}
-                />
-              </div>
-            )}
-
-            {activeTool === 'packets' && (
-              <div className="w-full">
-                <PacketFramer
-                  activeHexByteStream={hexByteStream}
+                <ProtocolPacketLab
+                  initialTab={activeTool === 'hex' ? 'hex' : activeTool === 'packets' ? 'packets' : 'analyzer'}
+                  hexByteStream={hexByteStream}
+                  onClearHex={clearHexStream}
                   isConnected={isConnected}
                 />
               </div>
@@ -229,16 +227,6 @@ function AppContent() {
                   onToggleBridge={() => {}}
                   bridgeLog={[]}
                   onClearBridgeLog={() => {}}
-                  onSendRawBytes={sendRawBytes}
-                  onLogMessage={addLog}
-                />
-              </div>
-            )}
-
-            {activeTool === 'ubx' && (
-              <div className="w-full">
-                <UbxConfigDeck
-                  isConnected={isConnected}
                   onSendRawBytes={sendRawBytes}
                   onLogMessage={addLog}
                 />
@@ -286,12 +274,14 @@ function AppContent() {
               </div>
             )}
 
-            {activeTool === 'wardrive' && (
+            {['wardrive', 'ubx'].includes(activeTool) && (
               <div className="w-full">
-                <GpsWardriverDeck
+                <GpsNavigationSuite
+                  initialTab={activeTool === 'ubx' ? 'ubx' : 'wardrive'}
                   latestTextStream={latestRxText}
                   isConnected={isConnected}
                   onLogMessage={addLog}
+                  onSendRawBytes={sendRawBytes}
                 />
               </div>
             )}
@@ -344,16 +334,10 @@ function AppContent() {
               </div>
             )}
 
-            {/* 4 New Hardware Diagnostic Tools */}
-            {activeTool === 'ch341a' && (
+            {/* Hardware Programmers Suite */}
+            {['programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp'].includes(activeTool) && (
               <div className="w-full">
-                <Ch341aProgrammer />
-              </div>
-            )}
-
-            {activeTool === 'cmsis-dap' && (
-              <div className="w-full">
-                <CmsisDapDebugger />
+                <HardwareProgrammersSuite initialTab={activeTool} />
               </div>
             )}
 
@@ -369,7 +353,7 @@ function AppContent() {
               </div>
             )}
 
-            {/* 6 New Hardware Workbenches */}
+            {/* Hardware Workbenches */}
             {activeTool === 'usb-pd' && (
               <div className="w-full">
                 <UsbPdWorkbench />
@@ -382,21 +366,9 @@ function AppContent() {
               </div>
             )}
 
-            {activeTool === 'jtag-programmer' && (
-              <div className="w-full">
-                <JtagWorkbench />
-              </div>
-            )}
-
             {activeTool === 'modbus-rtu' && (
               <div className="w-full">
                 <ModbusWorkbench />
-              </div>
-            )}
-
-            {activeTool === 'avr-isp' && (
-              <div className="w-full">
-                <AvrIspWorkbench />
               </div>
             )}
 
@@ -424,21 +396,9 @@ function AppContent() {
               </div>
             )}
 
-            {activeTool === 'cyberchef' && (
+            {['ducky', 'cyberchef'].includes(activeTool) && (
               <div className="w-full">
-                <CyberChefWorkbench />
-              </div>
-            )}
-
-            {activeTool === 'ducky' && (
-              <div className="w-full">
-                <DuckyScriptStudio />
-              </div>
-            )}
-
-            {activeTool === 'packet-analyzer' && (
-              <div className="w-full">
-                <PacketAnalyzerWorkbench />
+                <BadUsbPayloadSuite initialTab={activeTool === 'cyberchef' ? 'cyberchef' : 'ducky'} />
               </div>
             )}
             </React.Suspense>

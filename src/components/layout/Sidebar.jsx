@@ -41,39 +41,44 @@ export const SIDEBAR_SECTIONS = [
   },
   {
     id: 'analysis',
-    title: 'ANALYSIS & SNIFFING',
+    title: 'ANALYSIS & PROTOCOL LAB',
     items: [
+      { id: 'packet-analyzer', name: 'Packet & Protocol Lab', icon: Activity, accent: 'purple', desc: 'Wi-Fi 802.11, PCAP, Hex Stream & Packet Framer' },
       { id: 'logic-analyzer', name: '24MHz Logic Analyzer', icon: Activity, accent: 'cyan', desc: '8-channel digital waveforms & protocol decoders' },
-      { id: 'can-bus', name: 'CAN Bus & OBD-II Scanner', icon: Gauge, accent: 'emerald', desc: 'Live packet sniffer & car diagnostics' },
-      { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF Sub-GHz RF deck, LCD screen & FREQMAN' },
-      { id: 'flipper', name: 'Flipper Zero Suite', icon: Bot, accent: 'amber', desc: 'qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC & SD' },
-      { id: 'proxmark', name: 'Proxmark3 / PM5 Suite', icon: Radio, accent: 'cyan', desc: '13.56MHz & 125kHz RFID cloner, raw NG framing & WebFlash' },
+      { id: 'can-bus', name: 'CAN Bus & OBD-II Scanner', icon: Gauge, accent: 'emerald', desc: 'Live packet sniffer & automotive diagnostics' },
       { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', desc: '1-click chip identification & register watch' },
       { id: 'modbus-rtu', name: 'Modbus RTU & RS-485', icon: Activity, accent: 'amber', desc: 'Industrial holding registers & inverter telemetry' },
-      { id: 'packet-analyzer', name: 'Packet & Protocol Analyzer', icon: Activity, accent: 'purple', desc: '802.11 Wi-Fi frames, EAPOL, PCAP & hex inspector' },
-      { id: 'cyberchef', name: 'CyberChef Obfuscator', icon: Sparkles, accent: 'cyan', desc: 'Recipe pipeline, multi-format encoder/decoder & payload obfuscator' },
-      { id: 'hex', name: 'Hex Stream Viewer', icon: Binary, accent: 'cyan', desc: 'Live 8/16-byte hexdump inspector' },
       { id: 'plotter', name: 'Oscilloscope Plotter', icon: Activity, accent: 'rose', desc: 'Multi-channel live waveforms' },
-      { id: 'packets', name: 'Packet Framer', icon: Layers, accent: 'emerald', desc: 'SLIP, COBS & custom protocols' },
-      { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer' },
-      { id: 'ubx', name: 'u-blox GPS (UBX)', icon: Navigation, accent: 'cyan', desc: 'Binary GPS protocol configurator' }
+      { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer' }
+    ]
+  },
+  {
+    id: 'rf',
+    title: 'RF, WIRELESS & BADGES',
+    items: [
+      { id: 'flipper', name: 'Flipper Zero Suite', icon: Bot, accent: 'amber', desc: 'qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC & SD' },
+      { id: 'proxmark', name: 'Proxmark3 / PM5 Suite', icon: Radio, accent: 'cyan', desc: '13.56MHz & 125kHz RFID cloner, raw NG framing & WebFlash' },
+      { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF Sub-GHz RF deck, LCD screen & FREQMAN' },
+      { id: 'rfid-nfc', name: 'RFID & NFC Card Deck', icon: Radio, accent: 'purple', desc: '125kHz badge cloner & Mifare sector dump' },
+      { id: 'wardrive', name: 'GPS & Wardrive Suite', icon: Compass, accent: 'emerald', desc: 'NMEA sentence tracker, live map & u-blox UBX' }
+    ]
+  },
+  {
+    id: 'programmers',
+    title: 'HARDWARE & PAYLOADS',
+    items: [
+      { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript compiler, simulator & CyberChef obfuscator' },
+      { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A BIOS flash, CMSIS-DAP, JTAG SVF & AVR ISP' },
+      { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'PPS variable voltage trigger & VBUS analyzer' }
     ]
   },
   {
     id: 'utilities',
     title: 'DEVICE UTILITIES',
     items: [
-      { id: 'ducky', name: 'DuckyScript BadUSB Studio', icon: Keyboard, accent: 'amber', desc: 'HID keystroke compiler, simulator & Flipper exporter' },
-      { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'PPS variable voltage trigger & VBUS analyzer' },
-      { id: 'jtag-programmer', name: 'JTAG & SVF Player', icon: Layers, accent: 'purple', desc: 'Boundary scan & FPGA bitstream runner' },
-      { id: 'avr-isp', name: 'AVR ISP & Bootloader', icon: Cpu, accent: 'cyan', desc: 'Optiboot burner & fuse bit calculator' },
-      { id: 'rfid-nfc', name: 'RFID & NFC Card Deck', icon: Radio, accent: 'purple', desc: '125kHz badge cloner & Mifare sector dump' },
-      { id: 'ch341a', name: 'CH341A BIOS Programmer', icon: HardDrive, accent: 'amber', desc: 'SPI/I2C EEPROM recovery & flash programmer' },
-      { id: 'cmsis-dap', name: 'CMSIS-DAP ARM Debugger', icon: Cpu, accent: 'cyan', desc: 'ARM Cortex-M SWD halt, step & SRAM watch' },
       { id: 'micropython', name: 'MicroPython Files', icon: FileCode, accent: 'purple', desc: 'On-chip filesystem explorer' },
       { id: 'improv', name: 'Improv Wi-Fi', icon: Wifi, accent: 'emerald', desc: 'Standard serial Wi-Fi provisioner' },
       { id: 'telemetry', name: 'Telemetry Gauges', icon: Gauge, accent: 'cyan', desc: 'Speedometer sensor dials' },
-      { id: 'wardrive', name: 'GPS Wardriver', icon: Compass, accent: 'emerald', desc: 'NMEA sentence tracker & mapper' },
       { id: 'alerts', name: 'Crash & Panic Alerts', icon: ShieldAlert, accent: 'rose', desc: 'Auto-detect kernel panics' },
       { id: 'automation', name: 'Test Runner & Scripts', icon: Bot, accent: 'purple', desc: 'Automated JS test routines' },
       { id: 'autopsy', name: 'USB Recon & Autopsy', icon: Usb, accent: 'amber', desc: 'Mystery chip descriptor analysis' }
@@ -191,7 +196,12 @@ export default function Sidebar({
               <div className="space-y-0.5">
                 {visibleItems.map((item) => {
                   const Icon = item.icon;
-                  const isActive = activeTool === item.id;
+                  const isActive = 
+                    activeTool === item.id ||
+                    (item.id === 'packet-analyzer' && ['packet-analyzer', 'hex', 'packets'].includes(activeTool)) ||
+                    (item.id === 'ducky' && ['ducky', 'cyberchef'].includes(activeTool)) ||
+                    (item.id === 'wardrive' && ['wardrive', 'ubx'].includes(activeTool)) ||
+                    (item.id === 'programmers' && ['programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp'].includes(activeTool));
 
                   return (
                     <button

@@ -67,7 +67,7 @@ export default function ProxmarkWorkbench() {
     const unsubTx = device.on('packetSent', ({ packet }) => {
       addLog(
         'tx',
-        `TX -> CMD: 0x${packet.cmd.toString(16).padStart(4, '0')} | LEN: ${packet.length} | ARG0: 0x${packet.arg0.toString(16)} | ARG1: 0x${packet.arg1.toString(16)}`
+        `TX -> CMD: 0x${(packet.cmd ?? 0).toString(16).padStart(4, '0')} | LEN: ${packet.length ?? 0} | ARG0: 0x${(packet.arg0 ?? 0).toString(16)} | ARG1: 0x${(packet.arg1 ?? 0).toString(16)}`
       );
     });
 
@@ -75,7 +75,7 @@ export default function ProxmarkWorkbench() {
       if (packet.cmd !== 0x0105) {
         addLog(
           'rx',
-          `RX <- CMD: 0x${packet.cmd.toString(16).padStart(4, '0')} | LEN: ${packet.length} | ARG0: 0x${packet.arg0.toString(16)} | ARG1: 0x${packet.arg1.toString(16)}`
+          `RX <- CMD: 0x${(packet.cmd ?? 0).toString(16).padStart(4, '0')} | LEN: ${packet.length ?? 0} | ARG0: 0x${(packet.arg0 ?? 0).toString(16)} | ARG1: 0x${(packet.arg1 ?? 0).toString(16)}`
         );
       }
     });
@@ -479,9 +479,9 @@ export default function ProxmarkWorkbench() {
                       <span className="text-slate-500 font-mono">
                         ({(art.byteSize / 1024).toFixed(1)} KB)
                       </span>
-                      {art.targetAddress !== undefined && (
+                      {art.targetAddress !== undefined && art.targetAddress !== null && (
                         <span className="text-slate-500 font-mono">
-                          @ 0x{art.targetAddress.toString(16)}
+                          @ 0x{(art.targetAddress ?? 0).toString(16)}
                         </span>
                       )}
                     </div>

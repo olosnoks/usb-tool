@@ -25,11 +25,15 @@ export const PM3_COMMANDS = {
 
   // Low frequency (125 kHz)
   CMD_LF_EM410X_WATCH: 0x021c,
+  CMD_LF_EM410X_READ: 0x021c,
   CMD_LF_SNIFF_RAW_ADC: 0x0360,
 
   // High frequency ISO 14443A (13.56 MHz). Raw frames use the same opcode with ISO14A_RAW.
   CMD_HF_ISO14443A_SIMULATE: 0x0384,
   CMD_HF_ISO14443A_READER: 0x0385,
+  CMD_HF_14A_READER: 0x0385,
+  CMD_HF_14A_RAW: 0x0385,
+  CMD_HF_14A_INFO: 0x0385,
 
   // Antenna tuning
   CMD_MEASURE_ANTENNA_TUNING: 0x0400,
@@ -40,7 +44,7 @@ export const PM3_COMMANDS = {
 } as const;
 
 /** Legacy aliases used by the UI schema / device helpers. */
-export const CMD_HF_14A_READER = PM3_COMMANDS.CMD_HF_ISO14443A_READER;
+export const CMD_HF_14A_READER = PM3_COMMANDS.CMD_HF_14A_READER;
 
 /** ISO14A_* flags for CMD_HF_ISO14443A_READER arg0 */
 export const ISO14A = {
