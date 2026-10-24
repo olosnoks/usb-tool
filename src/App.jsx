@@ -38,6 +38,10 @@ const CyberChefWorkbench = React.lazy(() => import('./components/tools/CyberChef
 const DuckyScriptStudio = React.lazy(() => import('./components/tools/DuckyScriptStudio'));
 const PacketAnalyzerWorkbench = React.lazy(() => import('./components/tools/PacketAnalyzerWorkbench'));
 const GpsWardriverDeck = React.lazy(() => import('./components/GpsWardriverDeck'));
+const CrashAlertDeck = React.lazy(() => import('./components/CrashAlertDeck'));
+const ScriptRunner = React.lazy(() => import('./components/ScriptRunner'));
+const UsbReconDeck = React.lazy(() => import('./components/UsbReconDeck'));
+const EspMemoryInspector = React.lazy(() => import('./components/EspMemoryInspector'));
 
 // Common & Guide Components
 import ToolGuide from './components/common/ToolGuide';

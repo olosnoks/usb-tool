@@ -8,64 +8,74 @@ const REMOTE_MANIFEST_URL = 'https://espterminator.com/firmware/manifest.json';
 const CACHE_KEY = 'skons_firmware_catalog_v1';
 const CACHE_EXPIRY_MS = 1000 * 60 * 60 * 6; // 6 hours
 
-// Curated high-priority offline fallback presets
+// Curated high-priority offline fallback presets pointing to real upstream releases
 export const BUNDLED_FALLBACK_PRESETS = [
   {
-    name: 'ESP32 Marauder',
+    name: 'Flipper WiFi Dev Board (Marauder)',
+    device: 'ESP32-S2',
+    type: 'marauder',
+    version: 'v1.19.2',
+    description: 'Upstream ESP32 Marauder Wi-Fi & BLE pentesting suite compiled for Flipper Zero WiFi Dev Board.',
+    downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_flipper.bin',
+    files: [
+      { name: 'esp32_marauder_v1_19_2_flipper.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_flipper.bin' }
+    ],
+    features: ['Wi-Fi Beacon Flood', 'Deauth Detector & Scanner', 'PMKID Capture', 'BLE Wardriving', 'PCAP to Flipper'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: false }
+  },
+  {
+    name: 'Generic ESP32 (Marauder)',
     device: 'ESP32',
     type: 'marauder',
-    version: 'v0.13.10',
-    description: 'Suite of Wi-Fi & Bluetooth offensive/defensive analysis tools for ESP32 with SD card logging.',
-    downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v0.13.10/esp32_marauder_v0_13_10_20231208_flipper.bin',
+    version: 'v1.19.2',
+    description: 'Official ESP32 Marauder firmware for generic NodeMCU / WROOM boards with OLED & SD card support.',
+    downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_old_hardware.bin',
     files: [
-      { name: 'bootloader.bin', address: '0x1000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v0.13.10/bootloader.bin' },
-      { name: 'partitions.bin', address: '0x8000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v0.13.10/partitions.bin' },
-      { name: 'esp32_marauder.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v0.13.10/esp32_marauder_v0_13_10_20231208_flipper.bin' }
+      { name: 'esp32_marauder_v1_19_2_generic.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_old_hardware.bin' }
     ],
-    features: ['Wi-Fi Beacon Flood', 'Deauth Detector & Scanner', 'PMKID Capture', 'BLE Wardriving', 'PCAP to SD card'],
+    features: ['Wi-Fi Packet Sniffer', 'Deauth Attack Engine', 'Probe Request Monitor', 'BLE Spam & Detection'],
+    flashConfig: { flashMode: 'keep', baudRate: 115200, eraseAll: false }
+  },
+  {
+    name: 'ESP32-S3 Multiboard (Marauder)',
+    device: 'ESP32-S3',
+    type: 'marauder',
+    version: 'v1.19.2',
+    description: 'Official Marauder for ESP32-S3 and Flipper Zero Multiboard S3 modules.',
+    downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_multiboardS3.bin',
+    files: [
+      { name: 'esp32_marauder_v1_19_2_multiboardS3.bin', address: '0x10000', downloadUrl: 'https://github.com/justcallmekoko/ESP32Marauder/releases/download/v1.19.2/esp32_marauder_v1_19_2_20261023_multiboardS3.bin' }
+    ],
+    features: ['Dual Core S3 Acceleration', 'High-Speed Packet Sniffing', 'RGB Status LED', 'USB CDC Serial'],
     flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: false }
   },
   {
-    name: 'Meshtastic ESP32',
+    name: 'AWOK Mini (Bruce)',
     device: 'ESP32',
-    type: 'meshtastic',
-    version: 'v2.5.4',
-    description: 'Off-grid decentralized mesh communication firmware for LoRa & Wi-Fi/BLE devices.',
-    downloadUrl: 'https://github.com/meshtastic/firmware/releases/download/v2.5.4.195cb9a/firmware-esp32-2.5.4.195cb9a.bin',
-    files: [
-      { name: 'meshtastic-esp32-factory.bin', address: '0x0', downloadUrl: 'https://github.com/meshtastic/firmware/releases/download/v2.5.4.195cb9a/firmware-esp32-2.5.4.195cb9a.bin' }
-    ],
-    isMergedBinary: true,
-    features: ['Encrypted Mesh Networking', 'GPS Location Sharing', 'BLE / Wi-Fi Mobile App Gateway', 'Long Range LoRa Packets'],
-    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
-  },
-  {
-    name: 'Bruce ESP32-S3',
-    device: 'ESP32-S3',
     type: 'bruce',
-    version: 'v1.6.2',
-    description: 'Multi-tool firmware for M5Stack, Cardputer, and CYD boards with RF, IR, Wi-Fi, and BLE capabilities.',
-    downloadUrl: 'https://github.com/pr3y/Bruce/releases/download/v1.6.2/bruce-cardputer.bin',
+    version: '1.16.1',
+    description: 'Multi-tool firmware for ESP32 with RF, IR, Wi-Fi, and BLE capabilities. Complete factory-merged binary for 0x0.',
+    downloadUrl: 'https://github.com/BruceDevices/firmware/releases/download/1.16.1/Bruce-Awok-Mini.bin',
     files: [
-      { name: 'bruce-cardputer.bin', address: '0x0', downloadUrl: 'https://github.com/pr3y/Bruce/releases/download/v1.6.2/bruce-cardputer.bin' }
+      { name: 'Bruce-Awok-Mini.bin', address: '0x0', downloadUrl: 'https://github.com/BruceDevices/firmware/releases/download/1.16.1/Bruce-Awok-Mini.bin' }
     ],
     isMergedBinary: true,
-    features: ['Sub-GHz & IR Control', 'Wi-Fi & BLE Toolkit', 'M5Stack Cardputer Keyboard Support', 'SD File Explorer'],
+    features: ['Sub-GHz & IR Control', 'Wi-Fi & BLE Toolkit', 'M5Stack / Cardputer / AWOK Support', 'SD File Explorer'],
     flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
   },
   {
-    name: 'M5Launcher',
-    device: 'ESP32-S3',
-    type: 'launcher',
-    version: 'v2.2.0',
-    description: 'Multi-bootloader firmware manager that downloads and boots multiple binaries directly from an SD card or Wi-Fi OTA.',
-    downloadUrl: 'https://github.com/bmorcelli/M5Launcher/releases/download/v2.2.0/M5Launcher-S3.bin',
+    name: 'CYD 2432S028 (Bruce)',
+    device: 'ESP32',
+    type: 'bruce',
+    version: '1.16.1',
+    description: 'Bruce portable RF/BLE multi-tool for the Cheap Yellow Display (ESP32 2.8" Touch TFT). Factory merged for 0x0.',
+    downloadUrl: 'https://github.com/BruceDevices/firmware/releases/download/1.16.1/Bruce-CYD-2432S028.bin',
     files: [
-      { name: 'M5Launcher-S3.bin', address: '0x0', downloadUrl: 'https://github.com/bmorcelli/M5Launcher/releases/download/v2.2.0/M5Launcher-S3.bin' }
+      { name: 'Bruce-CYD-2432S028.bin', address: '0x0', downloadUrl: 'https://github.com/BruceDevices/firmware/releases/download/1.16.1/Bruce-CYD-2432S028.bin' }
     ],
     isMergedBinary: true,
-    features: ['OTA Binary Downloader', 'Multi-boot from SD Card', 'Wi-Fi Portal', 'Auto-recovery'],
-    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: false }
+    features: ['Full Touchscreen GUI', 'Sub-GHz / IR Transceiver', 'Wi-Fi Wardrive & Scan', 'RGB LED & Beeper'],
+    flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: true }
   },
   {
     name: 'WLED ESP32',
@@ -75,7 +85,7 @@ export const BUNDLED_FALLBACK_PRESETS = [
     description: 'Fast and feature-rich implementation of an ESP8266/ESP32 web server to control NeoPixel (WS2812B, WS2811, SK6812) LED strips.',
     downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v0.14.4/WLED_0.14.4_ESP32.bin',
     files: [
-      { name: 'WLED_ESP32.bin', address: '0x10000', downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v0.14.4/WLED_0.14.4_ESP32.bin' }
+      { name: 'WLED_0.14.4_ESP32.bin', address: '0x10000', downloadUrl: 'https://github.com/Aircoookie/WLED/releases/download/v0.14.4/WLED_0.14.4_ESP32.bin' }
     ],
     features: ['100+ Visual Effects', 'E1.31 / DMX / Art-Net Sync', 'Home Assistant & Alexa Support', 'Web UI Controller'],
     flashConfig: { flashMode: 'keep', baudRate: 921600, eraseAll: false }
@@ -85,10 +95,10 @@ export const BUNDLED_FALLBACK_PRESETS = [
     device: 'ESP32',
     type: 'interpreter',
     version: 'v1.23.0',
-    description: 'Official Python 3 runtime optimized to run on microcontroller boards with hardware REPL.',
+    description: 'Official Python 3 runtime optimized to run on ESP32 boards with interactive hardware REPL.',
     downloadUrl: 'https://micropython.org/resources/firmware/ESP32_GENERIC-20240602-v1.23.0.bin',
     files: [
-      { name: 'micropython-esp32.bin', address: '0x1000', downloadUrl: 'https://micropython.org/resources/firmware/ESP32_GENERIC-20240602-v1.23.0.bin' }
+      { name: 'ESP32_GENERIC-v1.23.0.bin', address: '0x1000', downloadUrl: 'https://micropython.org/resources/firmware/ESP32_GENERIC-20240602-v1.23.0.bin' }
     ],
     isMergedBinary: true,
     features: ['Python 3 REPL over Serial', 'Hardware GPIO / SPI / I2C APIs', 'Micro-file System', 'Low Power Sleep'],
@@ -136,4 +146,60 @@ export async function fetchFirmwareCatalog(forceRefresh = false) {
     inMemoryCatalog = BUNDLED_FALLBACK_PRESETS;
     return { options: BUNDLED_FALLBACK_PRESETS, fromCache: true, total: BUNDLED_FALLBACK_PRESETS.length, error: err.message };
   }
+}
+
+/**
+ * Downloads a firmware binary file using a robust multi-proxy fallback chain to bypass CORS.
+ * Automatically handles GitHub release redirects and relative manifest paths.
+ */
+export async function downloadFirmwareBinary(rawUrl, onProgress) {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    throw new Error('Invalid download URL provided');
+  }
+
+  // Normalize URL: resolve relative paths against espterminator.com
+  let targetUrl = rawUrl.trim();
+  if (targetUrl.startsWith('./') || targetUrl.startsWith('/')) {
+    targetUrl = 'https://espterminator.com/' + targetUrl.replace(/^\.?\//, '');
+  }
+
+  const strategies = [];
+
+  // GitHub Releases require a CORS proxy in web browsers
+  if (targetUrl.includes('github.com') || targetUrl.includes('githubusercontent.com')) {
+    // 1. ESP Terminator custom-domain proxy (fast Cloudflare Worker with server-side GH token)
+    strategies.push(`https://proxy.espterminator.com/?url=${encodeURIComponent(targetUrl)}`);
+    // 2. Jubilee Workers proxy backup
+    strategies.push(`https://esp-terminator-github-proxy.jubilee333.workers.dev/?url=${encodeURIComponent(targetUrl)}`);
+  }
+
+  // 3. corsproxy.io fallback
+  strategies.push(`https://corsproxy.io/?${encodeURIComponent(targetUrl)}`);
+
+  // 4. Direct fetch (for origins allowing CORS like raw github or custom domains)
+  strategies.push(targetUrl);
+
+  let lastError = null;
+
+  for (const fetchUrl of strategies) {
+    try {
+      if (onProgress) onProgress(`Contacting mirror: ${fetchUrl.slice(0, 45)}...`);
+      const res = await fetch(fetchUrl);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      const arrayBuf = await res.arrayBuffer();
+      if (arrayBuf && arrayBuf.byteLength > 0) {
+        return {
+          data: new Uint8Array(arrayBuf),
+          size: arrayBuf.byteLength
+        };
+      }
+    } catch (err) {
+      lastError = err;
+      console.warn(`Proxy strategy failed for ${fetchUrl.slice(0, 50)}:`, err.message);
+    }
+  }
+
+  throw new Error(`Failed to download binary from all mirrors: ${lastError?.message || 'Network error'}`);
 }

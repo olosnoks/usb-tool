@@ -16,7 +16,7 @@ import {
   Sliders,
   ChevronRight
 } from 'lucide-react';
-import { fetchFirmwareCatalog, getCachedCatalogSync, BUNDLED_FALLBACK_PRESETS } from '../../services/firmwareCatalogService';
+import { fetchFirmwareCatalog, getCachedCatalogSync, downloadFirmwareBinary, BUNDLED_FALLBACK_PRESETS } from '../../services/firmwareCatalogService';
 
 export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
   const [catalog, setCatalog] = useState(() => getCachedCatalogSync() || BUNDLED_FALLBACK_PRESETS);
@@ -74,14 +74,14 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
 
   const handleDownloadAndFlash = async (firmware) => {
     if (!onSelectFirmwareForFlashing) return;
-    setDownloadProgress({ status: 'fetching', message: `Fetching binary for ${firmware.name}...` });
+    setDownloadProgress({ status: 'fetching', message: `Initializing download for ${firmware.name}...` });
 
     try {
       // Prepare partition files list
       const filesToLoad = [];
       const files = firmware.files && firmware.files.length > 0 
         ? firmware.files 
-        : [{ name: `${firmware.name}.bin`, address: '0x0', downloadUrl: firmware.downloadUrl }];
+        : [{ name: `${firmware.name}.bin`, address: firmware.isMergedBinary ? '0x0' : '0x10000', downloadUrl: firmware.downloadUrl }];
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -90,29 +90,30 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
           message: `Downloading part ${i + 1}/${files.length}: ${file.name}...` 
         });
 
-        const res = await fetch(file.downloadUrl);
-        if (!res.ok) throw new Error(`Failed to download ${file.name} (HTTP ${res.status})`);
-        const arrayBuf = await res.arrayBuffer();
+        const { data, size } = await downloadFirmwareBinary(file.downloadUrl, (step) => {
+          setDownloadProgress({ status: 'downloading', message: `[${file.name}] ${step}` });
+        });
+
         filesToLoad.push({
           name: file.name,
-          address: file.address || (i === 0 ? '0x0' : '0x10000'),
-          data: new Uint8Array(arrayBuf),
-          size: arrayBuf.byteLength
+          address: file.address || (i === 0 && firmware.isMergedBinary ? '0x0' : '0x10000'),
+          data,
+          size
         });
       }
 
-      setDownloadProgress({ status: 'ready', message: 'Firmware loaded into flasher slots!' });
+      setDownloadProgress({ status: 'ready', message: `Successfully loaded ${filesToLoad.length} partition(s)! Redirecting to flasher...` });
       setTimeout(() => setDownloadProgress(null), 2500);
 
       onSelectFirmwareForFlashing({
         firmware,
         files: filesToLoad,
-        flashConfig: firmware.flashConfig || { baudRate: 921600, eraseAll: firmware.isMergedBinary }
+        flashConfig: firmware.flashConfig || { baudRate: 921600, eraseAll: Boolean(firmware.isMergedBinary) }
       });
     } catch (err) {
-      console.error(err);
-      setDownloadProgress({ status: 'error', message: `Download error: ${err.message}` });
-      setTimeout(() => setDownloadProgress(null), 4000);
+      console.error('Firmware download error:', err);
+      setDownloadProgress({ status: 'error', message: `Download failed: ${err.message}` });
+      setTimeout(() => setDownloadProgress(null), 5000);
     }
   };
 
