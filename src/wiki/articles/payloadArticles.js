@@ -1,117 +1,89 @@
 /**
- * Pentesting & Payloads Wiki Articles — Comprehensive Technical Manual
- * Covering RocketGod Suite, Bruce Multi-Tool, and BadUSB & DuckyScript Studio
+ * Offensive Security & BadUSB Payloads Wiki Articles — Exhaustive Technical Engineering Manual
+ * Covering RocketGod RF Suite, Bruce Multi-Tool Firmware, and BadUSB / DuckyScript Studio with CyberChef.
  */
 
 export const PAYLOAD_ARTICLES = [
   {
     id: 'rocketgod-suite',
-    toolId: 'flasher',
+    toolId: 'rocketgod-suite',
     category: 'pentesting',
-    title: 'RocketGod Pentesting Suite — 8 Wireless Security Toolkits',
-    summary: 'Comprehensive technical manual for RocketGod’s wireless security toolkits: Evil Portal, HTMLSquash, Marauder WROOM, Minino C6, Wi-Fi Pen Tool, and Hash Monster.',
-    tags: ['RocketGod', 'Evil Portal', 'HTMLSquash', 'Minino C6', 'Hash Monster', 'Deauther', 'WROOM', 'Pentesting'],
+    title: 'RocketGod RF Suite — Sub-GHz, BLE & ESP Companion Tools',
+    summary: 'Master Sub-GHz CC1101 transceivers, Flipper Zero GPIO companion wiring, custom modulation formats, and low-level RF penetration testing tools.',
+    tags: ['RocketGod', 'Sub-GHz', 'CC1101', 'Flipper Zero', 'GPIO', 'ESP32', 'RF Auditing', 'Transceiver'],
     readTime: '20 min read',
     content: `
-# RocketGod Pentesting Suite — Technical Manual
+# RocketGod RF Suite — Sub-GHz, BLE & ESP Companion Tools
 
-The **RocketGod Pentesting Suite** bundles 8 offensive and auditing toolkits created by security researcher **RocketGod**. These firmwares cover rogue captive portal generation, embedded web asset compression, miniature Marauder ports, PMKID harvesting, and frame injection.
+The **RocketGod RF Suite** aggregates hardware diagnostic and wireless penetration testing tools developed by security researcher **RocketGod**. Sourced directly from native implementations and hardware transceiver driver specifications, this guide covers Sub-GHz radio manipulation, custom modulation, and the ESP32 GPIO companion module for the Flipper Zero.
 
 ---
 
-### 1. Evil Portal ESP32 / C3 / C6
+### 1. What Is This Tool & Why Do You Need It?
 
-#### How It Works Under the Hood
-1. **Rogue Access Point**: Spawns an open 802.11 AP (e.g. \`Free_Public_WiFi\`).
-2. **DNS Hijacking (DNS Spoofing)**: Runs an embedded DNS server on UDP port 53. Whenever a connected device sends a DNS query, the DNS server intercepts the query and responds with the ESP's own IP address (\`192.168.4.1\`).
-3. **Captive Network Assistant (CNA) Trigger**: Mobile operating systems (iOS, Android, Windows) immediately detect that the internet is walled off and launch their built-in modal captive login screen.
-4. **Credential Harvesting**: When a user inputs credentials into the phishing form and submits, the HTTP POST request is captured by the microcontroller and appended to \`/credentials.txt\` on internal SPIFFS / LittleFS flash storage or an external MicroSD card.
+Modern building automation, smart utility meters, automotive remote keyless entry (RKE), gate barriers, and industrial remote controls communicate over sub-gigahertz ISM (Industrial, Scientific, and Medical) radio bands.
 
-<details>
-<summary>Deep Dive: Captive Network Assistant (CNA) Bypass & OS Probing Endpoints</summary>
+The **RocketGod RF Suite** provides deep technical control over RF transceivers:
+- Testing physical radio links across 300 MHz to 928 MHz.
+- Interfacing external ESP32 coprocessors directly to the Flipper Zero's 18-pin expansion header.
+- Analyzing custom pulse-width modulated (PWM) and frequency-shift keyed (FSK) digital signals.
 
-Operating systems perform automatic connectivity checks upon associating with any Wi-Fi network:
+---
 
-| Operating System | Probing Endpoint URL | Expected Non-Captive Response | Evil Portal Interception Action |
-| :--- | :--- | :--- | :--- |
-| **Apple iOS / macOS** | \`http://captive.apple.com/hotspot-detect.html\` | \`<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>\` | DNS maps to \`192.168.4.1\`; HTTP server returns 302 redirect or login HTML, forcing modal CNA. |
-| **Android / ChromeOS** | \`http://connectivitycheck.gstatic.com/generate_204\` | HTTP \`204 No Content\` | Returns HTTP \`200 OK\` with login portal body, triggering "Sign in to Wi-Fi network" notification. |
-| **Windows 10 / 11** | \`http://www.msftconnecttest.com/connecttest.txt\` | Text string: \`Microsoft Connect Test\` | Returns HTML page; NCSI service detects response mismatch and launches Edge browser. |
-| **Mozilla Firefox** | \`http://detectportal.firefox.com/success.txt\` | Text string: \`success\\n\` | Returns login portal page. |
+### 2. Under the Hood: Texas Instruments CC1101 Architecture
 
-</details>
+The core of modern Sub-GHz auditing hardware is the **Texas Instruments CC1101** sub-1GHz RF transceiver. It integrates a highly configurable hardware baseband modem supporting flexible packet handling, data buffering, and automatic clear channel assessment (CCA).
 
 <details>
-<summary>PMKID & Hashcat Mode 22000 Hash Extraction Details</summary>
+<summary>Deep-Dive: Carrier Frequency Synthesizer Math & Registers</summary>
 
-Traditional WPA handshake cracking requires waiting for an active user to connect to the router to capture the 4-way handshake. **Hash Monster** and **RocketGod Wi-Fi Pen Tool** execute the clientless **PMKID Attack**:
+The CC1101 carrier frequency is generated by an internal Fractional-N PLL derived from an external 26.0 MHz crystal reference oscillator ($f_{\\text{xosc}}$):
 
-#### PMKID Cryptographic Derivation
-Modern APs implementing 802.11i/r transmit the Pairwise Master Key Identifier (PMKID) inside the RSN Information Element (IE 48) of Message 1 of the EAPOL handshake:
-$$\text{PMKID} = \text{HMAC-SHA1-128}\left(\text{PMK}, \text{"PMK Name"} \,\|\, \text{MAC}_{\text{AP}} \,\|\, \text{MAC}_{\text{STA}}\right)$$
-
-#### Hashcat Mode 22000 Format
-Captured PMKID lines are formatted for instant GPU cracking in Hashcat:
+#### Carrier Frequency Equation:
 \`\`\`text
-WPA*02*<PMKID_HEX>*<MAC_AP_HEX>*<MAC_STA_HEX>*<ESSID_HEX>***
+f_carrier = (f_xosc / 2^16) * (FREQ[23:0] + CHAN * CHANSPC)
 \`\`\`
-- \`WPA*02*\`: Specifies EAPOL / PMKID format v2.
-- No client interaction is required — you can capture PMKIDs from any vulnerable access point within 500ms of association!
 
+- **FREQ2 (0x09), FREQ1 (0x0A), FREQ0 (0x0B)**: 24-bit base frequency word.
+- **MDMCFG0 (0x14) & MDMCFG1 (0x13)**: Channel spacing exponent and mantissa.
+- **CHANNR (0x0A)**: 8-bit channel number.
+
+#### Supported Modulation Modes:
+1. **2-FSK / 4-FSK**: Frequency Shift Keying (common in smart gas/water utility meters).
+2. **GFSK (Gaussian FSK)**: FSK filtered through a Gaussian filter to reduce spectral sidelobes.
+3. **ASK / OOK (Amplitude Shift Keying / On-Off Keying)**: Used by 95% of garage door openers, ceiling fans, and wireless doorbells.
+4. **MSK (Minimum Shift Keying)**: Phase-continuous FSK with modulation index 0.5.
+</details>
+
+<details>
+<summary>Deep-Dive: Flipper Zero GPIO Companion Wiring & Serial Interface</summary>
+
+To expand the Flipper Zero with Wi-Fi and advanced scanning capabilities, an external ESP32 board connects directly to the Flipper's top 18-pin GPIO header:
+
+\`\`\`text
+Target ESP32 Pin                  Flipper Zero 18-Pin Header
+3.3V (VCC)       <------------->  Pin 9  (3.3V Power Out - Max 800mA)
+GND (Ground)     <------------->  Pin 18 (GND Common Electrical Ground)
+TX (GPIO 1)      <------------->  Pin 14 (USART RX - STM32WB55 LPUART)
+RX (GPIO 3)      <------------->  Pin 13 (USART TX - STM32WB55 LPUART)
+\`\`\`
+
+#### Operational Flow:
+1. The Flipper Zero powers the ESP32 coprocessor directly from its internal 2,100 mAh LiPo battery.
+2. The user navigates menus on the Flipper's monochrome screen using the physical D-pad.
+3. The Flipper sends serial command strings over the LPUART bus to the ESP32.
+4. The ESP32 executes promiscuous Wi-Fi packet capture or BLE scanning and streams parsed data back to the Flipper for real-time LCD rendering!
 </details>
 
 ---
 
-### 2. HTMLSquash — Embedded Web Minifier
+### 3. Step-by-Step Usage Guide
 
-Microcontrollers have extremely limited RAM and flash memory (typically only 4MB flash and 520KB SRAM). Storing rich HTML pages with CSS styling and JavaScript logic directly in C++ source code is tedious and memory-heavy.
-
-#### What HTMLSquash Does:
-- **Minification**: Strips all HTML/CSS/JS comments, whitespace, and line breaks.
-- **Inlining**: Automatically converts external CSS, JS, and image assets (PNG, SVG, JPG) into base64 data URIs embedded directly inside the single HTML payload.
-- **PROGMEM Header Generation**: Compresses the minified HTML and emits a C/C++ header file containing a \`const uint8_t portal_html[] PROGMEM\` byte array ready to compile directly into your Arduino IDE or ESP-IDF projects!
-
----
-
-### 3. Marauder WROOM Edition
-
-The **ESP32-WROOM-32** is the most widely sold 30-pin and 38-pin ESP32 development board on the market.
-- **Headless Architecture**: Unlike Marauder builds designed for CYD or LilyGO displays, the WROOM edition runs headless without requiring an expensive SPI display.
-- **WebSerial Control**: Connects directly to Skon's USB Tool terminal at **115,200 baud**.
-- **Android Companion Ready**: Compatible with Bluetooth / Serial USB OTG Android companion applications for discreet field wardriving.
-
----
-
-### 4. Minino ESP32-C6
-
-The **ESP32-C6** is Espressif’s RISC-V SoC featuring integrated 2.4 GHz Wi-Fi 6 (802.11ax), Bluetooth 5 (LE), and IEEE 802.15.4 (Zigbee / Thread).
-- **Lower Power Draw**: Consumes up to 40% less current than the original Xtensa ESP32 during continuous scanning loops.
-- **Wi-Fi 6 Detection**: Maps Wi-Fi 6 OFDMA channels and modern BSS Coloring features in enterprise environments.
-
----
-
-### 5. Wi-Fi Pen Tool
-
-The **Wi-Fi Pen Tool** is designed for automated penetration testing and rapid physical security assessments.
-- **Zero-Interaction Autonomous Mode**: Once powered on via a USB power bank, the device begins an automated assessment loop:
-  1. Cycles all channels to identify target APs with weak encryption (WPA-TKIP, Open, WPS enabled).
-  2. Sends targeted deauthentication pulses to connected stations.
-  3. Listens for returning 4-way handshakes and saves them to internal flash storage.
-  4. Blinks an LED confirmation when a handshake is secured.
-
----
-
-### 6. Flipper Zero Easy Marauder
-
-A dedicated companion firmware for ESP32 Wi-Fi development boards wired directly to the Flipper Zero's 18-pin GPIO header:
-\`\`\`
-ESP32 Board       Flipper Zero GPIO Header
-3.3V -----------> Pin 9 (3.3V)
-GND ------------> Pin 18 (GND)
-TX (GPIO 1) ----> Pin 14 (USART RX)
-RX (GPIO 3) ----> Pin 13 (USART TX)
-\`\`\`
-Controlled entirely using the Flipper Zero's physical screen and D-pad through the Flipper Marauder companion application!
+1. Plug your ESP32 companion board into your PC via USB.
+2. In Skon's USB Tool, select **Firmware Flasher** -> **RocketGod Suite**.
+3. Select your target device and click **Connect & Flash**.
+4. Once flashed, unplug USB and seat the board into the Flipper Zero GPIO header.
+5. On your Flipper, launch the companion application to begin auditing!
 
 ---
 
@@ -131,71 +103,65 @@ Controlled entirely using the Flipper Zero's physical screen and D-pad through t
     title: 'Bruce Multi-Tool — M5Stack & ESP32 Wireless Swiss-Army Knife',
     summary: 'Comprehensive guide to Bruce firmware: Sub-GHz RF, IR remote cloning, BLE spamming (Apple/Android/Windows), Wi-Fi auditing, and BadUSB payloads.',
     tags: ['Bruce', 'M5Stack', 'Cardputer', 'BLE Spam', 'Sub-GHz', 'IR Blaster', 'RFID', 'BadUSB'],
-    readTime: '18 min read',
+    readTime: '22 min read',
     content: `
-# Bruce Multi-Tool — Wireless Auditing Firmware
+# Bruce Multi-Tool — M5Stack & ESP32 Wireless Swiss-Army Knife
 
-**Bruce** is an all-in-one open-source firmware suite designed for M5Stack hardware (M5Stack Core, StickC Plus, Plus2, Cardputer) and standard ESP32 development boards. It transforms compact pocket hardware into a versatile wireless auditing and hardware testing instrument.
+**Bruce** is a multi-purpose offensive and defensive security firmware suite created by **pr3y** and open-source contributors, designed specifically for the **M5Stack ecosystem** (M5Stack Cardputer, M5StickC-Plus, M5StickC-Plus2, M5Stack Core, Core2, and CoreS3).
 
 ---
 
-### 1. Bluetooth Low Energy (BLE) Advertisement Flooding
+### 1. Hardware Ecosystem & Architecture
 
-Modern smartphones and operating systems continuously listen for background BLE advertisements to simplify pairing with accessories. Bruce implements high-intensity advertisement flooding:
+Bruce leverages the unique integrated hardware peripherals of M5Stack devices:
+- **M5Stack Cardputer**: ESP32-S3 dual-core Xtensa LX7, 56-key physical QWERTY keyboard, 1.14-inch IPS display, SPM1423 digital microphone, NS4148 audio amplifier, microSD slot, and internal Li-ion battery.
+- **M5StickC-Plus2**: Ultra-compact ESP32-PICO-V3-02, built-in IR transmitter LED, IR receiver, 6-axis MPU6886 IMU, microphone, and 200 mAh battery.
+
+---
+
+### 2. Under the Hood: Wireless & RF Capabilities
 
 <details>
-<summary>BLE Advertisement Protocol Breakdown (Apple Continuity, GFPS, Swift Pair)</summary>
+<summary>Deep-Dive: BLE Advertisement Spamming Mechanics (Apple, Android, Windows)</summary>
 
-#### 1. Apple Action Modal (Continuity Protocol)
-Apple devices continuously scan for BLE packets with Apple's Company Identifier \`0x004C\`:
-- **Header**: Length byte, \`0xFF\` (Manufacturer Specific Data), \`0x4C 0x00\` (Apple Inc).
-- **Type Byte**: \`0x07\` (AirDrop), \`0x09\` (AirPods / Beats Proximity Pairing), \`0x10\` (Nearby Action / Setup Modal).
-- **Model ID**: 16-bit code identifying device (e.g. \`0x02 0x20\` for AirPods Pro, \`0x05 0x20\` for AirPods Max).
-- When spammed at 20ms intervals across channels 37, 38, and 39, iOS displays continuous modal dialogues.
+Bluetooth Low Energy (BLE) peripheral devices broadcast non-connectable undirected advertising packets (\`ADV_NONCONN_IND\`) at 2.4 GHz across three dedicated advertising channels: **Channel 37 (2402 MHz)**, **Channel 38 (2426 MHz)**, and **Channel 39 (2480 MHz)**.
 
-#### 2. Android Fast Pair (GFPS — Google Fast Pair Service)
-- **Service UUID**: \`0xFE2C\` registered to Google LLC.
-- **Payload**: Contains a 3-byte Model ID (e.g. Pixel Buds, Sony WH-1000XM5).
-- Android devices with Google Play Services enabled intercept the beacon and display a notification asking if the user wishes to link the device to their Google Account.
+Bruce exploits OS-level proximity pairing mechanisms by crafting authentic manufacturer advertising frames:
 
-#### 3. Windows Swift Pair
-- **Header**: \`0xFF\`, Microsoft Vendor ID \`0x06 0x00\`.
-- **Beacon Flag**: \`0x03\` (Swift Pair Sub-scenario).
-- Windows 10/11 computers display a desktop toast in the lower right notification tray prompting instant Bluetooth pairing.
+#### 1. Apple Continuity Device Modals:
+- **Company Identifier**: \`0x004C\` (Apple Inc.).
+- **Continuity Type**: \`0x07\` (Proximity Pairing / Action Modal).
+- Transmits counterfeit pairing beacons mimicking AirPods Pro, AirPods Max, AirTags, Apple Watch Setup, and Transfer Number modals. When an iOS device receives these packets, SpringBoard pops up fullscreen modal dialogs that disrupt user input.
 
+#### 2. Google Fast Pair Service (GFPS):
+- **Service UUID**: \`0xFE2C\` (Google Fast Pair).
+- Transmits raw Model IDs (e.g. Pixel Buds, Sony WH-1000XM4). Android devices with Google Play Services display notification banners prompting the user to pair.
+
+#### 3. Microsoft Swift Pair:
+- **Company Identifier**: \`0x0006\` (Microsoft Corp.).
+- **Beacon Type**: \`0x03\` (Swift Pair). Windows 10/11 machines in proximity display instant notification toasts in the bottom-right corner.
 </details>
 
 <details>
-<summary>Sub-GHz CC1101 Register Configuration & Frequency Registers</summary>
+<summary>Deep-Dive: Infrared (IR) Protocol Demodulation & TV-B-Gone</summary>
 
-When paired with a Texas Instruments **CC1101** SPI transceiver module, Bruce calculates carrier frequencies using the on-board crystal oscillator ($f_{\text{XOSC}} = 26\,\text{MHz}$):
-
-$$f_{\text{carrier}} = \frac{f_{\text{XOSC}}}{2^{16}} \times \left(\text{FREQ}[23:0] + \text{CHAN} \times \text{CHANSPC}\right)$$
-
-- **315 MHz Band**: \`FREQ2=0x0C\`, \`FREQ1=0x1D\`, \`FREQ0=0x89\` (Automotive TPMS & garage remotes).
-- **433.92 MHz Band**: \`FREQ2=0x10\`, \`FREQ1=0xB1\`, \`FREQ0=0x3B\` (ISM band gate openers & weather stations).
-- **868.3 MHz Band**: \`FREQ2=0x21\`, \`FREQ1=0x62\`, \`FREQ0=0x76\` (European smart meters & security systems).
-- **915 MHz Band**: \`FREQ2=0x23\`, \`FREQ1=0x31\`, \`FREQ0=0x3B\` (North American ISM band).
-
+For devices equipped with an IR LED and 38 kHz demodulator (M5StickC-Plus2, Cardputer):
+1. **Pulse-Distance & Pulse-Width Modulation**:
+   - **NEC Protocol**: 9ms leading pulse + 4.5ms space. A logical \`0\` is 562.5µs pulse + 562.5µs space (1.125ms total). A logical \`1\` is 562.5µs pulse + 1.6875ms space (2.25ms total).
+   - **Sony SIRC Protocol**: 2.4ms start pulse. Logical \`1\` = 1.2ms pulse; Logical \`0\` = 0.6ms pulse.
+2. **Universal TV-B-Gone Database**:
+   - Bruce cycles through over 200 known television power-off hex codes, transmitting each code over the 38 kHz modulated carrier to power down projectors, monitors, and public displays.
 </details>
 
 ---
 
-### 2. Infrared (IR) Blaster & Learning Lab
-
-For hardware equipped with an IR LED and 38kHz demodulator receiver (like M5StickC-Plus2 and Cardputer):
-- **Universal TV-B-Gone**: Rapidly cycles through hundreds of known power-off codes for Samsung, LG, Sony, Vizio, and Panasonic televisions.
-- **Signal Learning & Replay**: Point any standard remote (air conditioner, projector, soundbar) at the receiver. Bruce samples the pulse-width modulated carrier frequency (typically 38 kHz NEC or RC-5 protocol) and saves it to internal flash storage for instant replay.
-
----
-
-### 3. Flashing Bruce via Skon's Web Flasher
+### 3. Step-by-Step Flashing Guide via Web Flasher
 
 1. Open the **Firmware Flasher** tab in Skon's USB Tool.
 2. Select **Bruce Multi-Tool** from the curated preset dropdown.
-3. Select your exact device (e.g. *M5StickC-Plus2* or *M5Stack Cardputer*).
-4. Connect via USB and click **Connect & Flash**.
-5. Once completed, your device reboots into Bruce's interactive graphical menu!
+3. Select your exact device model (*M5Stack Cardputer* or *M5StickC-Plus2*).
+4. Plug your board into USB and click **Connect & Flash**.
+5. Once completed (100%), the device reboots directly into Bruce's graphical menu. Use the Cardputer keyboard or StickC buttons to explore Sub-GHz, BLE, Wi-Fi, and IR menus!
 
 ---
 
@@ -215,103 +181,115 @@ For hardware equipped with an IR LED and 38kHz demodulator receiver (like M5Stic
     title: 'BadUSB & DuckyScript Studio — Keystroke Injection & CyberChef',
     summary: 'Compile DuckyScript 1.0/2.0 payloads, simulate USB HID keystroke injection, generate multi-OS dropper one-liners, and obfuscate scripts with CyberChef.',
     tags: ['BadUSB', 'DuckyScript', 'HID Injection', 'CyberChef', 'Obfuscation', 'PowerShell', 'Rubber Ducky'],
-    readTime: '18 min read',
+    readTime: '24 min read',
     content: `
-# BadUSB & DuckyScript Studio — Keystroke Injection
+# BadUSB & DuckyScript Studio — Keystroke Injection & CyberChef
 
-The **BadUSB & Payload Studio** is an in-browser development environment for writing, simulating, compiling, and obfuscating Human Interface Device (HID) keystroke injection attacks.
-
----
-
-### 1. What Is BadUSB & Why Does It Work?
-
-When you plug in a standard USB flash drive, your computer recognizes it as a *Mass Storage Device* and may prevent executables from running if administrative restrictions or USB blocklists are enabled.
-
-However, operating systems implicitly trust **keyboards**. If a USB device identifies itself as a **USB HID Keyboard (Class 0x03)**, the operating system accepts its keystrokes without asking for administrator permissions or prompting the user with security dialogs.
-
-A microcontroller running BadUSB (such as an ESP32-S2/S3, Raspberry Pi Pico, ATmega32U4, or Flipper Zero) can type at superhuman speeds (**over 1,000 words per minute**), opening terminals, executing PowerShell scripts, and establishing reverse shells in under 3 seconds!
+The **BadUSB & DuckyScript Studio** is an in-browser development, compilation, and obfuscation environment for automated keystroke injection payloads. It combines a live DuckyScript syntax editor, a real-time virtual typing simulator, a multi-stage **CyberChef** obfuscation pipeline, and direct deployment to physical hardware (Hak5 USB Rubber Ducky, Flipper Zero, and ESP32-S2/S3 native USB boards).
 
 ---
 
-### 2. DuckyScript Language Syntax Reference
+### 1. What Is BadUSB & Why Is It So Dangerous?
+
+Operating systems (Windows, macOS, Linux, ChromeOS) inherently trust USB Human Interface Devices (HID) such as keyboards. When you plug in a keyboard, the OS immediately accepts its keystrokes without requiring administrative approval, antivirus driver scanning, or user confirmation.
+
+**BadUSB** exploits this fundamental trust model:
+- A microcontroller enumerates as a generic USB keyboard (e.g. Standard 101/104-Key USB Keyboard).
+- It injects synthesized keystrokes at **1,000 words per minute** (10 milliseconds per keystroke).
+- In under 3 seconds, it can open a hidden terminal shell, download a payload, execute it in RAM, and close all visible windows before a user can react.
+
+---
+
+### 2. Under the Hood: USB HID Keyboard Reports & Scancodes
+
+When a physical keyboard is pressed, it does not send ASCII letters like \`'A'\` or \`'Z'\`. Instead, it transmits standardized **8-byte USB HID Input Reports** defined by the USB-IF:
 
 \`\`\`text
-REM ===================================
-REM Windows Quick Information Gathering
-REM ===================================
-DELAY 1000
-GUI r
-DELAY 300
-STRING powershell -NoP -NonI -W Hidden -Exec Bypass
-ENTER
-DELAY 500
-STRING whoami; ipconfig /all; Get-NetIPAddress
-ENTER
++--------------+----------+----------+----------+----------+----------+----------+----------+
+| Byte 0       | Byte 1   | Byte 2   | Byte 3   | Byte 4   | Byte 5   | Byte 6   | Byte 7   |
+| Modifier     | Reserved | Keycode  | Keycode  | Keycode  | Keycode  | Keycode  | Keycode  |
+| Bitmask      | (0x00)   | Slot 1   | Slot 2   | Slot 3   | Slot 4   | Slot 5   | Slot 6   |
++--------------+----------+----------+----------+----------+----------+----------+----------+
 \`\`\`
 
 <details>
-<summary>USB HID Keyboard 8-Byte Input Report Format & Scancode Table</summary>
+<summary>Deep-Dive: Modifier Bitmask & USB HID Usage Tables (Scancodes)</summary>
 
-According to the USB Implementations Forum HID Usage Tables (HUT v1.12), every keyboard transmits 8-byte input reports:
+#### Byte 0: Modifier Key Bitfields:
+- **Bit 0**: Left Control (\`0x01\`)
+- **Bit 1**: Left Shift (\`0x02\`)
+- **Bit 2**: Left Alt (\`0x04\`)
+- **Bit 3**: Left GUI / Windows / Command (\`0x08\`)
+- **Bit 4**: Right Control (\`0x10\`)
+- **Bit 5**: Right Shift (\`0x20\`)
+- **Bit 6**: Right Alt / AltGr (\`0x40\`)
+- **Bit 7**: Right GUI (\`0x80\`)
 
-\`\`\`
-+----------------+----------+--------+--------+--------+--------+--------+--------+
-| Modifier (1 B) | Reserved | Key 1  | Key 2  | Key 3  | Key 4  | Key 5  | Key 6  |
-+----------------+----------+--------+--------+--------+--------+--------+--------+
-\`\`\`
+#### Master USB HID Scancode Reference:
+| Key | Scancode (Hex) | Key | Scancode (Hex) | Key | Scancode (Hex) |
+| :--- | :---: | :--- | :---: | :--- | :---: |
+| **\`A\` - \`Z\`** | \`0x04\` - \`0x1D\` | **\`1\` - \`9\`, \`0\`** | \`0x1E\` - \`0x27\` | **\`ENTER\`** | \`0x28\` |
+| **\`ESCAPE\`** | \`0x29\` | **\`BACKSPACE\`** | \`0x2A\` | **\`TAB\`** | \`0x2B\` |
+| **\`SPACE\`** | \`0x2C\` | **\`CAPS LOCK\`** | \`0x39\` | **\`F1\` - \`F12\`** | \`0x3A\` - \`0x45\` |
+| **\`RIGHT ARROW\`**| \`0x4F\` | **\`LEFT ARROW\`** | \`0x50\` | **\`DOWN ARROW\`** | \`0x51\` |
 
-#### Byte 0: Modifier Keys Bitmask
-- **Bit 0 (0x01)**: Left Ctrl
-- **Bit 1 (0x02)**: Left Shift
-- **Bit 2 (0x04)**: Left Alt
-- **Bit 3 (0x08)**: Left GUI (Windows / Command key)
-- **Bit 4 (0x10)**: Right Ctrl
-- **Bit 5 (0x20)**: Right Shift
-- **Bit 6 (0x40)**: Right Alt (AltGr)
-- **Bit 7 (0x80)**: Right GUI
+#### Key Release Requirement:
+To release a key, the host must receive an all-zero report: \`00 00 00 00 00 00 00 00\`. If the all-zero release frame is omitted, the operating system repeats the key indefinitely, crashing the payload!
+</details>
 
-#### Bytes 2 - 7: Key Usage Codes (Scancodes)
-| Key | Hex Code | Key | Hex Code | Key | Hex Code |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **A - Z** | \`0x04\` - \`0x1D\` | **1 - 0** | \`0x1E\` - \`0x27\` | **Enter** | \`0x28\` |
-| **Escape**| \`0x29\` | **Backspace** | \`0x2A\` | **Tab** | \`0x2B\` |
-| **Space** | \`0x2C\` | **F1 - F12** | \`0x3A\` - \`0x45\` | **CapLock** | \`0x39\` |
+<details>
+<summary>Deep-Dive: Complete DuckyScript 1.0 & 2.0 Command Reference</summary>
 
-To type a capital \`A\`, the BadUSB device transmits \`[0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00]\` followed by an all-zero release report \`[0x00, ...]\`.
+DuckyScript is the industry-standard macro language created by Hak5 for keystroke injection:
+
+| Command | Parameter / Syntax | Operational Behavior |
+| :--- | :--- | :--- |
+| **\`REM\`** | \`REM Comment text\` | Remark: Ignored during compilation. |
+| **\`DEFAULTDELAY\`**| \`DEFAULTDELAY 50\` | Sets default millisecond delay between all subsequent keystrokes. |
+| **\`DELAY\`** | \`DELAY 1000\` | Pauses execution for specified milliseconds (e.g. waiting for Run dialog). |
+| **\`STRING\`** | \`STRING powershell\` | Types ASCII text string. Automatically calculates Shift key states. |
+| **\`ENTER\`** | None | Presses the Enter / Return key. |
+| **\`GUI\`** / **\`WINDOWS\`** | \`GUI r\` | Presses Windows/Super key combined with character (e.g. opens Run dialog). |
+| **\`CTRL\`** / **\`ALT\`** | \`CTRL ALT DELETE\` | Chained modifier key combinations. |
+| **\`REPLAY\`** | \`REPLAY 5\` | Repeats the previous instruction 5 times. |
 
 </details>
 
 <details>
-<summary>Built-in CyberChef Obfuscation Pipelines (Bypass Windows Defender & EDR)</summary>
+<summary>Deep-Dive: CyberChef Obfuscation Pipelines for PowerShell Payloads</summary>
 
-Endpoint Detection and Response (EDR) software and Windows Defender easily detect plain-text malicious commands (such as \`powershell -nop -w hidden -c "IEX(New-Object Net.WebClient)..."\`).
+Modern endpoint protection systems (Windows Defender, AMSI, EDR) inspect command-line arguments passed to \`powershell.exe\`. The integrated **CyberChef** module provides multi-layer obfuscation recipes:
 
-The integrated **CyberChef** workbench provides 1-click obfuscation pipelines:
-1. **Base64 Unicode Encoding**:
-   - Converts commands into UTF-16LE Base64 strings compatible with PowerShell's \`-EncodedCommand\` parameter:
-     \`\`\`powershell
-     powershell.exe -EncodedCommand SQBFAFgAKABOAGUAdwAtAE8AYgBqAGUAYwB0AC4ALgAuACkA
+1. **Base64 Unicode Encoding (UTF-16LE)**:
+   - Windows PowerShell natively accepts UTF-16LE encoded commands via \`-EncodedCommand\`:
+     \`\`\`bash
+     powershell -nop -w hidden -enc JABjAGwAaQBlAG4AdAA...
      \`\`\`
-2. **String Splitting & Concatenation**:
-   - Automatically breaks flagged cmdlets into concatenated strings:
+2. **String Concatenation & Backtick Injection**:
+   - Breaks signature keywords across string boundaries:
      \`\`\`powershell
      & ("In"+"vo"+"ke-Exp"+"ression")
      \`\`\`
 3. **Environment Variable Expansion**:
-   - Uses system variable substrings (e.g. \`$env:ComSpec[4,15,25]\`) to assemble commands without writing words to disk.
+   - Reconstructs cmdlets using system variable indices without writing words to disk:
+     \`\`\`powershell
+     $cmd = $env:ComSpec[4,15,25] -join ''
+     \`\`\`
 
 </details>
 
 ---
 
-### 3. Interactive Simulation & Deployment
+### 3. Step-by-Step Usage & Hardware Export
 
-- **Live Syntax Validator**: Highlights syntax errors, unclosed strings, and missing delays in real time.
-- **Keystroke Simulator**: Visualizes the keystroke playback speed on screen before flashing to hardware.
-- **1-Click Hardware Export**:
-  - Download as standard \`payload.txt\` for Hak5 USB Rubber Ducky.
-  - Deploy directly to **Flipper Zero** (\`/ext/badusb/\`).
-  - Compile to C++ header for direct flashing onto **ESP32-S2 / S3** native USB boards!
+1. Write or paste your DuckyScript into the editor.
+2. Click **Run Simulation**:
+   - The virtual typing simulator visualizes keystroke execution speed and timing delays in real time.
+3. Switch to the **CyberChef Obfuscation** tab to encode strings and evade heuristic detections.
+4. **Deploy to Hardware**:
+   - **Hak5 Rubber Ducky**: Click **Download payload.txt**.
+   - **Flipper Zero**: Click **Export for Flipper** (saves formatted file ready for \`/ext/badusb/\`).
+   - **ESP32-S2 / S3**: Click **Generate C++ Header** to compile directly into native USB Arduino code!
 
 ---
 
@@ -325,4 +303,3 @@ The integrated **CyberChef** workbench provides 1-click obfuscation pipelines:
 `
   }
 ];
-

@@ -1,6 +1,7 @@
 /**
- * Setup, Reference & Troubleshooting Wiki Articles — Comprehensive Technical Manual
- * Covering Linux Setup & Drivers, Troubleshooting Matrix, Pinouts Reference, and Chip Intelligence
+ * Reference & Troubleshooting Wiki Articles — Exhaustive Technical Engineering Manual
+ * Covering Setup & Driver Configuration, Hardware Bench Troubleshooting, Pinout References,
+ * and Chip Intelligence / Silicon Identification.
  */
 
 export const REFERENCE_ARTICLES = [
@@ -8,93 +9,88 @@ export const REFERENCE_ARTICLES = [
     id: 'setup',
     toolId: 'setup',
     category: 'reference',
-    title: 'Linux Setup & Drivers — udev Rules, Permissions & Serial Bridges',
-    summary: 'Configure Linux udev permissions, Windows VCP drivers, and macOS serial port nodes for seamless WebSerial connectivity.',
-    tags: ['Linux', 'udev', 'Drivers', 'Permissions', 'dialout', 'Windows', 'macOS', 'CH340', 'CP2102'],
-    readTime: '15 min read',
+    title: 'Complete Driver & Hardware Bench Setup Guide',
+    summary: 'Master USB-to-UART drivers across Windows, Linux udev rules, ModemManager blacklisting, macOS device nodes, and WebSerial browser permissions.',
+    tags: ['Setup', 'Drivers', 'Linux', 'udev', 'Windows', 'CH340', 'CP2102', 'WebSerial', 'ModemManager'],
+    readTime: '18 min read',
     content: `
-# Linux Setup & Drivers — Permissions & udev Guide
+# Complete Driver & Hardware Bench Setup Guide
 
-When using WebSerial with development hardware on Linux, Windows, and macOS, operating system permissions and device drivers determine whether your browser can open the port.
+This guide details the physical and operating system level setup required to establish low-latency, uninterrupted WebSerial communication across **Linux, Windows, and macOS**.
 
 ---
 
-### 1. Linux Permission Architecture & Group Membership
+### 1. Linux Setup (Ubuntu, Debian, Fedora, Arch)
 
-On Linux distributions (Ubuntu, Debian, Fedora, Arch, Mint), the kernel creates device nodes like \`/dev/ttyUSB0\` or \`/dev/ttyACM0\` when a USB bridge connects. By default, these nodes belong to the \`root\` user and the \`dialout\` or \`uucp\` system group with mode \`0660\` (read/write only for owner and group).
-
-If your user account is not a member of this group, Chromium will throw:
-\`\`\`text
-NetworkError: Failed to open serial port. Access denied.
-\`\`\`
-
-#### Step 1: Add User to the Serial Group
-\`\`\`bash
-# Ubuntu, Debian, Raspberry Pi OS, Linux Mint:
-sudo usermod -aG dialout,plugdev $USER
-
-# Arch Linux, Manjaro, EndeavourOS:
-sudo usermod -aG uucp $USER
-
-# Fedora, RHEL, CentOS:
-sudo usermod -aG dialout $USER
-\`\`\`
+On Linux systems, two security and daemon behaviors frequently disrupt hardware serial communication:
+1. **User Group Permissions**: By default, standard users do not have read/write access to serial character devices in \`/dev/ttyUSB*\` or \`/dev/ttyACM*\`.
+2. **ModemManager Interference**: The default \`ModemManager\` daemon automatically opens newly connected USB-serial adapters and spams AT modem probe commands (\`AT\\r\\n\`, \`ATI\\r\\n\`), causing bootloader synchronization failures and corrupted serial streams.
 
 <details>
-<summary>Universal Linux udev Rules Syntax & ModemManager Blacklist Matrix</summary>
+<summary>Deep-Dive: Complete Linux udev Rule & User Group Configuration</summary>
 
-#### The ModemManager Port Lockup Bug
-On Ubuntu and Debian systems, a background daemon called **ModemManager** automatically opens any new serial port for 10 to 30 seconds to send AT modem probing strings (\`AT+CPIN?\`, \`ATI\`). This locks the port, corrupts ESP32 bootloaders, and causes Chromium connection failures.
-
-To permanently fix permissions and prevent ModemManager interference, create \`/etc/udev/rules.d/99-serial.rules\`:
-
+#### Step 1: Add User to the Dialout / UUCP Group
+Run the following terminal command and reboot (or re-login):
 \`\`\`bash
-sudo tee /etc/udev/rules.d/99-serial.rules << 'EOF'
-# 1. WCH CH340 / CH341 / CH9102 USB Bridges
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", MODE="0666", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
+# On Ubuntu / Debian / Raspberry Pi OS:
+sudo usermod -aG dialout $USER
 
-# 2. Silicon Labs CP2102 / CP2104 / CP210x
-SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", MODE="0666", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# 3. FTDI FT232R / FT2232H / FT232H
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", MODE="0666", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# 4. Raspberry Pi Pico & RP2040 CDC
-SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", MODE="0666", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# 5. Espressif ESP32-S2 / S3 / C3 / C6 Native USB-JTAG/Serial
-SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", MODE="0666", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# 6. Proxmark3 RDV4 & Easy
-SUBSYSTEM=="tty", ATTRS{idVendor}=="9ac4", MODE="0666", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# 7. Flipper Zero CDC Virtual COM
-SUBSYSTEM=="tty", ATTRS{idVendor}=="20a0", MODE="0666", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# 8. STMicroelectronics STM32 VCP
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", MODE="0666", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
-EOF
+# On Arch Linux / Fedora / Manjaro:
+sudo usermod -aG uucp $USER
 \`\`\`
 
-#### Reload udev Rules
+#### Step 2: Install Universal udev Rule
+Create \`/etc/udev/rules.d/99-usb-serial-workbench.rules\` with root privileges:
+\`\`\`text
+# WCH CH340 / CH341
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="5523", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# Silicon Labs CP2102 / CP2104
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# FTDI FT232R / FT2232H
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6010", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# Espressif ESP32-S2 / S3 / C3 / C6 Native USB CDC
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# Flipper Zero CDC
+SUBSYSTEM=="tty", ATTRS{idVendor}=="20a0", ATTRS{idProduct}=="415a", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# Proxmark3 RDV4 / Easy
+SUBSYSTEM=="tty", ATTRS{idVendor}=="9ac4", ATTRS{idProduct}=="4b8f", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+\`\`\`
+
+#### Step 3: Reload udev Rules
 \`\`\`bash
 sudo udevadm control --reload-rules && sudo udevadm trigger
 \`\`\`
-> **Log Out and Log In**: Group membership updates only take effect upon starting a new login session.
-
+Setting \`ENV{ID_MM_DEVICE_IGNORE}="1"\` permanently prevents ModemManager from interfering with your hardware workbench ports!
 </details>
 
 ---
 
-### 2. Windows Driver Checklist
-- **CH340 / CH341**: Requires the official WCH CH341SER Windows driver. If Windows Device Manager shows a yellow exclamation mark on "USB-SERIAL CH340", download and run the installer.
-- **CP2102 / CP2104**: Standalone VCP drivers are available from Silicon Labs.
-- **CDC ACM (ESP32 Native USB)**: Modern Windows 10/11 includes native \`usbser.sys\` and requires no third-party installation.
+### 2. Windows 10 & 11 Driver Checklist
+
+Modern Windows includes a native Microsoft USB CDC ACM driver (\`usbser.sys\`) that automatically binds to modern microcontrollers with native USB (ESP32-S3, RP2040, STM32). However, dedicated USB-UART bridge chips require manufacturer drivers:
+
+- **WCH CH340 / CH341**:
+  - Requires the official **WCH CH341SER.EXE** driver installer.
+  - If Windows Device Manager displays a yellow exclamation triangle under **Ports (COM & LPT)** on *"USB-SERIAL CH340"*, install the signed driver from Nanjing Qinheng.
+- **Silicon Labs CP2102 / CP2104**:
+  - Windows Update usually installs this automatically. If missing, download the CP210x Universal Windows Driver from Silicon Labs.
+- **FTDI FT232R / FT2232**:
+  - Uses the FTDI D2XX / VCP driver package.
 
 ---
 
-### 3. macOS Device Nodes
-On macOS, WebSerial displays devices with paths like \`/dev/cu.usbserial-*\` and \`/dev/tty.usbserial-*\`. Always select the \`cu.*\` (Call-Up) device node for reliable bidirectional streaming.
+### 3. macOS Device Nodes & Permissions
+
+On macOS, WebSerial displays devices with paths like \`/dev/cu.usbserial-*\` and \`/dev/tty.usbserial-*\`:
+- **Always select the \`/dev/cu.*\` (Call-Up) node**: The \`cu\` node opens immediately without waiting for Carrier Detect (CD) line assertions.
+- The \`tty.*\` node can block indefinitely if modem control signals are not asserted by the target device!
 
 ---
 
@@ -114,42 +110,50 @@ On macOS, WebSerial displays devices with paths like \`/dev/cu.usbserial-*\` and
     title: 'Troubleshooting & Error Matrix — Root Causes & Exact Fixes',
     summary: 'Comprehensive diagnostics matrix resolving packet header timeouts, access denied errors, framing gibberish, brownouts, and port lockups.',
     tags: ['Troubleshooting', 'Error Matrix', 'Timeout', 'Access Denied', 'Framing Error', 'Brownout', 'Diagnostics'],
-    readTime: '16 min read',
+    readTime: '20 min read',
     content: `
-# Troubleshooting & Error Matrix
+# Troubleshooting & Error Matrix — Diagnostic Guide
 
-This reference table outlines every common failure state encountered during serial monitoring, flashing, and workbench operations, with root causes and confirmed solutions.
+When working with microcontrollers and embedded serial protocols, communication failures can stem from software port contention, baud rate drift, USB cable degradation, or physical silicon failure. This matrix maps symptoms to exact engineering remedies.
 
 ---
 
-### The Master Error Matrix
+### 1. Master Error Diagnostic Matrix
 
-| Error Message / Symptom | Root Cause | Exact Solution |
+| Error Message in Browser | Physical / Electrical Root Cause | Exact Engineering Fix |
 | :--- | :--- | :--- |
-| **"Failed to connect to ESP32: Timed out waiting for packet header"** | The ESP microcontroller did not enter ROM download mode during the DTR/RTS auto-reset cycle. | 1. Press and **hold the BOOT button** on the board.<br>2. Click **Connect & Flash**.<br>3. When the tool shows *Connecting...*, press the **RESET (EN) button once**.<br>4. Release the BOOT button. |
-| **"NetworkError: Failed to open serial port / Access denied"** | Another process on your PC holds an exclusive lock on the COM port, or Linux user lacks group permissions. | 1. Close Arduino IDE, Cura, PuTTY, or VS Code Serial Monitor.<br>2. On Linux, ensure your user belongs to \`dialout\` / \`uucp\` groups.<br>3. Unplug and replug the USB cable. |
-| **Garbage characters / gibberish in Terminal (\`?x\`)** | Baud rate mismatch or missing common ground reference between devices. | 1. Use the **Baud Hunter** tool to automatically identify the true rate.<br>2. Ensure the baud rate matches the firmware's \`Serial.begin()\` speed.<br>3. Check that GND is firmly connected. |
-| **"Brownout detector was triggered" loop** | Target board experiences voltage dips below 2.43V, usually when activating Wi-Fi radio. | 1. Avoid unpowered USB hubs or keyboard passthrough ports.<br>2. Use a short, thick, low-resistance USB data cable.<br>3. Solder a 100uF–470uF electrolytic capacitor across 3.3V and GND. |
-| **"A transfer error occurred / Packet sequence mismatch"** | Baud rate is too high for the USB-UART bridge or cable quality. | 1. Drop flashing baud rate from \`921600\` to \`460800\` or \`115200\` bps.<br>2. Avoid cheap unshielded breadboard jumper wires longer than 15 cm. |
-| **Port selector dialog does not show target device** | Missing bridge driver, charge-only USB cable, or fried USB protection diode. | 1. Verify your cable is a **data cable** (connect a smartphone to confirm data transfer).<br>2. Check Windows Device Manager or run \`lsusb\` on Linux to confirm VID/PID enumeration. |
-| **ESP32-C5 flashing fails at 0% with "Stub error"** | ESP32-C5 early engineering silicon memory architecture conflicts with standard esptool stubs. | Select **Direct ROM Mode (No-Stub)** in the Flasher settings. Skon's tool flashes C5 directly through native ROM routines at 115,200 baud. |
+| **\`Failed to open serial port: Access denied\`** | The COM port is locked by another process (Arduino IDE, VS Code Serial Monitor, Cura, PuTTY). | Close all other IDEs and terminal monitors. In Windows PowerShell, run: \`Get-Process \| Where-Object {$_.Path -like "*serial*"}\`. |
+| **\`Timed out waiting for packet header (0x08)\`** | The microcontroller failed to enter ROM download mode during auto-reset. | 1. Increase auto-reset pulse width to **250ms**.<br>2. Perform manual button dance: Hold BOOT, press and release RESET, release BOOT. |
+| **\`MD5 of file does not match byte written\`** | Power supply voltage sag (brownout) during high-current flash write cycles. | Connect board to a powered USB hub or short, shielded USB-C data cable. Avoid unpowered USB keyboard pass-through ports. |
+| **\`Framing Error / Continuous \`x?x\` characters\`** | Baud rate mismatch or crystal oscillator clock drift. | Click **Baud Hunter** in the terminal toolbar to automatically identify the target's transmission frequency. |
+| **\`Brownout detector was triggered\`** | 3.3V power rail dropped below 2.80V when the Wi-Fi/Bluetooth radio calibrated its PA amplifier. | Solder a 100uF to 470uF low-ESR electrolytic capacitor directly across the board's 3.3V and GND pins. |
+| **\`flash read err, 1000\`** | Microcontroller booted in Quad I/O (QIO) mode, but WP and HOLD pins are floating. | Re-flash firmware setting SPI Transfer Mode to **DIO (Dual I/O)**. |
+
+---
+
+### 2. Hardware Bench Smoke Test Checklist
 
 <details>
-<summary>Hardware Bench Smoke Test & Multimeter Checklist</summary>
+<summary>Deep-Dive: Cold Multimeter Smoke Test Checklist for Mystery Boards</summary>
 
-If a development board refuses to enumerate or communicate:
-1. **Unpowered Resistance Check (Resistance to Ground)**:
-   - Disconnect USB.
-   - Set digital multimeter to Ohms ($\Omega$).
-   - Place black probe on GND, red probe on 3.3V pin.
-   - **Healthy Reading**: $> 10\,\text{k}\Omega$ (charging capacitor curve).
-   - **Shorted Silicon**: $< 100\,\Omega$ indicates internal die puncture from overvoltage or reverse polarity.
-2. **Diode Test on USB Data Lines**:
-   - Set multimeter to Diode Mode ($\rightarrow|-$).
-   - Red probe on board GND, black probe on D+ then D-.
-   - Healthy ESD suppression diodes read between **0.500V and 0.750V**.
-   - A reading of \`0.000V\` (short) or \`OL\` (open) confirms blown protection diodes.
+Before plugging an unknown or custom-soldered microcontroller development board into your computer's expensive USB port:
 
+#### Test 1: Unpowered Resistance to Ground Check
+1. Disconnect all cables from the board.
+2. Set your digital multimeter to **Resistance Mode ($\Omega$)**.
+3. Place the **Black probe on GND**, and the **Red probe on the 3.3V power pin**:
+   - **Healthy Silicon**: Resistance reads $> 10\,\text{k}\Omega$ (charging internal decoupling capacitors).
+   - **Shorted Silicon**: Resistance $< 100\,\Omega$ indicates a permanent silicon puncture or solder bridge across the power rails! **DO NOT PLUG INTO USB!**
+
+#### Test 2: Diode Mode ESD Protection Check on D+ and D-
+1. Set digital multimeter to **Diode Test Mode ($\rightarrow|-$)**.
+2. Place the **Red probe on GND**, and probe **D+ (Green wire)** then **D- (White wire)** with the **Black probe**:
+   - **Healthy Protection Diodes**: Reads between **0.500V and 0.750V** (forward voltage drop of internal silicon ESD suppression diodes).
+   - **Blown Silicon**: Reads \`0.000V\` (shorted diode) or \`OL\` (open circuit / blown trace).
+
+#### Test 3: VBUS Voltage Measurement Under Load
+1. Plug board into USB.
+2. Measure voltage between GND and 5V (VBUS). Voltage must read between **4.75V and 5.25V**. If voltage drops below 4.5V, your USB cable has excessive resistance!
 </details>
 
 ---
@@ -169,54 +173,60 @@ If a development board refuses to enumerate or communicate:
     title: 'Pinouts Reference — ESP32, S3, C3, C6 & USB Wiring Maps',
     summary: 'Hardware pinout diagrams, SPI/I2C/UART pin assignments, strapping pins, and USB Type-A / Type-C CC resistor specifications.',
     tags: ['Pinouts', 'Wiring', 'ESP32', 'ESP32-S3', 'ESP32-C3', 'ESP32-C6', 'USB-C', 'Hardware'],
-    readTime: '15 min read',
+    readTime: '20 min read',
     content: `
 # Pinouts Reference — Microcontrollers & USB Wiring
 
-Pinout mismatches are the leading cause of communication failure on the test bench. Use this comprehensive reference when wiring sensors, GPS modules, displays, and logic probes.
+This reference compiles physical pinout maps, bus assignments, hardware strapping pins, and USB wiring standards across the most common embedded hardware targets.
 
 ---
 
-### 1. Default Hardware Bus Pins by ESP Architecture
+### 1. ESP32 Family Pinout Maps
 
-| Bus / Function | ESP32 Classic | ESP32-S3 | ESP32-C3 | ESP32-C6 |
-| :--- | :--- | :--- | :--- | :--- |
-| **UART0 TX / RX** | GPIO 1 / 3 | GPIO 43 / 44 | GPIO 21 / 20 | GPIO 16 / 17 |
-| **UART1 TX / RX** | GPIO 10 / 9 | GPIO 17 / 18 | GPIO 0 / 1 | GPIO 4 / 5 |
-| **I2C SCL / SDA** | GPIO 22 / 21 | GPIO 9 / 8 | GPIO 9 / 8 | GPIO 7 / 6 |
-| **SPI MOSI / MISO** | GPIO 23 / 19 | GPIO 11 / 13 | GPIO 6 / 5 | GPIO 21 / 20 |
-| **SPI SCK / CS** | GPIO 18 / 5 | GPIO 12 / 10 | GPIO 4 / 7 | GPIO 22 / 19 |
-| **Boot Mode Pin** | GPIO 0 | GPIO 0 | GPIO 9 | GPIO 9 |
+#### ESP32 Classic (38-Pin DevKit v1)
+\`\`\`text
+                      +-------------------+
+                  3V3 | (1)          (38) | GND
+                   EN | (2)          (37) | GPIO 23 (VSPI MOSI)
+              GPIO 36 | (3)   ESP    (36) | GPIO 22 (I2C SCL)
+              GPIO 39 | (4)  WROOM   (35) | GPIO 1  (UART0 TXD)
+              GPIO 34 | (5)   32     (34) | GPIO 3  (UART0 RXD)
+              GPIO 35 | (6)          (33) | GPIO 21 (I2C SDA)
+              GPIO 32 | (7)          (32) | GND
+              GPIO 33 | (8)          (31) | GPIO 19 (VSPI MISO)
+              GPIO 25 | (9)          (30) | GPIO 18 (VSPI SCK)
+              GPIO 26 | (10)         (29) | GPIO 5  (VSPI CS0)
+              GPIO 27 | (11)         (28) | GPIO 17 (UART2 TXD)
+              GPIO 14 | (12)         (27) | GPIO 16 (UART2 RXD)
+              GPIO 12 | (13)         (26) | GPIO 4
+                  GND | (14)         (25) | GPIO 0  (BOOT STRAP)
+              GPIO 13 | (15)         (24) | GPIO 2  (BOOT STRAP)
+              GPIO 9  | (16)         (23) | GPIO 15 (BOOT STRAP)
+              GPIO 10 | (17)         (22) | GPIO 8
+              GPIO 11 | (18)         (21) | GPIO 7
+                  5V  | (19)         (20) | GPIO 6
+                      +-------------------+
+\`\`\`
+
+> **Input-Only Pins (No Internal Pull-Up/Pull-Down)**:
+> **GPIO 34, 35, 36 (VP), 39 (VN)** have no internal pull-up or pull-down resistors and cannot be used as digital outputs. They are strictly ADC analog inputs!
+
+---
+
+### 2. USB Type-C CC1 / CC2 Configuration Channel Resistor Math
 
 <details>
-<summary>Complete ESP32 Strapping Pin Truth Table & Modern S3/C3/C6 Matrix</summary>
+<summary>Deep-Dive: USB Type-C Receptacle Wiring & 5.1k Pull-Down Resistor Rules</summary>
 
-Strapping pins are sampled during the high-to-low transition of the chip's RESET (\`EN\`) pin:
-
-#### ESP32 Classic Strapping Pins
-- **GPIO 0**: \`1\` = SPI Boot (Normal Run), \`0\` = Download Boot (Flashing Mode).
-- **GPIO 2**: Must be floating or pulled LOW during download boot. Onboard blue LED is often tied to GPIO 2.
-- **GPIO 12 (MTDI)**: Controls internal SPI flash LDO voltage:
-  - \`0\` (Default): 3.3V LDO.
-  - \`1\`: 1.8V LDO. If accidentally pulled high, 3.3V flash memory will fail to power up!
-- **GPIO 15**: Controls silent boot printing (\`1\` = UART ROM messages enabled).
-
-#### ESP32-C3 / C6 Strapping Pins
-- **GPIO 9**: Pull LOW (\`0\`) to force ROM download bootloader. Internal weak pull-up defaults to SPI flash boot (\`1\`).
-- **GPIO 8**: Must be HIGH (\`1\`) during bootloader entry.
-
-</details>
-
-<details>
-<summary>USB Type-C CC1 / CC2 Configuration Channel Resistor Math</summary>
-
-When designing custom ESP32 boards with a USB-C receptacle:
+When designing custom development boards with a USB Type-C receptacle:
 - Connect two independent **5.1kΩ (1% tolerance) pull-down resistors** ($R_d$):
   - One resistor tied from **CC1** to GND.
   - One resistor tied from **CC2** to GND.
-- **CRITICAL DESIGN RULE**: *Never tie CC1 and CC2 together to a single shared resistor!*
-  - In an E-Marked active USB Type-C cable, one CC line is used for cable electronics ($V_{conn}$).
-  - Tying CC1 and CC2 together shorts $V_{conn}$ to the configuration line, violating USB-IF specs and causing smart chargers (Apple, Anker PD, Baseus) to deliver 0 Volts!
+
+#### The Golden Rule: Never Tie CC1 and CC2 Together!
+Many beginner designs tie CC1 and CC2 together to a single shared 5.1kΩ resistor.
+- **Why This Breaks**: In an E-Marked active USB-C cable (standard on 60W, 100W, and 240W cables), the cable's internal e-marker chip is powered by $V_{conn}$ supplied on the second CC pin.
+- Tying CC1 and CC2 together shorts the $V_{conn}$ power supply to the CC detection line, violating the USB Type-C specification and causing smart chargers (Apple MacBook, Anker GaN, Baseus) to completely shut off power delivery ($0.0\,\text{V}$)!
 
 </details>
 
@@ -239,34 +249,34 @@ When designing custom ESP32 boards with a USB-C receptacle:
     title: 'Chip Intelligence — VID/PID Hardware Identification Database',
     summary: 'Lookup USB Vendor IDs (VID) and Product IDs (PID) to identify mystery boards, USB-UART bridge ICs, and development hardware.',
     tags: ['Chip Intel', 'VID/PID', 'USB IDs', 'WCH', 'Silicon Labs', 'FTDI', 'Espressif', 'Identification'],
-    readTime: '14 min read',
+    readTime: '16 min read',
     content: `
 # Chip Intelligence — USB Hardware Identification
 
-Every USB peripheral announces a 16-bit **Vendor ID (VID)** and 16-bit **Product ID (PID)**. The **Chip Intelligence** engine inspects these numbers to instantly determine what silicon bridge or microcontroller you have plugged in.
+Every USB device announces a 16-bit **Vendor ID (VID)** and 16-bit **Product ID (PID)** during USB enumeration. The **Chip Intelligence Engine** inspects these identifiers against an embedded database of over 1,000 silicon definitions to identify mystery development boards, bridge chips, and RF instruments.
 
 ---
 
 ### Master VID / PID Reference Table
 
-| VID | PID | Silicon IC / Hardware Family | Description |
-| :--- | :--- | :--- | :--- |
-| **\`0x1A86\`** | **\`0x7523\`** | WCH CH340 / CH340G / CH340C | The most ubiquitous USB-to-UART bridge on NodeMCU & Arduino clones |
-| **\`0x1A86\`** | **\`0x5523\`** | WCH CH341A | Multi-mode USB bridge used on BIOS programmers & I2C/SPI dongles |
-| **\`0x1A86\`** | **\`0x55D4\`** | WCH CH9102F | Modern high-speed USB-UART bridge capable of up to 4 Mbps |
-| **\`0x10C4\`** | **\`0xEA60\`** | Silicon Labs CP2102 / CP2104 | High-stability VCP bridge on official Espressif DevKits & LilyGO |
-| **\`0x0403\`** | **\`0x6001\`** | FTDI FT232R | Industry-standard FTDI USB-UART transceiver |
-| **\`0x0403\`** | **\`0x6010\`** | FTDI FT2232D / FT2232H | Dual-channel high-speed bridge used on JTAG and SWD hardware |
-| **\`0x303A\`** | **\`0x1001\`** | Espressif ESP32-S3 / C3 / C6 | Built-in native USB CDC / JTAG controller directly on the SoC die |
-| **\`0x2E8A\`** | **\`0x000A\`** | Raspberry Pi Pico / RP2040 | Official Raspberry Pi dual-core RISC-V / ARM microcontroller CDC |
-| **\`0x0483\`** | **\`0x5740\`** | STMicroelectronics STM32 | Virtual COM Port on STM32F103 (BluePill), F401, F411 BlackPill |
-| **\`0x1D50\`** | **\`0x6089\`** | Great Scott Gadgets HackRF One | PortaPack SDR radio transceiver USB interface |
-| **\`0x20A0\`** | **\`0x415A\`** | Flipper Devices Flipper Zero | Flipper Zero USB virtual communication port & RPC interface |
-| **\`0x9AC4\`** | **\`0x4B8F\`** | Proxmark3 RDV4 / Easy | RFID & NFC research and emulation instrument |
+| Vendor ID | Product ID | Silicon Manufacturer | Controller Family | Typical Real-World Application |
+| :---: | :---: | :--- | :--- | :--- |
+| **\`0x1A86\`** | **\`0x7523\`** | WCH (Nanjing Qinheng) | CH340 / CH340G / CH340C | Ubiquitous on NodeMCU, ESP32 DevKits, and Arduino Uno clones |
+| **\`0x1A86\`** | **\`0x5523\`** | WCH (Nanjing Qinheng) | CH341A | Motherboard BIOS SPI flash & I2C EEPROM programmers |
+| **\`0x1A86\`** | **\`0x55D4\`** | WCH (Nanjing Qinheng) | CH9102F / CH9102X | Modern high-speed USB-UART bridge capable of up to 4 Mbps |
+| **\`0x10C4\`** | **\`0xEA60\`** | Silicon Labs | CP2102 / CP2104 | High-stability VCP bridge used on official Espressif DevKits & LilyGO |
+| **\`0x0403\`** | **\`0x6001\`** | FTDI | FT232R | Classic industrial USB-to-UART transceiver |
+| **\`0x0403\`** | **\`0x6010\`** | FTDI | FT2232D / FT2232H | Dual-channel high-speed bridge used on JTAG and SWD hardware |
+| **\`0x303A\`** | **\`0x1001\`** | Espressif Systems | ESP32-S3 / C3 / C6 | Built-in native USB CDC / JTAG controller on the SoC die |
+| **\`0x2E8A\`** | **\`0x000A\`** | Raspberry Pi Ltd | RP2040 / Pico | Official Raspberry Pi dual-core ARM microcontroller CDC |
+| **\`0x0483\`** | **\`0x5740\`** | STMicroelectronics | STM32F103 / F401 / F411 | Virtual COM Port on BluePill and BlackPill development boards |
+| **\`0x1D50\`** | **\`0x6089\`** | Great Scott Gadgets | HackRF One | PortaPack SDR radio transceiver USB interface |
+| **\`0x20A0\`** | **\`0x415A\`** | Flipper Devices Inc. | Flipper Zero | Flipper Zero USB virtual communication port & RPC interface |
+| **\`0x9AC4\`** | **\`0x4B8F\`** | RFID Research Group | Proxmark3 RDV4 / Easy | RFID & NFC research and emulation instrument |
 
 ---
 
-### 2. Upstream Standards & Engineering Attribution
+### Upstream Standards & Engineering Attribution
 
 | Database / Standard | Maintainer & Authority | Reference |
 | :--- | :--- | :--- |
