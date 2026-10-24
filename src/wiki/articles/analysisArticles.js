@@ -958,5 +958,471 @@ You need **two** USB-UART adapters connected to your computer:
 | **Hardware Serial TAPs & MitM Bridges** | Bus Pirate (Dangerous Prototypes), GreatFET (Great Scott Gadgets), and hardware serial packet sniffers. | [Dangerous Prototypes Bus Pirate](http://dangerousprototypes.com/docs/Bus_Pirate) |
 | **W3C Multi-Port WebSerial Implementation** | W3C WICG Serial API concurrent device claim specification. | [W3C WebSerial](https://wicg.github.io/serial/) |
 `
+  },
+  {
+    id: 'cyberchef-workbench',
+    toolId: 'cyberchef',
+    category: 'analysis',
+    title: 'CyberChef Workbench — Modular Engine, Web Worker Pipeline & Magic Detection',
+    summary: 'Master enterprise-grade data transformations, asynchronous Web Worker offload, dynamic Operation Registry, Shannon entropy calculations, and automated heuristic magic decoding.',
+    tags: ['CyberChef', 'Web Worker', 'Magic Engine', 'Shannon Entropy', 'AES', 'Gzip', 'Cryptography', 'Deobfuscation'],
+    readTime: '20 min read',
+    content: `
+# CyberChef Workbench — Multi-Threaded Data Engine & Magic Analysis
+
+The **CyberChef Workbench** in Skon's USB Tool brings the full architectural power of GCHQ's CyberChef into a high-performance, asynchronous Web Worker pipeline. It enables reverse engineers, firmware auditors, and penetration testers to manipulate binary, hex, encrypted, and obfuscated payloads in real-time without stuttering the browser DOM.
+
+---
+
+### 1. What Is This Tool & Why Do You Need It?
+
+During hardware security testing and firmware extraction, binary data rarely arrives in human-readable plain text:
+- EEPROM memory dumps often contain **Gzip-compressed** or **Zlib-compressed** configuration tables.
+- Web API tokens and IoT telemetry are frequently encoded as **JWTs (JSON Web Tokens)** or obfuscated through Base64 and custom XOR masks.
+- Malicious USB keystroke payloads (BadUSB / DuckyScript) employ string-slicing and random delay jitter to evade heuristic endpoint detection.
+
+The **CyberChef Workbench** provides a modular pipeline to compose sequences of operations ("Recipes"), analyze data entropy, inspect unknown file headers, and automatically discover decoding routines using the built-in **"Magic" Heuristic Engine**.
+
+---
+
+### 2. Under the Hood: The Modular Core Architecture
+
+The transformation engine is built upon decoupled foundational classes in \`src/utils/cyberchef/core/\`:
+
+\`\`\`
++------------------------------------------------------------------------+
+|                                 CHEF                                   |
+|                (Main Controller & Pipeline Executor)                   |
++-----------------------------------+------------------------------------+
+                                    |
+                                    v
++-----------------------------------+------------------------------------+
+|                                RECIPE                                  |
+|         (Step Execution, Fork/Merge, Registers & Breakpoints)          |
++-----------------------------------+------------------------------------+
+                                    |
+            +-----------------------+-----------------------+
+            |                                               |
+            v                                               v
++-----------+-----------+                       +-----------+-----------+
+|      OPERATION        | <-------------------> |         DISH          |
+| (AES, DES, Zip, ...)  |                       | (String / ArrayBuffer)|
++-----------------------+                       +-----------------------+
+\`\`\`
+
+#### 1. The Dish Container (\`Dish.js\`)
+The \`Dish\` encapsulates raw data flowing between operations. Rather than forcing all data into strings (which corrupts binary null bytes and high-order UTF-8 characters), \`Dish\` maintains internal typing:
+- **\`Dish.type\`**: Returns \`'string'\` or \`'ArrayBuffer'\`.
+- **\`Dish.toString()\`**: Safely decodes buffers via \`TextDecoder('utf-8', { fatal: false })\`.
+- **\`Dish.toArrayBuffer()\`**: Returns zero-copy typed byte views.
+- **\`Dish.toHex(delimiter)\`**: Generates space-, comma-, or prefix-separated hexadecimal representations.
+- **\`Dish.toBase64()\`**: Encodes binary streams using 8KB chunking to prevent browser call-stack overflow on large payloads.
+- **\`Dish.toHexdump(bytesPerLine = 16)\`**: Produces standard Wireshark/xxd 16-bytes-per-line formatted dumps with byte offsets and an ASCII printable gutter.
+
+#### 2. Abstract Operations (\`Operation.js\`) & Dynamic Registry (\`OperationRegistry.js\`)
+Every transformation step is an isolated class inheriting from \`Operation\`, declaring:
+- Metadata: \`name\`, \`module\`, \`description\`.
+- Input & Output typing: \`'string'\`, \`'ArrayBuffer'\`, or \`'Dish'\`.
+- Dynamic arguments schema: \`args\` with labels, types, and defaults.
+- \`run(input, args, context)\`: Pure asynchronous or synchronous execution method with access to the execution context.
+
+All 80+ operations auto-register into \`registry\`, allowing case-insensitive lookup by canonical name or normalized snake_case ID.
+
+---
+
+### 3. Flow Control Engine (\`flowControl.js\`)
+
+Complex decoding routines often require multi-stream branch processing, conditional execution, or dynamic memory registers. The CyberChef Flow Control Engine provides five native control-flow primitives:
+
+\`\`\`
+                       Raw Stream
+                           |
+                           v
+                    +--------------+
+                    | Fork (\\n, ,) |
+                    +------+-------+
+                           |
+           +---------------+---------------+
+           |               |               |
+           v               v               v
+       Sub-Dish 1      Sub-Dish 2      Sub-Dish 3
+       [From Hex]      [From Hex]      [From Hex]
+           |               |               |
+           +---------------+---------------+
+                           |
+                           v
+                    +--------------+
+                    | Merge (\\n, ,)|
+                    +--------------+
+                           |
+                           v
+                     Unified Stream
+\`\`\`
+
+1. **Fork (\`Fork\`)**:
+   - Splits incoming data into sub-streams based on a delimiter (e.g., newline \`\\n\`, comma, or custom character).
+   - Pushes an isolated fork frame onto the Recipe's \`forkStack\`.
+   - All subsequent operations execute independently on each sub-branch until a \`Merge\` operation is encountered.
+2. **Merge (\`Merge\`)**:
+   - Closes the active fork frame and reconciles all branched sub-dishes back into a single unified \`Dish\` stream joined by the specified delimiter.
+3. **Registers (\`Register\`)**:
+   - Memory storage and variable persistence across recipe steps.
+   - **Set**: Extracts a value (optionally via regular expression capture groups) and stores it under a key in the recipe's \`registers\` map.
+   - **Get**: Retrieves the stored register value and replaces the active stream.
+   - **Inject / Replace**: Replaces patterns or appends stored register values into the active stream.
+4. **Subsection (\`Subsection\`)**:
+   - Selectively applies subsequent transformations only to lines or tokens matching a specified regular expression, leaving non-matching segments unaltered.
+5. **Label & Jump (\`Label\`, \`Jump\`)**:
+   - Enables looping over payload transformations with deterministic loop counters to prevent infinite execution cycles.
+
+---
+
+### 4. Interactive Breakpoints & Step-Through Debugging
+
+Auditing layered obfuscation (e.g. Base64 -> XOR -> Gzip -> Hex) requires inspecting intermediate states to verify that keys, offsets, or headers match expectations.
+
+- **Breakpoint Toggles**: Every step in the Recipe editor features a Breakpoint indicator. Clicking the breakpoint icon arms a pause trigger on that step.
+- **Worker Execution Pausing**: When the Web Worker encounters a step with an active breakpoint, execution pauses *immediately before* applying that operation.
+- **Intermediate Inspection**: The engine returns the intermediate \`Dish\` state, allowing the analyst to inspect the payload in Raw Text, Hex, Base64, or Hexdump format.
+- **Step & Continue**:
+  - **Step**: Executes exactly one operation in the recipe, capturing the immediate output and advancing the pause cursor.
+  - **Continue**: Resumes execution until the next breakpoint or recipe termination.
+
+---
+
+### 5. Auto-Bake Pipeline & Multi-Tab Workspace
+
+- **Auto-Bake with 300ms Debounce**:
+  - When enabled, editing any input character or modifying operation arguments automatically queues a background worker bake after 300ms of inactivity.
+  - Stale worker requests are automatically cancelled via monotonic request correlation IDs, preventing race conditions.
+  - Analysts can toggle Auto-Bake off when working with massive multi-megabyte payloads or CPU-intensive algorithms, switching to manual **"BAKE!"** triggers.
+- **Multi-Tab Architecture**:
+  - Open multiple concurrent analysis sessions across independent tabs.
+  - Each tab preserves its own isolated Input payload, Recipe configuration, Output format, and debugging breakpoint state.
+- **Chunked File Ingestion & Drag-and-Drop**:
+  - Drop binary firmwares, PCAP slices, or memory dumps directly onto the input drop zone.
+  - Files are read as zero-copy \`ArrayBuffer\` streams and piped cleanly into the Dish without UI freezing.
+- **Output Views**:
+  - Instant one-click toggling between **Raw Text**, **Hex Bytes**, **Base64 String**, and **Formatted Hexdump** (16-byte aligned with ASCII gutter).
+  - Includes a **"Replace Input with Output"** button for iterative multi-stage deobfuscation.
+
+---
+
+### 6. The "Magic" Heuristic Engine v2 (\`magic.js\`)
+
+When inspecting unfamiliar firmware chunks or network payloads, reverse engineers often don't know what encoding was applied. The **Magic Engine v2** solves this using multi-step chaining and a 3-stage heuristic diagnostic:
+
+#### 1. Multi-Step Chaining (Depth ≤ 3)
+Rather than testing single encodings in isolation, Magic v2 utilizes a breadth-first search (BFS) over high-yield deobfuscation paths:
+- \`From Base64\` -> \`Gunzip\`
+- \`From Hex\` -> \`From Base64\`
+- \`From Base85\` -> \`Raw Inflate\`
+
+#### 2. Shannon Entropy Calculation ($H$)
+Information entropy measures the unpredictability of byte distributions:
+\`\`\`text
+H = - \\sum_{i=0}^{255} p_i \\log_2(p_i)
+\`\`\`
+- Plain English ASCII text: $H \\approx 3.5 - 4.8$ bits/byte.
+- Source code / JSON / Base64 text: $H \\approx 4.5 - 5.5$ bits/byte.
+- Encrypted or compressed ciphertext: $H > 7.2$ bits/byte (maximum theoretical limit: $8.0$).
+
+#### 3. File Signature (Magic Bytes) Detection
+The engine matches leading byte headers against standard forensic databases:
+- **Gzip**: \`1F 8B\`
+- **ZIP**: \`50 4B 03 04\`
+- **PDF**: \`25 50 44 46\` (\`%PDF\`)
+- **PNG**: \`89 50 4E 47\`
+- **ELF**: \`7F 45 4C 46\`
+- **Windows PE**: \`4D 5A\` (\`MZ\`)
+
+#### 4. Printable ASCII Ratio Scoring
+Calculates the proportion of bytes falling within printable ranges ($[32..126, 9, 10, 13]$). If a trial transformation raises printable density above $75\\%$, or exposes recognized magic bytes, it generates a high-confidence recommendation with one-click recipe application.
+
+---
+
+### 7. Live Hardware Piping Pipeline
+
+Analyzing hardware telemetry (such as serial debugging logs, GPS NMEA streams, sensor frames, and 802.11 monitor packets) typically requires tedious manual copy-pasting. The **Hardware Piping** engine bridges browser WebSerial and WebUSB streams directly into the CyberChef transformation pipeline:
+
+\`\`\`
++-----------------------+      +-----------------------+      +-----------------------+
+| WebSerial (COM Ports) |  or  | Alfa Wi-Fi (WebUSB)   |  or  | Hardware Telemetry    |
++-----------+-----------+      +-----------+-----------+      +-----------+-----------+
+            |                              |                              |
+            +------------------------------+------------------------------+
+                                           | (Uint8Array Stream)
+                                           v
+                        +-------------------------------------+
+                        | Rolling Capture Buffer (2KB - 50KB) |
+                        +------------------+------------------+
+                                           |
+                                           v
+                        +-------------------------------------+
+                        | CyberChef Input Dish                |
+                        +------------------+------------------+
+                                           | (Debounced Auto-Bake)
+                                           v
+                        +-------------------------------------+
+                        | Real-Time Decoded Output            |
+                        +-------------------------------------+
+\`\`\`
+
+1. **Hardware Stream Ingestion**:
+   - Analysts click **"Pipe Hardware"** in the Input Deck to open the source selection deck.
+   - Sources include connected **WebSerial COM devices**, **Alfa Wi-Fi 802.11 monitor streams**, or realistic mock streams (**GPS NMEA 0183**, **ESP32 Firmware Telemetry**, **16-byte Binary Sensor Frames**).
+2. **Rolling Buffer Memory Management**:
+   - Configurable rolling buffer window (2KB, 5KB, 10KB, or 50KB) prevents memory exhaustion and DOM freezing during high-baud transmissions.
+   - Slices incoming byte buffers to continuously retain only the most recent $N$ bytes.
+3. **Continuous Auto-Bake Pipeline**:
+   - In combination with Auto-Bake, the Web Worker decodes the streaming telemetry buffer in the background at 300ms intervals, giving immediate live deciphering of checksums, decodings, or ciphers.
+
+---
+
+### 8. Interactive Hex Editor & Two-Way Synchronization
+
+The Baked Output pane includes a native 16-bytes-per-line **Interactive Hex Editor**:
+
+- **Dual-Pane Grid**:
+  - **Offset Address**: 8-digit hexadecimal memory offsets (\`00000000\`, \`00000010\`, ...).
+  - **16 Hex Byte Cells**: Split into two 8-byte columns with subtle gutter separators.
+  - **ASCII Column**: Simultaneous representation of printable characters and control points.
+- **In-Place Two-Way Editing**:
+  - Click any byte cell to edit its value in hexadecimal (\`00\` - \`FF\`) or click ASCII glyphs to edit characters.
+  - Modified bytes are highlighted with a distinct rose accent and tracked in a modifications set.
+- **Real-Time Search Highlighting**:
+  - Integrated search box supporting both Hex byte sequences (e.g. \`1F 8B\` or \`AA 55\`) and ASCII strings (e.g. \`HTTP\`, \`flag{\`, \`MZ\`).
+  - Matching cells are highlighted in vibrant amber with match count and step-through navigation.
+- **Pipeline Synchronization**:
+  - Click **"Pipe to Input"** to feed the edited binary payload straight back into the recipe input, enabling rapid iterative reverse-engineering.
+
+---
+
+### 9. Visual Analytics: Rolling Entropy & Byte Frequency
+
+Clicking the **"Charts"** tab in the Output Deck exposes deep structural telemetry:
+
+1. **Rolling Shannon Entropy Curve**:
+   - Calculates the entropy profile across rolling blocks (default 256 bytes) to visualize boundary transitions between plaintext ($H < 4.5$), structured/code ($4.5 \\le H \\le 7.0$), and ciphertext/compression ($H > 7.2$).
+   - Features an interactive SVG line chart with threshold guide lines, min/max metrics, and hover tooltips detailing block offsets.
+2. **256-Bin Byte Frequency Histogram**:
+   - Bins every byte from \`0x00\` to \`0xFF\` into an interactive bar histogram.
+   - Color-coded by byte category:
+     - **Null Bytes** (\`0x00\`): Blue
+     - **Control Characters** (\`0x01\` - \`0x1F\`, \`0x7F\`): Amber
+     - **Printable ASCII** (\`0x20\` - \`0x7E\`): Emerald
+     - **High / Binary Bytes** (\`0x80\` - \`0xFF\`): Purple
+   - Displays top 5 most frequent byte occurrences and relative payload percentages.
+
+---
+
+### 10. Comprehensive Operation Suites Reference (80+ Operations)
+
+| Module | Key Operations | Description & Underlying Engines |
+| :--- | :--- | :--- |
+| **Cryptography** | AES, DES, Triple DES, RC4, Blowfish, XOR Brute Force, RSA, Bcrypt, Scrypt | Symmetric ciphers (CBC, ECB, CTR, CFB, OFB) via \`crypto-js\`, key derivation, and automated single-byte XOR key brute-forcing. |
+| **Compression** | Gzip, Gunzip, Raw Deflate, Raw Inflate, Zip, Unzip | RFC 1952 / 1951 Deflate via \`pako\` and full ZIP archive creation/extraction via \`JSZip\`. |
+| **Parsing** | Parse JWT, Parse X.509, Parse ASN.1, Parse IPv6, Parse URI, Parse User Agent, JSON Beautify/Minify, XML Beautify | Token verification via \`jwt-decode\`, RFC 5952 IPv6 formatting, ASN.1 DER parser, and structural formatters. |
+| **Extractors** | Extract IPs, Domains, URLs, Emails, MACs, Hashes, Base64 | High-performance regex scanners isolating indicators of compromise (IOCs) and encoded strings. |
+| **Networking** | Change IP Format, Generate UUID, Parse MAC address | Hex, decimal, octal, dotted-quad IP conversions and RFC 4122 v4 UUID generators. |
+| **Forensics** | Detect File Type, Extract EXIF, Identify Hash | Magic bytes file signature analyzer, EXIF metadata extractor, and hash format identifier. |
+| **Flow Control** | Fork, Merge, Register, Subsection, Label, Jump | Multi-branch splitting, register persistence, regex sub-scoping, and controlled execution loops. |
+| **Arithmetic / Logic** | Sum, Mean, Median, Bit-shift, Bitwise AND/OR/XOR | Multi-radix numeric computations, statistical aggregations, and bit-level logic operations. |
+| **Date / Time** | From UNIX Timestamp, To UNIX Timestamp, Parse DateTime | Epoch seconds/milliseconds bidirectional conversions and ISO 8601 UTC timestamp parsing. |
+| **Data Format** | To/From Base32, Base58, Base85, Hexdump, Decimal, Binary, Base64, Hex, URL | Radix converters, Bitcoin Base58, RFC 1924 Base85, and Wireshark-compatible hexdump formats. |
+| **Hashing** | MD5, SHA-1, SHA-256, SHA-3, BLAKE2b, CRC-32, Adler-32 | Cryptographic digests including Keccak and RFC 7693 BigInt BLAKE2b-512. |
+| **Obfuscation** | CharCode Array, Hex Escape, Unicode Escape, PowerShell Slicing, Ducky Jitter | Payload evasion, format scrambling, and keystroke rate-limiter evasion. |
+| **User / Scripting** | Custom Script | Sandboxed user-defined JavaScript execution in strict mode for custom algorithms and ad-hoc transformations. |
+
+---
+
+### 11. Interactive Structured Data Visualizers
+
+Raw text or hexdump outputs are often insufficient for deeply nested configurations, security tokens, or tabular reports. CyberChef Workbench features three dedicated structured viewers:
+
+1. **Collapsible JSON Tree View**:
+   - Automatically activates when output parses as valid JSON (or toggled via **"JSON Tree"**).
+   - Renders a recursive tree showing keys, data types (string, number, boolean, object, array, null), and item counts.
+   - Expand/collapse buttons for the whole tree or individual branches.
+   - Built-in real-time filter search bar highlighting matching keys and values across the JSON hierarchy.
+
+2. **JWT (JSON Web Token) Decoder View**:
+   - Specialized inspector for RFC 7519 JSON Web Tokens (e.g. from the *Parse JWT* operation or pasted directly).
+   - Deconstructs token into three distinct color-coded semantic blocks:
+     - **Header** (Cyan): Algorithm (\`alg\`), token type (\`typ\`), key ID (\`kid\`).
+     - **Payload / Claims** (Emerald): Subject (\`sub\`), issuer (\`iss\`), audience (\`aud\`), and human-readable expiration timestamp status (\`exp\` calculated with live validity checks).
+     - **Signature** (Purple): Base64URL cryptographic verification block.
+
+3. **HTML Table View**:
+   - For tabular outputs (such as *Parse CSV*, TSV datasets, or regex extractor lists of IOCs).
+   - Automatically parses delimiter-separated lines into structured columns with styled header rows.
+   - Includes real-time row filtering and row-count telemetry.
+
+---
+
+### 12. User-Defined Custom Scripting Operation
+
+For advanced analysts requiring custom string manipulation, binary transformations, or proprietary encoding schemes not covered by standard operations, the **Custom Script** operation (located under the **User** category) provides in-recipe JavaScript execution:
+
+- **Strict Sandboxing**:
+  - Code executes inside an isolated \`new Function('input', ...)\` wrapper running under ECMAScript \`"use strict"\` mode.
+  - Global scope contamination is prevented, receiving only the current recipe pipeline \`input\` (as a string or binary ArrayBuffer).
+- **Integrated Code Editor**:
+  - Embedded monospace editor directly within the recipe step card.
+  - Includes quick snippet insertion buttons:
+    - **Reverse String**: \`return input.split('').reverse().join('');\`
+    - **Uppercase**: \`return input.toUpperCase();\`
+    - **Filter Lines**: \`return input.split('\\n').filter(l => l.trim()).join('\\n');\`
+- **Error Handling**:
+  - Runtime exceptions or syntax faults are trapped and surfaced as clear \`Custom Script Execution Error\` alerts without crashing the worker or browser.
+
+---
+
+### 13. Recipe Portability & Standalone HTML Session Export
+
+Sharing and archiving multi-stage analysis workflows is supported through comprehensive portability features:
+
+1. **Recipe Sharing (Import/Export)**:
+   - **Save Recipe**: Serializes the current operation pipeline and parameter dictionary into a downloadable \`.cyberchef\` (or \`.json\`) file.
+   - **Load Recipe**: Uploads an existing \`.cyberchef\` configuration file, automatically reconstructing the pipeline UI and triggering an immediate re-bake.
+   - **Copy Recipe**: One-click clipboard export of clean JSON recipe arrays for sharing in team documentation, incident tickets, or chat channels.
+2. **Standalone HTML Session Exporter**:
+   - Clicking **"HTML"** in the Baked Output deck generates a completely self-contained, offline-compatible HTML5 document.
+   - Embeds the full audit record: session metadata, generation timestamp, input data, each configured recipe step with arguments, and raw/hex/JSON output formats.
+   - Includes embedded CSS and lightweight client-side JavaScript for copying and format switching—allowing external stakeholders to inspect forensic results without requiring any server, node environment, or internet connection.
+
+---
+
+### 14. Network Payload Parsers (Hardware Synergy)
+
+When piping hardware streams from USB serial interfaces or 802.11 monitor feeds, analysts frequently need to decode raw Layer 3/4 datagrams and Layer 7 protocol messages directly. CyberChef provides four dedicated wire-format parsers:
+
+1. **Parse DNS Query**:
+   - Decodes DNS wire-format payloads into structured JSON.
+   - Extracts Transaction ID (\`0x1234\`), Message Type (Query vs Response), standard flags (Opcode, Authoritative Answer, Truncated, Recursion Desired/Available, RCODE), record counts, and full domain queries (e.g. \`example.com\`, Type \`A\`, Class \`IN\`).
+2. **Parse TCP Header**:
+   - Extracts Source/Destination ports with service mapping (HTTP, HTTPS, SSH, DNS, etc.), 32-bit Sequence and Acknowledgment numbers, and Header Length.
+   - Decodes control flags: \`SYN\`, \`ACK\`, \`RST\`, \`FIN\`, \`PSH\`, \`URG\`, \`ECE\`, \`CWR\`, \`NS\`.
+   - Computes payload offset and remaining payload length for subsequent pipeline chaining.
+3. **Parse UDP Header**:
+   - Extracts 16-bit Source/Destination ports (with mDNS, DNS, DHCP, SNMP mappings), Length field, and Checksum.
+   - Determines payload byte offset (\`offset + 8\`) and truncation state.
+4. **Parse HTTP Request/Response**:
+   - Decodes unencrypted Layer 7 HTTP/1.x traffic.
+   - For Requests: extracts HTTP method (GET, POST, etc.), URI/Path, HTTP version, normalized header dictionary, and payload body.
+   - For Responses: extracts status code (200, 404, etc.), status text, headers, and response body.
+5. **Byte Offset Control**:
+   - All network operations accept a \`Byte Offset\` parameter, allowing users to skip physical Ethernet frames or IP headers when dissecting encapsulated streams.
+
+---
+
+### 15. Archive & File System Forensics
+
+Inspecting firmware packages, update drops, or memory dumps requires deep archive traversal and signature recognition:
+
+1. **Unzip & Untar Operations**:
+   - **Unzip**: Decompresses PKZip archives from binary, Hex, or Base64 streams. When given an empty filename, returns a structured JSON directory table of all contained files with paths, sizes, compressed sizes, and timestamps. When given a specific path, extracts that file's content directly into the pipeline.
+   - **Untar**: Implements a zero-dependency POSIX USTAR / GNU TAR parser. Traverses 512-byte blocks, reading filenames, file modes, user/group IDs, octal file sizes, and file type flags (\`'0'\` normal file, \`'5'\` directory). Supports single-file extraction or JSON archive cataloging.
+2. **50+ File Type Magic Signatures**:
+   - The upgraded **Detect File Type** engine inspects binary headers across 50+ industry formats:
+     - **Images**: PNG, JPEG, GIF87a/89a, WebP, BMP, TIFF (LE/BE), ICO, PSD.
+     - **Documents**: PDF, PostScript, RTF, MS Office OLE2 (DOC/XLS/PPT).
+     - **Executables**: ELF (Linux 32/64), Windows PE/MZ, Mach-O (32/64/Fat), WebAssembly (WASM), Java Class, Android DEX.
+     - **Archives**: ZIP, Gzip, Bzip2, 7-Zip, TAR, XZ, RAR v4/v5, Zstandard, CPIO, ISO 9660.
+     - **Databases & Telemetry**: SQLite 3, PCAP (LE/BE/Nanosecond), PCAPNG, Redis RDB, Git Packfile.
+     - **Audio/Video**: MP3 (ID3/Sync), FLAC, Ogg, WAV, AVI, MIDI, MP4/MOV, WebM/MKV, FLV.
+     - **Firmware & Security**: DER X.509, OpenPGP Keyrings, ESP32 ROM images, Device Tree Blobs (DTB).
+   - Outputs rich JSON telemetry containing MIME type, extension, category, detected magic bytes, and formatted description.
+
+---
+
+### 16. Global Command Palette & Keyboard Navigation
+
+For high-velocity operations, the CyberChef Workbench incorporates an overlay Command Palette:
+
+- **Shortcut**: Press \`Ctrl+K\` (or \`Cmd+K\`) anywhere within the workbench.
+- **Fuzzy Search**: Filter across all 80+ operations, saved recipes, and UI actions.
+- **Immediate Execution**:
+  - \`Ctrl+Enter\`: Force Bake current recipe.
+  - \`Ctrl+S\`: Save recipe / download output.
+  - \`Ctrl+Z\`: Revert the last recipe change with full undo history stack.
+  - \`Esc\`: Dismiss palette.
+- **UI Shortcuts**:
+  - Switch output formats (Text, Hex, Tree, Table, JWT, Hex Editor, Charts).
+  - Toggle Auto-Bake, Clear Input, or Clear Recipe.
+  - Pipe Hardware Data directly from the palette.
+
+---
+
+### 17. Time Machine (Session History Timeline)
+
+Iterative reverse engineering requires tracking how data evolves across multiple transformations. The **Time Machine** provides an automated audit trail:
+
+1. **Automated Bake Snapshots**:
+   - Every manual or auto-bake execution captures an in-memory snapshot containing the input payload, full recipe configuration, output, duration, and timestamp.
+   - Automatically avoids duplicate entries when consecutive debounced bakes produce identical states.
+2. **Memory-Conscious Capping**:
+   - History is strictly capped at 20 snapshots using a rolling FIFO eviction strategy, guaranteeing lightweight browser memory consumption.
+3. **One-Click State Restoration**:
+   - The left pane features a **History** tab alongside the Operations library.
+   - Analysts can browse the chronological snapshot feed and click any entry to immediately restore the exact Input, Recipe, and Output state.
+   - A **Clear History** button allows purging all snapshots at any time.
+
+---
+
+### 18. Deep Cryptanalysis Tools
+
+Enterprise cryptanalysis often begins with unknown ciphertext or raw cryptographic material that requires algorithmic extraction and frequency profiling:
+
+1. **XOR Brute Force**:
+   - Iterates through all single-byte keys from \`0x00\` to \`0xFF\` (0 to 255).
+   - Evaluates each candidate output against English unigram frequency distributions (weighting common vowels, consonants, and standard whitespace).
+   - Ranks candidates by score and outputs the top 10 most likely plaintext strings alongside their hex keys, ASCII character representations, and printable ratios.
+2. **Frequency Analysis**:
+   - Computes statistical character distributions across the entire input buffer.
+   - Outputs total character counts, unique symbol counts, individual frequencies, and percentages.
+   - Generates a visual Unicode bar chart histogram for rapid inspection of plaintext language models or ciphertext entropy.
+3. **X.509 Certificate Parser**:
+   - Native browser-side ASN.1 DER and PEM parser for public-key certificates.
+   - Extracts Subject, Issuer, Common Name (CN), Validity Dates (NotBefore / NotAfter), active validity status, detected Public Key Algorithm (RSA, ECDSA/Ed25519), and SHA-256 fingerprint.
+4. **RSA Key Parser**:
+   - Extracts Modulus ($N$), Public Exponent ($E$), and bit length (e.g. 512, 1024, 2048, 4096-bit) from standard PKCS#1 and PKCS#8 PEM or DER public keys.
+
+---
+
+### 19. Recipe Test Suites & Regression Validation
+
+As recipes grow into complex multi-stage pipelines with custom scripts and flow controls, modifications can inadvertently break edge cases. The **Recipe Test Suite** introduces enterprise test-driven engineering to CyberChef:
+
+1. **Test Case Modal**:
+   - Click the **Test** button on the Recipe header bar or on any saved recipe in the Presets manager.
+   - Define custom test cases with distinct **Input Strings** and **Expected Output Strings**.
+   - Choose between **Exact Match** (\`assert.strictEqual\`) and **Fuzzy Contains** assertions.
+2. **Execution & Feedback**:
+   - Click **Run All Tests** to execute the pipeline through the Chef engine in isolated dishes.
+   - Passing tests display a green checkmark with execution latency in milliseconds.
+   - Failing tests display a red X with a visual side-by-side diff comparing Expected vs. Actual output.
+3. **Persistence**:
+   - Test suites are persisted to browser \`localStorage\` keyed by recipe signature, ensuring regression suites are retained across sessions.
+
+---
+
+### 20. Presentation Mode & Dynamic Theming
+
+Sharing technical findings with non-technical stakeholders or presenting during security reviews requires a clean, distraction-free interface:
+
+1. **Presentation Mode**:
+   - Located in the top action bar: click **Presentation Mode**.
+   - Collapses the Operations library and Recipe pipeline columns, expanding the Input and Output decks across the entire 12-column viewport.
+   - CodeMirror editors expand with line numbers and syntax highlighting, ideal for screenshots, reports, and live conference demonstrations.
+2. **Multi-Palette Theming**:
+   - **Cyberpunk Dark**: Sleek deep-slate and cyan interface designed for extended analytical sessions.
+   - **Matrix Green**: High-contrast pure black background (\`#000000\`) with phosphor neon green accents (\`#00ff66\`) and monospace terminal aesthetics.
+   - **Classic Light**: Clean light-gray and slate styling tailored for standard office environments, documentation, and high-visibility displays.
+   - Theme selections persist across browser sessions via \`localStorage\`.
+`
   }
 ];
+
+
+
