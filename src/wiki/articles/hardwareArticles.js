@@ -512,5 +512,594 @@ The telemetry HUD samples onboard voltage and current sensors (e.g. INA219, INA2
 | **Type-C Cable & Connector Specification** | USB-IF Working Group (CC pin signaling, BMC 300kHz modulation, SOP framing) | [USB Type-C Specification](https://www.usb.org/developers) |
 | **FUSB302 / CH224K USB-PD Controller Architecture** | ON Semiconductor / Fairchild & Nanjing Qinheng Microelectronics (WCH) | [onsemi FUSB302 Datasheet](https://www.onsemi.com) |
 `
+  },
+  {
+    id: 'alfa-wifi',
+    toolId: 'alfa-wifi',
+    category: 'hardware',
+    title: 'Alfa Wi-Fi Workbench — RTL8812AU WebUSB Engineering Manual',
+    summary: 'Browser-native monitor mode and frame capture for Realtek RTL8812AU chipsets using WASM and WebUSB.',
+    tags: ['WebUSB', 'WASM', 'RTL8812AU', '802.11', 'Monitor Mode'],
+    readTime: '25 min read',
+    content: `
+# Alfa Wi-Fi Workbench — WebUSB & RTL8812AU Manual
+
+### 1. What Is This Tool & Why Do You Need It?
+This tool bypasses the operating system's native Wi-Fi drivers using the WebUSB API. It loads a Rust-based WASM driver (\`@openipc-rs/web\`) to interface directly with the Alfa AWUS036ACH (RTL8812AU chipset), allowing for raw 802.11 frame capture (monitor mode) directly in the browser.
+
+### 2. Hardware Architecture & Physics / Protocol Theory
+<details>
+<summary>Deep Dive: WebUSB, WinUSB, and Firmware Loading</summary>
+Browsers cannot access USB Wi-Fi adapters if the host OS claims them. Windows users MUST replace the vendor driver with WinUSB using Zadig. The WASM driver uploads the proprietary Realtek firmware to the device's RAM, initializes the MAC/BB/RF registers, and then initiates raw RX bulk transfers.
+</details>
+
+<details>
+<summary>Deep Dive: Understanding 802.11 Frame Parsing & Radiotap Architecture</summary>
+
+Raw bulk RX transfers from the RTL8812AU arrive encapsulated in a **Radiotap Header** followed by standard **IEEE 802.11 MAC frames**:
+
+1. **Radiotap Header Anatomy**:
+   - \`Byte 0\`: Version (\`0x00\`).
+   - \`Byte 1\`: Padding / alignment flag.
+   - \`Bytes 2-3\`: \`it_len\` (Total Radiotap length in little-endian uint16). The 802.11 payload begins precisely at offset \`it_len\`.
+   - \`Bytes 4-7\`: \`it_present\` bitmask indicating telemetry fields.
+     - **Bit 3**: Channel frequency in MHz (e.g. 2412 for CH 1, 5180 for CH 36).
+     - **Bit 5**: Antenna signal strength in dBm (\`int8\`, e.g. -45 dBm).
+
+2. **802.11 MAC Header & Frame Control**:
+   - \`Bytes 0-1\`: Frame Control field.
+     - **Type**: Bits 2-3 (\`00\` = Management, \`01\` = Control, \`10\` = Data).
+     - **Subtype**: Bits 4-7 (\`1000\` = Beacon, \`0101\` = Probe Response, \`0100\` = Probe Request).
+   - \`Bytes 4-9\`: Destination / Receiver MAC address (Broadcast \`FF:FF:FF:FF:FF:FF\` for Beacons).
+   - \`Bytes 10-15\`: Transmitter / Source MAC address.
+   - \`Bytes 16-21\`: **BSSID** (Basic Service Set Identifier, uniquely identifying the Access Point radio).
+
+3. **Management Frame Body & Tagged Parameters (IEs)**:
+   - Following 12 bytes of fixed parameters (Timestamp, Beacon Interval, Capability Info) in Beacons and Probe Responses, the frame delivers variable-length tagged parameters:
+     - \`Tag 0 (SSID)\`: Network name string. A tag length of 0 represents a **Hidden SSID**.
+     - \`Tag 3 (DS Parameter Set)\`: 1-byte operational channel number (1–14 for 2.4 GHz).
+</details>
+
+### 3. Complete UI Control Mapping
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| Connect via WebUSB | Button | Prompts the browser's native USB device picker. |
+| Simulate RF | Toggle | Injects synthetic 802.11 frames for testing without hardware. |
+| Channel Dropdown | Select | Configures the hardware's center frequency (1-165). |
+| Auto-Hop Channels | Checkbox | Automatically cycles channel through 1, 6, 11, 36, 40, 44, 48 every 500ms. |
+| Pause / Resume | Button | Freezes packet ingestion buffer without tearing down the USB interface. |
+| Export PCAP | Button | Downloads raw 802.11 packet buffer as a Wireshark-compatible PCAP file. |
+| Export Wigle CSV | Button | Generates WigleWifi-1.4 formatted CSV for wardriving and Wigle.net uploads. |
+| Export JSON | Button | Serializes the aggregated BSSID and Client directory into a downloadable JSON file. |
+| Probing Clients | Tab View | Identifies client stations broadcasting Probe Requests seeking specific network SSIDs. |
+| Spectrum Tab | Tab View | Bar chart visualizer displaying real-time packet density and congestion across RF channels. |
+| Topology View | Tab View | Interactive SVG graph rendering physical relationships, parent APs, orbiting client stations, and encryption security colors. |
+| Signal Trend | Column | Real-time SVG sparkline visualizer tracking the last 15 RSSI data points per transmitter. |
+| Handshake | Column | Shows green lock indicator when a complete WPA/WPA2 4-way handshake (or M1+M2) is captured. |
+| GPS Tagging | Toggle | Hooks browser Geolocation API (\`navigator.geolocation.watchPosition\`) to tag discovered devices with latitude, longitude, and accuracy. |
+| Distance | Column | Displays real-time Haversine distance (in meters) from operator GPS fix to the Access Point. |
+| Device Table | Tab View | Live diagnostic table listing BSSID, SSID, Handshake status, RSSI, channel, distance, and vendor. |
+| Save Session | Button | Serializes and persists current AP, client, channel, and packet buffers to browser IndexedDB store. |
+| Load Session | Button | Opens modal interface to hydrate state from historical IndexedDB capture sessions. |
+| Anomalies | Tab View | Surfaces suspected device identity rotation anomalies where multiple MACs probe identical SSID sequences. |
+| Signal Map | Tab View | Plots physical GPS coordinates and RSSI signal strength heatmaps using Leaflet and vector overlays. |
+| Waterfall | Tab View | Real-time canvas-based RF spectrum waterfall showing rolling channel packet density over time. |
+| Signature | Column | Displays extracted Information Element (IE) Tag sequence and flags potential MAC randomization. |
+| Posture Score | Header Gauge | Circular visualizer calculating environment health (0-100) based on open APs, legacy ciphers, and threat anomalies. |
+| Cleartext | Tab View | Monitors observable DNS query domains (UDP 53) and HTTP endpoints (TCP 80) from unencrypted Data frames. |
+| Executive Report | Button | Generates and exports a styled standalone HTML audit report of the RF environment. |
+| Roaming Tab | Tab View | Dedicated mobility audit table tracking client handoffs, source/destination BSSIDs, and roam latency (ms). |
+| Upload PCAP | Button | Ingests offline .pcap binary capture files and replays raw frames through the background Web Worker. |
+| Wi-Fi 6 Badge | Badge | Blue pill indicating 802.11ax High-Efficiency capabilities and spatial reuse BSS Color. |
+
+
+
+
+### 4. Step-by-Step Engineering Walkthroughs
+#### Walkthrough A: Getting Hardware Access on Windows
+1. Download **Zadig**.
+2. Select your Alfa adapter.
+3. Replace the driver with **WinUSB**.
+4. Refresh the tool and click "Connect".
+
+#### Walkthrough B: Analyzing Captures in Wireshark
+1. Click **Export PCAP** in the action bar to download your raw packet stream.
+2. Open the resulting \`.pcap\` file directly in **Wireshark**.
+3. Wireshark automatically recognizes **LinkType 127 (\`LINKTYPE_IEEE802_11_RADIOTAP\`)**:
+   - Inspect full radio physical metrics (dBm RSSI, channel frequency, channel bandwidth, and data rates) decoded in the Radiotap layer.
+   - Filter for handshakes using display filter \`eapol\` to locate WPA2/WPA3 4-way key exchanges.
+   - Filter for beacon frames using \`wlan.fc.type_subtype == 0x08\` to analyze vendor-specific Information Elements.
+
+### 5. Wireless Intrusion Detection (WIDS) & Threat Detection
+The workbench includes automated real-time WIDS heuristics designed to catch active Wi-Fi jamming and rogue deauthentication attacks:
+- **Deauth & Disassociation Inspection**: The parser monitors 802.11 Management frames with Subtype \`12\` (Deauth) and Subtype \`10\` (Disassoc).
+- **Reason Code Extraction**: Inspects the 2-byte body payload to extract the deauthentication reason (e.g. Code 7: *Class 3 frame received from nonassociated station*, typically generated by automated deauth tools like \`aireplay-ng\` or ESP8266 deauthers).
+- **Sliding-Window Threshold**: When $\ge 10$ Deauth events strike within a rolling 5,000ms window, the tool sounds an immediate high-priority visual alarm, flagging the targeted Client Station MAC and the spoofed AP BSSID.
+
+### 6. Local OUI Vendor Lookup & Reconnaissance
+Hardware identification is accelerated via an offline, in-memory IEEE Organizationally Unique Identifier (OUI) database:
+- **Prefix Extraction**: Strips colons, hyphens, and spaces from 48-bit MAC addresses and indexes the initial 24 bits (first 3 bytes, e.g. \`00:1A:11\` $\rightarrow$ \`Google\`, \`3C:22:FB\` $\rightarrow$ \`Apple\`, \`24:6F:28\` $\rightarrow$ \`Espressif\`).
+- **Zero Network Overhead**: Performs zero external HTTP queries, keeping sensitive RF reconnaissance completely offline and local.
+- **Deep Table & Detail Panel Integration**: Surfaces vendor intelligence directly in AP and Client tables, enabling instant identification of IoT microcontrollers (ESP32, Tuya), consumer smartphones, and enterprise APs.
+
+### 7. Memory Safety & PCAP Ring Buffer Architecture
+Long capture runs in high-density RF environments can capture tens of thousands of frames per minute, posing severe browser heap exhaustion risks:
+- **50,000 Frame Strict Ring Buffer**: The raw packet buffer for PCAP export acts as a strict circular ring buffer capped at 50,000 frames. When capacity is reached, the oldest frames are systematically shifted out to keep heap usage bounded and stable.
+- **Buffer Full Alert**: A dedicated amber notification banner warns the user when the 50,000-frame ceiling is reached, providing one-click access to download the capture as a \`.pcap\` file before oldest frames rotate out.
+- **Adaptive UI State Throttling**: When the discovered device count exceeds 200 nodes, the React state flush timer automatically switches from 500ms to 1500ms, decoupling high-throughput USB bulk packet processing from DOM rendering.
+- **Windowed Table Pagination**: Tables slice visible rows into pages of 100 entries with previous/next controls, preventing virtual DOM recalculation lag even with 500+ active transmitters.
+
+### 8. Capturing WPA Handshakes (EAPOL 4-Way Key Exchange)
+The workbench includes a dedicated WPA/WPA2/WPA3 4-way handshake detection engine:
+- **Frame Identification**: Inspects 802.11 Data frames (Frame Control Type 2) searching for the LLC/SNAP encapsulation header (EtherType \`0x888E\`).
+- **Key Information Bitmask Decoding**: Decodes the 2-byte EAPOL-Key Information field to track the cryptographic handshake sequence:
+  - **M1 (AP $\rightarrow$ Client)**: Authenticator sends ANonce (\`isPairwise && isAck && !isMic\`).
+  - **M2 (Client $\rightarrow$ AP)**: Supplicant replies with SNonce + MIC (\`isPairwise && !isAck && isMic\`).
+  - **M3 (AP $\rightarrow$ Client)**: Authenticator sends GTK + MIC (\`isPairwise && isAck && isMic && isInstall\`).
+  - **M4 (Client $\rightarrow$ AP)**: Supplicant confirms handshake completion (\`isPairwise && !isAck && isMic\`).
+- **Complete Handshake Determination**: Capturing M1 and M2 contains the cryptographic nonces (ANonce, SNonce) and Message Integrity Check (MIC) required for offline Pairwise Master Key (PMK) / PSK verification in tools like \`hashcat\` or \`aircrack-ng\`. Once both M1 and M2 are captured for an AP-Client pair, the tool flags the pair as a **Complete Handshake**.
+- **Audio & Visual Alerts**: Upon capturing a verified handshake pair, the workbench triggers a green status banner, plays an alert chime via the Web Audio API, and displays a green lock icon in the Access Point table.
+
+### 9. RF Spectrum & Channel Utilization Visualizer
+The **Spectrum** tab provides an interactive bar chart of channel packet density across 2.4 GHz and 5 GHz bands:
+- **Packet Density Tracking**: Continuously tallies frame counts per channel (\`channelStatsRef\`) without impacting frame capture throughput.
+- **Spectrum Band Filtering**: Toggle between **All Channels**, **2.4 GHz (Channels 1–14)**, and **5 GHz (UNII Channels 36–165)**.
+- **Congestion KPI Metrics**: Displays Total Logged Packets, Peak Congestion Channel, and an automated **Recommended Channel** recommendation based on the lowest observed packet density across non-overlapping channels.
+- **Interactive Click-to-Retune**: Clicking any channel bar on the spectrum graph immediately retunes the Alfa radio hardware or simulated RF engine to that channel.
+- **Optimal Channel Selection**:
+  - **2.4 GHz**: Select non-overlapping channels \`1\`, \`6\`, or \`11\` to avoid adjacent channel interference.
+  - **5 GHz**: UNII-1/UNII-3 channels (\`36-48\` and \`149-165\`) offer up to 80 MHz channel widths with lower interference from consumer electronics.
+
+### 10. Detecting Evil Twins (Rogue Access Points)
+The workbench actively monitors for Evil Twin attacks where an attacker broadcasts a legitimate network's SSID to intercept client credentials:
+- **Multi-BSSID Clustering**: Automatically clusters discovered APs by normalized SSID, distinguishing between legitimate enterprise roaming meshes and malicious duplicates.
+- **Encryption Downgrade Heuristic**: If two APs broadcast the same SSID but one offers \`WPA2\` while the duplicate is \`Open\` (or WEP), the duplicate is flagged as an active credential-harvesting rogue captive portal.
+- **Vendor OUI Discrepancy Heuristic**: If multiple APs broadcast the same SSID but their hardware OUIs point to wildly conflicting vendors (e.g. \`Cisco\` vs \`Espressif\` / ESP32 WiFi Pineapple clones), the duplicate is flagged as a hardware imposter.
+- **Visual Alerting**: Surfaces high-visibility amber warning banners and displays a **Rogue Suspect** pill badge directly in the AP table and inspection side-panel.
+
+### 11. Browser Geolocation & Live Wardriving GPS Tagging
+The workbench features native browser geolocation logging using the W3C Geolocation API:
+- **Real-Time GPS Watcher**: When **GPS Tagging** is toggled on in the header, the engine registers an active listener via \`navigator.geolocation.watchPosition()\`, receiving continuous updates with high accuracy enabled.
+- **Zero-Latency In-Memory Tagging**: As 802.11 frames arrive over WebUSB, newly discovered Access Points and Client Stations are stamped with the operator's current \`latitude\`, \`longitude\`, \`accuracy\`, and \`altitude\`.
+- **Haversine Distance Estimation**: When GPS is active, the AP table calculates the approximate line-of-sight distance in meters between the operator and each discovered transmitter using the Haversine formula:
+  $$\Delta\sigma = 2\arcsin\left(\sqrt{\sin^2\left(\frac{\Delta\phi}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\Delta\lambda}{2}\right)}\right)$$
+  $$d = R \cdot \Delta\sigma \quad (R = 6,371,000\text{ m})$$
+- **Standardized Wigle CSV Export**: When clicking **Wigle CSV**, the exporter populates the \`CurrentLatitude\`, \`CurrentLongitude\`, and \`AccuracyMeters\` columns with tagged coordinates (defaulting to \`0.0\` / \`0\` if GPS is disabled), producing fully compliant WigleWifi-1.4 files ready for upload.
+
+### 12. Interactive Network Topology Map (Map View)
+The **Topology** tab renders a real-time vector relationship graph showing the physical and operational structure of the RF environment:
+- **AP & Client Clustering**: Parent Access Points are anchored centrally, with associated Client Stations orbiting each AP. Unassociated probing stations orbit along the outer perimeter.
+- **Association Vector Links**: Dashed SVG vector links connect each active station MAC to its target BSSID, highlighting in vibrant cyan/indigo when selected or hovered.
+- **Security Color Coding**:
+  - **Green (\`#10b981\`)**: WPA3 Secure (SAE authenticated meshes).
+  - **Yellow (\`#eab308\`)**: WPA2 / WPA Standard encryption.
+  - **Red (\`#ef4444\`)**: Open / Insecure networks.
+- **Deep Inspection Side-Panel Integration**: Clicking any node immediately displays comprehensive hardware telemetry, vendor OUI, RSSI history sparkline, and GPS coordinates in the right inspector drawer.
+- **High-Density Safeguard**: If more than 50 total nodes are tracked simultaneously, the topology engine displays a safety banner and provides a one-click return to the paginated table view, preventing browser redraw stalls.
+
+### 13. Offline Data Persistence Engine (IndexedDB Architecture)
+Long-duration RF auditing sessions (12+ hours) can capture hundreds of thousands of frames and discover thousands of BSSIDs, leading to potential browser heap limits or tab crashes if kept purely in ephemeral React memory:
+- **IndexedDB Schema & Store**: The persistence engine initializes a dedicated IndexedDB database (\`skons_wifi_persistence_db\`) with an object store named \`capture_sessions\` keyed by \`id\` and indexed by \`timestamp\`.
+- **Asynchronous Serialization**: When clicking **Save Session** or triggering auto-save, the utility asynchronously writes the complete session state—including AP telemetry, client stations, channel utilization statistics, and raw frame buffers—directly to local browser disk storage.
+- **Instant State Hydration**: The **Load Session** modal lists historical captures with timestamp, node counts, and packet totals. Selecting a session hydrates the active workbench state instantaneously without requiring hardware reconnection.
+- **Offline Reliability**: Persisted sessions remain intact across browser restarts, page refreshes, and power outages.
+
+### 14. Identity Anomaly Tracking (MAC Randomization & Probe Fingerprinting)
+To protect user privacy and prevent physical tracking, modern client devices (Apple iOS, Android 10+, Windows 11) periodically rotate and randomize their hardware 802.11 MAC addresses (using locally administered address bit 1):
+- **Behavioral Fingerprinting**: While hardware identifiers rotate, a device's internal Preferred Network List (PNL) remains constant. Devices continuously transmit Probe Requests looking for their configured home, office, and preferred networks.
+- **Ordered Sequence Correlation**: The anomaly tracking engine groups stations broadcasting identical sequences of probed SSIDs (\`probedSsids\`). If two or more distinct MAC addresses broadcast the exact same probe sequence within a sliding time window (10 minutes), they are correlated and flagged as a **Potential Identifier Rotation Anomaly**.
+- **OUI Discrepancy & Vendor Profiling**: Correlated MACs are analyzed against the offline IEEE OUI lookup table, identifying whether the device rotates within standard randomized bit ranges or mimics known vendor hardware.
+- **Anomalies View**: The dedicated **Anomalies** tab displays all flagged rotating clusters, showing observed MACs, vendor OUIs, signal strength (RSSI), and the shared probe request sequence.
+
+### 15. Spatial Signal Mapping & Physical RSSI Heatmaps
+The **Signal Map** workbench integrates GPS coordinates with RF signal strength measurements to generate real-time spatial coverage maps:
+- **Spatial Data Correlation**: When GPS Tagging is enabled, each captured 802.11 beacon or frame ties the transmitter's received signal strength (RSSI) to physical coordinates (latitude, longitude, accuracy).
+- **Semi-Transparent Heatmap Overlays**: Renders circular heatmap regions anchored to the physical location where the access point was detected, with radius scaled according to GPS accuracy:
+  - **Emerald Green (\`> -60 dBm\`)**: Strong signal / immediate physical proximity.
+  - **Amber Yellow (\`-75 dBm to -60 dBm\`)**: Moderate signal / intermediate boundary.
+  - **Rose Red (\`< -75 dBm\`)**: Weak signal / edge of radio reception.
+- **Target AP Filtering**: A top toolbar dropdown allows isolating a single target BSSID or viewing all geotagged access points concurrently.
+- **Leaflet & Vector Themes**: Supports high-contrast CartoDB Dark Matter tiles and OpenStreetMap standard layers with smooth recentering and interactive popup inspection.
+
+### 16. Undisclosed Identity Correlation & Client Signature Profiling
+Many 802.11 Access Points conceal their Service Set Identifier (SSID) in periodic Beacon broadcasts, reporting an empty or null string (\`<Hidden SSID>\`). However, 802.11 client devices looking for or associating to these hidden networks must explicitly transmit the SSID in cleartext inside:
+- **Probe Requests (Discovery Queries, Subtype 4)**: Directed client discovery queries targeting a specific network name.
+- **Association Requests (Subtype 0) & Reassociation Requests (Subtype 2)**: Client station connection requests addressed directly to the AP's BSSID.
+
+The **Identity Correlation Engine** listens continuously for client discovery and association frames:
+- **Cross-Reference Resolution**: When a client transmits a Probe Request or Association Request containing a valid cleartext SSID targeting an AP known in state to have a hidden or undisclosed SSID, the engine cross-references the destination BSSID.
+- **Dynamic State Unmasking**: The AP record is updated to display the discovered SSID, marked with a lock icon and an \`(Unmasked)\` badge, preserving visibility into which networks were originally hidden.
+- **Client Information Element (IE) Signature Profiling**: Management frames carry a specific sequence of Information Element (IE) Tag IDs (e.g. Supported Rates \`1\`, DS Channel \`3\`, HT Capabilities \`45\`, Extended Rates \`50\`, Extended Capabilities \`127\`, VHT Capabilities \`191\`, Vendor Specific \`221\`).
+- **MAC Randomization Detection**: Operating systems that randomize their MAC addresses retain identical Wi-Fi hardware and software stack capabilities. By concatenating and tracking the sequence of Tag IDs as a signature string (\`"1,50,3,45,127,191,221"\`), the workbench correlates distinct hardware addresses broadcasting the identical signature within a 10-minute window, flagging them as **Potential Randomization**.
+
+### 17. Real-Time Spectrum Waterfall Visualization (RF Spectrogram)
+The **Waterfall** tab provides a real-time rolling spectrogram visualizer for monitoring RF channel congestion, intermittent transmissions, and spectrum interference over time:
+- **High-Frequency Sampling**: Samples packet density per channel (Channels 1–165) every 100 milliseconds via a high-frequency asynchronous reference buffer (\`waterfallCountsRef\`).
+- **Canvas-Accelerated Spectrogram**: Utilizes HTML5 2D canvas rendering with double-buffering for fluid 60 FPS performance without React re-render overhead:
+  - **Y-Axis**: Frequency channels across 2.4 GHz and 5 GHz UNII bands with highlighted current tuned channel.
+  - **X-Axis**: Time progression scrolling smoothly from right (newest / 0s) to left (historical / -20s).
+  - **Color-Coded Density Colormap**: Maps frame density from deep blue (low traffic) through cyan, emerald green, and amber to crimson red/white (high congestion / channel jamming).
+- **Interactive Controls**: Supports band filtering (**All Channels**, **2.4 GHz**, **5 GHz**), time freezing for packet analysis, and history clearing.
+
+### 18. Environment Posture Scoring Engine
+The workbench features an automated **Environment Posture Engine** that continuously evaluates the overall security hygiene of the local RF airspace on a scale of **0 to 100**:
+- **Baseline Posture Score**: Starts at a perfect baseline score of \`100\` (Grade A+).
+- **Deduction & Penalty Heuristics**:
+  - **Open (Unencrypted) Networks (-15 pts each)**: Heavily penalized due to cleartext transmission risks, packet injection vulnerabilities, and susceptibility to adversary snooping.
+  - **Legacy Encryption (-10 pts each)**: Medium penalty for Access Points relying on obsolete, cryptographically compromised ciphers (WEP, WPA1, or TKIP).
+  - **Generic / Factory Default SSIDs (-5 pts each)**: Light penalty for default SSIDs (\`linksys\`, \`NETGEAR\`, \`default\`, \`setup\`, \`dlink\`, \`tp-link\`) that expose default administrative router credentials and WPS vulnerabilities.
+  - **Threat & Identity Anomalies (-10 pts each)**: Medium penalty for each detected Rogue AP (Evil Twin duplicate) or MAC address rotation anomaly.
+- **Score Classification & Visual Gauge**:
+  - **90–100 (Grade A / Optimal)**: Displayed with an emerald green circular gauge.
+  - **70–89 (Grade B/C / Warning)**: Displayed with an amber yellow circular gauge indicating elevated risk.
+  - **< 70 (Grade D/F / Critical)**: Displayed with a crimson red circular gauge warning of widespread exposure or hostile activity.
+
+### 19. Cleartext Telemetry Metadata Extraction (DNS & HTTP)
+Unencrypted 802.11 Data frames (Frame Control Type 2, Protected bit 14 = 0) transmit Layer 3/4 payload packets over the air in cleartext:
+- **LLC/SNAP & IPv4 Header Decapsulation**: Bypasses the 802.11 MAC header (24 bytes, or 26 bytes for QoS Data) and unpacks the 8-byte LLC/SNAP header (\`0xAA 0xAA 0x03 0x00 0x00 0x00 0x08 0x00\`) to access the IPv4 packet payload.
+- **UDP Port 53 (DNS Query Extraction)**: Inspects the DNS Question Section, decoding length-prefixed domain labels (e.g. \`\\x06google\\x03com\\x00\` $\rightarrow$ \`google.com\`).
+- **TCP Port 80 (HTTP Request Extraction)**: Inspects standard HTTP stream buffers, extracting the target Host header (\`Host: <domain>\`) and HTTP endpoint path (\`GET /path\`).
+- **Privacy Boundary**: Operates in passive diagnostic mode; extracts strictly observable network routing destinations (domain names and endpoint paths) without buffering, inspecting, or storing user payload contents or credentials.
+- **Dedicated Telemetry View**: Surfaces requests in the **Cleartext** tab, detailing timestamp, protocol, requesting client station MAC, target AP BSSID, channel, and RSSI.
+
+### 20. Executive Summary Reporting & HTML Export
+Auditing dense corporate or industrial Wi-Fi environments requires executive-ready reporting that translates low-level 802.11 frame telemetry into actionable security intelligence:
+- **Standalone Single-File HTML Reports**: When clicking **Executive Report** in the action bar, the generator compiles all session metrics into a self-contained, beautifully styled HTML document.
+- **Executive Scorecard & Risk Triage**: Prominently highlights the overall Environment Posture Score, Risk Level badge, and specific security penalties.
+- **Infrastructure Inventory & Top 10 APs**: Details the 10 strongest Access Points ranked by RSSI, including encryption standards, channel allocation, handshake capture status, and vendor OUIs.
+- **Threat Anomaly Ledger**: Records all identified Rogue AP Evil Twins, conflicting encryption mesh duplicates, and MAC rotation clusters.
+- **Offline Portability**: The report contains zero external stylesheet or script dependencies, rendering instantly in any web browser or printable as a PDF.
+
+### 21. Web Worker Thread Architecture (High-Throughput Offloading)
+In dense RF environments with multiple access points and active client devices, the adapter can receive thousands of 802.11 frames per second. Parsing variable-length Radiotap headers, IEEE 802.11 MAC headers, Information Element (IE) tag sequences, and cleartext payloads on the main JavaScript execution thread causes significant UI lag and frames to drop:
+- **Dedicated Parser Worker**: The parsing subsystem is isolated in a background Web Worker (\`src/workers/parserWorker.js\`). Raw binary \`Uint8Array\` frame buffers received over WebUSB (\`radio.readRxTransfer\`) are posted directly to the worker thread without blocking the browser's DOM rendering cycle.
+- **200ms Batch Ingestion Pipeline**: Rather than posting individual messages for every packet, the worker aggregates structured JSON frame records and posts them to the main thread in batches every 200 milliseconds (\`BATCH_PARSED\`). This decouples packet processing from React component reconciliation.
+- **Lifecycle & Cleanup**: The worker instance is cleanly managed with automatic termination (\`worker.terminate()\`) upon adapter disconnection, interface teardown, or workbench component unmount.
+
+### 22. Target Watchlist & Offline Device Tracking
+Surveillance and diagnostic workflows require operators to focus on specific high-priority hardware targets without getting lost in environmental radio noise:
+- **Star (⭐) Pinning System**: Users can click the Star icon in the first column of either the Access Points or Clients table to add or remove any BSSID or station MAC address from the persistent target watchlist.
+- **LocalStorage Persistence**: Watchlist configurations are saved immediately to \`localStorage\` under \`alfa_wifi_watchlist\`, preserving surveillance lists across browser sessions and reboots.
+- **Dedicated Watchlist Tab**: The **Watchlist** tab aggregates all pinned access points and client stations into a single prioritized interface, including targets awaiting initial detection.
+- **Offline Inactivity Alerts (>60s)**: If a target on the watchlist is not observed transmitting for more than 60 seconds, its row is highlighted in red with an animated **Missing (>60s)** badge, alerting operators to potential target departure, signal shielding, or power-off events.
+
+### 23. Mixed-Mode Profile Detection (WPA2/WPA3 Downgrade Vector)
+Many modern Wi-Fi routers operate in "WPA2/WPA3 Mixed Mode" for backwards compatibility with legacy devices that do not support 802.11w Protected Management Frames (PMF) or Simultaneous Authentication of Equals (SAE):
+- **RSN Information Element Parsing (Tag 48)**: The parser inspects the Authentication and Key Management (AKM) suite selectors in Tag 48.
+- **Simultaneous PSK & SAE Detection**: If the Beacon or Probe Response frame advertises both WPA2 (PSK, AKM suite type 2 or 6) and WPA3 (SAE, AKM suite type 8 or 9) concurrently, the network is flagged as a Mixed-Mode deployment.
+- **Security Implications**: Mixed Mode allows an attacker to launch downgrade attacks against connected stations, forcing them to negotiate WPA2 4-way handshakes vulnerable to offline dictionary cracking.
+- **Visual Alerting**: In the Access Points table, networks operating in Mixed Mode display a yellow warning shield icon (\`ShieldAlert\`) with a tooltip warning: *"Mixed-Mode Encryption (WPA2/WPA3)"*.
+
+### 24. Roaming Profile Engine (802.11k/v/r Enterprise Fast BSS Transition)
+Enterprise WLAN architectures rely on IEEE 802.11 amendment extensions to facilitate seamless, low-latency roaming for mobile client stations without dropping active VoIP or streaming sessions:
+- **802.11k (Radio Resource Measurement - Tag 70)**: Discovered via Information Element Tag 70 (\`RM Enabled Capabilities\`). Provides client devices with neighbor reports and channel load metrics, reducing scanning latency by directing stations to the best candidate BSSID before signal degradation occurs.
+- **802.11v (Wireless Network Management - Tag 127)**: Discovered via Information Element Tag 127 (\`Extended Capabilities\`, bit 19 / octet 3 bit 3). Implements BSS Transition Management, enabling the infrastructure to request or advise a client to steer toward an optimal access point or frequency band (band steering).
+- **802.11r (Fast BSS Transition - Tag 54)**: Discovered via Information Element Tag 54 (\`Mobility Domain\`). Pre-negotiates PMK-R1 keys before reassociation, reducing 4-way handshake re-authentication overhead from >100ms down to <10ms ("fast roaming").
+- **Visual Pill Badges**: Access points supporting any of these extensions display green indicator badges (\`k\`, \`v\`, \`r\`) in the Roaming column with hover tooltips detailing each protocol's technical role.
+
+### 25. Baseline Diffing & Event-Driven Desktop Alerts
+RF site surveys and continuous airspace surveillance require rapid identification of newly introduced rogue devices and immediate alerting when critical assets drop off the air:
+- **Reference Baseline Snapshots**: Operators click **Save Baseline** to record an instantaneous snapshot of all active APs and Client STAs in local storage, capturing hardware identifiers, SSIDs, and initial detection timestamps.
+- **Compare Mode (Show New Since Baseline)**: Activating the toggle filters the display tables to show exclusively new hardware discovered after the baseline snapshot was saved. Newly discovered devices are highlighted with a distinct purple border accent and a **NEW** badge.
+- **Watchlist Inactivity Alarms (>60s)**: If a target pinned to the Watchlist ceases transmitting telemetry for over 60 seconds, a desktop notification is dispatched (\`Device Missing: Watchlist device [MAC/Vendor] is no longer in range.\`).
+- **WIDS Telemetry Intrusion Alerts**: When management frame anomaly thresholds are breached (e.g., 10+ deauth/disassoc frames within 5 seconds), the system triggers an \`Anomaly Detected: Unusual volume of link-state frames detected.\` notification.
+- **Spam Throttling**: A 60-second cooldown window is strictly enforced per event and device key, preventing browser alert flooding during high-volume anomaly storms.
+
+### 26. Physical Layer Signal Integrity & Signal-to-Noise Ratio (SNR)
+Raw Received Signal Strength Indication (RSSI) alone does not convey the full fidelity of an RF link; an AP transmitting at -50 dBm in an environment with -55 dBm ambient RF interference will experience severe frame loss:
+- **Radiotap Header Telemetry**: The parser inspects the Radiotap \`it_present\` bitmask for Antenna Signal (bit 5 / \`0x0020\`, signed int8) and Antenna Noise Floor (bit 6 / \`0x0040\`, signed int8).
+- **SNR Calculation**: When both physical layer parameters are provided by the hardware NIC, the engine calculates:
+  \`SNR (dB) = RSSI (dBm) - NoiseFloor (dBm)\`
+- **Signal Integrity Tiers & Color Coding**:
+  - **Excellent (> 25 dB, Green)**: Negligible frame loss, capable of maximum modulation coding schemes (MCS 8/9/11 with 256-QAM or 1024-QAM).
+  - **Fair (15 - 25 dB, Yellow)**: Moderate throughput, occasional MAC retries, adequate for standard web browsing and VoIP.
+  - **Poor (< 15 dB, Red)**: Severe interference, high frame error rates (FER), packet retransmissions, and high disconnection probability.
+
+### 27. Management Frame Protection (IEEE 802.11w / MFP)
+Legacy 802.11 networks transmit management frames (such as Deauthentication, Disassociation, and Action frames) in cleartext without cryptographic message integrity checks, leaving clients vulnerable to trivial link-state spoofing attacks:
+- **RSN Capabilities Extraction (Tag 48)**: Inside the Robust Security Network Information Element (Tag 48), the engine reads the 2-byte \`RSN Capabilities\` field immediately succeeding the AKM suite list.
+- **Bitwise Capability Evaluation**:
+  - **MFP Capable (Bit 6 / \`0x0040\`)**: The AP supports Protected Management Frames (PMF) using AES-128-CMAC / BIP (Broadcast Integrity Protocol) if negotiated by the station.
+  - **MFP Required (Bit 7 / \`0x0080\`)**: The AP strictly mandates 802.11w for all associations, rejecting legacy non-MFP clients.
+- **Visual Shield Badging**: In the Access Points table, networks advertising MFP display an emerald shield icon (\`ShieldCheck\`) with hover tooltips detailing *"802.11w MFP Supported"* or *"802.11w MFP Required"*, verifying resistance to deauthentication flood attacks.
+
+### 28. Historical Timeline Replay & Session Scrubbing
+Forensic analysis of prolonged capture sessions requires reviewing how the RF airspace evolved over time rather than examining an aggregated static snapshot:
+- **Session Range Calculation**: When loading a session from IndexedDB (\`localDataStore.js\`), the engine computes the global \`startTime\` and \`endTime\` across all recorded devices and clients using their \`firstSeen\` and \`lastSeen\` timestamps.
+- **Interactive Scrubber Slider**: A range slider (\`<input type="range">\`) allows operators to scrub smoothly across the session timeline, displaying the current scrubber timestamp and elapsed relative offset (\`+X seconds\`).
+- **Dynamic Time Filtering**: As the slider moves, both Access Point and Client Station tables filter dynamically to display exclusively devices active at that exact temporal instant:
+  \`device.firstSeen <= currentSliderTime && device.lastSeen >= currentSliderTime\`
+- **10x Playback Simulation**: Operators can click **Play (10x Speed)** to run an automated playback loop that advances the scrubber forward at 10x real-world speed, watching networks appear, roam, and depart in real time.
+
+### 29. Enterprise Infrastructure Clustering & MAC Sequential Addressing
+Large enterprise Wi-Fi installations (e.g. Cisco Catalyst, Aruba, Ubiquiti UniFi, Ruckus) deploy multiple dual-band access points with consecutive factory-provisioned BSSIDs. Scanning dense environments produces hundreds of separate rows that represent different radios of the same physical access point chassis or neighboring ceiling nodes:
+- **Sequential Addressing Heuristics**: The clustering engine (\`clusterInfrastructure\`) analyzes 48-bit MAC addresses and binds nodes into single cluster groups when:
+  1. **5-Byte Identical Prefix**: The first 5 octets of the MAC address match identically (e.g., \`00:11:22:33:44:01\` and \`00:11:22:33:44:FE\`), typical for multi-SSID virtual BSSIDs broadcast from the same physical radio.
+  2. **OUI Match & Sequential Proximity**: Devices share an identical 24-bit OUI (first 3 octets) and their 24-bit NIC integer address difference is within a configurable sequential delta (default \`±5\`).
+- **Union-Find Disjoint Sets**: Disjoint-set forest data structures efficiently resolve transitive groupings across multi-radio access points without duplicate cluster generation.
+- **Hierarchical Table Aggregation**: Operators can toggle **Group Clusters** in the Access Points view to collapse dense infrastructure clusters under unified master rows (e.g. *"Cisco - Node Group (4 APs)"*) with single-click expansion to inspect individual member BSSIDs.
+
+### 30. RF Sensitivity Tuning & Real-Time RSSI Thresholding
+In high-density environments or when targeting a specific proximate transmitter, distant ambient packets clutter the diagnostic display and generate unnecessary rendering work:
+- **Dual-Layer Threshold Filtering**: The RF Sensitivity Threshold slider allows continuous adjustment from **-100 dBm** (*Show Everything / Deep Noise Floor*) to **-50 dBm** (*Strong Signals Only / Immediate Proximity*).
+- **Web Worker Offload Filtering**: When adjusted, the threshold is passed via \`SET_THRESHOLD\` to \`parserWorker.js\`. Weak signals below the threshold are pruned immediately within the background thread before entering React state queues, minimizing IPC memory transfer overhead.
+- **Client Table Pruning**: The reactive state filters both Access Point and Client Station views dynamically, immediately clearing out weak background nodes when increasing sensitivity.
+- **Persistent Profile**: The chosen sensitivity value is stored in browser \`localStorage\` under \`alfa_rf_sensitivity_threshold\`, persisting across browser refreshes and session reloads.
+
+### 31. Security Heuristic Engine & Vulnerability Auditing
+The automated Heuristic Engine (\`heuristicEngine.js\`) passively inspects beacon and probe response frames to detect configuration anti-patterns and legacy cryptographic exposures:
+- **Out-of-the-Box Default SSID Detection**: Matches broadcast network names against regex patterns for default factory hardware vendors (e.g. \`linksys\`, \`netgear\`, \`TP-LINK_XXXX\`, \`ATT-WIFI-XXXX\`, \`xfinitywifi\`, \`dlink\`, \`belkin\`, \`tenda\`, \`asus\`). Default names reveal equipment models and strongly correlate with unpatched firmware and default administrative credentials.
+- **Deprecated Legacy Encryption Scanning**: Identifies networks running **WEP** (RC4 keystreams vulnerable to FMS/KoreK key reconstruction) or **WPA-TKIP** (vulnerable to Beck-Tews keystream re- **Open / Unencrypted Broadcast Warnings**: Flags unencrypted broadcast networks that transmit link-layer frames in plaintext, advising administrators to migrate to 802.1X Enterprise or Opportunistic Wireless Encryption (OWE / 802.11ow).
+- **Dedicated Security Heuristics Tab**: Surfaces a dedicated audit deck categorized by severity (Critical, High, Medium) with actionable remediation guidance and direct access to inspect affected nodes.
+
+### 32. Live Disk Streaming & File System Access API
+Traditional browser memory buffers store captured 802.11 frames in a JavaScript array (\`rawPacketsRef\`), which creates memory pressure and crashes the tab during multi-hour packet auditing sessions. The Live Disk Streaming engine (\`livePcapWriter.js\`) eliminates memory constraints by streaming frames directly to local disk:
+- **File System Access API Integration**: Prompts the operator via \`window.showSaveFilePicker()\` to choose a destination \`.pcap\` file on physical NVMe/SSD storage.
+- **Immediate Global Header Initialization**: Upon file handle creation, the stream writer immediately creates an asynchronous writable stream (\`fileHandle.createWritable()\`) and commits the standard 24-byte PCAP file header (\`0xA1B2C3D4\`, Version 2.4, Snaplen 65535, LinkType 127: \`LINKTYPE_IEEE802_11_RADIOTAP\`).
+- **Sequential Record Streaming**: As raw \`Uint8Array\` packet chunks arrive from hardware or simulation, the engine formats a 16-byte PCAP record header containing second/microsecond timestamps and packet length, immediately pushing both header and raw payload to the file stream.
+- **Zero-Copy Memory Bypass**: When "Stream to Disk" is active, incoming frames completely bypass the in-memory 50,000-frame ring buffer, enabling indefinite multi-gigabyte capture sessions without browser tab exhaustion.
+- **Safe Buffer Flushing & Finalization**: The stream automatically flushes buffered chunks every 5 seconds and performs clean stream termination upon stopping monitor mode or component unmount.
+
+### 33. 2.4GHz Physical Channel Overlap & RF Interference Map
+In the 2.4GHz ISM band (802.11b/g/n/ax), channels span 20MHz bandwidth but are spaced only 5MHz apart:
+- **Spectral Physics of 2.4GHz Overlap**: Channels 1 (2412 MHz), 6 (2437 MHz), and 11 (2462 MHz) are the only three standard channels with sufficient 25MHz center separation to operate simultaneously without physical co-channel or adjacent-channel overlap.
+- **Parabolic Bell Curve Spectral Mask**: The \`ChannelOverlapChart.jsx\` component maps channels 1 through 14 across the 2.400 GHz to 2.495 GHz frequency continuum, rendering cubic/quadratic parabolic emission masks for each active channel spanning 20MHz width (\`center ± 10MHz\`).
+- **Spectral Density Blending (\`opacity: 0.5\`)**: By utilizing semi-transparent fills with 50% opacity, physical frequency overlaps between adjacent channels (e.g., Channel 1 overlapping with Channels 2, 3, 4, 5) physically blend into darker, denser collision zones that visually highlight severe radio collision risks.
+- **Primary Non-Overlapping Guides**: Channels 1, 6, and 11 are permanently marked with vertical dashed alignment markers and distinct indicator pills (Emerald for CH 1, Cyan for CH 6, Purple for CH 11).
+- **Automated Cleanest Channel Recommendation**: The analysis engine aggregates active access points and frame volumes across primary channels to automatically identify and recommend the least congested clean channel in the current airspace.
+
+### 34. Custom Device Annotations & Tagging System
+During complex wireless security assessments and physical facility walks, operators need to assign readable aliases, visual tags, and field notes to specific MAC addresses:
+- **Side-Panel Note Editor**: An "Edit Note" action icon (\`Edit3\`) in the Device Detail panel opens an inline annotation manager allowing operators to assign custom device labels (e.g. *"Floor 2 Zebra Label Printer"*, *"Executive Boardroom AP"*), choose visual highlight colors, and input multi-line notes.
+- **Custom Color Swatches**: Operators can pick curated highlight colors (Emerald, Cyan, Blue, Purple, Amber, Rose) to visually categorize authorized devices vs. unauthorized rogue hardware.
+- **Persistent LocalStorage Keying**: Device annotations are serialized to \`localStorage\` under \`alfa_wifi_device_annotations\` keyed by normalized 48-bit MAC address. Annotations persist indefinitely across scans, cache wipes, and browser restarts.
+- **Prominent UI Table Highlighting**: When an annotated MAC address is observed in the Access Points or Tracked Clients table, its custom alias is rendered prominently alongside the SSID/Vendor, and its custom color is applied as a bold 4px left border on the table row.
+
+### 35. Client Roaming Handoff Analysis (802.11 Mobility Tracking)
+In enterprise campus deployments, client devices (laptops, VoWiFi smartphones, medical carts) physically move across coverage cells. Diagnosing sticky clients, excessive handoff latencies, or ping-pong roaming loops is critical for real-time applications:
+- **Handoff Detection Logic**: The roaming engine monitors directed Data and Reassociation frames from authenticated client station MAC addresses. When a client MAC transitions from an existing associated BSSID to a new BSSID within a 30-second temporal window, the system records a formal **Roaming Event**.
+- **Roam Latency Calculation**: The engine computes exact roam delta time:
+  \`Roam Time (ms) = First Seen Timestamp on New BSSID - Last Seen Timestamp on Old BSSID\`
+- **Mobility KPI Metrics Deck**: Surfaces real-time statistics including Total Roams observed, Fastest Roam time, Average Roam duration across the session, and Total Unique Roaming Clients.
+- **Dedicated Roaming Tab**: Features a tabular audit view tracking Client MAC, Source BSSID, Destination BSSID, Roam Time (ms) with color-coded speed indicators (emerald for <100ms fast transitions, amber for 100-300ms, rose for >300ms slow transitions), channel, and observation timestamp.
+
+### 36. Wi-Fi 6 (802.11ax) High-Efficiency (HE) & Spatial BSS Coloring
+IEEE 802.11ax introduces High-Efficiency (HE) enhancements to dramatically boost throughput in dense multi-device environments through OFDMA, 1024-QAM, and spatial reuse:
+- **Information Element Tag 255 (Extension Elements)**: 802.11ax utilizes Element ID \`255\` followed by a 1-byte Element ID Extension to encapsulate HE parameters:
+  - **HE Capabilities (Ext ID 35 / \`0x23\`)**: Encapsulates a 6-byte HE MAC Capabilities Information field and an 11-byte HE PHY Capabilities Information field detailing channel widths (80/160MHz), trigger frame support, and spatial stream allocation.
+  - **HE Operation (Ext ID 36 / \`0x24\`)**: Encapsulates 802.11ax operational parameters, including the 6-bit **BSS Color** (\`bits 0-5\` of HE Operation Parameters) and the BSS Color Disabled flag (\`bit 7\`).
+- **Spatial Reuse & BSS Coloring (0–63)**: BSS coloring assigns a 6-bit integer numerical identifier (values 1–63) to each BSSID. Spatial reuse engines allow stations to transmit simultaneously on the identical frequency channel if overlapping transmissions exhibit different BSS colors, mitigating traditional CSMA/CA clear-channel backoff delays.
+- **Visual Badging & Inspector**: In the Access Points table, networks advertising 802.11ax display a blue **Wi-Fi 6** pill badge. The Device Detail inspector displays the extracted BSS Color, BSS Color Disabled flag, and hex-encoded HE MAC/PHY capability bitfields.
+
+### 37. Offline PCAP Forensic Replay & Ingestion Pipeline
+Security incidents, forensic packet captures, and RF site survey files collected in the field frequently need to be ingested and re-analyzed offline without physical hardware attached:
+- **Universal PCAP Binary Parsing**: The \`pcapReader.js\` engine decodes standard libpcap binary captures (\`.pcap\`), parsing the 24-byte global header:
+  - **Magic Number Validation**: Detects standard microsecond (\`0xA1B2C3D4\`) and nanosecond (\`0xA1B23C4D\`) captures in both little-endian and big-endian byte order.
+  - **LinkType 127 Enforcement**: Validates that the capture utilizes \`LINKTYPE_IEEE802_11_RADIOTAP\` (\`127\`), rejecting incompatible Ethernet or raw MAC captures with descriptive error feedback.
+  - **Record Iteration**: Streams 16-byte record headers (timestamp seconds, microseconds/nanoseconds, captured length, wire length) and decapsulates raw frame payloads into \`Uint8Array\` chunks.
+- **Throttled Playback Rate (500 PPS)**: The \`PcapReplayer\` scheduler streams parsed packet payloads into the background Web Worker (\`parserWorker.js\`) in controlled 50-packet batches at a default 500 packets/second rate, simulating real-world packet flow and driving interactive UI animations without overloading the browser thread.
+- **Forensic UI Integration**: An **Upload PCAP** button in the Action Bar allows direct drag-and-drop or file selection. During playback, the "Connect WebUSB" button is disabled, and an amber **Replaying Offline Capture** banner displays file name, live packet progress counter, and playback cancellation controls.
+
+### 38. Understanding Airtime Utilization & Channel Congestion
+In dense multi-access wireless environments, packet counts and bandwidth megabits do not tell the whole story of channel availability. Airtime utilization measures the percentage of physical radio medium capacity consumed over time:
+- **802.11 MAC Duration Field Extraction**: Every 802.11 MAC header incorporates a 2-byte \`Duration/ID\` field at offset bytes 2 and 3 (immediately succeeding the 2-byte Frame Control field). In standard transmissions (where bit 15 is 0), this field represents the expected medium reservation duration in microseconds (\`µs\`) requested by the transmitting station for acknowledgments and NAV (Network Allocation Vector) reservation.
+- **Microsecond Accumulation in 1-Second Sliding Window**: The background parser worker (\`parserWorker.js\`) and main-thread tracker maintain a rolling 1-second (1,000,000 µs) FIFO sliding window of observed frame durations.
+- **Airtime Congestion Formula**:
+  \`Airtime % = (Total Duration in 1 second / 1,000,000 µs) * 100\`
+- **Dynamic KPI Strip Gauge & Congestion Grading**:
+  - **Optimal Airtime (< 40%)**: Indicated in bright emerald (\`#10B981\`), representing ample channel capacity with low collision probability and clean contention windows.
+  - **Moderate Congestion (40% – 70%)**: Indicated in amber (\`#F59E0B\`), reflecting active medium usage with potential for CSMA/CA backoff contention delays.
+  - **Critical Congestion (> 70%)**: Indicated in vivid red (\`#EF4444\`), warning of a severely saturated channel where frame retransmissions, high packet jitter, and excessive drop rates occur.
+
+### 39. Hardware Endpoint Introspection & Low-Level Querying
+Verifying that physical USB hardware is not only recognized by the operating system but actively communicating across control and vendor endpoints is vital for diagnostic reliability:
+- **Direct WASM Driver Method Queries**: The \`queryHardwareIntrospection\` routine queries the underlying \`@openipc-rs/web\` driver for low-level diagnostic telemetry:
+  - **Thermal Sensor Interrogation (\`readThermalStatus\`)**: Interrogates the on-die Realtek thermal sensor to verify junction temperature (e.g. 42°C – 70°C), warning of potential thermal throttling.
+  - **Adapter Capabilities (\`adapterCapabilities\`)**: Queries internal hardware registers to identify exact RF revision, firmware revision strings, and capability matrices.
+  - **Register Read (\`readRegisterU8\`)**: Attempts to read the factory MAC address from non-volatile EEPROM registers (\`0x0050\` – \`0x0055\`).
+- **WebUSB Vendor-Specific Control Transfer Fallback**: When the WASM driver does not expose direct register access, the tool executes standard WebUSB vendor control transfer requests (\`device.controlTransferIn\` with \`requestType: 'vendor'\`, \`request: 0x05\`, \`value: 0x0050\`) to retrieve the factory 48-bit MAC address.
+- **Hardware Status Inspector Panel**: A dedicated expandable "Hardware Status" panel in the header displays Adapter MAC, Firmware Version, Chipset Model (e.g. RTL8812AU / RTL8814AU), and Endpoint Status, validating low-level USB pipe responsiveness.
+
+### 40. Dynamic Pre-Worker Telemetry Filtering Pipeline
+In high-throughput environments receiving thousands of packets per second (such as high-traffic airport terminals or enterprise venues), serializing every raw frame across Web Worker \`postMessage\` boundaries can overwhelm main-thread garbage collectors and induce UI lag:
+- **Zero-Copy Main-Thread Heuristic Check**: Before passing raw frame buffers to the Web Worker, the read loop executes \`fastFilterPacket\` to evaluate packet suitability in microseconds with zero allocations.
+- **Pre-Worker RSSI Threshold**: Frames with RSSI weaker than the user's configured sensitivity threshold (e.g. \`-80 dBm\`) are immediately dropped at the transfer loop boundary, avoiding unnecessary worker dispatch.
+- **Selective Frame Type Discarding**:
+  - **Ignore Data Frames**: Drops high-frequency QoS Data and Data payload frames, preserving CPU cycles exclusively for network discovery and beacon auditing.
+  - **Ignore Management Frames**: Filters out continuous Beacons and Probe Requests during targeted data packet capture.
+  - **Ignore Control Frames**: Discards high-volume ACKs, RTS, and CTS frames that lack payload information.
+- **Target MAC Address Matching**: Fast byte-level comparison checks the frame's Address 1 (Destination), Address 2 (Source), and Address 3 (BSSID) against a target MAC address. Frames unrelated to the targeted network or client are pruned before serialization.
+- **Action Bar Filtering Popover**: An interactive popover in the Action Bar provides one-click access to RSSI thresholds, frame type checkboxes, target MAC input, and an active filter indicator badge.
+
+### 41. Layer 3 Visibility & Cleartext Protocol Metadata Extraction
+While IEEE 802.11 monitor mode operates predominantly across Layer 2 (MAC/PHY) frames, unencrypted Data frames encapsulate higher-layer protocols that expose valuable IP-to-MAC associations:
+- **LLC/SNAP Demultiplexing**: In standard unencrypted 802.11 Data transmissions, the MAC header (24 bytes, or 26 bytes for QoS Data) is followed by an 8-byte IEEE 802.2 LLC/SNAP header (\`0xAA 0xAA 0x03 0x00 0x00 0x00\`) carrying the 2-byte EtherType.
+- **Address Resolution Protocol (ARP, EtherType \`0x0806\`)**: The parser extracts 28-byte ARP announcements (both Requests and Replies), mapping the Sender Hardware Address (SHA / MAC) to the Sender Protocol Address (SPA / IPv4). This enables passive mapping of static and dynamically addressed hosts without generating active network probes.
+- **Dynamic Host Configuration Protocol (DHCP, UDP Port 67/68)**: IPv4 packets (EtherType \`0x0800\`) carrying UDP datagrams on ports 67 (DHCP Server) or 68 (DHCP Client) are demultiplexed to inspect BOOTP/DHCP payloads:
+  - **Client Hardware MAC (\`chaddr\`)**: The physical 48-bit MAC address of the requesting station.
+  - **Assigned/Offered IP (\`yiaddr\`)**: The IPv4 lease assigned by the DHCP server.
+  - **DHCP Option 12 (Host Name)**: Decodes ASCII hostnames (e.g. \`iPhone-15\`, \`MacBook-Pro\`, \`DESKTOP-G784\`), linking hardware MAC addresses directly to human-readable device names.
+- **Layer 3 Workbench Integration**: Discovered IP addresses populate in dedicated columns within the Access Points and Tracked Clients tables. A standalone **Layer 3 Mappings** tab catalogs all intercepted IP/MAC pairs, protocol tags, and DHCP hostnames with one-click device inspection.
+
+### 42. Geographic Spatial Exports (GeoJSON & Google Earth KML)
+To support modern Geographic Information Systems (GIS) and spatial war-driving workflows, captured wireless telemetry can be exported directly to standard geo-spatial formats:
+- **GeoJSON FeatureCollection**: The \`generateGeoJSON\` engine converts all GPS-tagged access points into standard GeoJSON (\`RFC 7946\`) Point features:
+  - **Geometry**: \`[longitude, latitude, altitude]\` in WGS84 coordinates.
+  - **Properties**: SSID, BSSID, RSSI (dBm), Hardware Vendor, Operating Channel, Security Suite, and Last Seen timestamp.
+  - **Interoperability**: Directly loadable into QGIS, ArcGIS, Mapbox Studio, and web mapping frameworks.
+- **Keyhole Markup Language (KML 2.2)**: The \`generateKML\` engine constructs XML documents with \`<Placemark>\` tags formatted for **Google Earth** and Google Maps:
+  - **Placemark Titles**: Formatted as \`SSID (BSSID)\` for instant identification in the 3D globe viewer.
+  - **HTML CDATA Descriptions**: Richly formatted balloons displaying signal strength, channel, encryption, vendor OUI, and observation timestamps.
+  - **Coordinates String**: \`lon,lat,alt\` triplets for native 3D spatial pin placement.
+- **Unified Export Action Menu**: The Action Bar export button features a dropdown offering:
+  - **Export PCAP**: Full packet captures for Wireshark analysis.
+  - **Export Wigle CSV**: Wardriving format for community wireless mapping.
+  - **Export GeoJSON**: Standard JSON geospatial format.
+  - **Export KML**: Google Earth spatial overlay format.
+  - **Export HTML & JSON**: Audit summaries and machine-readable dumps.
+
+### 43. Hardware Receiver (RX) Gain & Sensitivity Tuning
+Optimizing RF reception across varying physical environments requires fine-grained control over baseband receiver amplification:
+- **Low-Noise Amplifier (LNA) & Baseband Gain**: Strong signals in close proximity to transmitters can overdrive receiver amplifiers (causing ADC clipping and packet corruption), while distant signals require maximum amplification to cross the decode threshold.
+- **WASM Driver Integration**: The \`setHardwareRxGain\` utility interfaces with the \`@openipc-rs/web\` driver to calibrate hardware gain:
+  - **Direct Driver API**: Calls \`radioInstance.setRxGain(gain)\`, \`setGain(gain)\`, or \`setSensitivity(gain)\` where supported by the driver firmware.
+  - **Baseband Register Writing**: Adjusts Automatic Gain Control (AGC) and VGA registers (e.g. Realtek Baseband Register \`0x0824\` / \`0x082C\`) via \`writeRegisterU8\` or \`writeRegisterU32\`.
+  - **WebUSB Vendor Control Transfers**: Dispatches vendor-specific USB setup packets (\`requestType: 'vendor'\`, \`request: 0x05\`, \`value: 0x0824\`) to adjust analog front-end gain on hardware endpoints.
+- **UI Gain Slider & Real-Time Feedback**: An **RX Gain** slider (levels 1–10) in the workbench header allows operators to tune receiver sensitivity on the fly, with toast notifications confirming hardware register updates.
+
+### 44. Universal Hardware Abstraction Layer (HAL) & Supported Hardware Matrix
+To eliminate single-chipset lock-in, the workbench employs a multi-vendor **Hardware Abstraction Layer (HAL)** in \`hardwareManager.js\`. The HAL queries the USB \`vendorId\` and \`productId\` at connection time to determine driver profile, generation, and supported feature flags:
+
+| Chipset Family | USB VID / PID | Wi-Fi Generation | Frequency Bands | MIMO | Capabilities | Reference Hardware Models |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Realtek RTL8812AU** | \`0x0BDA\` : \`0x8812\`, \`0x881A\` | 802.11ac (Wi-Fi 5) | 2.4 GHz & 5 GHz | 2x2:2 | Monitor Mode, TX Support, Dual Band, Packet Injection, RX Tuning | Alfa AWUS036ACH, TP-Link Archer T4U, Netgear A6210 |
+| **Realtek RTL8814AU** | \`0x0BDA\` : \`0x8813\` | 802.11ac (Wi-Fi 5) | 2.4 GHz & 5 GHz | 4x4:4 | Monitor Mode, TX Support, Dual Band, 4-Antenna Diversity, RX Tuning | Alfa AWUS1900, TP-Link Archer T9UH, ASUS USB-AC68 |
+| **Realtek RTL8811AU** | \`0x0BDA\` : \`0x0811\` | 802.11ac (Wi-Fi 5) | 2.4 GHz & 5 GHz | 1x1:1 | Monitor Mode, TX Support, Dual Band, Compact Dongle Profile | Alfa AWUS036ACS, Edimax EW-7811UTC |
+| **MediaTek MT7921AU** | \`0x0E8D\` : \`0x7961\` | 802.11ax (Wi-Fi 6) | 2.4 GHz & 5 GHz | 2x2:2 | Monitor Mode, Dual Band, Wi-Fi 6 HE Tag Demux, Airtime Extraction | Alfa AWUS036AXML, Comfast CF-953AX |
+| **MediaTek MT7612U** | \`0x0E8D\` : \`0x7612\` | 802.11ac (Wi-Fi 5) | 2.4 GHz & 5 GHz | 2x2:2 | Monitor Mode, TX Support, Dual Band, Packet Injection | Alfa AWUS036ACM, Netgear A6210 v2 |
+| **MediaTek MT7610U** | \`0x0E8D\` : \`0x7610\` | 802.11ac (Wi-Fi 5) | 2.4 GHz & 5 GHz | 1x1:1 | Monitor Mode, Dual Band, Airtime Extraction | Alfa AWUS036AC |
+| **Ralink RT5370** | \`0x148F\` : \`0x5370\` | 802.11b/g/n | 2.4 GHz | 1x1:1 | Monitor Mode, TX Support, Legacy 2.4GHz Monitoring | Raspberry Pi Wi-Fi, Generic RT5370 |
+
+- **Dynamic UI Adaptation**: The workbench queries \`hasCapability(profile, CAPABILITIES.TX_SUPPORT)\`. When an adapter profile lacks packet transmission capability (such as pure RX monitor firmware), the **Run TX Loopback Test** button is dynamically disabled with a tooltip indicator: *"Transmit not supported by this chipset."*
+
+### 45. Windows Driver Setup Guide (Native NDIS vs WinUSB Architecture)
+On Windows, operating system security and kernel architecture restrict how user-space browser applications interact with USB network cards:
+- **The Problem: Exclusive NDIS Driver Lock**: When a USB Wi-Fi dongle is plugged into Windows, the OS automatically binds its certified Network Driver Interface Specification (NDIS) miniport driver (\`rtwlanu.sys\` or \`mtkwl6ex.sys\`). The Windows WLAN AutoConfig service (\`wlanapi.dll\`) claims the adapter exclusively, locking it to managed station mode (connecting to BSSIDs) and hiding USB bulk endpoints from the browser's WebUSB API.
+- **The Solution: Generic WinUSB Binding**: **WinUSB** (\`WinUSB.sys\`) is Microsoft's universal kernel-mode driver for USB devices that don't fit standard device classes. Binding WinUSB gives Chromium browsers direct access to USB endpoints 0 (Control), 1 (Interrupt), 2 (Bulk OUT), and 3 (Bulk IN), allowing the browser WASM engine to boot monitor mode firmware directly into the chip's internal RAM.
+- **Step-by-Step Zadig Setup Protocol**:
+  1. Download the standalone Zadig executable from [https://zadig.akeo.ie/](https://zadig.akeo.ie/) and run as Administrator.
+  2. Plug the USB Wi-Fi adapter into a high-speed USB 3.0 port.
+  3. In Zadig, open the **Options** menu and click **List All Devices** (required because Windows categorizes network adapters separately from generic USB devices).
+  4. From the main dropdown, select your adapter (e.g., *"Realtek 8812AU Wireless LAN 802.11ac USB NIC"*).
+  5. In the target driver selection box on the right side of the green arrow, select **WinUSB (v6.1.7600.16385)**.
+  6. Click **Replace Driver** (or **Install Driver**) and allow Windows ~30 seconds to rebind the USB interface.
+- **Operational Impact & Reverting to Normal Wi-Fi**:
+  - While WinUSB is bound, Windows will temporarily **not** show this adapter in the system Wi-Fi tray, because it is no longer bound to NDIS.
+  - To revert the adapter to a regular Windows Wi-Fi client card: Open **Device Manager** &rarr; locate the device under *"Universal Serial Bus devices"* &rarr; right-click and choose **Update driver** &rarr; select **Search automatically for drivers**. Windows will restore the original manufacturer NDIS driver immediately.
+
+### 46. Automation Rule Engine & Reactive Webhooks
+The **Automation Rule Engine** (\`ruleEngine.js\`) eliminates the cognitive burden of continuously monitoring real-time wireless telemetry by evaluating user-configured rules against incoming batches of dissected 802.11 frames:
+- **Rule Architecture & Structure**:
+  - Each rule is structured as a declarative JSON object: \`{ id, name, eventType, targetMac, actionType, actionPayload, enabled, createdAt }\`.
+  - Rules are fully persisted in the browser's \`localStorage\` under \`alfa_wifi_automation_rules\` and hydrated on initial workbench boot.
+- **Trigger Event Types**:
+  - \`DEVICE_CONNECTED\`: Evaluates when an Access Point (BSSID) or Client Station (STA) is first observed transmitting frames on the active channel.
+  - \`DEVICE_DISCONNECTED\`: Triggers when an active device has not emitted radio energy for greater than 60 seconds (inactivity / out-of-range timeout).
+  - \`ANOMALY_DETECTED\`: Fires reactively when heuristic security alarms occur, including high-rate 802.11 deauthentication floods (>=10 deauths within a 5-second sliding window) or Rogue AP / Evil Twin beacon collisions.
+- **Granular MAC Targeting**:
+  - Operators can bind rules to a specific hardware MAC address (e.g., \`00:11:22:33:44:55\`), with automatic sanitization across colon, hyphen, and case variations.
+  - Specifying \`*\` or \`ANY\` configures a wildcard rule that triggers on any discovered wireless endpoint matching the event type.
+- **Supported Automated Actions**:
+  - \`WEBHOOK\`: Formats and dispatches an asynchronous HTTP POST request to an external security operations center (SOC), SIEM, or Slack/Discord endpoint via \`fetch()\`, delivering detailed JSON telemetry including rule metadata, timestamp, and target device attributes.
+  - \`NATIVE_NOTIFICATION\`: Interacts with the W3C Web Notification API to surface OS-level desktop push alerts without requiring window focus.
+  - \`AUDIO_BEEP\`: Utilizes the browser's Web Audio API (\`AudioContext\`) to synthesize an audible oscillator tone (default 880 Hz, or user-defined frequency in Hz), providing heads-up acoustic feedback during physical field audits.
+
+### 47. Device-Specific Targeted PCAP Extraction & Forensic Filtering
+In high-density RF environments, capturing hours of promiscuous traffic yields massive multi-gigabyte PCAP files where 99% of the frames belong to unrelated network nodes. The **Targeted Extraction** engine (\`pcapExporter.js\`) allows security analysts to isolate and download forensic packet captures filtered strictly for a selected device:
+- **802.11 Header & Radiotap Dissection**:
+  - The extraction pipeline parses each captured frame in the in-memory circular ring buffer (\`rawPacketsRef\`), extracting the Radiotap header length (\`it_len\`) from bytes 2–3.
+  - It inspects the 802.11 MAC header at offset \`it_len\`, analyzing:
+    - **Address 1 (RA / Destination)**: Bytes 4–9
+    - **Address 2 (TA / Source)**: Bytes 10–15
+    - **Address 3 (BSSID / Filtering)**: Bytes 16–21
+    - **Address 4 (WDS Intersite)**: Bytes 24–29 (when Frame Control indicates \`To DS = 1\` and \`From DS = 1\`).
+- **Zero-Latency In-Memory Extraction**:
+  - When the analyst clicks **Export Device PCAP** in the Device Detail Side-Panel, the engine synchronously filters only the matching \`Uint8Array\` frame buffers.
+  - A standard libpcap 2.4 binary file with \`LINKTYPE_IEEE802_11_RADIOTAP\` (LinkType 127) is immediately compiled in-memory and committed to disk via an automated browser download anchor.
+  - This workflow eliminates the need to load gigabyte captures into external tools like Wireshark or \`tshark\` just to isolate traffic for a single suspicious client or rogue AP.
+
+### 48. Hardware Heartbeat Watchdog & Autonomous Re-Synchronization
+USB monitor-mode hardware operating under heavy RF loads or aggressive channel hopping can experience endpoint stalls or firmware lockups. The **Hardware Heartbeat Watchdog** provides continuous health telemetry and autonomous fault recovery:
+- **Packet Time Heartbeat Telemetry**:
+  - The workbench tracks a high-resolution timestamp (\`lastPacketTimeRef\`) updated continuously on every valid USB RX transfer, Web Worker parsing batch, and simulated frame ingestion.
+- **5-Second Watchdog Timer**:
+  - A background watchdog loop evaluates hardware link liveness every 2 seconds. If greater than 5,000 ms (5 seconds) elapse without incoming frame data while monitor mode is active, the watchdog identifies a potential hardware lockup and initiates autonomous recovery.
+- **Tiered Multi-Stage Self-Healing**:
+  - **Stage 1 (Soft Link Retune)**: Dispatches a soft retune command to the active radio driver instance to clear the baseband FIFO and re-synchronize the synthesizer PLL.
+  - **Stage 2 (Handle Re-Initialization)**: If the radio instance is unresponsive, the watchdog accesses previously granted WebUSB device permissions via \`navigator.usb.getDevices()\` to re-open the USB device configuration and reclaim Interface 0 without prompting the operator.
+  - **Stage 3 (Graceful State Teardown)**: If physical hardware is disconnected or unrecoverable, the watchdog terminates the capture loop, releases worker threads, and transitions the workbench UI cleanly to the "Disconnected" state while warning the operator.
+
+### 49. Client Device OS Fingerprinting via Information Elements (IEs)
+Passive operating system identification in 802.11 monitor mode allows analysts to discern the hardware platform and software stack of client stations without injecting a single probe or packet:
+- **Information Element (IE) Tag Sequencing**:
+  - During network discovery, client stations broadcast 802.11 Probe Requests containing ordered sequences of Information Elements (IEs) defined in IEEE 802.11-2020.
+  - The order and presence of specific tags (e.g., Tag 0: SSID, Tag 1: Supported Rates, Tag 3: DS Parameter, Tag 45: HT Capabilities, Tag 50: Extended Supported Rates, Tag 107: Interworking, Tag 127: Extended Capabilities, Tag 191: VHT Capabilities, Tag 221: Vendor-Specific) form distinct, platform-specific signatures.
+- **Fingerprinting Dictionary (\`OS_SIGNATURES\`)**:
+  - **Apple iOS / iPadOS**: Identified by signature profiles such as \`0,1,50,45,127,221,221\` and \`0,1,50,45,127,107,221,221\`, exhibiting strict Apple vendor-specific elements without VHT in probe frames.
+  - **Apple macOS**: Identified by profiles including Tag 191 (VHT Capabilities) such as \`0,1,50,45,61,127,191,221\` and \`0,1,3,45,127,191,221\`.
+  - **Google Android**: Characterized by Tag 107 (Interworking / Hotspot 2.0) positioned before or after Tag 127, as well as multiple Tag 221 vendor elements (\`0,1,50,45,127,107,221\`).
+  - **Microsoft Windows**: Identified by WMM/WPS vendor elements (\`00:50:F2\`) and tag sequence \`0,1,50,3,45,127,221\`.
+  - **Generic Linux / wpa_supplicant**: Clean sequences without proprietary vendor tags, typically \`0,1,50,45,127\`.
+  - **IoT / Embedded Microcontrollers**: Minimalist tag sequences (typically 4 or fewer elements) such as \`0,1,50,221\` or \`0,1,45\` characteristic of Espressif ESP8266/ESP32, Tuya, and smart home appliances.
+- **Multimodal Evaluation Pipeline (\`identifyOS\`)**:
+  - Direct exact-match signature hash table lookup against known tag sequences.
+  - Contextual resolution using DHCP option 12 hostnames (e.g., "iPhone", "Galaxy-S23", "MacBook-Pro", "desktop-") and vendor Organizationally Unique Identifiers (OUIs).
+  - UI visual badges and platform-specific Lucide iconography (Apple, Smartphone, Monitor, Laptop, Cpu, Terminal) rendered inline next to MAC addresses across Station and Probing tables.
+
+### 50. Interactive Geospatial RF Heatmapping & Multi-Tile Mapping
+The **Geospatial Signal Heatmap** (\`GeospatialMap.jsx\`) maps 802.11 RF signal propagation across physical coordinates:
+- **Leaflet & Dynamic Heat Layer Integration**:
+  - Leverages Leaflet 1.9.4 and \`leaflet.heat\` to plot spatial signal intensity gradients across real-world GPS coordinates collected via the W3C Geolocation API.
+  - Generates multi-stop heat gradients (Cyan -> Emerald -> Amber -> Rose) where point weights are normalized from live RSSI levels: \`intensity = (rssi + 100) / 60\`.
+- **Accuracy-Proportional Error Radii**:
+  - For each observed node, the map renders a semi-transparent circular boundary whose radius in meters is strictly proportional to the physical GPS accuracy tolerance (\`±m\`).
+  - Color-coded borders immediately indicate RF signal strength: Emerald (>= -60 dBm, Strong), Cyan (-70 to -60 dBm, Good), Amber (-80 to -70 dBm, Moderate), and Rose (< -80 dBm, Weak).
+- **Multi-Provider Tile Switching**:
+  - **Dark Vector View**: High-contrast CartoDB dark tile basemap optimized for tactical wardriving and night operations.
+  - **OSM Standard View**: OpenStreetMap cartographic vectors highlighting streets, buildings, and civil infrastructure.
+  - **Satellite Imagery**: High-resolution Esri World Imagery providing aerial terrain and foliage visibility to correlate RF attenuation with physical obstacles.
+- **Interactive Inspection**:
+  - Clicking any node opens a rich popup with SSID, BSSID, RSSI, channel, hardware vendor, and GPS coordinates.
+  - Synchronous bidirectional selection highlights the corresponding device in the workbench inspector sidebar.
+
+### 51. Autonomous Channel Planning & Congestion Advisory
+Dense 802.11 deployments frequently suffer from co-channel interference and spectrum saturation. The **Channel Planning Advisor** (\`channelAdvisor.js\`) continuously analyzes spectrum metrics to recommend optimal channel configurations:
+- **Multivariate Congestion Scoring Algorithm**:
+  - **Co-Channel AP Density**: Each observed access point operating on the target channel contributes +15% to baseline congestion.
+  - **Strong Signal Contention**: Access points with RSSI >= -70 dBm contribute an additional +10% penalty due to direct carrier sense (CSMA/CA) preamble contention and clear channel assessment (CCA) backoffs.
+  - **Packet Throughput Ratio**: Cumulative packet volumes observed on the channel contribute up to +35% weighted by overall spectrum packet volume.
+  - **Airtime Utilization Integration**: When analyzing the currently tuned channel, live 1-second rolling airtime utilization (\`airtimePercent\`) contributes 50% to the overall score.
+  - **2.4 GHz Spectral Overlap**: Evaluates adjacent overlapping channels (e.g., channels 2, 3, 4, 5 for channel 1) and adds an overlap penalty of +8% per adjacent network.
+- **2.4 GHz Band Optimization**:
+  - Evaluates standard non-overlapping primary channels (1, 6, 11) and identifies the channel with the lowest normalized congestion score.
+  - Generates human-readable advisory explanations comparing the recommended channel against congested alternatives (e.g., "Channel 6 has the lowest congestion (12%), avoiding Channel 1 which is congested by 4 neighboring networks").
+- **5 GHz Band Optimization**:
+  - Evaluates primary UNII-1 and UNII-3 channels (36, 40, 44, 48, 149, 153, 157, 161) to identify the top 3 least congested channels with the lowest packet contention scores.
+- **Workbench Dashboard Widget**:
+  - Displays instant recommendations on the main workbench KPI panel with hover tooltips detailing channel traffic composition and one-click quick-retune actions.
+
+### 52. Complete Troubleshooting & Diagnostic Matrix
+| Error Message / Symptom | Root Cause | Engineering Solution |
+| :--- | :--- | :--- |
+| \`NotFoundError\` | User cancelled prompt or no device found. | Ensure adapter is plugged in. |
+| \`NetworkError\` | Driver is claimed by OS (Windows) or cable disconnected. | Use Zadig to install WinUSB driver; verify USB-C cable connection. |
+| WebUSB undefined | Unsupported browser (Safari/Firefox). | Use Google Chrome or Microsoft Edge. |
+| PCAP buffer full | Capture session exceeded 50,000 frames. | Enable "Stream to Disk" for unlimited capture, or click "Export PCAP" and clear buffer. |
+| GPS Not Locked / 0.0 | Location permission denied or device lacks GPS. | Grant browser location permissions in browser site settings. |
+| Airtime Gauge Stuck at 0% | No frames observed or duration field missing. | Verify monitor mode is active and channel is set to an active frequency. |
+| Packets Not Appearing | Pre-worker filtering pipeline discarding frames. | Open "Filtering" popover and reset filters or raise RSSI sensitivity threshold. |
+| Hardware Status "Fallback Defaults" | OS restricted USB control transfer endpoint. | Device operates normally in monitor mode; install WinUSB driver via Zadig for full vendor control pipe access. |
+| Hardware unresponsive (>5s) | USB endpoint stall or baseband synthesizer lockup. | Watchdog initiates autonomous retune or WebUSB handle re-synchronization; if physical cable disconnected, re-insert adapter. |
+| Webhook delivery failed | Destination URL unreachable or blocked by CORS. | Ensure target webhook endpoint accepts CORS \`POST\` requests or configure a local proxy. |
+
+### 53. Upstream Standards & Engineering Attribution
+| Standard / Component | Authoring Organization / Maintainers | Reference & Specification |
+| :--- | :--- | :--- |
+| WebUSB API | W3C / Chromium | https://wicg.github.io/webusb/ |
+| OpenIPC-RS | OpenIPC Project | https://github.com/OpenIPC/openipc-rs |
+| RTL8812AU | Realtek | 802.11ac USB NIC Datasheet |
+| IEEE 802.11-2020 | IEEE Computer Society | Wireless LAN Medium Access Control and Physical Layer Specifications |
+| IEEE 802.11ax-2021 | IEEE Computer Society | High-Efficiency (HE) Wireless LAN Amendment (Wi-Fi 6) |
+| IEEE 802.11w-2009 | IEEE Standards Association | Protected Management Frames Amendment |
+| tcpdump / libpcap | The Tcpdump Group | PCAP File Format Specification (LinkType 127 Radiotap) |
+| File System Access API | W3C / WHATWG | https://wicg.github.io/file-system-access/ |
+| IndexedDB API 3.0 | W3C | https://www.w3.org/TR/IndexedDB-3/ |
+| Leaflet.js | Vladimir Agafonkin / Leaflet | https://leafletjs.com/ |
+| Wigle.net | WiGLE Project | Wireless Geographic Logging Engine v1.4 File Format Specification |
+| W3C Geolocation API | W3C | https://www.w3.org/TR/geolocation/ |
+`
+
+
   }
 ];
+

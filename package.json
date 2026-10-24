@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@openipc-rs/web": "^0.1.40",
     "leaflet": "^1.9.4",
+    "leaflet.heat": "^0.2.0",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -25,6 +27,8 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^7.0.2",
     "vite": "^5.4.11",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0",
     "vitest": "^2.1.9"
   }
 }

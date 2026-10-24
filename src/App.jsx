@@ -41,6 +41,7 @@ const CrashAlertDeck = React.lazy(() => import('./components/CrashAlertDeck'));
 const ScriptRunner = React.lazy(() => import('./components/ScriptRunner'));
 const UsbReconDeck = React.lazy(() => import('./components/UsbReconDeck'));
 const EspMemoryInspector = React.lazy(() => import('./components/EspMemoryInspector'));
+const AlfaWifiWorkbench = React.lazy(() => import('./components/workbenches/AlfaWifiWorkbench'));
 
 // Composite Tool Suites
 const BadUsbPayloadSuite = React.lazy(() => import('./components/tools/BadUsbPayloadSuite'));
@@ -382,6 +383,12 @@ function AppContent() {
             {activeTool === 'modbus-rtu' && (
               <div className="w-full">
                 <ModbusWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'alfa-wifi' && (
+              <div className="w-full">
+                <AlfaWifiWorkbench />
               </div>
             )}
 

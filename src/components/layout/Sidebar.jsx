@@ -56,6 +56,7 @@ export const SIDEBAR_SECTIONS = [
     id: 'rf',
     title: 'RF, WIRELESS & BADGES',
     items: [
+      { id: 'alfa-wifi', name: 'Alfa Wi-Fi (RTL8812AU)', icon: Wifi, accent: 'cyan', desc: 'WebUSB monitor mode & 802.11 frame capture for Alfa adapters' },
       { id: 'flipper', name: 'Flipper Zero Suite', icon: Bot, accent: 'amber', desc: 'qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC & SD' },
       { id: 'proxmark', name: 'Proxmark3 / PM5 Suite', icon: Radio, accent: 'cyan', desc: '13.56MHz & 125kHz RFID cloner, raw NG framing & WebFlash' },
       { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF Sub-GHz RF deck, LCD screen & FREQMAN' },
@@ -205,6 +206,7 @@ export default function Sidebar({
                   const Icon = item.icon;
                   const isActive = 
                     activeTool === item.id ||
+                    (item.id === 'alfa-wifi' && ['alfa-wifi', 'wifi-scanner'].includes(activeTool)) ||
                     (item.id === 'packet-analyzer' && ['packet-analyzer', 'hex', 'packets', 'kismet'].includes(activeTool)) ||
                     (item.id === 'ducky' && ['ducky', 'cyberchef'].includes(activeTool)) ||
                     (item.id === 'wardrive' && ['wardrive', 'ubx'].includes(activeTool)) ||

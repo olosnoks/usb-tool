@@ -25,6 +25,10 @@ import CrashAlertDeck from '../src/components/CrashAlertDeck';
 import ScriptRunner from '../src/components/ScriptRunner';
 import UsbReconDeck from '../src/components/UsbReconDeck';
 import EspMemoryInspector from '../src/components/EspMemoryInspector';
+import AlfaWifiWorkbench from '../src/components/workbenches/AlfaWifiWorkbench';
+import TopologyView from '../src/components/workbenches/TopologyView';
+import SignalMapView from '../src/components/workbenches/SignalMapView';
+import GeospatialMap from '../src/components/workbenches/GeospatialMap';
 
 // Composite Tool Suites
 import BadUsbPayloadSuite from '../src/components/tools/BadUsbPayloadSuite';
@@ -58,6 +62,8 @@ describe('UI Workbench Render Sanity Check', () => {
     { name: 'PortapackWorkbench', comp: <PortapackWorkbench /> },
     { name: 'FlipperWorkbench', comp: <FlipperWorkbench /> },
     { name: 'ProxmarkWorkbench', comp: <ProxmarkWorkbench /> },
+    { name: 'AlfaWifiWorkbench', comp: <AlfaWifiWorkbench /> },
+    { name: 'TopologyView', comp: <TopologyView devices={{}} clients={{}} /> },
     { name: 'CyberChefWorkbench', comp: <CyberChefWorkbench /> },
     { name: 'DuckyScriptStudio', comp: <DuckyScriptStudio /> },
     { name: 'PacketAnalyzerWorkbench', comp: <PacketAnalyzerWorkbench /> },
@@ -85,8 +91,10 @@ describe('UI Workbench Render Sanity Check', () => {
     { name: 'MicroPythonFileManager', comp: <MicroPythonFileManager isConnected={false} /> },
     { name: 'ImprovWifiDeck', comp: <ImprovWifiDeck isConnected={false} /> },
     { name: 'TelemetryDashboard', comp: <TelemetryDashboard isConnected={false} /> },
-    {name: 'HelpTroubleshootingTab', comp: <HelpTroubleshootingTab /> },
-    { name: 'SerialPlotter', comp: <SerialPlotter isConnected={false} /> }
+    { name: 'HelpTroubleshootingTab', comp: <HelpTroubleshootingTab /> },
+    { name: 'SerialPlotter', comp: <SerialPlotter isConnected={false} /> },
+    { name: 'SignalMapView', comp: <SignalMapView /> },
+    { name: 'GeospatialMap', comp: <GeospatialMap /> }
   ];
 
   for (const { name, comp } of components) {
