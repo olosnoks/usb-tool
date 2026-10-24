@@ -6,7 +6,10 @@ import './index.css';
 // Register PWA Service Worker for offline field use
 if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(err => {
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      // Force checking for updated sw.js immediately
+      reg.update().catch(() => {});
+    }).catch(err => {
       console.warn('PWA service worker registration notice:', err);
     });
   });
