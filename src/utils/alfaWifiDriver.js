@@ -235,9 +235,12 @@ export function unpackRealtekUsbTransfer(inputBuffer, defaultChannel = 36) {
     }
 
     // Determine descriptor size: 24 bytes (RTL8812AU) or 32 bytes (RTL8814AU)
+    // rx_desc DWORD0 (little-endian) field positions:
+    //   drvinfo_sz = bits [19:16] -> low nibble of byte 2 (in 8-byte units)
+    //   shift_sz   = bits [25:24] -> low 2 bits of byte 3
     let descSize = 24;
-    let drvInfoSize = ((buffer[offset + 2] >> 4) & 0x0F) * 8;
-    let shift = (buffer[offset + 3] >> 4) & 0x03;
+    let drvInfoSize = (buffer[offset + 2] & 0x0F) * 8;
+    let shift = buffer[offset + 3] & 0x03;
     let frameStart = offset + descSize + drvInfoSize + shift;
 
     // Check if 802.11 protocol version is 0 (bottom 2 bits of Frame Control)
