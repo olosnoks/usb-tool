@@ -89,6 +89,88 @@ Unlike standard web serial terminals that only spray raw bytes, Skon's USB Tool 
 
 ---
 
+## 🏗️ Architecture & How It Works
+
+Skon's USB Tool is a **100% client-side single-page app** — there is no server,
+no telemetry, and no build step on the user's side. Everything (serial I/O,
+firmware flashing, 802.11 parsing, crypto) runs in the browser tab. That choice
+drives the whole design: it installs nothing, leaks nothing to a backend, and
+deploys as static files to GitHub Pages.
+
+### Stack & Entry Points
+- **Vite + React + Tailwind CSS.** Vite bundles two HTML entry points —
+  `index.html` (the app) and `wiki/index.html` (the standalone docs) — with
+  `base: './'` so the whole thing works from any static subpath.
+- `src/main.jsx` mounts `src/App.jsx`, which renders the shell: a persistent
+  `Header`, a collapsible `Sidebar`, the active tool viewport, a dockable
+  `TerminalDrawer`, and global modals (command palette, pinouts, chip intel).
+
+### Tool Routing & Memory Discipline
+- The active tool is a single `activeTool` state value (seedable from a `?tool=`
+  URL param). Each workbench is **`React.lazy(() => import(...))`** and rendered
+  **conditionally** (`{activeTool === 'x' && <X/>}`).
+- The practical effect: a tool's code isn't even downloaded until you open it,
+  and switching away **unmounts** it — tearing down its effects, timers, and
+  (for hardware tools) releasing the device. Nothing sits idle eating memory at
+  launch. Capture-heavy tools additionally cap their in-memory state and age out
+  stale entries.
+
+### The Shared Transport Layer (`SerialContext`)
+`src/context/SerialContext.jsx` is the heart of the app — one provider that owns
+every serial connection so all tools behave consistently:
+- Opens ports via the **Web Serial API**, with a **WebUSB OTG fallback** for
+  Android/Chrome where Web Serial is unavailable.
+- Runs a continuous RX read loop, tracks byte/packet stats, and exposes
+  `sendString` / `sendRawBytes`, DTR/RTS signal control, UART BREAK, and an
+  automated baud-scan.
+- Provides a **`transceive(bytes, {expectedLength, timeoutMs})`** request/response
+  primitive and `reconfigureActivePort()` so protocol decks (e.g. Modbus RTU) can
+  do synchronous polling over the same connection the Terminal uses.
+
+### The Driver + Workbench Pattern
+Every tool is two pieces:
+1. A **pure driver/parser module** in `src/utils/` (e.g. `modbusDriver.js`,
+   `wifiParser.js`, `canBusDriver.js`) — framing, CRCs, decoders, no UI. These
+   are unit-tested in isolation with Vitest.
+2. A **React workbench** in `src/components/` that wires the driver to the shared
+   transport and renders the UI.
+
+This separation is what makes the tool list long without the app becoming
+unmaintainable, and it's documented end-to-end in
+[`docs/FEATURE_TOOL_HANDOFF.md`](docs/FEATURE_TOOL_HANDOFF.md).
+
+### Offloading Heavy Work: Web Workers & WASM
+- **Web Workers** (`src/workers/`) keep the UI at 60 FPS under load. The 802.11
+  parser worker digests raw frames off the main thread and batches results every
+  ~200 ms; the CyberChef worker runs recipe pipelines without stuttering the DOM.
+- **WASM** is loaded on demand: `@openipc-rs/web` (a Rust driver) powers raw
+  Realtek RTL8812AU monitor-mode capture over WebUSB, and CyberChef operations
+  use native/WASM crypto. WASM assets are resolved through Vite so they're served
+  with the correct MIME type and hashed URLs.
+
+### Data Flow Example — the Alfa Wi-Fi Capture Pipeline
+A good illustration of how the pieces fit:
+
+```
+WebUSB  →  @openipc-rs/web WASM  →  readRxTransfer()  →  unpackRealtekUsbTransfer()
+(raw RTL8812AU bulk transfer)      (Realtek rx_desc)     (→ Radiotap + 802.11 frames)
+   →  fastFilterPacket()  →  parserWorker (wifiParser)  →  ~200ms batched flush
+   →  throttled React state (APs/clients, capped + LRU-aged)  →  tables / map / WIDS
+```
+
+### Persistence (all local)
+- **IndexedDB** stores capture/session snapshots.
+- The **File System Access API** streams high-rate serial logs and live PCAP
+  straight to disk with zero memory growth (overnight burn-in friendly).
+- **localStorage** holds per-viewer UI preferences. None of it leaves the device.
+
+### Build & Deploy
+`npm run build` (Vite → `dist/`) is published to GitHub Pages by
+`.github/workflows/deploy.yml` on every push to `main`. Because the app is static
+and self-contained, the deployed artifact is just HTML/JS/WASM assets.
+
+---
+
 ## 🚀 Quick Start
 
 ### Online Web App

@@ -458,17 +458,32 @@ When communicating with vehicles on Mode 01 (Live Current Data), broadcast reque
 
 ### 3. Complete UI Control Mapping
 
+The CAN workbench rides on the app's **shared serial connection** — connect your
+SLCAN adapter once from the top bar (**Connect**), then this deck frames and
+transmits SLCAN ASCII over that port. A **Test Simulation** toggle generates
+synthetic traffic so the sniffer, gauges, and byte-diff view can be explored with
+no vehicle attached.
+
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Connect Adapter** | Button | Connects WebSerial to SLCAN hardware (CANable, Candlelight, ESP32 TWAI). |
-| **CAN Bitrate** | Dropdown | Selects network baud rate: 125 kbps, 250 kbps, 500 kbps (Standard OBD-II), or 1 Mbps. |
-| **Listen-Only Mode** | Toggle | Disables ACK generation, ensuring 100% passive sniffing without altering vehicle bus state. |
-| **CAN Sniffer Table** | Table | Displays live IDs, period (ms), count, and payload bytes with byte-diff highlighting. |
-| **Filter by CAN ID** | Input | Isolates specific 11-bit or 29-bit identifiers. |
-| **Send CAN Frame** | Inputs + Button | Transmits custom arbitrary standard or extended frames onto the bus. |
-| **OBD-II Telemetry Tab**| Tab | Switches to active diagnostic dashboard with virtual gauges (RPM, Speed, Temp). |
-| **Read Fault Codes** | Button | Issues Mode 03 request to retrieve stored Diagnostic Trouble Codes (DTCs). |
-| **Clear Fault Codes** | Button | Issues Mode 04 request to clear DTCs and extinguish the Check Engine MIL light. |
+| **(Top-bar Connect)** | Button | Attaches the SLCAN adapter via the shared Web Serial transport; the deck reads/writes through it. |
+| **Mode Toggle** | Buttons | Switches between **CAN Bus Sniffer** and **OBD-II Scanner & Gauges** views. |
+| **Test Simulation** | Toggle | Injects synthetic CAN/OBD-II traffic (sine-wave RPM, speed, temp) for demos without hardware. |
+| **CAN Bitrate** | Dropdown | Selects network baud rate: 125 / 250 / 500 kbps (standard OBD-II) / 1 Mbps. |
+| **CAN Sniffer Table** | Table | Live IDs with period (ms), count, and payload bytes, with per-byte change highlighting. |
+| **Filter by CAN ID** | Input | Isolates specific 11-bit or 29-bit identifiers (hex substring match). |
+| **Send CAN Frame** | Inputs + Button | Builds an SLCAN frame (\`t\`/\`T\`) from a hex ID + data bytes and transmits it over the shared port. |
+| **Read Fault Codes** | Button | Retrieves stored DTCs. *In the current build this returns representative demo codes (e.g. P0300, P0171) rather than issuing a live Mode 03 request.* |
+| **Clear Fault Codes** | Button | Clears the displayed DTC list (demo Mode 04). |
+
+---
+
+### 3b. Implementation & Architecture
+
+- **Component:** [\`src/components/tools/CanBusWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/CanBusWorkbench.jsx) uses \`useSerial()\` for \`isConnected\`/\`sendString\`, keeps a \`messages\` map keyed by CAN ID (for the de-duplicated sniffer table with period/count), and a \`sniffer\`/\`obd2\` view mode.
+- **Framing:** \`buildSlcanFrame(id, bytes, isExtended)\` in [\`src/utils/canBusDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/canBusDriver.js) encodes the Lawicel \`t<id><len><data>\` (11-bit) / \`T<id><len><data>\` (29-bit) ASCII form, which is written over the shared serial port via \`sendString(frame, '')\`.
+- **Simulation:** when **Test Simulation** is on, a timer synthesizes plausible traffic (e.g. RPM = \`1200 + sin(t)*800 + noise\`) and feeds the same \`messages\` map, so the table and gauges render identically to live data.
+- **Transport reuse:** because it shares \`SerialContext\`, the CAN deck inherits the same connection, RX loop, and byte-stats as the Terminal and other serial tools rather than opening its own port.
 
 ---
 
@@ -515,7 +530,17 @@ When communicating with vehicles on Mode 01 (Live Current Data), broadcast reque
     content: `
 # I2C & SPI Bus Explorer — Hardware Reverse Engineering
 
-The **I2C & SPI Bus Explorer** enables interactive exploration, debugging, and reverse engineering of sensors, EEPROMs, displays, and peripheral chips connected to I2C or SPI buses via USB bridging hardware (such as Bus Pirate, CH341A, or ESP32 bus bridge firmware).
+The **I2C & SPI Bus Explorer** is an interactive workbench for learning and
+reverse-engineering I2C/SPI peripherals — sensors, EEPROMs, displays — through
+address scanning, chip identification, and register read/write.
+
+> **Current build — interactive simulation.** This workbench ships as a hands-on
+> *simulation*. It models a set of virtual chips at well-known I2C addresses
+> (e.g. an MPU-6050 at \`0x68\`, a BME280 at \`0x76\`) so you can practice bus
+> sweeps and register pokes with no hardware attached. The protocol theory and
+> address/register dictionaries below are real and accurate; driving a physical
+> Bus Pirate / CH341A / ESP32 bridge is not yet wired, so **"Connect" starts the
+> demo**, not a live bus. (See *Implementation & Architecture* below.)
 
 ---
 
@@ -579,15 +604,26 @@ Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Commu
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Connect Bridge** | Button | Connects WebSerial to hardware adapter (Bus Pirate, ESP32 Bridge, or CH341A). |
-| **Protocol Mode** | Selector | Toggles between I2C Mode and SPI Mode. |
-| **I2C Clock Speed** | Dropdown | Selects bus frequency: Standard Mode (100 kHz) or Fast Mode (400 kHz). |
-| **Scan I2C Bus** | Button | Sweeps all 120 possible 7-bit addresses (\`0x08\` to \`0x77\`) and marks responding nodes. |
-| **Address Grid** | Hex Matrix | 16x8 visual matrix highlighting responding I2C addresses with chip identification badges. |
-| **Register Address**| Input | Hexadecimal byte offset of target register to read or write. |
-| **Read Register** | Button | Sends repeated START sequence to read target register value. |
-| **Write Register** | Button | Transmits new byte value to target register. |
-| **Live Register Watch**| Toggle | Periodically polls register at selectable intervals (50ms–1000ms) to display live changes. |
+| **Connect Bus Explorer (Demo)** | Button | Starts the simulated bus session with its virtual chip set (no hardware). |
+| **Scan I2C Bus (7-bit Sweep)** | Button | Sweeps addresses \`0x08\`–\`0x77\` and marks the virtual devices that "respond". |
+| **Address Grid** | Hex Matrix | Visual matrix highlighting responding addresses with chip-identification badges from the built-in dictionary. |
+| **Register Address** | Input | Hexadecimal byte offset of the target register to read or write. |
+| **Read Register** | Button | Reads the value of the target register from the simulated device model. |
+| **Write Register** | Button | Writes a new byte value into the simulated device's register store. |
+| **Disconnect** | Button | Tears down the simulated session. |
+
+> Because the session is simulated, the scan always returns the same deterministic
+> virtual devices — ideal for demos, screenshots, and learning the workflow. A
+> future hardware mode would route these same actions over the shared serial
+> transport to a Bus Pirate / CH341A / ESP32 bridge.
+
+---
+
+### 2b. Implementation & Architecture
+
+- **Component:** [\`src/components/tools/BusExplorerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/BusExplorerWorkbench.jsx) renders the header, scan bar, address grid, and register panel, and holds \`isConnected\`, \`isSimulated\`, \`detectedDevices\`, and scan state.
+- **Driver:** [\`src/utils/busExplorerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/busExplorerDriver.js) implements the virtual bus. \`connectSimulation()\` seeds a model of known chips keyed by 7-bit address; \`scanBus()\` walks \`0x08\`–\`0x77\` and reports which virtual addresses ACK; \`initSimulatedRegisters(addr)\` populates a per-device register map (including identity registers such as the MPU-6050 \`WHO_AM_I\` = \`0x68\`) that the read/write controls operate on.
+- **Why simulated:** WebSerial/WebUSB can reach a *bridge* (Bus Pirate, CH341A, ESP32), but each bridge speaks its own command dialect. The simulation lets the UI, dictionary, and teaching flow ship and be tested now, with a real bridge adapter as a clean future addition that reuses the same grid and register UI.
 
 ---
 
