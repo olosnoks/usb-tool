@@ -46,9 +46,12 @@ export default function GeospatialMap({
   // Tile layer URL definitions
   const tileProviders = {
     dark: {
-      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      maxZoom: 19,
-      attribution: '&copy; CartoDB &copy; OpenStreetMap'
+      // Esri World Dark Gray Base — free, no API key (same provider family as the
+      // HackRF Tactical Map). Carto's basemaps.cartocdn.com dark tiles now return
+      // "API KEY REQUIRED" watermark tiles, so we no longer use them.
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      maxZoom: 16,
+      attribution: 'Tiles &copy; Esri'
     },
     standard: {
       url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
