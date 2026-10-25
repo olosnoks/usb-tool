@@ -244,6 +244,14 @@ The Flipper Zero mounts standard FAT32 / exFAT microSD cards under the root moun
 | **Flipper Zero Firmware & Protobuf RPC** | Pavel Zhovner, Alexander Kulagin, and Flipper Devices Inc. | [github.com/flipperdevices/flipperzero-firmware](https://github.com/flipperdevices/flipperzero-firmware) | GPL-3.0 |
 | **qFlipper Desktop Architecture** | Flipper Devices Inc. (Protocol Buffers \`PB_Main\` schema) | [github.com/flipperdevices/qFlipper](https://github.com/flipperdevices/qFlipper) | GPL-3.0 |
 | **ST7567 Monochrome Display Architecture** | Sitronix Technology Corp. (128x64 dot matrix LCD controller specification) | [Sitronix ST7567 Datasheet](https://www.sitronix.com.tw) | Hardware Spec |
+
+---
+
+### Implementation & Architecture
+
+- **Component:** [\`components/tools/flipper/FlipperWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/flipper/FlipperWorkbench.jsx) connects a Flipper Zero through the shared \`SerialContext\` and drives it with \`FlipperZeroDriver\` from [\`utils/flipperDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/flipperDriver.js).
+- **Protocol:** communication is the Flipper **RPC** — length-delimited Protocol Buffers (\`PB_Main\` messages) started with \`start_rpc_session\` on the serial CLI. The driver encodes/decodes these varint-prefixed protobuf frames for storage, GPIO, Sub-GHz, NFC/RFID, and 128×64 framebuffer streaming.
+- **Why WebSerial:** the Flipper enumerates as a USB CDC serial port, so no WASM or driver swap is needed — it rides the same transport as the Terminal.
 `
   },
   {
@@ -453,6 +461,14 @@ If your Proxmark3 is bricked or stuck in bootloader mode (e.g. following a faile
 | **Proxmark3 RDV4 & Iceman Repository** | Jonathan Westhues (creator), Christian Herrmann (@iceman1001), and RFID Research Group (RRG) | [github.com/RfidResearchGroup/proxmark3](https://github.com/RfidResearchGroup/proxmark3) | GPL-3.0 |
 | **Proxmark3 NG Framing Protocol (\`0x424D5033\`)** | Proxmark3 Core Firmware Team | [Proxmark3 Protocol Docs](https://github.com/RfidResearchGroup/proxmark3/blob/master/doc/new_framing.md) | GPL-3.0 |
 | **NXP Mifare & Atmel T5577 RFID Standards** | NXP Semiconductors (Mifare Classic / Crypto-1) & Microchip / Atmel (ATA5577 LF Transponder) | [NXP Application Notes](https://www.nxp.com) | Industry Standard |
+
+---
+
+### Implementation & Architecture
+
+- **Component:** [\`components/tools/proxmark/ProxmarkWorkbench.tsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/proxmark/ProxmarkWorkbench.tsx) with [\`devices/proxmark/ProxmarkDevice.ts\`](https://github.com/olosnoks/usb-tool/blob/main/src/devices/proxmark/ProxmarkDevice.ts) talks to a Proxmark3 / PM5 over WebSerial/WebUSB, requesting the known PM3 RDV4 / Easy / clone vendor IDs.
+- **Protocol:** the PM3 **NG framing** protocol (magic \`0x424D5033\` = "BMP3") in \`src/protocols/pm3/\` packetizes commands and responses with pre/postambles and CRC.
+- **UI:** \`CommandTreeForm\` exposes the Proxmark client command tree (the \`hf\`/\`lf\` families) so LF (125 kHz) and HF (13.56 MHz) RFID/NFC auditing commands are issued over that NG link and their frames decoded back into the UI.
 `
   },
   {
@@ -634,6 +650,15 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 | **HackRF One Software Defined Radio** | Michael Ossmann and Great Scott Gadgets | [github.com/greatscottgadgets/hackrf](https://github.com/greatscottgadgets/hackrf) | GPL-2.0 |
 | **RocketGod Mayhem Sub-GHz & Tactical Modules** | RocketGod (@RocketGod-git) | [github.com/RocketGod-git](https://github.com/RocketGod-git) | Open Source Community |
 | **dump1090 ADS-B Decoder Architecture** | Salvatore Sanfilippo (antirez) & FlightAware | [github.com/flightaware/dump1090](https://github.com/flightaware/dump1090) | BSD 3-Clause |
+
+---
+
+### Implementation & Architecture
+
+> **Current build — mostly simulation.** The PortaPack/HackRF decks render a mirror of the Mayhem LCD with **synthetic** spectrum, waterfall, and sensor data (procedurally generated noise) so the UI, FREQMAN, and tactical modules can be explored without an SDR. Live HackRF streaming is not wired.
+
+- **Component:** [\`components/tools/PortapackWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/PortapackWorkbench.jsx) composes several decks — \`TacticalMapDeck\`, \`HamRadioDeck\`, \`SensorHubDeck\`, \`LookingGlassDeck\` — over \`utils/mayhemDriver.js\`.
+- **Rendering:** the spectrum/waterfall canvases are driven by procedural noise (\`Math.sin\` + \`Math.random\`) on a render tick, and the LCD view accepts simulated touch coordinates — faithfully mirroring the Mayhem firmware's screens for demos and learning the layout.
 `
   },
   {
@@ -762,6 +787,14 @@ for (let i = 2; i < buffer.length - 2; i++) {
 | **WiGLE.net (Wireless Geographic Logging Engine)** | Bobzilla & Arkasha (WiGLE project founders) | [wigle.net](https://wigle.net) | Open WiGLE CSV Spec |
 | **u-blox UBX Binary Protocol** | u-blox AG (Thalwil, Switzerland) | [u-blox M8 Receiver Description](https://www.u-blox.com) | Proprietary Open Spec |
 | **NMEA 0183 Standard** | National Marine Electronics Association | [nmea.org](https://www.nmea.org) | Maritime & GNSS Standard |
+
+---
+
+### Implementation & Architecture
+
+- **Component:** [\`components/tools/GpsNavigationSuite.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/GpsNavigationSuite.jsx) hosts two tabs — **Wardrive** (live map + logging) and **UBX** (u-blox configurator) — both fed by the shared serial stream from a connected GPS module.
+- **Parsing:** [\`utils/nmeaParser.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/nmeaParser.js) decodes NMEA 0183 sentences (GGA/RMC) into latitude/longitude/fix-quality/speed; [\`utils/ubxProtocol.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/ubxProtocol.js) builds and parses u-blox UBX binary frames for receiver configuration.
+- **Export & map:** captured networks are serialized to WiGLE CSV / GeoJSON / KML via \`utils/wardrivingExporter.js\`, and positions plot on the \`TacticalMapDeck\` Leaflet map using the same key-free tile providers as the rest of the app.
 `
   },
   {
@@ -855,6 +888,15 @@ AA:BB:CC:DD:EE:FF,CoffeeShop,[WPA2-PSK-CCMP],2024-03-23 12:45:10,6,-68,48.123456
 | **ESP32-Piglet Wardriver** | JustCallMeKoko (@JustCallMeKoko) | [github.com/JustCallMeKoko/ESP32-Piglet](https://github.com/JustCallMeKoko/ESP32-Piglet) | GPL-3.0 |
 | **CYD (Cheap Yellow Display) Community** | Brian Lough and the ESP32-2432S028R developer community | [github.com/witnessmenow/ESP32-Cheap-Yellow-Display](https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display) | Open Hardware |
 | **WiGLE Wireless Mapping Standard** | WiGLE.net team | [wigle.net](https://wigle.net) | Public Format |
+
+---
+
+### Implementation & Architecture (App Integration)
+
+Piglet is **external firmware** for CYD / T-Display boards — not an in-app workbench. The app's role is to **flash and feed** it:
+
+- **Flashing:** the **Firmware Flasher** resolves the image through [\`services/firmwareCatalogService.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/services/firmwareCatalogService.js) and burns it with the ESP ROM bootloader protocol (SLIP framing, stub, MD5 verify).
+- **Operation:** once running, the wardriver's serial output is viewable in the **Terminal**, and its WiGLE logs can be mapped and re-exported through the **GPS & Wardrive Suite**.
 `
   },
   {
@@ -934,6 +976,16 @@ After running \`scanap\`:
 | **ESP32 Marauder** | JustCallMeKoko (@JustCallMeKoko) | [github.com/JustCallMeKoko/ESP32Marauder](https://github.com/JustCallMeKoko/ESP32Marauder) | GPL-3.0 / MIT |
 | **Espressif Wi-Fi Promiscuous Mode API** | Espressif Systems (ESP-IDF \`esp_wifi_set_promiscuous\`) | [docs.espressif.com](https://docs.espressif.com) | Apache-2.0 |
 | **IEEE 802.11 Protocol Standard** | IEEE Computer Society LAN/MAN Standards Committee | [IEEE 802.11-2020 Standard](https://standards.ieee.org) | International Standard |
+
+---
+
+### Implementation & Architecture (App Integration)
+
+ESP32 Marauder is **external firmware** controlled over its serial CLI — there is no dedicated Marauder component. The app integrates it from three existing tools:
+
+- **Flash** it via a **Firmware Flasher** preset (ESP ROM protocol).
+- **Drive** it by typing Marauder CLI commands in the **Terminal** over the shared \`SerialContext\`.
+- **Analyze** its output by streaming captured frames into the **Packet & Protocol Lab** (which reuses \`wifiParser.js\`).
 `
   }
 ];
