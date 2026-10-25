@@ -66,25 +66,32 @@ export default function SetupGuideModal({
   const steps = [
     {
       num: 1,
-      title: 'Download Zadig Driver Utility',
-      desc: 'Zadig is an open-source Windows application that installs generic USB drivers (such as WinUSB) onto USB peripherals.',
+      title: 'Download Zadig & run it as Administrator',
+      desc: 'Zadig is a free, open-source Windows tool that installs the generic WinUSB driver onto a USB device. Download it, then right-click the downloaded zadig-*.exe and choose "Run as administrator" — replacing a driver requires admin rights.',
       actionUrl: 'https://zadig.akeo.ie/',
       actionLabel: 'Download Zadig from official site'
     },
     {
       num: 2,
-      title: 'Plug In Your USB Wi-Fi Adapter',
-      desc: 'Connect your Alfa AWUS036ACH (RTL8812AU) or MediaTek adapter directly to a high-speed USB 3.0 port.'
+      title: 'Plug the adapter directly into a USB port',
+      desc: 'Connect your Alfa AWUS036ACH (RTL8812AU) or other supported adapter straight into a USB port — prefer a USB 3.0 port and avoid unpowered hubs or extension cables.'
     },
     {
       num: 3,
-      title: 'Enable "List All Devices" in Zadig',
-      desc: 'Launch Zadig (run as Administrator). In the top navigation menu, open Options and check "List All Devices". By default, Windows hides active network devices.'
+      title: 'Turn on Options → "List All Devices"',
+      desc: 'In the Zadig menu bar, open "Options" and tick "List All Devices". Windows hides active network adapters by default, so the Alfa will not appear in the dropdown until this is enabled.'
     },
     {
       num: 4,
-      title: 'Select Adapter & Install WinUSB',
-      desc: 'In the main dropdown, select your adapter (e.g., "Realtek 8812AU Wireless LAN 802.11ac USB NIC"). In the target driver box, choose "WinUSB (v6.1.7600.16385)" and click "Replace Driver" or "Install Driver". Wait ~30 seconds for Windows to bind the driver.'
+      title: 'Select the adapter, then replace its driver with WinUSB',
+      desc: 'In the main dropdown pick your adapter (e.g. "Realtek 8812AU Wireless LAN 802.11ac USB NIC"). On the right, use the ▲▼ arrows so the target driver box reads "WinUSB (v6.1.7600.16385)", then click "Replace Driver". Wait ~30 seconds while Windows binds it.',
+      tip: 'If the adapter shows more than one interface, choose Interface 0. If "Replace Driver" fails, unplug and replug the adapter and try again.'
+    },
+    {
+      num: 5,
+      title: 'Reconnect in the app and start capturing',
+      desc: 'Unplug and replug the adapter, reload this page, then click "Connect via WebUSB" and pick the adapter in the browser chooser. Once connected, press "Start Monitor" — discovered access points and clients will begin filling the tables.',
+      tip: 'When you later want the adapter back as a normal Wi-Fi card, revert the driver using the steps in the note below.'
     }
   ];
 
@@ -180,6 +187,12 @@ export default function SetupGuideModal({
                           <span>{step.actionLabel}</span>
                           <ExternalLink className="w-3 h-3 ml-0.5" />
                         </a>
+                      </div>
+                    )}
+                    {step.tip && (
+                      <div className="mt-1.5 flex items-start gap-1.5 text-[10px] text-amber-300/80 bg-amber-950/20 border border-amber-500/20 rounded-lg px-2 py-1.5">
+                        <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                        <span>{step.tip}</span>
                       </div>
                     )}
                   </div>
