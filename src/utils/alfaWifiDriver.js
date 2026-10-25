@@ -4,6 +4,14 @@
  */
 
 import init, { WebUsbRealtekDevice, supportedUsbFilters } from '@openipc-rs/web';
+// Resolve the WASM binary through Vite so it is served with the correct
+// (application/wasm) MIME type and a real, hashed asset URL in both dev and
+// build. Without this, init() falls back to `new URL('openipc_web_bg.wasm',
+// import.meta.url)`, which Vite answers with the SPA's index.html (404
+// fallback) — making WebAssembly.instantiate() fail with "expected magic word
+// 00 61 73 6d" and the adapter never initializes. The package's exports map
+// does not expose the .wasm subpath, so we import it by relative file path.
+import openIpcWasmUrl from '../../node_modules/@openipc-rs/web/openipc_web_bg.wasm?url';
 
 export { WebUsbRealtekDevice, supportedUsbFilters };
 
@@ -14,7 +22,7 @@ let wasmInitialized = false;
  */
 export async function initDriver() {
   if (!wasmInitialized) {
-    await init();
+    await init({ module_or_path: openIpcWasmUrl });
     wasmInitialized = true;
   }
 }
@@ -108,12 +116,24 @@ export async function connectAlfaDevice(customFilters = null) {
 
 /**
  * Configure radio into monitor mode on the specified channel.
- * @param {WebUsbRealtekDevice} radioInstance 
- * @param {number} channel 
- * @param {number} width 
- * @param {number} offset 
+ *
+ * Prefers initializeMonitorWithOptions with acceptBadFcs=true: in raw 802.11
+ * monitor capture many frames arrive with imperfect FCS (weak signal, mid-hop,
+ * partial aggregation). If the hardware is left to drop bad-FCS frames the UI
+ * can show an active monitor with zero captured packets, so we accept them and
+ * let the parser validate. Falls back to the basic initializeMonitor when the
+ * options variant is unavailable.
+ *
+ * @param {WebUsbRealtekDevice} radioInstance
+ * @param {number} channel
+ * @param {number} width
+ * @param {number} offset
+ * @param {boolean} acceptBadFcs
  */
-export async function startMonitorMode(radioInstance, channel = 36, width = 20, offset = 0) {
+export async function startMonitorMode(radioInstance, channel = 36, width = 20, offset = 0, acceptBadFcs = true) {
+  if (radioInstance && typeof radioInstance.initializeMonitorWithOptions === 'function') {
+    return await radioInstance.initializeMonitorWithOptions(channel, width, offset, acceptBadFcs);
+  }
   return await radioInstance.initializeMonitor(channel, width, offset);
 }
 

@@ -423,6 +423,7 @@ export default function AlfaWifiWorkbench() {
 
   // Connection Heartbeat & Watchdog Ref
   const lastPacketTimeRef = useRef(Date.now());
+  const lastRxErrorTsRef = useRef(0);
   const [isWatchdogRecovering, setIsWatchdogRecovering] = useState(false);
 
   // Desktop Alerts State & Cooldown Ref (Throttled to 1/min)
@@ -1567,8 +1568,8 @@ export default function AlfaWifiWorkbench() {
           if (deviceRef.current && typeof deviceRef.current.retune === 'function') {
             await deviceRef.current.retune(channelRef.current);
             lastPacketTimeRef.current = Date.now();
-            setStatusMessage('Hardware connection restored.');
-            setStatusLevel('success');
+            setStatusMessage('No packets received — re-tuned radio, still waiting for RX data. Check channel, antenna, or driver support.');
+            setStatusLevel('warning');
             setIsWatchdogRecovering(false);
             return;
           }
@@ -1972,6 +1973,14 @@ export default function AlfaWifiWorkbench() {
           setStatusLevel('error');
           setStatusMessage('Adapter disconnected. Please reconnect.');
           break;
+        }
+
+        // Surface the real read error instead of silently retrying forever (throttled to 2s)
+        const nowTs = Date.now();
+        if (nowTs - lastRxErrorTsRef.current > 2000) {
+          lastRxErrorTsRef.current = nowTs;
+          setStatusLevel('warning');
+          setStatusMessage(`Monitor active but RX read failed: ${err.message || err}`);
         }
 
         await new Promise(r => setTimeout(r, 60));
@@ -3511,8 +3520,8 @@ export default function AlfaWifiWorkbench() {
       </div>
 
       {/* Action Bar */}
-      <div className="bg-[#171920] border border-slate-800/80 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="bg-[#171920] border border-slate-800/80 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 min-w-0">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           {/* Start / Pause / Stop Monitor */}
           {!isMonitoring ? (
             <button
@@ -3753,7 +3762,7 @@ export default function AlfaWifiWorkbench() {
         </div>
 
         {/* Right: Forensic & Session Controls */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           {/* Save Session to IndexedDB */}
           <button
             onClick={handleSaveSession}
