@@ -482,7 +482,8 @@ export default function AlfaWifiWorkbench() {
   const deviceCountRef = useRef(0);
   const hopIntervalRef = useRef(null);
   const isRetuningRef = useRef(false);
-  const deauthTimestampsRef = useRef([]);
+  // Deauth/disassoc events bucketed per victim: Map<"station|ap", number[] timestamps>
+  const deauthEventsRef = useRef(new Map());
   const waterfallCountsRef = useRef({});
   const [latestWaterfallSlice, setLatestWaterfallSlice] = useState({});
   const [cleartextMetadata, setCleartextMetadata] = useState([]);
@@ -1523,18 +1524,44 @@ export default function AlfaWifiWorkbench() {
   }, [isAutoHop, isMonitoring, isConnected, isSimulateRf]);
 
   // 4. WIDS Check Helper
+  // Highest standard 802.11 reason code is in the 60s; attacks use low codes (1, 7).
+  const MAX_VALID_DEAUTH_REASON = 66;
+  const DEAUTH_FLOOD_THRESHOLD = 12; // frames to one victim within the window
   const checkDeauthAttack = (frame) => {
     if (!frame.isDeauth) return;
-    const nowTs = Date.now();
-    deauthTimestampsRef.current.push(nowTs);
-    // Keep timestamps from last 5 seconds (5000ms sliding window)
-    deauthTimestampsRef.current = deauthTimestampsRef.current.filter(t => nowTs - t <= 5000);
 
-    if (deauthTimestampsRef.current.length >= 10) {
+    // Reject corrupted frames. accept-bad-FCS lets malformed frames through, and a
+    // genuine deauth/disassoc always carries a defined reason code — a garbage code
+    // (e.g. 40634) means the frame is noise, not an attack.
+    if (frame.reasonCode == null || frame.reasonCode < 1 || frame.reasonCode > MAX_VALID_DEAUTH_REASON) {
+      return;
+    }
+
+    // Count per victim (station + AP), not globally — otherwise ordinary disassoc /
+    // band-steering traffic across many networks in a dense area trips the threshold.
+    const target = frame.stationMac || frame.destinationMac;
+    const ap = frame.bssid;
+    if (!target || !ap || target === 'Broadcast') return;
+
+    const key = `${target}|${ap}`;
+    const nowTs = Date.now();
+    const events = deauthEventsRef.current;
+    const recent = (events.get(key) || []).filter(t => nowTs - t <= 5000);
+    recent.push(nowTs);
+    events.set(key, recent);
+
+    // Opportunistically prune other stale buckets so the map does not grow unbounded
+    if (events.size > 256) {
+      for (const [k, ts] of events) {
+        if (!ts.some(t => nowTs - t <= 5000)) events.delete(k);
+      }
+    }
+
+    if (recent.length >= DEAUTH_FLOOD_THRESHOLD) {
       const anomalyPayload = {
-        count: deauthTimestampsRef.current.length,
-        target: frame.stationMac || frame.destinationMac || 'Broadcast',
-        ap: frame.bssid,
+        count: recent.length,
+        target,
+        ap,
         reason: frame.reasonDescription || 'Deauthentication flood',
         timestamp: frame.timestamp
       };

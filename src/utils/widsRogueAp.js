@@ -15,6 +15,29 @@ const IGNORED_SSIDS = new Set([
 ]);
 
 /**
+ * Collapse a parsed security string into a coarse trust family for comparison.
+ *
+ * - 'WEP' is treated as UNRELIABLE (null): the parser falls back to WEP whenever a
+ *   beacon's Privacy bit is set but its RSN/WPA IE can't be found (truncated or
+ *   bad-FCS beacons), so a normal WPA2 network frequently shows a phantom "WEP"
+ *   twin. Real WEP is essentially extinct, so we never flag on it.
+ * - WPA2 / WPA3 / mixed all collapse to 'secured' so an SSID running transition
+ *   mode across APs isn't flagged as a mismatch.
+ * - 'Open' stays distinct, so a genuine open AP cloning a secured SSID still flags.
+ *
+ * @param {string} sec
+ * @returns {'open'|'secured'|null}
+ */
+function securityFamily(sec) {
+  if (!sec) return null;
+  const s = String(sec).toLowerCase();
+  if (s === 'open') return 'open';
+  if (s.includes('wep')) return null; // unreliable classification — ignore
+  if (s.includes('wpa') || s.includes('rsn') || s.includes('sae')) return 'secured';
+  return null;
+}
+
+/**
  * Analyze discovered access points to detect potential Evil Twin / Rogue APs.
  * 
  * Heuristics:
@@ -56,10 +79,12 @@ export function detectRogueAps(devices) {
 
     const reasons = [];
 
-    // 1. Encryption Mismatch Check
-    const securityTypes = new Set(group.map(a => a.security || 'Open'));
-    if (securityTypes.size > 1) {
-      reasons.push(`Encryption mismatch: ${Array.from(securityTypes).join(' vs ')}`);
+    // 1. Encryption Mismatch Check — only a genuine open-vs-secured split counts.
+    // WEP is ignored (parser-misclassification noise) and WPA2/WPA3/mixed are one
+    // family, so transition-mode deployments no longer trip the alert.
+    const families = new Set(group.map(a => securityFamily(a.security || 'Open')).filter(Boolean));
+    if (families.has('open') && families.has('secured')) {
+      reasons.push('Encryption mismatch: an open BSSID is advertising a secured SSID');
     }
 
     // 2. Vendor OUI Mismatch Check
@@ -70,7 +95,10 @@ export function detectRogueAps(devices) {
       }).filter(Boolean)
     );
 
-    if (vendors.size > 1) {
+    // Only treat a vendor split as suspicious for a small, clone-like set. Large
+    // fleets and mesh deployments (carrier/campus SSIDs) legitimately mix vendor
+    // hardware under one SSID, so flagging those is pure noise.
+    if (vendors.size > 1 && uniqueBssids.length <= 2) {
       reasons.push(`Vendor OUI mismatch: ${Array.from(vendors).join(' vs ')}`);
     }
 
