@@ -207,6 +207,30 @@ const HOP_CHANNELS = [1, 6, 11, 36, 40, 44, 48];
 const PCAP_MAX_CAPACITY = 50000;
 const ROWS_PER_PAGE = 100;
 
+// Upper bound on tracked APs/clients held in React state. Without a cap the
+// dictionaries grow without limit on long or dense captures, and since each
+// 500ms flush shallow-clones the whole dictionary that cost climbs with every
+// new node. Once over the cap we age out the least-recently-seen entries.
+const MAX_TRACKED_NODES = 3000;
+
+// Delete the oldest entries (by timestamp field tsKey) from a keyed object
+// until it holds at most cap keys. Mutates and returns the same object.
+function pruneOldestEntries(dict, cap, tsKey) {
+  const key = tsKey || 'lastSeenTimestamp';
+  const keys = Object.keys(dict);
+  if (keys.length <= cap) return dict;
+  const sorted = keys.sort(function (a, b) {
+    const ta = (dict[a] && dict[a][key]) || 0;
+    const tb = (dict[b] && dict[b][key]) || 0;
+    return ta - tb;
+  });
+  const removeCount = keys.length - cap;
+  for (let i = 0; i < removeCount; i++) {
+    delete dict[sorted[i]];
+  }
+  return dict;
+}
+
 /**
  * Lightweight SVG sparkline tracking RSSI signal trends over time.
  * Dynamic color-coding: Emerald for strong, Cyan for moderate, Rose for weak.
@@ -1299,6 +1323,7 @@ export default function AlfaWifiWorkbench() {
             }
           }
 
+          pruneOldestEntries(nextDevices, MAX_TRACKED_NODES);
           deviceCountRef.current = Object.keys(nextDevices).length;
           return nextDevices;
         });
@@ -1397,6 +1422,7 @@ export default function AlfaWifiWorkbench() {
               }
             }
           }
+          pruneOldestEntries(nextClients, MAX_TRACKED_NODES);
           return nextClients;
         });
 
@@ -1437,6 +1463,9 @@ export default function AlfaWifiWorkbench() {
             };
           }
         }
+
+        // Keep the roaming-tracking map bounded too (one entry per client MAC seen)
+        pruneOldestEntries(clientApTrackingRef.current, MAX_TRACKED_NODES, 'lastSeenTs');
 
         if (newRoams.length > 0) {
           setRoamHistory(prev => [...newRoams, ...prev].slice(0, 500));
@@ -1844,9 +1873,27 @@ export default function AlfaWifiWorkbench() {
     setStatusMessage('Adapter disconnected.');
   };
 
-  // Terminate Web Worker on unmount
+  // Full teardown on unmount. The workbench is conditionally mounted, so switching
+  // tools mid-capture unmounts it — if we only killed the worker the RX loop would
+  // keep running on a dead component and the USB interface would stay claimed
+  // (blocking the next connect). Stop the loop, release the radio, kill the worker.
   useEffect(() => {
     return () => {
+      isCapturingRef.current = false;
+      if (hopIntervalRef.current) {
+        clearInterval(hopIntervalRef.current);
+        hopIntervalRef.current = null;
+      }
+      const radio = deviceRef.current;
+      deviceRef.current = null;
+      if (radio) {
+        // shutdownMonitor is async; free() only after it settles to avoid freeing
+        // the WASM handle mid-operation.
+        Promise.resolve()
+          .then(() => radio.shutdownMonitor?.())
+          .catch(() => {})
+          .finally(() => { try { radio.free?.(); } catch (e) {} });
+      }
       if (parserWorkerRef.current) {
         parserWorkerRef.current.terminate();
         parserWorkerRef.current = null;
@@ -4485,7 +4532,7 @@ export default function AlfaWifiWorkbench() {
           {/* Tab 1: Access Points (BSSIDs) */}
           {activeTab === 'aps' && (
             <div>
-              <div className="overflow-x-auto max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+              <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
                 {apList.length === 0 ? (
                   <div className="p-8 text-center text-xs space-y-4 max-w-xl mx-auto my-4 bg-slate-900/40 rounded-xl border border-slate-800/80">
                     <div className="w-12 h-12 rounded-full bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mx-auto text-cyan-400">
@@ -5206,7 +5253,7 @@ export default function AlfaWifiWorkbench() {
           {/* Tab 2: Client Stations (STAs) */}
           {activeTab === 'clients' && (
             <div>
-              <div className="overflow-x-auto max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+              <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
                 {clientList.length === 0 ? (
                   <div className="p-12 text-center text-slate-600 text-xs space-y-2">
                     <div>No client devices detected yet.</div>
@@ -5398,7 +5445,7 @@ export default function AlfaWifiWorkbench() {
           {/* Tab: Target Watchlist */}
           {activeTab === 'watchlist' && (
             <div>
-              <div className="overflow-x-auto max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+              <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
                 {watchlistList.length === 0 ? (
                   <div className="p-12 text-center text-slate-600 text-xs space-y-2">
                     <Star className="w-8 h-8 text-amber-500/40 mx-auto" />
@@ -5528,7 +5575,7 @@ export default function AlfaWifiWorkbench() {
           {/* Tab: Probing Clients (STAs seeking networks) */}
           {activeTab === 'probing' && (
             <div>
-              <div className="overflow-x-auto max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+              <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
                 {probingClientList.length === 0 ? (
                   <div className="p-12 text-center text-slate-600 text-xs space-y-2">
                     <div>No probing client stations detected yet.</div>
@@ -5686,7 +5733,7 @@ export default function AlfaWifiWorkbench() {
               </div>
 
               {/* Roaming Events Table */}
-              <div className="overflow-x-auto max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+              <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
                 {roamHistory.length === 0 ? (
                   <div className="p-12 text-center text-slate-500 text-xs">
                     <ArrowRightLeft className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
@@ -5897,7 +5944,7 @@ export default function AlfaWifiWorkbench() {
 
           {/* Tab 4: Live Frames Feed */}
           {activeTab === 'frames' && (
-            <div className="overflow-x-auto max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+            <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
               {frames.length === 0 ? (
                 <div className="p-12 text-center text-slate-600 text-xs">
                   No frames captured yet.
@@ -5947,7 +5994,7 @@ export default function AlfaWifiWorkbench() {
 
           {/* Tab 4: Raw Hex View */}
           {activeTab === 'hex' && (
-            <div className="p-3 max-h-[500px] overflow-y-auto space-y-1 text-[11px] leading-relaxed scrollbar-thin scrollbar-thumb-slate-800">
+            <div className="p-3 max-h-[75vh] overflow-y-auto space-y-1 text-[11px] leading-relaxed scrollbar-thin scrollbar-thumb-slate-800">
               {rawHexLogs.length === 0 ? (
                 <div className="p-12 text-center text-slate-600 text-xs">
                   No raw hex packets in buffer.
@@ -6119,7 +6166,7 @@ export default function AlfaWifiWorkbench() {
 
           {/* Tab 9: Observable Cleartext Protocol Telemetry */}
           {activeTab === 'cleartext' && (
-            <div className="overflow-x-auto max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+            <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
               {cleartextMetadata.length === 0 ? (
                 <div className="p-12 text-center text-slate-600 text-xs space-y-2">
                   <Globe className="w-8 h-8 text-slate-600 mx-auto" />
@@ -6178,7 +6225,7 @@ export default function AlfaWifiWorkbench() {
 
           {/* Tab 10: Security Heuristics Vulnerability Audit */}
           {activeTab === 'heuristics' && (
-            <div className="p-4 space-y-4 max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+            <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
               {/* Summary KPIs */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3">
@@ -6395,7 +6442,7 @@ export default function AlfaWifiWorkbench() {
 
           {/* Tab 11: Layer 3 Mappings */}
           {activeTab === 'layer3' && (
-            <div className="p-4 space-y-4 max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+            <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
               {/* Summary KPIs */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3">
