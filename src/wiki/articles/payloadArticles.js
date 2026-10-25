@@ -87,6 +87,15 @@ RX (GPIO 3)      <------------->  Pin 13 (USART TX - STM32WB55 LPUART)
 
 ---
 
+### Implementation & Architecture (App Integration)
+
+RocketGod's RF suite is **external ESP / Sub-GHz firmware and companion tooling**, not an in-app workbench. The app's role is to flash and drive it:
+
+- **Flash** the chosen image through the **Firmware Flasher** (curated preset → [\`services/firmwareCatalogService.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/services/firmwareCatalogService.js) → ESP ROM bootloader protocol).
+- **Operate** the companion tools over the **Terminal** / relevant RF decks via the shared \`SerialContext\`, since the firmware exposes a serial CLI.
+
+---
+
 ### 4. Upstream Project & Engineering Attribution
 
 | Project / Component | Author(s) / Maintainers | Repository & Reference | License |
@@ -162,6 +171,15 @@ For devices equipped with an IR LED and 38 kHz demodulator (M5StickC-Plus2, Card
 3. Select your exact device model (*M5Stack Cardputer* or *M5StickC-Plus2*).
 4. Plug your board into USB and click **Connect & Flash**.
 5. Once completed (100%), the device reboots directly into Bruce's graphical menu. Use the Cardputer keyboard or StickC buttons to explore Sub-GHz, BLE, Wi-Fi, and IR menus!
+
+---
+
+### Implementation & Architecture (App Integration)
+
+Bruce is **external firmware** for M5Stack / ESP32 devices (Cardputer, StickC, etc.), not an in-app component. The app integrates it the same way as other firmware:
+
+- **Flash** a Bruce build via a **Firmware Flasher** preset (ESP ROM protocol, MD5-verified).
+- **Interact** with its serial CLI through the **Terminal**; captured Wi-Fi/BLE output can be piped into the **Packet & Protocol Lab** for dissection.
 
 ---
 
@@ -290,6 +308,14 @@ Modern endpoint protection systems (Windows Defender, AMSI, EDR) inspect command
    - **Hak5 Rubber Ducky**: Click **Download payload.txt**.
    - **Flipper Zero**: Click **Export for Flipper** (saves formatted file ready for \`/ext/badusb/\`).
    - **ESP32-S2 / S3**: Click **Generate C++ Header** to compile directly into native USB Arduino code!
+
+---
+
+### Implementation & Architecture
+
+- **Component:** [\`components/tools/DuckyScriptStudio.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/DuckyScriptStudio.jsx) (inside the BadUSB & Payload Studio) is a **pure client-side transpiler** — it needs no connected device to compose and build payloads.
+- **Compilation:** it parses DuckyScript (\`STRING\`, \`DELAY\`, \`GUI\`, \`CTRL\`, key combos, loops) and emits ready-to-flash HID keyboard code for two targets — **Arduino** (\`Keyboard.h\`) and **CircuitPython** (\`adafruit_hid\`) — plus export to Flipper Zero BadUSB.
+- **Keymap & presets:** DuckyScript tokens map to USB HID keycodes and modifier bitmasks; \`DUCKY_PRESETS\` seeds common payloads, and the suite's integrated CyberChef tab can obfuscate the generated strings before deployment.
 
 ---
 
