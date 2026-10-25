@@ -201,6 +201,15 @@ Kismet functions as a headless multi-threaded C++ RF capture engine serving real
 
 ---
 
+### Implementation & Architecture
+
+- **Component:** [\`src/components/tools/ProtocolPacketLab.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/ProtocolPacketLab.jsx) is a thin tab router. By active sub-tab it mounts one of four views: \`PacketAnalyzerWorkbench\` (802.11 dissector), \`HexViewer\` (raw hex stream), \`PacketFramer\` (SLIP/COBS framer), or \`KismetStudioWorkbench\` (Alfa / 802.11 studio).
+- **802.11 parsing:** frame dissection uses [\`src/utils/wifiParser.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/wifiParser.js) — the same parser the Alfa capture worker runs — so radiotap stripping, frame-control type/subtype, address extraction, and SSID/security IE parsing are shared, not duplicated.
+- **Hex stream:** \`HexViewer\` renders \`hexByteStream\` straight from the shared \`SerialContext\` (every RX/TX byte, color-coded by direction), so it reflects whatever the Terminal is connected to.
+- **PCAP & framing:** import/export go through \`pcapReader.js\` / \`pcapExporter.js\` for Wireshark-compatible files, and \`PacketFramer\` builds and parses SLIP (RFC 1055) and COBS frames with live checksums.
+
+---
+
 ### 6. Upstream Standards & Engineering Attribution
 
 | Standard / Component | Authoring Organization / Maintainers | Reference & Specification |
@@ -336,6 +345,19 @@ Every transition records the nanosecond timestamp (\`#41\`) followed by the logi
 | **\`USB Transfer Failed: Overflow\`** | Host computer USB bus cannot sustain 192 Mbps bulk transfer. | Lower sample rate from 24 MHz to 16 MHz or 12 MHz, or unplug other high-bandwidth USB 3 devices. |
 | **Signals Always Read High (3.3V / 5V)** | Ground reference is not connected between analyzer and target. | Connect the black GND pin directly to the microcontroller or sensor ground plane. |
 | **Decoded UART Characters are Gibberish** | Sample rate is too low or baud rate parameter in decoder is incorrect. | Ensure sample rate is at least 4x baud rate (e.g. at least 1 MHz sample rate for 115200 baud). |
+
+---
+
+### Implementation & Architecture
+
+> **Current build — capture simulation.** The workbench generates and decodes
+> synthetic 8-channel waveforms so you can learn protocol decoding and VCD export
+> without an FX2LP device. The **decoders themselves are real**; a live WebUSB
+> capture path (fx2lafw-style streaming) is a future addition.
+
+- **Component:** [\`src/components/tools/LogicAnalyzerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/LogicAnalyzerWorkbench.jsx) holds the sample rate (up to 24 MHz), eight named channels (D0–D7, pre-labeled UART/SPI/I2C), and a **packed digital sample buffer** — a \`Uint8Array\` where each byte encodes all 8 channels as individual bits.
+- **Decoders:** [\`src/utils/logicAnalyzerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/logicAnalyzerDriver.js) provides edge-walking protocol decoders (e.g. \`decodeI2C\`) that scan the sample buffer for START/STOP/clock edges and reconstruct bus transactions, rendered as annotations over the canvas waveforms.
+- **Rendering:** \`handleCaptureSimulation()\` seeds the buffer with representative traffic for the selected protocol, then the waveform canvas and decoder tables redraw from the same packed buffer.
 
 ---
 
@@ -920,6 +942,14 @@ The oscilloscope plotter computes dynamic statistics over the sliding sample win
 
 ---
 
+### Implementation & Architecture
+
+- **Component:** [\`src/components/SerialPlotter.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/SerialPlotter.jsx) subscribes to the shared serial text stream (\`latestTextStream\` from \`SerialContext\`), so it plots **live data from the connected device** — no separate connection or parser hookup needed.
+- **Parsing:** \`parseLineTelemetry()\` auto-detects the format per line — key/value (\`temp:24.5 volt:3.3\`), or comma/space/colon-separated numbers — and extracts a labeled value vector. Multi-line chunks are split first so bursts aren't dropped at high sample rates.
+- **Rendering:** parsed values feed per-channel ring buffers (a 50–500 sample window) drawn to an HTML5 canvas via \`requestAnimationFrame\` (~60 FPS), with live min/max/average statistics and one-click CSV export of the captured session.
+
+---
+
 ### 5. Upstream Standards & Engineering Attribution
 
 | Standard / Component | Authoring Entity | Purpose & Reference |
@@ -999,6 +1029,18 @@ You need **two** USB-UART adapters connected to your computer:
 5. In the stream viewer, observe periodic 100ms packets flowing back and forth.
 6. Pull the brake lever: observe which byte flips value in the \`A -> B\` stream.
 7. Use the **Inject to Port B** bar to send modified speed limit bytes to unlock higher acceleration modes!
+
+---
+
+### Implementation & Architecture
+
+> **Status note.** The MitM Serial Bridge UI is present and documents the intended
+> dual-port pass-through workflow, but in the current app shell its bridge toggle
+> and log are wired to no-ops (\`App.jsx\` passes inert handlers), so the relay
+> isn't actively forwarding yet. Treat this as a scaffolded feature.
+
+- **Component:** [\`src/components/SerialBridgeDeck.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/SerialBridgeDeck.jsx) is designed around the **multi-board** capability of \`SerialContext\` — two independently-connected boards (A and B) registered in the same provider.
+- **Intended data flow:** bytes arriving on board A's RX loop are written to board B via \`sendRawBytes\`, and vice-versa, with each direction tapped into a bridge log so you can watch a device↔device conversation man-in-the-middle. Wiring those handlers in \`App.jsx\` (instead of the current no-ops) is what turns the scaffold into a live tap.
 
 ---
 
