@@ -3056,9 +3056,11 @@ export default function AlfaWifiWorkbench() {
             </div>
           </div>
 
+          {/* Secondary toggles (GPS / Alerts / Simulation) grouped into one segment */}
+          <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-slate-800 bg-slate-900/50 p-1">
           {/* GPS Tagging Toggle */}
-          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700">
-            <input 
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none px-2.5 py-1 rounded-md hover:bg-slate-800/60">
+            <input
               type="checkbox"
               checked={isGpsTagging}
               onChange={(e) => {
@@ -3081,10 +3083,10 @@ export default function AlfaWifiWorkbench() {
           <button
             type="button"
             onClick={handleToggleDesktopAlerts}
-            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition ${
+            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition ${
               isDesktopAlerts
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
-                : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                ? 'bg-amber-500/20 text-amber-300 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-300'
             }`}
             title={isDesktopAlerts ? 'Desktop Alerts Active (1 per min limit)' : 'Enable Desktop Alerts (Notification API)'}
           >
@@ -3097,8 +3099,8 @@ export default function AlfaWifiWorkbench() {
           </button>
 
           {/* Simulation Toggle */}
-          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700">
-            <input 
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none px-2.5 py-1 rounded-md hover:bg-slate-800/60">
+            <input
               type="checkbox"
               checked={isSimulateRf}
               onChange={(e) => {
@@ -3112,6 +3114,7 @@ export default function AlfaWifiWorkbench() {
             />
             <span className="font-semibold text-slate-300">Simulate RF</span>
           </label>
+          </div>
 
           {/* Hardware RX Sensitivity / Gain Slider */}
           <div 
@@ -3163,6 +3166,8 @@ export default function AlfaWifiWorkbench() {
             <span className="font-semibold">Hardware Status</span>
             <span className={`w-1.5 h-1.5 rounded-full ${isConnected || isSimulateRf ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
           </button>
+
+          <div className="h-6 w-px bg-slate-800 mx-0.5 hidden sm:block" />
 
           {/* Connect / Disconnect */}
           {!isConnected ? (
