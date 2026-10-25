@@ -8,6 +8,24 @@
 
 It transforms your web browser into an industrial-grade serial station combining low-level Web Serial communication, true in-browser ESP32 ROM bootloader flashing, a 60 FPS real-time multi-channel oscilloscope, synchronized live hex memory inspection, automated U-Boot autoboot killing with root password bypass, and overnight zero-drop disk logging.
 
+Beyond flashing and serial it has grown into a full hardware-hacking suite — raw 802.11 monitor-mode capture for Alfa / RTL8812AU adapters, protocol analyzers (logic analyzer, CAN / OBD-II, I²C / SPI, Modbus RTU), RF and badge companions (Flipper Zero, Proxmark3, PortaPack / HackRF, GPS wardriving), hardware programmers (CH341A, CMSIS-DAP, JTAG, AVR ISP, USB-PD), a BadUSB / DuckyScript studio, and an in-browser CyberChef workbench — all running client-side with no backend.
+
+---
+
+## 🧰 Complete Tool Suite
+
+**Core Operations** — Terminal & Console (serial monitor + baud hunter) · Firmware Flasher (ESP32 / ESP8266 ROM bootloader) · Hardware Controls (DTR/RTS strapping, U-Boot interrupter)
+
+**Analysis & Protocol Lab** — Packet & Protocol Lab (802.11 dissector, PCAP, hex stream) · 24 MHz Logic Analyzer · CAN Bus & OBD-II Scanner · I²C & SPI Bus Explorer · Modbus RTU & RS-485 · Oscilloscope Plotter · MitM Serial Bridge · CyberChef Workbench (Web Worker pipeline)
+
+**RF, Wireless & Badges** — Alfa Wi-Fi (RTL8812AU WebUSB monitor mode & 802.11 capture) · Flipper Zero Suite · Proxmark3 / PM5 · PortaPack Mayhem SDR (HackRF) · GPS & Wardrive Suite
+
+**Hardware & Payloads** — BadUSB & Payload Studio (DuckyScript) · Hardware Programmers (CH341A, CMSIS-DAP, JTAG SVF, AVR ISP) · USB-PD Power Delivery
+
+**Device Utilities** — MicroPython Files · Improv Wi-Fi · Telemetry Gauges · Crash & Panic Alerts · Test Runner & Scripts · USB Recon & Autopsy · Silicon Memory Dump
+
+**Setup & Reference** — In-app Knowledge Base Wiki (28+ engineering manuals) · driver setup guides · pinout diagrams · VID/PID chip-intelligence database
+
 ---
 
 ## ⚡ Power Features & Tool Suite
@@ -84,6 +102,15 @@ cd usb-tool
 npm install
 npm run dev
 ```
+
+---
+
+## 🤝 Contributing & Community
+
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — dev setup, project layout, the driver + workbench pattern for adding tools, and the PR process.
+- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — community standards.
+- **[SECURITY.md](SECURITY.md)** — responsible-disclosure policy and responsible-use notice.
+- **[docs/FEATURE_TOOL_HANDOFF.md](docs/FEATURE_TOOL_HANDOFF.md)** — exhaustive blueprint for dropping a brand-new workbench into the app.
 
 ---
 
