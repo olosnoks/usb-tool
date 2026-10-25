@@ -70,6 +70,7 @@ import {
   bytesToHex, 
   identifyChipsetModel,
   queryHardwareIntrospection,
+  unpackRealtekUsbTransfer,
   MOCK_WIFI_FRAMES 
 } from '../../utils/alfaWifiDriver';
 import { AirtimeTracker, calculateAirtime } from '../../utils/airtimeCalculator';
@@ -260,8 +261,8 @@ export default function AlfaWifiWorkbench() {
   const [channel, setChannel] = useState(() => {
     try {
       const saved = localStorage.getItem('alfa_wifi_channel');
-      return saved ? parseInt(saved, 10) : 36;
-    } catch { return 36; }
+      return saved ? parseInt(saved, 10) : 6;
+    } catch { return 6; }
   });
 
   const [isAutoHop, setIsAutoHop] = useState(() => {
@@ -1881,67 +1882,73 @@ export default function AlfaWifiWorkbench() {
       }
 
       try {
-        const buffer = await radio.readRxTransfer(32768);
-        if (buffer && buffer.length > 0) {
+        const rawTransfer = await radio.readRxTransfer(32768);
+        if (rawTransfer && rawTransfer.length > 0) {
           lastPacketTimeRef.current = Date.now();
-          // Pre-Worker Filtering Pipeline Heuristic Check
-          if (!fastFilterPacket(buffer, filterSettingsRef.current)) {
-            // Drop packet immediately in main thread before worker to save CPU
-            continue;
-          }
+          byteCountRef.current += rawTransfer.byteLength || rawTransfer.length || 0;
 
-          packetCountRef.current += 1;
-          byteCountRef.current += buffer.byteLength || buffer.length || 0;
+          // Unpack Realtek USB bulk transfer into individual 802.11 frames (with Radiotap headers)
+          const unpackedFrames = unpackRealtekUsbTransfer(rawTransfer, channelRef.current);
 
-          // Direct disk streaming or rolling ring buffer for PCAP export (capped at 50,000)
-          if (isStreamingToDiskRef.current && livePcapWriterRef.current?.isOpen) {
-            livePcapWriterRef.current.writePacket(buffer);
-            setDiskStreamStats({
-              fileName: livePcapWriterRef.current.fileName,
-              packetCount: livePcapWriterRef.current.packetCount,
-              bytesWritten: livePcapWriterRef.current.bytesWritten
-            });
-          } else {
-            if (rawPacketsRef.current.length >= PCAP_MAX_CAPACITY) {
-              rawPacketsRef.current.shift(); // Strict ring buffer: overwrite oldest
-              setPcapBufferFull(true);
+          for (const buffer of unpackedFrames) {
+            // Pre-Worker Filtering Pipeline Heuristic Check
+            if (!fastFilterPacket(buffer, filterSettingsRef.current)) {
+              // Drop packet immediately in main thread before worker to save CPU
+              continue;
             }
-            rawPacketsRef.current.push(buffer);
-          }
 
-          // If worker is running, offload heavy parsing to worker thread
-          if (parserWorkerRef.current) {
-            parserWorkerRef.current.postMessage({
-              type: 'PARSE_BUFFER',
-              buffer,
-              channel: channelRef.current
-            });
+            packetCountRef.current += 1;
 
-            // Fast EAPOL Handshake check on main thread for real-time chime
-            if (buffer.length > 32 && handshakeTrackerRef.current) {
-              const hsRes = handshakeTrackerRef.current.processPacket(buffer);
-              if (hsRes && hsRes.isNewComplete) {
-                setHandshakeAlert(hsRes);
-                playHandshakeChime();
+            // Direct disk streaming or rolling ring buffer for PCAP export (capped at 50,000)
+            if (isStreamingToDiskRef.current && livePcapWriterRef.current?.isOpen) {
+              livePcapWriterRef.current.writePacket(buffer);
+              setDiskStreamStats({
+                fileName: livePcapWriterRef.current.fileName,
+                packetCount: livePcapWriterRef.current.packetCount,
+                bytesWritten: livePcapWriterRef.current.bytesWritten
+              });
+            } else {
+              if (rawPacketsRef.current.length >= PCAP_MAX_CAPACITY) {
+                rawPacketsRef.current.shift(); // Strict ring buffer: overwrite oldest
+                setPcapBufferFull(true);
               }
+              rawPacketsRef.current.push(buffer);
             }
-          } else {
-            // Fallback parsing on main thread if worker unavailable
-            const parsed = parse80211Frame(buffer);
-            if (parsed) {
-              if (!parsed.channel) parsed.channel = channelRef.current;
-              channelStatsRef.current[parsed.channel] = (channelStatsRef.current[parsed.channel] || 0) + 1;
-              waterfallCountsRef.current[parsed.channel] = (waterfallCountsRef.current[parsed.channel] || 0) + 1;
 
-              // EAPOL Handshake detection
-              const hsRes = handshakeTrackerRef.current.processPacket(buffer, parsed);
-              if (hsRes && hsRes.isNewComplete) {
-                setHandshakeAlert(hsRes);
-                playHandshakeChime();
+            // If worker is running, offload heavy parsing to worker thread
+            if (parserWorkerRef.current) {
+              parserWorkerRef.current.postMessage({
+                type: 'PARSE_BUFFER',
+                buffer,
+                channel: channelRef.current
+              });
+
+              // Fast EAPOL Handshake check on main thread for real-time chime
+              if (buffer.length > 32 && handshakeTrackerRef.current) {
+                const hsRes = handshakeTrackerRef.current.processPacket(buffer);
+                if (hsRes && hsRes.isNewComplete) {
+                  setHandshakeAlert(hsRes);
+                  playHandshakeChime();
+                }
               }
+            } else {
+              // Fallback parsing on main thread if worker unavailable
+              const parsed = parse80211Frame(buffer);
+              if (parsed) {
+                if (!parsed.channel) parsed.channel = channelRef.current;
+                channelStatsRef.current[parsed.channel] = (channelStatsRef.current[parsed.channel] || 0) + 1;
+                waterfallCountsRef.current[parsed.channel] = (waterfallCountsRef.current[parsed.channel] || 0) + 1;
 
-              pendingFramesRef.current.push(parsed);
-              checkDeauthAttack(parsed);
+                // EAPOL Handshake detection
+                const hsRes = handshakeTrackerRef.current.processPacket(buffer, parsed);
+                if (hsRes && hsRes.isNewComplete) {
+                  setHandshakeAlert(hsRes);
+                  playHandshakeChime();
+                }
+
+                pendingFramesRef.current.push(parsed);
+                checkDeauthAttack(parsed);
+              }
             }
           }
         }
@@ -3484,7 +3491,7 @@ export default function AlfaWifiWorkbench() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => handleChannelChange(channelRecommendations.recommended24.channel)}
-            disabled={isMonitoring && !isPaused && !isSimulateRf}
+            disabled={channel === channelRecommendations.recommended24.channel}
             title={`Tune hardware radio to recommended 2.4GHz Channel ${channelRecommendations.recommended24.channel}`}
             className="px-2.5 py-1 text-[11px] font-semibold rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition disabled:opacity-40"
           >
@@ -3493,7 +3500,7 @@ export default function AlfaWifiWorkbench() {
           {channelRecommendations.recommended5[0] && (
             <button
               onClick={() => handleChannelChange(channelRecommendations.recommended5[0].channel)}
-              disabled={isMonitoring && !isPaused && !isSimulateRf}
+              disabled={channel === channelRecommendations.recommended5[0].channel}
               title={`Tune hardware radio to top recommended 5GHz Channel ${channelRecommendations.recommended5[0].channel}`}
               className="px-2.5 py-1 text-[11px] font-semibold rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 transition disabled:opacity-40"
             >
@@ -3745,199 +3752,8 @@ export default function AlfaWifiWorkbench() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* View Mode Toggle: APs vs Clients vs Frames vs Hex */}
-          <div className="flex bg-slate-950 rounded-lg p-0.5 border border-slate-800">
-            <button
-              onClick={() => setActiveTab('aps')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'aps' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Table className="w-3.5 h-3.5" />
-              <span>Access Points</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('clients')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'clients' ? 'bg-purple-500/20 text-purple-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Clients (STAs)</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('roaming')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'roaming' ? 'bg-purple-500/20 text-purple-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <ArrowRightLeft className="w-3.5 h-3.5 text-purple-400" />
-              <span>Roaming</span>
-              {roamHistory.length > 0 && (
-                <span className="px-1.5 py-0.2 bg-purple-500 text-slate-950 font-bold rounded-full text-[10px]">
-                  {roamHistory.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('watchlist')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'watchlist' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-              <span>Watchlist</span>
-              {watchlist.length > 0 && (
-                <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-bold rounded-full text-[10px]">
-                  {watchlist.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('probing')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'probing' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Radar className="w-3.5 h-3.5" />
-              <span>Probing</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('spectrum')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'spectrum' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <BarChart2 className="w-3.5 h-3.5" />
-              <span>Spectrum</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('waterfall')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'waterfall' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Activity className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Waterfall</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('interference')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'interference' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span>Interference Map</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('topology')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'topology' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Network className="w-3.5 h-3.5" />
-              <span>Topology</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('anomalies')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'anomalies' ? 'bg-rose-500/20 text-rose-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Fingerprint className="w-3.5 h-3.5" />
-              <span>Anomalies</span>
-              {anomalies.length > 0 && (
-                <span className="px-1.5 py-0.2 bg-rose-500 text-slate-950 font-bold rounded-full text-[10px]">
-                  {anomalies.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('signalMap')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'signalMap' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <MapPin className="w-3.5 h-3.5" />
-              <span>Signal Map</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('frames')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'frames' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Radio className="w-3.5 h-3.5" />
-              <span>Live Frames</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('hex')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'hex' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Terminal className="w-3.5 h-3.5" />
-              <span>Raw Hex</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('cleartext')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'cleartext' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Globe className="w-3.5 h-3.5 text-amber-400" />
-              <span>Cleartext</span>
-              {cleartextMetadata.length > 0 && (
-                <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-bold rounded-full text-[10px]">
-                  {cleartextMetadata.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('heuristics')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'heuristics' ? 'bg-rose-500/20 text-rose-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
-              <span>Heuristics</span>
-              {heuristicReport.totalVulnerabilities > 0 && (
-                <span className="px-1.5 py-0.2 bg-rose-500 text-slate-950 font-bold rounded-full text-[10px]">
-                  {heuristicReport.totalVulnerabilities}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('layer3')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'layer3' ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Network className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Layer 3</span>
-              {layer3Mappings.length > 0 && (
-                <span className="px-1.5 py-0.2 bg-cyan-500 text-slate-950 font-bold rounded-full text-[10px]">
-                  {layer3Mappings.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('rules')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition ${
-                activeTab === 'rules' ? 'bg-amber-500/20 text-amber-300 font-bold' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Bell className="w-3.5 h-3.5 text-amber-400" />
-              <span>Rules</span>
-              {rules.length > 0 && (
-                <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-bold rounded-full text-[10px]">
-                  {rules.length}
-                </span>
-              )}
-            </button>
-          </div>
-
+        {/* Right: Forensic & Session Controls */}
+        <div className="flex flex-wrap items-center gap-2">
           {/* Save Session to IndexedDB */}
           <button
             onClick={handleSaveSession}
@@ -4073,7 +3889,7 @@ export default function AlfaWifiWorkbench() {
 
             {isExportDropdownOpen && (
               <div 
-                className="absolute right-0 sm:left-0 mt-2 w-52 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-1.5 z-50 text-xs backdrop-blur-md space-y-1"
+                className="absolute right-0 mt-2 w-52 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-1.5 z-50 text-xs backdrop-blur-md space-y-1"
                 onMouseLeave={() => setIsExportDropdownOpen(false)}
               >
                 <button
@@ -4191,47 +4007,214 @@ export default function AlfaWifiWorkbench() {
             <span className="hidden sm:inline">Upload PCAP</span>
           </button>
 
-          {/* Export Wigle CSV Button */}
-          <button
-            onClick={handleExportWigle}
-            disabled={Object.keys(devices).length === 0}
-            title="Download Wigle.net Wardriving CSV file"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 text-xs transition disabled:opacity-50 disabled:cursor-not-allowed font-bold"
-          >
-            <Compass className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Wigle CSV</span>
-          </button>
-
-          {/* Export Executive Report Button */}
-          <button
-            onClick={handleExportExecutiveReport}
-            disabled={Object.keys(devices).length === 0 && Object.keys(clients).length === 0}
-            title="Download formatted HTML Executive Audit Report"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs transition disabled:opacity-50 disabled:cursor-not-allowed font-bold"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Executive Report</span>
-          </button>
-
-          {/* Export JSON Button */}
-          <button
-            onClick={handleExportJson}
-            disabled={Object.keys(devices).length === 0 && Object.keys(clients).length === 0}
-            title="Download discovered devices as JSON"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Export JSON</span>
-          </button>
-
           {/* Clear Buffer */}
           <button
             onClick={handleClear}
             title="Clear captured devices, clients and packets"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs transition"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs transition font-bold"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Clear</span>
+          </button>
+        </div>
+      </div>
+
+      {/* View Mode Navigation Bar (Dedicated horizontal scrollable tab strip) */}
+      <div className="bg-[#171920] border border-slate-800/80 rounded-xl p-1.5 min-w-0 shadow-md">
+        <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-800 py-0.5 px-0.5 text-xs">
+          <button
+            onClick={() => setActiveTab('aps')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'aps' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Table className="w-3.5 h-3.5" />
+            <span>Access Points</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-slate-900 text-cyan-300 text-[10px] font-mono font-bold border border-cyan-800/40">
+              {Object.keys(devices).length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('clients')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'clients' ? 'bg-purple-500/20 text-purple-300 font-bold border border-purple-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>Clients (STAs)</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-slate-900 text-purple-300 text-[10px] font-mono font-bold border border-purple-800/40">
+              {Object.keys(clients).length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('roaming')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'roaming' ? 'bg-purple-500/20 text-purple-300 font-bold border border-purple-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5 text-purple-400" />
+            <span>Roaming</span>
+            {roamHistory.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-purple-500 text-slate-950 font-bold rounded-full text-[10px]">
+                {roamHistory.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('watchlist')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'watchlist' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+            <span>Watchlist</span>
+            {watchlist.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-bold rounded-full text-[10px]">
+                {watchlist.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('probing')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'probing' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Radar className="w-3.5 h-3.5" />
+            <span>Probing</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('spectrum')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'spectrum' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <BarChart2 className="w-3.5 h-3.5" />
+            <span>Spectrum</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('waterfall')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'waterfall' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Waterfall</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('interference')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'interference' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>Interference Map</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('topology')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'topology' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Network className="w-3.5 h-3.5" />
+            <span>Topology</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('anomalies')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'anomalies' ? 'bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Fingerprint className="w-3.5 h-3.5" />
+            <span>Anomalies</span>
+            {anomalies.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-rose-500 text-slate-950 font-bold rounded-full text-[10px]">
+                {anomalies.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('signalMap')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'signalMap' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <MapPin className="w-3.5 h-3.5" />
+            <span>Signal Map</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('frames')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'frames' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Radio className="w-3.5 h-3.5" />
+            <span>Live Frames</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('hex')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'hex' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            <span>Raw Hex</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('cleartext')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'cleartext' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5 text-amber-400" />
+            <span>Cleartext</span>
+            {cleartextMetadata.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-bold rounded-full text-[10px]">
+                {cleartextMetadata.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('heuristics')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'heuristics' ? 'bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+            <span>Heuristics</span>
+            {heuristicReport.totalVulnerabilities > 0 && (
+              <span className="px-1.5 py-0.2 bg-rose-500 text-slate-950 font-bold rounded-full text-[10px]">
+                {heuristicReport.totalVulnerabilities}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('layer3')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'layer3' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Network className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Layer 3</span>
+            {layer3Mappings.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-cyan-500 text-slate-950 font-bold rounded-full text-[10px]">
+                {layer3Mappings.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('rules')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap text-xs transition font-semibold shrink-0 ${
+              activeTab === 'rules' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 shadow-sm' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+            }`}
+          >
+            <Bell className="w-3.5 h-3.5 text-amber-400" />
+            <span>Rules</span>
+            {rules.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-bold rounded-full text-[10px]">
+                {rules.length}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -4454,10 +4437,106 @@ export default function AlfaWifiWorkbench() {
             <div>
               <div className="overflow-x-auto max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
                 {apList.length === 0 ? (
-                  <div className="p-12 text-center text-slate-600 text-xs space-y-2">
-                    <div>No access points captured yet.</div>
-                    <div className="text-slate-500">
-                      Click <span className="text-cyan-400 font-bold">"Start Monitor"</span> or enable <span className="text-cyan-400 font-bold">"Simulate RF"</span>.
+                  <div className="p-8 text-center text-xs space-y-4 max-w-xl mx-auto my-4 bg-slate-900/40 rounded-xl border border-slate-800/80">
+                    <div className="w-12 h-12 rounded-full bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mx-auto text-cyan-400">
+                      <Radar className={`w-6 h-6 ${isMonitoring ? 'animate-spin' : ''}`} style={{ animationDuration: '4s' }} />
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-slate-200">
+                        {isMonitoring ? 'Scanning Airwaves — No Networks Captured Yet' : 'Monitor Inactive — Adapter Ready'}
+                      </div>
+                      <div className="text-slate-400 text-[11px] mt-1 max-w-md mx-auto">
+                        {isMonitoring
+                          ? `Listening on Channel ${channel} (${Number(channel) > 14 ? '5 GHz' : '2.4 GHz'}). If you're on a 5GHz channel without local APs, try hopping to 2.4GHz where beacon traffic is highest.`
+                          : 'Click Start Monitor to begin capturing 802.11 beacons and probe frames with your Alfa adapter.'}
+                      </div>
+                    </div>
+
+                    {/* Quick Diagnostic Actions */}
+                    <div className="flex flex-wrap items-center justify-center gap-2 pt-2 border-t border-slate-800/60">
+                      {!isMonitoring && (
+                        <button
+                          type="button"
+                          onClick={handleStartMonitor}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition shadow-emerald-glow"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>Start Monitor</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleChannelChange(1)}
+                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                          channel === 1 || channel === '1'
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        }`}
+                        title="Tune hardware to 2.4 GHz Channel 1"
+                      >
+                        Tune Ch 1 (2.4G)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleChannelChange(6)}
+                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                          channel === 6 || channel === '6'
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        }`}
+                        title="Tune hardware to 2.4 GHz Channel 6"
+                      >
+                        Tune Ch 6 (2.4G)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleChannelChange(11)}
+                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                          channel === 11 || channel === '11'
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        }`}
+                        title="Tune hardware to 2.4 GHz Channel 11"
+                      >
+                        Tune Ch 11 (2.4G)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsAutoHop(prev => !prev)}
+                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                          isAutoHop
+                            ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                            : 'bg-slate-950 text-purple-300 border-slate-800 hover:border-slate-700'
+                        }`}
+                        title="Toggle automatic channel hopping across 2.4G and 5G bands"
+                      >
+                        {isAutoHop ? 'Disable Auto-Hop' : 'Enable Auto-Hop Scan'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsSimulateRf(true);
+                          if (!isMonitoring) {
+                            setIsMonitoring(true);
+                            isCapturingRef.current = true;
+                          }
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-cyan-300 hover:border-cyan-500/40 text-xs font-semibold transition"
+                        title="Generate realistic simulated 802.11 beacon, probe, and handshake traffic"
+                      >
+                        Simulate RF (Demo)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSetupGuideError(null);
+                          setIsSetupGuideOpen(true);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-amber-300 hover:border-amber-500/40 text-xs font-semibold transition"
+                        title="Open Windows WebUSB WinUSB Driver Configuration Guide"
+                      >
+                        Driver Guide
+                      </button>
                     </div>
                   </div>
                 ) : (

@@ -14,15 +14,28 @@ import {
   Sliders,
   Check
 } from 'lucide-react';
-import { 
-  ModbusClient, 
-  buildModbusRtuRequest, 
-  calculateModbusCrc16 
+import {
+  ModbusClient,
+  buildModbusRtuRequest,
+  calculateModbusCrc16
 } from '../../utils/modbusDriver';
 import StatusBadge from '../common/StatusBadge';
+import { useSerial } from '../../context/SerialContext';
 
 export default function ModbusWorkbench() {
-  const [client] = useState(() => new ModbusClient(console.log));
+  const {
+    isConnected: portConnected,
+    transceive,
+    reconfigureActivePort,
+    connect: connectPort,
+    addLog
+  } = useSerial();
+
+  // Route driver TX/RX frame logs into the app's live terminal
+  const loggerRef = React.useRef(addLog);
+  useEffect(() => { loggerRef.current = addLog; }, [addLog]);
+
+  const [client] = useState(() => new ModbusClient((msg) => loggerRef.current?.(msg, 'sys')));
   const [isConnected, setIsConnected] = useState(false);
   const [isSimulated, setIsSimulated] = useState(false);
 
@@ -55,6 +68,21 @@ export default function ModbusWorkbench() {
     client.connectSimulation(slaveId, baudRate);
     setIsConnected(true);
     setIsSimulated(true);
+    const regs = await client.readHoldingRegisters(0, 8);
+    setRegisters(regs);
+  };
+
+  const handleConnectLive = async () => {
+    try {
+      // Reopen the already-connected serial port with Modbus RTU framing (8-N-1)
+      await reconfigureActivePort({ baudRate, dataBits: 8, stopBits: 1, parity: 'none' });
+    } catch (err) {
+      addLog?.(`[MODBUS] Could not reconfigure port: ${err.message}`, 'sys');
+      return;
+    }
+    client.connectLive(transceive, slaveId, baudRate);
+    setIsConnected(true);
+    setIsSimulated(false);
     const regs = await client.readHoldingRegisters(0, 8);
     setRegisters(regs);
   };
@@ -104,13 +132,35 @@ export default function ModbusWorkbench() {
 
           <div className="flex items-center gap-2">
             {!isConnected ? (
-              <button
-                onClick={handleConnectSimulation}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 hover:bg-emerald-500/30 text-xs font-bold transition-all shadow-emerald-glow"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>CONNECT RS-485 (VIRTUAL INVERTER DEMO)</span>
-              </button>
+              <>
+                {portConnected ? (
+                  <button
+                    onClick={handleConnectLive}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-500/30 text-xs font-bold transition-all"
+                    title="Reopen the connected serial port at the selected baud (8-N-1) and poll the real slave"
+                  >
+                    <Radio className="w-3.5 h-3.5" />
+                    <span>CONNECT LIVE (RS-485)</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={connectPort}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 text-xs font-bold transition-all"
+                    title="Open a USB-RS485 adapter first, then connect live"
+                  >
+                    <Radio className="w-3.5 h-3.5" />
+                    <span>CONNECT SERIAL PORT…</span>
+                  </button>
+                )}
+                <button
+                  onClick={handleConnectSimulation}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-slate-400 border border-slate-700 hover:bg-slate-800 text-xs font-bold transition-all"
+                  title="No hardware required — synthesized inverter data for UI/demo"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>SIMULATION</span>
+                </button>
+              </>
             ) : (
               <button
                 onClick={handleDisconnect}
@@ -180,6 +230,21 @@ export default function ModbusWorkbench() {
           </span>
         </div>
       </div>
+
+      {/* Data-source banner — make it unambiguous whether values are real or synthetic */}
+      {isConnected && (
+        isSimulated ? (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-300 text-[11px] font-bold">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>SIMULATION MODE — values are synthesized, not read from hardware. Use CONNECT LIVE with a USB-RS485 adapter for real data.</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/40 text-cyan-300 text-[11px] font-bold">
+            <Radio className="w-3.5 h-3.5 shrink-0" />
+            <span>LIVE RS-485 — polling Slave {slaveId} at {baudRate} bps (8-N-1). Frames are CRC-validated; empty rows mean no/invalid response.</span>
+          </div>
+        )
+      )}
 
       {/* Live Holding Registers Table */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">

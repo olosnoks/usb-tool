@@ -198,9 +198,9 @@ function AppContent() {
         />
 
         {/* Central Workspace Canvas with Bottom Terminal Drawer */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-[#020617]">
+        <div className="flex-1 flex flex-col overflow-hidden bg-[#020617] min-w-0">
           {/* Active Tool Viewport */}
-          <main className="flex-1 overflow-y-auto p-3 sm:p-4 scrollbar-thin scrollbar-thumb-slate-800">
+          <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 scrollbar-thin scrollbar-thumb-slate-800 min-w-0">
             <React.Suspense fallback={
               <div className="py-20 flex flex-col items-center justify-center text-slate-400 font-mono text-xs space-y-3">
                 <div className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
@@ -387,7 +387,7 @@ function AppContent() {
             )}
 
             {activeTool === 'alfa-wifi' && (
-              <div className="w-full">
+              <div className="w-full min-w-0 max-w-full">
                 <AlfaWifiWorkbench />
               </div>
             )}

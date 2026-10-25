@@ -195,6 +195,142 @@ export async function setHardwareRxGain(radioInstance, gainValue = 7) {
 }
 
 /**
+ * Unpacks raw WebUSB bulk-IN transfer buffers from Realtek Wi-Fi chipsets
+ * (RTL8812AU, RTL8814AU, RTL8811AU, etc.).
+ * 
+ * In Realtek USB architecture, transfers may contain one or more aggregated packets.
+ * Each packet is preceded by a 24-byte (RTL8812AU) or 32-byte (RTL8814AU) hardware
+ * RX descriptor (`rx_desc`), an optional PHY status report (`drv_info_size`),
+ * and optional shift padding before the actual 802.11 MAC frame.
+ * 
+ * If the buffer is already a Radiotap or plain 802.11 frame, it is returned directly.
+ * For Realtek transfers, each extracted 802.11 frame is prepended with a standard Radiotap
+ * header encoding the hardware RSSI and RF channel.
+ * 
+ * @param {Uint8Array} inputBuffer - Raw bytes from radio.readRxTransfer
+ * @param {number} defaultChannel - Fallback channel if not in PHY status
+ * @returns {Uint8Array[]} Array of standard Radiotap + 802.11 frame buffers
+ */
+export function unpackRealtekUsbTransfer(inputBuffer, defaultChannel = 36) {
+  if (!inputBuffer || inputBuffer.length < 10) return [];
+  const buffer = inputBuffer instanceof Uint8Array ? inputBuffer : new Uint8Array(inputBuffer);
+
+  // 1. Already a Radiotap frame?
+  if (buffer[0] === 0x00 && buffer.length >= 4) {
+    const rLen = buffer[2] | (buffer[3] << 8);
+    if (rLen >= 8 && rLen < buffer.length) {
+      return [buffer];
+    }
+  }
+
+  // 2. Check if this is a Realtek USB transfer with RX descriptors
+  let offset = 0;
+  const extracted = [];
+
+  while (offset + 24 <= buffer.length) {
+    // Check packet length field in low 14 bits of DWORD 0
+    const pktLen = buffer[offset] | ((buffer[offset + 1] & 0x3F) << 8);
+    if (pktLen < 10 || pktLen > 4096 || offset + 24 + pktLen > buffer.length + 64) {
+      break;
+    }
+
+    // Determine descriptor size: 24 bytes (RTL8812AU) or 32 bytes (RTL8814AU)
+    let descSize = 24;
+    let drvInfoSize = ((buffer[offset + 2] >> 4) & 0x0F) * 8;
+    let shift = (buffer[offset + 3] >> 4) & 0x03;
+    let frameStart = offset + descSize + drvInfoSize + shift;
+
+    // Check if 802.11 protocol version is 0 (bottom 2 bits of Frame Control)
+    let isValid80211 = (frameStart + 10 <= buffer.length) && ((buffer[frameStart] & 0x03) === 0);
+
+    // If 24-byte descriptor didn't hit valid 802.11, try 32-byte descriptor (RTL8814AU / Jaguar3)
+    if (!isValid80211 && offset + 32 <= buffer.length) {
+      const altDescSize = 32;
+      const altFrameStart = offset + altDescSize + drvInfoSize + shift;
+      if (altFrameStart + 10 <= buffer.length && (buffer[altFrameStart] & 0x03) === 0) {
+        descSize = altDescSize;
+        frameStart = altFrameStart;
+        isValid80211 = true;
+      }
+    }
+
+    // If neither 24 nor 32 byte alignment matched directly, check shift variations
+    if (!isValid80211) {
+      for (const testOffset of [offset + 24, offset + 26, offset + 32, offset + 34]) {
+        if (testOffset + 10 <= buffer.length && (buffer[testOffset] & 0x03) === 0) {
+          const type = (buffer[testOffset] >> 2) & 0x03;
+          if (type <= 2) {
+            frameStart = testOffset;
+            isValid80211 = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!isValid80211) {
+      break;
+    }
+
+    // Extract RSSI from Realtek PHY status if available
+    let rssi = -60;
+    if (drvInfoSize >= 8 && offset + descSize < buffer.length) {
+      const rawPwdb = buffer[offset + descSize];
+      if (rawPwdb > 0 && rawPwdb <= 120) {
+        rssi = rawPwdb <= 100 ? rawPwdb - 100 : Math.round(rawPwdb / 2) - 110;
+      }
+    }
+
+    const frameEnd = Math.min(buffer.length, frameStart + pktLen);
+    const macFrame = buffer.slice(frameStart, frameEnd);
+
+    // Build standard 14-byte Radiotap header prepended to macFrame:
+    const freq = defaultChannel <= 14 ? 2407 + defaultChannel * 5 : 5000 + defaultChannel * 5;
+    const freqLow = freq & 0xFF;
+    const freqHigh = (freq >> 8) & 0xFF;
+    const chFlags = defaultChannel <= 14 ? 0x00A0 : 0x0140; // 2.4GHz vs 5GHz
+    const chFlagsLow = chFlags & 0xFF;
+    const chFlagsHigh = (chFlags >> 8) & 0xFF;
+    const rssiByte = rssi < 0 ? (rssi + 256) & 0xFF : rssi;
+
+    const radiotapHeader = new Uint8Array([
+      0x00, 0x00, // version 0, pad
+      0x0E, 0x00, // header length = 14 bytes
+      0x2A, 0x00, 0x00, 0x00, // present flags: bit 1 (flags), bit 3 (channel), bit 5 (dBm signal)
+      0x00,       // flags
+      freqLow, freqHigh, // channel frequency
+      chFlagsLow, chFlagsHigh, // channel flags
+      rssiByte    // dBm signal
+    ]);
+
+    const combined = new Uint8Array(radiotapHeader.length + macFrame.length);
+    combined.set(radiotapHeader, 0);
+    combined.set(macFrame, radiotapHeader.length);
+    extracted.push(combined);
+
+    // In Realtek USB aggregation, packets are aligned to an 8-byte boundary
+    const totalPktBytes = (frameStart - offset) + pktLen;
+    const alignedBytes = Math.ceil(totalPktBytes / 8) * 8;
+    if (alignedBytes <= 0) break;
+    offset += alignedBytes;
+  }
+
+  // If Realtek descriptor parsing extracted frames, return them!
+  if (extracted.length > 0) {
+    return extracted;
+  }
+
+  // 3. Fallback: if buffer didn't have Realtek descriptor, check if it's already a plain 802.11 frame
+  const fc = buffer[0] | (buffer[1] << 8);
+  if ((fc & 0x03) === 0 && ((fc >> 2) & 0x03) <= 2) {
+    return [buffer];
+  }
+
+  return [];
+}
+
+
+/**
  * Helper to convert bytes to hex string.
  */
 export function bytesToHex(bytes) {

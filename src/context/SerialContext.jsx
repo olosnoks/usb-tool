@@ -61,6 +61,15 @@ export function SerialProvider({ children }) {
   const boardOffsetsRef = useRef({});
   const boardRxTimersRef = useRef({});
   const boardTxTimersRef = useRef({});
+  // Pending request/response collectors keyed by boardId (used by transceive)
+  const pendingTransceiveRef = useRef({});
+
+  // Always-fresh mirrors of reactive state so non-memoized async helpers
+  // (transceive, reconfigureActivePort) never operate on a stale board.
+  const boardsStateRef = useRef(boards);
+  const activeBoardIdRef = useRef(activeBoardId);
+  useEffect(() => { boardsStateRef.current = boards; }, [boards]);
+  useEffect(() => { activeBoardIdRef.current = activeBoardId; }, [activeBoardId]);
 
   // Active board object
   const activeBoard = boards.find(b => b.id === activeBoardId) || boards[0] || INITIAL_BOARD;
@@ -99,6 +108,13 @@ export function SerialProvider({ children }) {
   // Ingest incoming bytes for a specific board
   const ingestIncomingBytes = useCallback((boardId, bytes) => {
     if (!bytes || bytes.length === 0) return;
+
+    // Feed any in-flight transceive() transaction waiting on this board
+    const pending = pendingTransceiveRef.current[boardId];
+    if (pending) {
+      pending.chunks.push(bytes);
+      pending.total += bytes.length;
+    }
 
     // Pulse RX activity LED & increment counters
     updateBoard(boardId, b => ({
@@ -453,6 +469,90 @@ export function SerialProvider({ children }) {
       : new Uint8Array(0);
   };
 
+  // Synchronous request/response transaction over the active board's open port.
+  // Writes txBytes (with full TX stats/hex bookkeeping), then collects inbound
+  // bytes until expectedLength is reached, an inter-frame quiet gap elapses, or
+  // the timeout fires. Returns the raw response as a Uint8Array (empty on timeout).
+  // This is the primitive protocol drivers (Modbus, etc.) use to talk to real hardware.
+  const transceive = async (txBytes, options = {}) => {
+    const { timeoutMs = 600, expectedLength = 0, quietMs = 60 } = options;
+    const boardId = activeBoardIdRef.current;
+    const board = boardsStateRef.current.find(b => b.id === boardId);
+    if (!board || !board.isConnected || !board.port) {
+      throw new Error('transceive: no connected serial port on the active board');
+    }
+
+    const collector = { chunks: [], total: 0 };
+    pendingTransceiveRef.current[boardId] = collector;
+
+    try {
+      await handleSendRawBytes(boardId, txBytes);
+
+      const deadline = Date.now() + timeoutMs;
+      let lastLen = 0;
+      let lastChange = Date.now();
+
+      while (Date.now() < deadline) {
+        if (expectedLength && collector.total >= expectedLength) break;
+        if (collector.total !== lastLen) {
+          lastLen = collector.total;
+          lastChange = Date.now();
+        }
+        // No known length: treat an inter-frame quiet gap as end-of-response
+        if (!expectedLength && collector.total > 0 && (Date.now() - lastChange) >= quietMs) break;
+        await new Promise(r => setTimeout(r, 8));
+      }
+
+      const out = new Uint8Array(collector.total);
+      let offset = 0;
+      for (const chunk of collector.chunks) {
+        out.set(chunk, offset);
+        offset += chunk.length;
+      }
+      return out;
+    } finally {
+      delete pendingTransceiveRef.current[boardId];
+    }
+  };
+
+  // Reopen the active board's port with new line settings (baud/parity/etc) without
+  // tearing down the session — used by protocol decks that need a specific framing
+  // (e.g. Modbus RTU 8-N-1). Keeps the continuous read loop running afterward.
+  const reconfigureActivePort = async (config = {}) => {
+    const boardId = activeBoardIdRef.current;
+    const board = boardsStateRef.current.find(b => b.id === boardId);
+    if (!board || !board.port) throw new Error('reconfigureActivePort: no open port');
+
+    boardKeepReadingRef.current[boardId] = false;
+    if (boardReadersRef.current[boardId]) {
+      try { await boardReadersRef.current[boardId].cancel(); } catch (e) {}
+    }
+    try { await board.port.close(); } catch (e) {}
+
+    const nextBaud = Number(config.baudRate ?? board.baudRate);
+    const nextDataBits = config.dataBits ?? board.serialConfig.dataBits;
+    const nextStopBits = config.stopBits ?? board.serialConfig.stopBits;
+    const nextParity = config.parity ?? board.serialConfig.parity;
+
+    await board.port.open({
+      baudRate: nextBaud,
+      dataBits: nextDataBits,
+      stopBits: nextStopBits,
+      parity: nextParity,
+      flowControl: board.serialConfig.flowControl,
+      bufferSize: 16384
+    });
+
+    boardKeepReadingRef.current[boardId] = true;
+    updateBoard(boardId, {
+      baudRate: nextBaud,
+      serialConfig: { ...board.serialConfig, dataBits: nextDataBits, stopBits: nextStopBits, parity: nextParity }
+    });
+    addLogToBoard(boardId, `[PORT] Line reconfigured to ${nextBaud} bps ${nextDataBits}-${String(nextParity).charAt(0).toUpperCase()}-${nextStopBits}.`, 'sys');
+    startReading(boardId, board.port);
+    startSignalPolling(boardId, board.port);
+  };
+
   // Add a new secondary board
   const handleAddNewBoard = () => {
     const newId = `board-${Date.now()}`;
@@ -506,6 +606,8 @@ export function SerialProvider({ children }) {
     setSignals: handleSetSignals,
     assertBreak: handleAssertBreak,
     runBaudScan: handleRunBaudScan,
+    transceive,
+    reconfigureActivePort,
     addLog,
     clearLogs: () => updateBoard(activeBoardId, { entries: [] }),
     clearHexStream: () => {
