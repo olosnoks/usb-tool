@@ -736,29 +736,44 @@ Because the original 1979 Modbus specification didn't define 32-bit float order,
 
 ### 5. Complete UI Control Mapping
 
+The workbench has two connection modes. **Live** talks to real hardware over a
+USB-to-RS485 adapter; **Simulation** feeds synthetic inverter data so you can
+explore the UI without hardware. A banner above the register table always states
+which mode is active so you never mistake synthetic values for real ones.
+
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Connect RS-485** | Button | Connects WebSerial to USB-to-RS485 adapter at configured baud rate (e.g. 9600, 19200, 115200). |
-| **Slave ID Input** | Number | Target industrial node address ($1$ to $247$). Address $0$ is broadcast. |
-| **Function Code** | Dropdown | Selects active Modbus action (Read Holding Registers, Read Input Registers, Write Single/Multiple). |
-| **Start Address** | Number | Memory register offset ($0$ to $65535$). |
-| **Register Quantity** | Number | Number of contiguous 16-bit words to query ($1$ to $125$). |
-| **Execute Query** | Button | Packages frame, computes CRC-16, transmits over RS-485, and parses response. |
-| **Float Endianness** | Dropdown | Decodes 32-bit float pairs using AB CD, CD AB, BA DC, or DC BA word layouts. |
-| **Poll Rate (ms)** | Slider | Sets automatic recurring query cycle from 100ms to 10,000ms. |
+| **Connect Serial Port…** | Button | Shown when no serial port is open. Prompts the browser's port picker to attach your USB-RS485 adapter. |
+| **Connect Live (RS-485)** | Button | Reopens the connected port at the selected baud (8-N-1) and polls the real slave. Responses are CRC-16 validated and Modbus exceptions are decoded; frames stream into the app's live terminal. |
+| **Simulation** | Button | Connects a virtual inverter/energy-meter with synthetic (clearly labeled) holding registers — no hardware required. |
+| **Slave ID Input** | Number | Target industrial node address ($1$ to $247$). |
+| **Baud Rate** | Dropdown | 4800 / 9600 / 19200 / 38400 / 57600 / 115200 bps. The port is reopened at this rate in Live mode. |
+| **Poll Once** | Button | Sends one Read Holding Registers (FC 0x03) request for registers 40001–40008 and renders the decoded table. |
+| **Start Auto-Poll** | Toggle | Repeats the FC 0x03 read every ~1 second; toggles to "Auto-Polling (1s)" while active. |
+| **Holding Registers Table** | Table | Live view of registers 40001–40008 with raw hex, uint16/int16, and scaled measurements (AC voltage, current, power, frequency, power factor, temperature, daily/lifetime energy). |
+| **Write Single Register** | Form | Register Offset + Value (uint16) inputs and a **Write Register** button issuing FC 0x06; the echo response is CRC-validated before the write is reported as acknowledged. |
+
+> The current build focuses on **Read Holding Registers (FC 0x03)** and **Write
+> Single Register (FC 0x06)**. The driver (\`utils/modbusDriver.js\`) also builds
+> frames for coils, discrete inputs, input registers, and multiple-register
+> writes, and includes uint16/int16/uint32/float32 decoders used by the scaled
+> table.
 
 ---
 
 ### 6. Step-by-Step Engineering Walkthroughs
 
-#### Walkthrough A: Polling an Industrial 3-Phase Energy Meter
-1. Connect RS-485 **A** to meter **A+** and RS-485 **B** to meter **B-**.
-2. Connect your USB-RS485 adapter and click **Connect RS-485** at **9600 baud, 8-N-1**.
-3. Set **Slave ID** to \`1\`. Set **Function Code** to \`0x04 (Read Input Registers)\`.
-4. Set **Start Address** to \`0x0000\` and **Quantity** to \`2\` (reading Voltage across registers 0 and 1).
-5. Set **Float Endianness** to **Big-Endian (AB CD)**.
-6. Click **Execute Query**. The workbench unpacks the IEEE 754 float: \`230.45 Volts AC\`!
-7. Engage **Auto-Poll** to monitor real-time mains line voltage fluctuations.
+#### Walkthrough A: Polling a Real RS-485 Energy Meter / Inverter (Live Mode)
+1. Wire RS-485 **A (D-)** to the meter's **A/D-** and **B (D+)** to **B/D+**, with a common ground and $120\Omega$ termination at both ends of the run.
+2. Click **Connect Serial Port…** and pick your USB-RS485 adapter in the browser prompt.
+3. Set **Slave ID** to the meter's address (e.g. \`1\`) and **Baud Rate** to match the device (e.g. \`9600\`).
+4. Click **Connect Live (RS-485)** — the port reopens at 9600 8-N-1 and an FC 0x03 read is issued automatically.
+5. The Holding Registers table fills with CRC-validated values; the scaled column shows AC voltage, current, power, and frequency. Empty rows mean no/invalid response (check A/B polarity, baud, and slave ID).
+6. Click **Start Auto-Poll** to watch the registers update once per second. Use **Write Single Register** (FC 0x06) to set a writable setpoint.
+
+#### Walkthrough B: Exploring the UI Without Hardware (Simulation)
+1. Click **Simulation** — a virtual solar inverter comes online with synthetic registers.
+2. Poll and auto-poll behave exactly as in Live mode, but the banner reads **SIMULATION** and every log line is prefixed \`SIM:\` so the data is never mistaken for a real device.
 
 ---
 
