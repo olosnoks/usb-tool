@@ -1735,26 +1735,35 @@ export default function AlfaWifiWorkbench() {
       setStatusMessage(`${model} adapter connected via WebUSB.`);
     } catch (err) {
       console.warn('Alfa connect error:', err);
+      const msg = (err && (err.message || String(err))) || '';
+      const lower = msg.toLowerCase();
       if (err.name === 'NotFoundError') {
         setStatusLevel('info');
         setStatusMessage('Device selection prompt cancelled.');
         setChipsetStatus('Idle / Disconnected');
       } else if (
-        err.name === 'SecurityError' || 
-        err.name === 'NetworkError' || 
-        err.message?.includes('claimed') || 
-        err.message?.includes('Access denied') ||
-        err.message?.includes('claim')
+        err.name === 'SecurityError' ||
+        err.name === 'NetworkError' ||
+        lower.includes('claim') ||
+        lower.includes('access denied') ||
+        // nusb / wasm WebUSB bring-up failures: the browser could not open or
+        // claim the adapter's interface (the generic "nusb from_js failed:
+        // WebUSB error"). On Windows this is almost always the driver binding.
+        lower.includes('nusb') ||
+        lower.includes('webusb error') ||
+        lower.includes('from_js') ||
+        lower.includes('unable to claim') ||
+        lower.includes('transfer')
       ) {
-        const driverErrMsg = 'Failed to claim interface. Please ensure the WinUSB driver is installed using Zadig.';
+        const driverErrMsg = 'Could not claim the adapter over WebUSB. On Windows the RTL8812AU must be bound to the WinUSB driver using Zadig (it replaces the native Realtek driver). Also make sure no other tab or app is currently using the adapter.';
         setStatusLevel('error');
         setStatusMessage(driverErrMsg);
         setChipsetStatus('Driver Setup Required');
-        setSetupGuideError(driverErrMsg);
+        setSetupGuideError(`${driverErrMsg}\n\nOriginal error: ${msg}`);
         setIsSetupGuideOpen(true);
       } else {
         setStatusLevel('error');
-        setStatusMessage(`Connection failed: ${err.message || err}`);
+        setStatusMessage(`Connection failed: ${msg}`);
         setChipsetStatus('Error');
       }
     }
