@@ -363,13 +363,16 @@ export async function createRadioDriverInstance(rawDevice) {
 
   let driverInstance = null;
 
-  if (profile.driverType === 'realtek' && typeof WebUsbRealtekDevice?.fromWebUsbDevice === 'function') {
-    try {
-      driverInstance = await WebUsbRealtekDevice.fromWebUsbDevice(rawDevice);
-    } catch (e) {
-      // Fallback to generic wrapper if WASM Realtek constructor is unavailable (e.g. test environment)
-      driverInstance = createGenericUsbDriverWrapper(rawDevice, profile);
+  if (profile.driverType === 'realtek') {
+    if (typeof WebUsbRealtekDevice?.fromWebUsbDevice !== 'function') {
+      // WASM Realtek binding genuinely unavailable (e.g. SSR / unit-test env with no WASM).
+      throw new Error('Realtek WASM driver unavailable; cannot initialize RTL8812AU monitor mode.');
     }
+    // The constructor exists, so any failure here is a real device error (USB interface
+    // claim, missing WinUSB/Zadig driver, etc.). Propagate it so the UI reports the actual
+    // cause — do NOT fall back to the generic wrapper, which lacks readRxTransfer and would
+    // only fail later mid-capture with "readRxTransfer is not a function".
+    driverInstance = await WebUsbRealtekDevice.fromWebUsbDevice(rawDevice);
   } else {
     // MediaTek or Generic WebUSB device wrapper
     driverInstance = createGenericUsbDriverWrapper(rawDevice, profile);
