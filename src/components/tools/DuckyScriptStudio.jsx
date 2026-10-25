@@ -55,7 +55,7 @@ DELAY 400
 STRING notepad
 ENTER
 DELAY 600
-STRING [SKON'S USB FLASHER] DuckyScript BadUSB HID Protocol Verified!
+STRING [SKON'S USB TOOL] DuckyScript BadUSB HID Protocol Verified!
 ENTER
 STRING Hardware latency: 15ms. Keystroke test complete.
 `

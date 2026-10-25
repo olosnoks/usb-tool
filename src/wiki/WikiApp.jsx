@@ -644,7 +644,7 @@ export default function WikiApp() {
 
       {/* Footer */}
       <footer className="border-t border-[#181c28] bg-[#07090f] px-6 py-4 text-center text-xs font-mono text-slate-500">
-        Skon's USB Tool & Web Flasher Documentation • Built with React & Vite • 28 Comprehensive Hardware & Firmware Guides
+        Skon's USB Tool Documentation • Built with React & Vite • 28 Comprehensive Hardware & Firmware Guides
       </footer>
     </div>
   );

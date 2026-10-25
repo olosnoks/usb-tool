@@ -143,7 +143,7 @@ export default function PigletUnifiedCard({
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-1.5 text-slate-400 hover:text-pink-400 bg-[#1e212b] rounded-lg border border-[#2b303c] transition"
-                title="Documentation & Web Flasher"
+                title="Documentation & USB Tool"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>

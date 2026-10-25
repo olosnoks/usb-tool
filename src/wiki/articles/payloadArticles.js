@@ -155,7 +155,7 @@ For devices equipped with an IR LED and 38 kHz demodulator (M5StickC-Plus2, Card
 
 ---
 
-### 3. Step-by-Step Flashing Guide via Web Flasher
+### 3. Step-by-Step Flashing Guide via USB Tool
 
 1. Open the **Firmware Flasher** tab in Skon's USB Tool.
 2. Select **Bruce Multi-Tool** from the curated preset dropdown.

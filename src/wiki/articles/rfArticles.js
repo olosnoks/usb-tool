@@ -796,7 +796,7 @@ The **Piglet Wardriver Suite** turns compact ESP32 development boards into high-
 ### 2. The ESP32-C5 Dual-Band Flashing Fix
 > **Critical Silicon Notice for ESP32-C5 Users**:
 > ESP32-C5 is Espressif's first dual-band 2.4 GHz and 5 GHz RISC-V processor. Because it is early engineering silicon, standard \`esptool\` flasher stubs fail with memory allocation crashes when writing to C5 flash memory.
-> **The Automatic Fix**: Skon's Web Flasher automatically identifies C5 chips from their eFuse MAC registers and forces **Direct ROM Mode (No-Stub)** at 115,200 baud, bypassing the stub and successfully burning firmware every time!
+> **The Automatic Fix**: Skon's USB Tool automatically identifies C5 chips from their eFuse MAC registers and forces **Direct ROM Mode (No-Stub)** at 115,200 baud, bypassing the stub and successfully burning firmware every time!
 
 ---
 

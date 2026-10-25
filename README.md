@@ -1,10 +1,10 @@
-# Skon's Web Flasher // Hardware Hacker Workbench & Serial Tool
+# Skon's USB Tool // Hardware Hacker Workbench & Serial Tool
 
 ![GitHub Pages Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-success?style=for-the-badge&logo=github)
 ![Web Serial API](https://img.shields.io/badge/Web%20Serial%20API-Native%20W3C-cyan?style=for-the-badge&logo=w3c)
 ![License](https://img.shields.io/badge/license-MIT-amber?style=for-the-badge)
 
-**Skon's Web Flasher** is an elite client-side hardware hacker workbench and serial tool built with Vite, React, and Tailwind CSS, engineered specifically for static hosting on **GitHub Pages**.
+**Skon's USB Tool** is an elite client-side hardware hacker workbench and serial tool built with Vite, React, and Tailwind CSS, engineered specifically for static hosting on **GitHub Pages**.
 
 It transforms your web browser into an industrial-grade serial station combining low-level Web Serial communication, true in-browser ESP32 ROM bootloader flashing, a 60 FPS real-time multi-channel oscilloscope, synchronized live hex memory inspection, automated U-Boot autoboot killing with root password bypass, and overnight zero-drop disk logging.
 
@@ -13,7 +13,7 @@ It transforms your web browser into an industrial-grade serial station combining
 ## ⚡ Power Features & Tool Suite
 
 ### 1. ⚡ Native ESP32 / ESP8266 ROM Bootloader Flashing Engine
-Unlike standard web serial terminals that only spray raw bytes, Skon's Web Flasher implements the **full SLIP-framed ESP ROM bootloader protocol**:
+Unlike standard web serial terminals that only spray raw bytes, Skon's USB Tool implements the **full SLIP-framed ESP ROM bootloader protocol**:
 - **Automated Hardware Strapping**: Pulses DTR and RTS through the standard transistor auto-reset circuit (EN $\rightarrow$ GPIO0) to guarantee entry into ROM bootloader mode.
 - **ROM Sync Handshake**: Exchanges 36-byte synchronization frames with the chip ROM.
 - **SPI Flash Sector Erase & Write**: Programs target flash blocks with 32-bit sequence numbers and real-time XOR checksum verification.

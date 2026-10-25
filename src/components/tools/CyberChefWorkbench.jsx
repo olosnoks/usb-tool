@@ -310,7 +310,7 @@ export default function CyberChefWorkbench() {
     {
       id: 'tab-1',
       title: 'Input 1',
-      inputText: 'Skon USB Flasher CyberChef Pipeline',
+      inputText: 'Skon USB Tool CyberChef Pipeline',
       inputBuffer: null,
       fileMeta: null,
       activeRecipe: [{ op: 'To Base64', uniqueId: 'step-1', args: {}, breakpoint: false }],

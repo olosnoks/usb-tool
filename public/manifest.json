@@ -1,7 +1,7 @@
 {
-  "name": "Skon's Web Flasher // Hardware Workbench",
-  "short_name": "WebFlasher",
-  "description": "Universal Hardware Hacker Workbench, Web Serial & WebUSB Flasher",
+  "name": "Skon's USB Tool // Hardware Workbench",
+  "short_name": "USB Tool",
+  "description": "Universal Hardware Hacker Workbench, Web Serial & WebUSB Tool",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

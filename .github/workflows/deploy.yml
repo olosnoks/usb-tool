@@ -1,4 +1,4 @@
-name: Deploy Skon's Web Flasher to GitHub Pages
+name: Deploy Skon's USB Tool to GitHub Pages
 
 on:
   push:

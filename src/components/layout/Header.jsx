@@ -96,7 +96,7 @@ export default function Header({
               <h1 className="text-xs sm:text-sm font-bold tracking-wider text-slate-100 flex items-center gap-1">
                 <span>SKON'S</span>
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-amber-300 to-amber-500">
-                  USB FLASHER
+                  USB TOOL
                 </span>
               </h1>
               <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700/60 text-cyan-400 font-mono hidden md:inline">

@@ -104,7 +104,7 @@ export default function HeaderHud({
           <div>
             <div className="flex items-center gap-1.5 sm:gap-2">
               <h1 className="text-base sm:text-lg font-bold font-display tracking-widest text-slate-100 flex items-center gap-1.5">
-                SKON'S <span className="text-cyber-amber cyber-glow-amber">WEB FLASHER</span>
+                SKON'S <span className="text-cyber-amber cyber-glow-amber">USB TOOL</span>
               </h1>
               <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded bg-slate-800 text-cyber-cyan border border-cyber-cyan/30">
                 PRO v1.5
@@ -268,7 +268,7 @@ export default function HeaderHud({
           {deferredPrompt && (
             <button
               onClick={handleInstallPwa}
-              title="Install Skon's Web Flasher as standalone offline app"
+              title="Install Skon's USB Tool as standalone offline app"
               className="flex items-center gap-1 bg-emerald-950/60 hover:bg-emerald-900/60 text-cyber-emerald px-2.5 py-1.5 rounded-lg border border-emerald-500/50 text-xs font-mono transition-all"
             >
               <Download className="w-3.5 h-3.5" />
