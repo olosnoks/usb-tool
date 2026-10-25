@@ -192,6 +192,7 @@ npm run dev
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — dev setup, project layout, the driver + workbench pattern for adding tools, and the PR process.
 - **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — community standards.
 - **[SECURITY.md](SECURITY.md)** — responsible-disclosure policy and responsible-use notice.
+- **[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)** — third-party dependencies, the projects this is modeled on, and the external firmware/hardware it integrates.
 - **[docs/FEATURE_TOOL_HANDOFF.md](docs/FEATURE_TOOL_HANDOFF.md)** — exhaustive blueprint for dropping a brand-new workbench into the app.
 
 ---

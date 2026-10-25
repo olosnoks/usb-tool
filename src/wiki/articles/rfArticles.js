@@ -655,10 +655,12 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 
 ### Implementation & Architecture
 
-> **Current build — mostly simulation.** The PortaPack/HackRF decks render a mirror of the Mayhem LCD with **synthetic** spectrum, waterfall, and sensor data (procedurally generated noise) so the UI, FREQMAN, and tactical modules can be explored without an SDR. Live HackRF streaming is not wired.
+The deck drives a **real PortaPack** over the Mayhem **USB serial console** (the ChibiOS shell, prompt \`ch>\`) — the same interface hackrf.app and mayhem-mobile use. There is no simulated data.
 
-- **Component:** [\`components/tools/PortapackWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/PortapackWorkbench.jsx) composes several decks — \`TacticalMapDeck\`, \`HamRadioDeck\`, \`SensorHubDeck\`, \`LookingGlassDeck\` — over \`utils/mayhemDriver.js\`.
-- **Rendering:** the spectrum/waterfall canvases are driven by procedural noise (\`Math.sin\` + \`Math.random\`) on a render tick, and the LCD view accepts simulated touch coordinates — faithfully mirroring the Mayhem firmware's screens for demos and learning the layout.
+- **Component:** [\`components/tools/PortapackWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/PortapackWorkbench.jsx) renders a live LCD mirror, a hardware control pad, tuning, and a device-info panel over [\`utils/mayhemDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/mayhemDriver.js).
+- **Live screen mirror:** \`captureScreen()\` sends \`screenframeshort\` and decodes the reply — one character per pixel, \`value = char - 32\` packing 6-bit \`00RRGGBB\` (2 bits/channel, scaled ×85) — into an RGBA frame drawn to a canvas. Frame dimensions are inferred from the response (width = chars/line, height = line count), so it adapts to the firmware's resolution.
+- **Control:** the on-screen D-pad / select / rotary / DFU map to \`button 1..8\`; clicking the mirror sends \`touch <x> <y>\`; typed text is sent via \`keyboard <hexpairs>\`. Tuning uses \`setfreq <Hz>\`, and apps launch through \`applist\` / \`appstart\`.
+- **Transport:** \`sendConsoleCommand()\` writes \`cmd\\r\\n\` and reads until the \`ch>\` prompt returns. The real WebUSB **libhackrf** path (raw IQ → ADS-B) remains available when the PortaPack is switched to HackRF mode.
 `
   },
   {
@@ -885,7 +887,7 @@ AA:BB:CC:DD:EE:FF,CoffeeShop,[WPA2-PSK-CCMP],2024-03-23 12:45:10,6,-68,48.123456
 
 | Project / Component | Author(s) / Organization | Repository & Reference | License |
 | :--- | :--- | :--- | :--- |
-| **ESP32-Piglet Wardriver** | JustCallMeKoko (@JustCallMeKoko) | [github.com/JustCallMeKoko/ESP32-Piglet](https://github.com/JustCallMeKoko/ESP32-Piglet) | GPL-3.0 |
+| **Piglet Wardriver** | Ham Spiced (@hamspiced) | [github.com/hamspiced/piglet](https://github.com/hamspiced/piglet) | Open Source |
 | **CYD (Cheap Yellow Display) Community** | Brian Lough and the ESP32-2432S028R developer community | [github.com/witnessmenow/ESP32-Cheap-Yellow-Display](https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display) | Open Hardware |
 | **WiGLE Wireless Mapping Standard** | WiGLE.net team | [wigle.net](https://wigle.net) | Public Format |
 
@@ -893,7 +895,7 @@ AA:BB:CC:DD:EE:FF,CoffeeShop,[WPA2-PSK-CCMP],2024-03-23 12:45:10,6,-68,48.123456
 
 ### Implementation & Architecture (App Integration)
 
-Piglet is **external firmware** for CYD / T-Display boards — not an in-app workbench. The app's role is to **flash and feed** it:
+Piglet (hamspiced/piglet) is **external firmware** for Seeed XIAO ESP32-S3 / C5 / C6 boards — not an in-app workbench. The app's role is to **flash and feed** it:
 
 - **Flashing:** the **Firmware Flasher** resolves the image through [\`services/firmwareCatalogService.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/services/firmwareCatalogService.js) and burns it with the ESP ROM bootloader protocol (SLIP framing, stub, MD5 verify).
 - **Operation:** once running, the wardriver's serial output is viewable in the **Terminal**, and its WiGLE logs can be mapped and re-exported through the **GPS & Wardrive Suite**.

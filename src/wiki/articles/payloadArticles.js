@@ -187,7 +187,7 @@ Bruce is **external firmware** for M5Stack / ESP32 devices (Cardputer, StickC, e
 
 | Project / Hardware Platform | Author(s) / Maintainers | Repository & Reference | License |
 | :--- | :--- | :--- | :--- |
-| **Bruce Multi-Tool Firmware** | pr3y and Bruce open-source contributors | [github.com/pr3y/Bruce](https://github.com/pr3y/Bruce) | GPL-3.0 |
+| **Bruce Multi-Tool Firmware** | pr3y and Bruce open-source contributors | [github.com/pr3y/Bruce](https://github.com/pr3y/Bruce) | AGPL-3.0 |
 | **M5Stack Hardware Ecosystem (Cardputer, Core, StickC)** | M5Stack Technology Co., Ltd. (Shenzhen, China) | [m5stack.com](https://m5stack.com) | Open Hardware |
 | **Apple Continuity & Google Fast Pair Specifications** | Apple Inc. / Google LLC reverse-engineered BLE advertisement protocols | [Bluetooth SIG Assigned Numbers](https://www.bluetooth.com) | Wireless Standards |
 `
