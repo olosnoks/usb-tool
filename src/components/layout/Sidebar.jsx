@@ -26,7 +26,8 @@ import {
   Sparkles,
   Zap,
   ShieldCheck,
-  Keyboard
+  Keyboard,
+  Download
 } from 'lucide-react';
 
 export const SIDEBAR_SECTIONS = [
@@ -69,7 +70,8 @@ export const SIDEBAR_SECTIONS = [
     items: [
       { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript compiler, simulator & CyberChef obfuscator' },
       { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A BIOS flash, CMSIS-DAP, JTAG SVF & AVR ISP' },
-      { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'PPS variable voltage trigger & VBUS analyzer' }
+      { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'PPS variable voltage trigger & VBUS analyzer' },
+      { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download — STM32, nRF & more' }
     ]
   },
   {

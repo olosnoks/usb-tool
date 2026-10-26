@@ -48,6 +48,7 @@ const BadUsbPayloadSuite = React.lazy(() => import('./components/tools/BadUsbPay
 const ProtocolPacketLab = React.lazy(() => import('./components/tools/ProtocolPacketLab'));
 const GpsNavigationSuite = React.lazy(() => import('./components/tools/GpsNavigationSuite'));
 const HardwareProgrammersSuite = React.lazy(() => import('./components/tools/HardwareProgrammersSuite'));
+const DfuFlasher = React.lazy(() => import('./components/tools/DfuFlasher'));
 
 // Modals
 import CommandPalette from './components/CommandPalette';
@@ -371,6 +372,12 @@ function AppContent() {
             {activeTool === 'usb-pd' && (
               <div className="w-full">
                 <UsbPdWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'dfu' && (
+              <div className="w-full">
+                <DfuFlasher />
               </div>
             )}
 
