@@ -46,7 +46,7 @@ Tools follow a **driver + workbench** pattern: a pure protocol/driver module in
 `src/utils/`, a React workbench in `src/components/`, lazy-loaded and routed from
 `src/App.jsx`, listed in `src/components/layout/Sidebar.jsx`, and documented with
 a wiki article in `src/wiki/articles/`. See
-[docs/FEATURE_TOOL_HANDOFF.md](docs/FEATURE_TOOL_HANDOFF.md) for the full
+[FEATURE_TOOL_HANDOFF.md](FEATURE_TOOL_HANDOFF.md) for the full
 blueprint.
 
 Keep hardware access honest: if a workbench offers a simulation/demo mode,
