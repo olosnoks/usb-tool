@@ -102,4 +102,17 @@ describe('UI Workbench Render Sanity Check', () => {
       expect(() => renderToString(<SerialProvider>{comp}</SerialProvider>)).not.toThrow();
     });
   }
+
+  it('renders Panda PAU09 (RT5572) frontend adapter toggles in AlfaWifiWorkbench and GpsWardriverDeck', () => {
+    const alfaHtml = renderToString(<SerialProvider><AlfaWifiWorkbench /></SerialProvider>);
+    expect(alfaHtml).toContain('Panda PAU09');
+    expect(alfaHtml).toContain('RT5572');
+    expect(alfaHtml).toContain('Wardriving Mode');
+
+    const wardriveHtml = renderToString(<SerialProvider><GpsWardriverDeck isConnected={false} /></SerialProvider>);
+    expect(wardriveHtml).toContain('Panda PAU09');
+    expect(wardriveHtml).toContain('RT5572');
+    expect(wardriveHtml).toContain('Connect PAU09 (WebUSB)');
+    expect(wardriveHtml).toContain('Simulate Wardrive Stream');
+  });
 });

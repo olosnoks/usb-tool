@@ -59,7 +59,9 @@ import {
   Laptop,
   Monitor,
   Flame,
-  HelpCircle
+  HelpCircle,
+  Usb,
+  Navigation
 } from 'lucide-react';
 import { 
   initDriver, 
@@ -280,6 +282,9 @@ export default function AlfaWifiWorkbench() {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isSimulateRf, setIsSimulateRf] = useState(false);
+  const [adapterPreset, setAdapterPreset] = useState(() => {
+    try { return localStorage.getItem('alfa_wifi_adapter_preset') || 'alfa'; } catch { return 'alfa'; }
+  });
 
   // Preference Persistence: Hydrate from localStorage
   const [channel, setChannel] = useState(() => {
@@ -1665,11 +1670,39 @@ export default function AlfaWifiWorkbench() {
     return () => clearInterval(watchdogInterval);
   }, [isConnected, isMonitoring, isPaused, isSimulateRf, replayingPcapState, activeDeviceProfile, isWatchdogRecovering]);
 
+  const handleSelectAdapterPreset = (preset) => {
+    setAdapterPreset(preset);
+    try { localStorage.setItem('alfa_wifi_adapter_preset', preset); } catch {}
+    if (!isConnected) {
+      const isPau09 = preset === 'pau09';
+      setActiveDeviceProfile(isPau09 ? getDeviceProfile(0x148F, 0x5572) : (preset === 'alfa' ? getDeviceProfile(0x0BDA, 0x8812) : null));
+      setHardwareStatus({
+        adapterMac: isPau09 ? '9C:EF:D5:98:76:54' : '00:C0:CA:98:76:54',
+        firmwareVersion: isPau09 ? (isSimulateRf ? 'v0.36 (Simulated rt2800usb)' : 'v0.36 (rt2870.bin / rt2800usb)') : (isSimulateRf ? 'v2.4.1 (Simulated)' : 'v2.4.1 (rtl8812au_fw)'),
+        chipsetModel: isPau09 ? 'Ralink RT5572 (Panda Wireless PAU09)' : 'Realtek RTL8812AU (Alfa AWUS036ACH)',
+        temperatureC: isSimulateRf ? (isPau09 ? 39 : 41) : null,
+        status: isSimulateRf ? 'Active (Simulated)' : 'Idle / Disconnected',
+        isIntrospected: isSimulateRf
+      });
+      if (isSimulateRf && isMonitoring) {
+        setChipsetStatus(isPau09 ? 'RT5572 (Simulated - PAU09)' : 'RTL8812AU (Simulated)');
+      }
+      setStatusLevel('info');
+      setStatusMessage(
+        isPau09
+          ? 'Hardware preset switched to Panda Wireless PAU09 (Ralink RT5572 — VID 0x148F : PID 0x5572).'
+          : preset === 'alfa'
+          ? 'Hardware preset switched to Alfa AWUS036ACH (Realtek RTL8812AU — VID 0x0BDA : PID 0x8812).'
+          : 'Hardware preset switched to Auto-Detect (All supported Realtek, Ralink & MediaTek USB adapters).'
+      );
+    }
+  };
+
   // 5. RF Simulation Ingestion Loop
   useEffect(() => {
     let simInterval = null;
     if (isSimulateRf && isMonitoring && !isPaused) {
-      setChipsetStatus('RTL8812AU (Simulated)');
+      setChipsetStatus(adapterPreset === 'pau09' ? 'RT5572 (Simulated - PAU09)' : 'RTL8812AU (Simulated)');
       setHardwareStatus({
         adapterMac: '00:C0:CA:98:76:54',
         firmwareVersion: 'v2.4.1 (Simulated)',
@@ -1770,7 +1803,12 @@ export default function AlfaWifiWorkbench() {
 
     try {
       setChipsetStatus('Requesting WebUSB...');
-      const dev = await connectAlfaDevice();
+      const customFilters = adapterPreset === 'pau09'
+        ? [{ vendorId: 0x148F, productId: 0x5572 }, { vendorId: 0x148F, productId: 0x5370 }]
+        : adapterPreset === 'alfa'
+        ? [{ vendorId: 0x0BDA, productId: 0x8812 }, { vendorId: 0x0BDA, productId: 0x8813 }, { vendorId: 0x0BDA, productId: 0x881A }, { vendorId: 0x0BDA, productId: 0x0811 }]
+        : null;
+      const dev = await connectAlfaDevice(customFilters);
       setDevice(dev);
       deviceRef.current = dev;
       setIsConnected(true);
@@ -3071,7 +3109,7 @@ export default function AlfaWifiWorkbench() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-bold text-slate-100 tracking-wide">
-                  Alfa Wi-Fi Adapter (RTL8812AU)
+                  {adapterPreset === 'pau09' ? 'Panda Wireless PAU09 (RT5572)' : 'Alfa Wi-Fi Adapter (RTL8812AU)'}
                 </h1>
                 <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
                   RF / Hardware
@@ -3140,7 +3178,84 @@ export default function AlfaWifiWorkbench() {
           </div>
 
           {/* Secondary toggles (GPS / Alerts / Simulation) grouped into one segment */}
+          {/* Hardware Adapter Profile Toggle (Alfa RTL8812AU vs Panda Wireless PAU09 RT5572) */}
+          <div
+            className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/80 p-1"
+            role="group"
+            aria-label="Wi-Fi Adapter Hardware Toggle"
+          >
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 flex items-center gap-1">
+              <Usb className="w-3 h-3 text-cyan-400" />
+              Adapter:
+            </span>
+            <button
+              type="button"
+              onClick={() => handleSelectAdapterPreset('alfa')}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                adapterPreset === 'alfa'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 border border-transparent'
+              }`}
+              title="Target Alfa AWUS036ACH / Realtek RTL8812AU / RTL8187 WebUSB filters"
+            >
+              Alfa RTL8812AU
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectAdapterPreset('pau09')}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition flex items-center gap-1.5 ${
+                adapterPreset === 'pau09'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 border border-transparent'
+              }`}
+              title="Target Panda Wireless PAU09 (Ralink / MediaTek RT5572 148f:5572 Dual-Band 2.4/5GHz)"
+            >
+              <span>Panda PAU09</span>
+              <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-500/30">
+                RT5572
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSelectAdapterPreset('auto')}
+              className={`px-2 py-1 rounded-md text-xs font-semibold transition ${
+                adapterPreset === 'auto'
+                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
+                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 border border-transparent'
+              }`}
+              title="Show all supported Monitor Mode USB adapters (Realtek, Ralink, MediaTek, Atheros)"
+            >
+              All USB
+            </button>
+          </div>
+
           <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-slate-800 bg-slate-900/50 p-1">
+          {/* Quick Wardriving Mode Toggle (enables GPS Tagging + Auto Channel Hopping) */}
+          <button
+            type="button"
+            onClick={() => {
+              const nextWardrive = !(isGpsTagging && isAutoHop);
+              setIsGpsTagging(nextWardrive);
+              setIsAutoHop(nextWardrive);
+              try {
+                localStorage.setItem('alfa_wifi_gps_tagging', String(nextWardrive));
+              } catch {}
+              showStatusNotice(
+                nextWardrive
+                  ? `Wardriving Mode active (${adapterPreset === 'pau09' ? 'Panda PAU09 RT5572' : 'Alfa RTL8812AU'}): GPS Tagging + Channel Hopping enabled.`
+                  : 'Wardriving Mode paused.'
+              );
+            }}
+            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition ${
+              isGpsTagging && isAutoHop
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-300 border border-transparent'
+            }`}
+            title="Toggle Wardriving Mode (simultaneous GPS coordinate tagging + 2.4/5GHz channel hopping)"
+          >
+            <Navigation className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="font-semibold">Wardriving Mode</span>
+          </button>
           {/* GPS Tagging Toggle */}
           <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none px-2.5 py-1 rounded-md hover:bg-slate-800/60">
             <input
@@ -3261,7 +3376,7 @@ export default function AlfaWifiWorkbench() {
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold text-xs transition shadow-cyan-glow disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Wifi className="w-4 h-4" />
-              <span>Connect via WebUSB</span>
+              <span>{adapterPreset === 'pau09' ? 'Connect PAU09 via WebUSB' : 'Connect via WebUSB'}</span>
             </button>
           ) : (
             <button
