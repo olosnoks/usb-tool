@@ -322,6 +322,29 @@ export const USB_CHIP_DATABASE = {
     voltage: '3.3V Logic',
     autoReset: 'DFU ROM Engine',
     notes: 'NXP LPC43xx ROM DFU bootloader. Used to flash HackRF One firmware and PortaPack Mayhem binaries directly into on-board SPI flash.'
+  },
+
+  // 802.11 Wireless Audit & Monitor Mode Adapters
+  '148f:5572': {
+    manufacturer: 'Ralink / MediaTek (Panda Wireless)',
+    chip: 'Ralink RT5572 Dual-Band 802.11a/b/g/n (Panda PAU09 N600)',
+    voltage: '5V USB Powered (3.3V RF & Baseband)',
+    autoReset: 'WebUSB / rt2800usb Vendor Control & Bulk DMA',
+    notes: 'Panda Wireless PAU09 N600 Dual-Band (2.4GHz & 5GHz) 2x2:2 MIMO adapter. Supports 802.11 monitor mode and packet injection.'
+  },
+  '148f:5370': {
+    manufacturer: 'Ralink / MediaTek (Panda Wireless)',
+    chip: 'Ralink RT5370 2.4GHz 802.11b/g/n USB Adapter (Panda PAU05/PAU06)',
+    voltage: '5V USB Powered (3.3V RF & Baseband)',
+    autoReset: 'WebUSB / rt2800usb Vendor Control & Bulk DMA',
+    notes: 'Compact 2.4GHz 1x1:1 wireless adapter with monitor mode and packet injection support.'
+  },
+  '0bda:8812': {
+    manufacturer: 'Realtek Semiconductor (Alfa Network)',
+    chip: 'Realtek RTL8812AU Dual-Band 802.11ac (Alfa AWUS036ACH)',
+    voltage: '5V USB Powered (3.3V RF & Baseband)',
+    autoReset: 'WebUSB / WASM Monitor Mode Engine',
+    notes: '2x2:2 MIMO Dual-Band 802.11ac wireless auditing adapter supporting raw monitor mode and frame injection.'
   }
 };
 

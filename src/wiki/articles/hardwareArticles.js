@@ -958,7 +958,8 @@ To eliminate single-chipset lock-in, the workbench employs a multi-vendor **Hard
 | **MediaTek MT7921AU** | \`0x0E8D\` : \`0x7961\` | 802.11ax (Wi-Fi 6) | 2.4 GHz & 5 GHz | 2x2:2 | Monitor Mode, Dual Band, Wi-Fi 6 HE Tag Demux, Airtime Extraction | Alfa AWUS036AXML, Comfast CF-953AX |
 | **MediaTek MT7612U** | \`0x0E8D\` : \`0x7612\` | 802.11ac (Wi-Fi 5) | 2.4 GHz & 5 GHz | 2x2:2 | Monitor Mode, TX Support, Dual Band, Packet Injection | Alfa AWUS036ACM, Netgear A6210 v2 |
 | **MediaTek MT7610U** | \`0x0E8D\` : \`0x7610\` | 802.11ac (Wi-Fi 5) | 2.4 GHz & 5 GHz | 1x1:1 | Monitor Mode, Dual Band, Airtime Extraction | Alfa AWUS036AC |
-| **Ralink RT5370** | \`0x148F\` : \`0x5370\` | 802.11b/g/n | 2.4 GHz | 1x1:1 | Monitor Mode, TX Support, Legacy 2.4GHz Monitoring | Raspberry Pi Wi-Fi, Generic RT5370 |
+| **Ralink RT5572** | \`0x148F\` : \`0x5572\` | 802.11a/b/g/n (N600) | 2.4 GHz & 5 GHz | 2x2:2 | Monitor Mode, TX Support, Dual Band, Packet Injection, RX Tuning | Panda Wireless PAU09, Alfa AWUS051NH v2, Alfa AWUS052NH |
+| **Ralink RT5370** | \`0x148F\` : \`0x5370\` | 802.11b/g/n | 2.4 GHz | 1x1:1 | Monitor Mode, TX Support, Legacy 2.4GHz Monitoring | Panda Wireless PAU05 / PAU06, Raspberry Pi Wi-Fi, Generic RT5370 |
 
 - **Dynamic UI Adaptation**: The workbench queries \`hasCapability(profile, CAPABILITIES.TX_SUPPORT)\`. When an adapter profile lacks packet transmission capability (such as pure RX monitor firmware), the **Run TX Loopback Test** button is dynamically disabled with a tooltip indicator: *"Transmit not supported by this chipset."*
 

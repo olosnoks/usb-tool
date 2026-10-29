@@ -7,7 +7,11 @@ import {
   initWifiAdapter,
   connectAlfaDevice,
   startMonitorMode,
-  retuneChannel
+  retuneChannel,
+  identifyChipsetModel,
+  unpackRalinkUsbTransfer,
+  unpackRealtekUsbTransfer,
+  queryHardwareIntrospection
 } from '../src/utils/alfaWifiDriver';
 
 describe('Alfa Wi-Fi Driver & 802.11 Frame Parser Suite', () => {
@@ -118,5 +122,55 @@ describe('Alfa Wi-Fi Driver & 802.11 Frame Parser Suite', () => {
       expect(frame.rssi).toBeLessThan(0);
       expect(frame.channel).toBeGreaterThan(0);
     });
+  });
+
+  it('identifies Panda Wireless PAU09 (Ralink RT5572) chipset model and introspection metadata', async () => {
+    const pau09Dev = { vendorId: 0x148f, productId: 0x5572 };
+    expect(identifyChipsetModel(pau09Dev)).toBe('RT5572 (Panda Wireless PAU09)');
+
+    const intro = await queryHardwareIntrospection(null, pau09Dev);
+    expect(intro.chipsetModel).toContain('PAU09');
+    expect(intro.firmwareVersion).toContain('rt2870.bin');
+    expect(intro.adapterMac).toBe('9C:EF:D5:98:76:54');
+  });
+
+  it('unpacks Ralink rt2800usb (RT5572 / Panda PAU09) DMA RX transfers into Radiotap + 802.11 frames', () => {
+    // 24-byte 802.11 Beacon frame
+    const beaconMac = new Uint8Array([
+      0x80, 0x00, 0x00, 0x00,
+      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+      0x9C, 0xEF, 0xD5, 0x11, 0x22, 0x33,
+      0x9C, 0xEF, 0xD5, 0x11, 0x22, 0x33,
+      0x00, 0x00
+    ]);
+    // RT5572 uses 20-byte (5-word) RXWI + 24-byte MPDU + 4-byte RXINFO trailer = 48 bytes DMA length
+    const rxwi = new Uint8Array(20);
+    // RXWI_W0: MPDU_TOTAL_BYTE_COUNT = 24 in bits [27:16] -> byte 2 = 24, byte 3 = 0
+    rxwi[2] = beaconMac.length;
+    rxwi[3] = 0x00;
+    // RXWI_W2 (offset 8 in RXWI): rssi0 = 36 -> -12 - 36 = -48 dBm
+    rxwi[8] = 36;
+
+    const dmaLen = rxwi.length + beaconMac.length + 4; // 48 bytes
+    const rxd = new Uint8Array([dmaLen & 0xFF, (dmaLen >> 8) & 0xFF, 0x00, 0x00]);
+    const rxinfo = new Uint8Array([0x80, 0x00, 0x00, 0x00]);
+
+    const transfer = new Uint8Array(4 + dmaLen);
+    transfer.set(rxd, 0);
+    transfer.set(rxwi, 4);
+    transfer.set(beaconMac, 24);
+    transfer.set(rxinfo, 24 + beaconMac.length);
+
+    const unpacked = unpackRalinkUsbTransfer(transfer, 36);
+    expect(unpacked.length).toBe(1);
+
+    // Also verify unpackRealtekUsbTransfer auto-detects and unpacks Ralink transfers
+    const autoUnpacked = unpackRealtekUsbTransfer(transfer, 36);
+    expect(autoUnpacked.length).toBe(1);
+
+    const parsed = parse80211Frame(autoUnpacked[0], 36);
+    expect(parsed.type).toBe('Beacon');
+    expect(parsed.source).toBe('9C:EF:D5:11:22:33');
+    expect(parsed.channel).toBe(36);
   });
 });

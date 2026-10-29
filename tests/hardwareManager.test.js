@@ -35,6 +35,20 @@ describe('Hardware Abstraction Layer (HAL) & Device Registry', () => {
       const rtl8814 = DEVICE_REGISTRY.find(d => d.vendorId === 0x0BDA && d.productId === 0x8813);
       expect(rtl8814).toBeDefined();
       expect(rtl8814.chipsetName).toContain('RTL8814AU');
+
+      // Verify Panda Wireless PAU09 (Ralink RT5572)
+      const pau09 = DEVICE_REGISTRY.find(d => d.vendorId === 0x148F && d.productId === 0x5572);
+      expect(pau09).toBeDefined();
+      expect(pau09.chipsetName).toBe('Ralink RT5572');
+      expect(pau09.family).toBe('RT5572');
+      expect(pau09.driverType).toBe('ralink');
+      expect(pau09.commonModels).toContain('Panda Wireless PAU09');
+      expect(pau09.capabilities).toContain(CAPABILITIES.MONITOR_MODE);
+      expect(pau09.capabilities).toContain(CAPABILITIES.TX_SUPPORT);
+      expect(pau09.capabilities).toContain(CAPABILITIES.DUAL_BAND);
+      expect(pau09.capabilities).toContain(CAPABILITIES.PACKET_INJECTION);
+      expect(pau09.capabilities).toContain(CAPABILITIES.HARDWARE_RX_GAIN);
+      expect(pau09.capabilities).toContain(CAPABILITIES.AIRTIME_EXTRACTION);
     });
 
     it('ensures all registry entries have valid fields and capabilities', () => {
@@ -57,6 +71,11 @@ describe('Hardware Abstraction Layer (HAL) & Device Registry', () => {
       const p2 = getDeviceProfile(0x0E8D, 0x7961);
       expect(p2.chipsetName).toBe('MediaTek MT7921AU');
       expect(p2.family).toBe('MT7921AU');
+
+      const p3 = getDeviceProfile(0x148F, 0x5572);
+      expect(p3.chipsetName).toBe('Ralink RT5572');
+      expect(p3.family).toBe('RT5572');
+      expect(p3.commonModels).toContain('Panda Wireless PAU09');
     });
 
     it('falls back to vendor family when PID is unknown or missing', () => {
@@ -107,10 +126,58 @@ describe('Hardware Abstraction Layer (HAL) & Device Registry', () => {
 
       const mediatekFilter = filters.find(f => f.vendorId === 0x0E8D && f.productId === 0x7961);
       expect(mediatekFilter).toBeDefined();
+
+      const pau09Filter = filters.find(f => f.vendorId === 0x148F && f.productId === 0x5572);
+      expect(pau09Filter).toBeDefined();
     });
   });
 
   describe('Driver Factory (createRadioDriverInstance)', () => {
+    it('instantiates Ralink RT5572 (Panda Wireless PAU09) driver with monitor, RX, and TX support', async () => {
+      const mockRxFrame = new Uint8Array([0x01, 0x02, 0x03, 0x04]);
+      const mockControlTransferOut = vi.fn().mockResolvedValue({ status: 'ok' });
+      const mockTransferIn = vi.fn().mockResolvedValue({
+        status: 'ok',
+        data: new DataView(mockRxFrame.buffer)
+      });
+      const mockTransferOut = vi.fn().mockResolvedValue({ status: 'ok' });
+
+      const mockRawUsb = {
+        vendorId: 0x148F,
+        productId: 0x5572,
+        productName: '802.11 n WLAN',
+        manufacturerName: 'Ralink',
+        opened: false,
+        open: vi.fn().mockImplementation(function () { this.opened = true; return Promise.resolve(); }),
+        selectConfiguration: vi.fn().mockResolvedValue(undefined),
+        claimInterface: vi.fn().mockResolvedValue(undefined),
+        controlTransferOut: mockControlTransferOut,
+        transferIn: mockTransferIn,
+        transferOut: mockTransferOut
+      };
+
+      const driver = await createRadioDriverInstance(mockRawUsb);
+      expect(driver).toBeDefined();
+      expect(driver.chipsetModel).toBe('Ralink RT5572');
+      expect(driver.hasCapability(CAPABILITIES.MONITOR_MODE)).toBe(true);
+      expect(driver.hasCapability(CAPABILITIES.DUAL_BAND)).toBe(true);
+      expect(driver.hasCapability(CAPABILITIES.TX_SUPPORT)).toBe(true);
+      expect(driver.hasCapability(CAPABILITIES.PACKET_INJECTION)).toBe(true);
+
+      const report = await driver.initializeMonitorWithOptions(36, 20, 0, true);
+      expect(report.chip).toBe('Ralink RT5572');
+      expect(mockRawUsb.open).toHaveBeenCalled();
+      expect(mockRawUsb.claimInterface).toHaveBeenCalledWith(0);
+      expect(mockControlTransferOut).toHaveBeenCalled();
+
+      const rxBytes = await driver.readRxTransfer(32768);
+      expect(rxBytes).toEqual(mockRxFrame);
+      expect(mockTransferIn).toHaveBeenCalledWith(1, 32768);
+
+      const txPayload = new Uint8Array([0x80, 0x00, 0x00, 0x00]);
+      await driver.write(txPayload);
+      expect(mockTransferOut).toHaveBeenCalledWith(2, txPayload);
+    });
     it('instantiates generic/MediaTek wrapper with uniform radio interface', async () => {
       const mockRawUsb = {
         vendorId: 0x0E8D,

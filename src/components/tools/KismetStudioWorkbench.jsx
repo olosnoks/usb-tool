@@ -91,6 +91,17 @@ const ALFA_PROFILES = [
     driverLinux: 'rt2800usb (Kernel In-Tree)',
     monitorSupport: 'Monitor Mode + Long-Range Injection',
     desc: 'Classic long-range 2.4GHz powerhouse. High sensitivity for distant or rural wireless reconnaissance.'
+  },
+  {
+    id: 'pau09',
+    name: 'Panda Wireless PAU09',
+    chipset: 'Ralink RT5572',
+    bands: 'Dual-Band 2.4 GHz & 5 GHz (802.11a/b/g/n N600)',
+    txPower: 'High Gain Dual-Band (300Mbps + 300Mbps)',
+    antennas: '2x 5dBi Detachable Dual-Band Dipole (SMA)',
+    driverLinux: 'rt2800usb (In-tree Linux Kernel)',
+    monitorSupport: 'Dual-Band Monitor Mode + Packet Injection',
+    desc: 'Plug-and-play N600 dual-band 2x2:2 audit adapter powered by Ralink RT5572 (VID 0x148F : PID 0x5572).'
   }
 ];
 

@@ -74,7 +74,7 @@ export default function SetupGuideModal({
     {
       num: 2,
       title: 'Plug the adapter directly into a USB port',
-      desc: 'Connect your Alfa AWUS036ACH (RTL8812AU) or other supported adapter straight into a USB port — prefer a USB 3.0 port and avoid unpowered hubs or extension cables.'
+      desc: 'Connect your Alfa AWUS036ACH (RTL8812AU), Panda Wireless PAU09 (Ralink RT5572), or other supported adapter straight into a USB port — prefer a USB 3.0 port and avoid unpowered hubs or extension cables.'
     },
     {
       num: 3,
@@ -84,7 +84,7 @@ export default function SetupGuideModal({
     {
       num: 4,
       title: 'Select the adapter, then replace its driver with WinUSB',
-      desc: 'In the main dropdown pick your adapter (e.g. "Realtek 8812AU Wireless LAN 802.11ac USB NIC"). On the right, use the ▲▼ arrows so the target driver box reads "WinUSB (v6.1.7600.16385)", then click "Replace Driver". Wait ~30 seconds while Windows binds it.',
+      desc: 'In the main dropdown pick your adapter (e.g. "Realtek 8812AU Wireless LAN 802.11ac USB NIC" or "802.11 n WLAN" for Panda PAU09 / RT5572). On the right, use the ▲▼ arrows so the target driver box reads "WinUSB (v6.1.7600.16385)", then click "Replace Driver". Wait ~30 seconds while Windows binds it.',
       tip: 'If the adapter shows more than one interface, choose Interface 0. If "Replace Driver" fails, unplug and replug the adapter and try again.'
     },
     {

@@ -2096,7 +2096,7 @@ export default function AlfaWifiWorkbench() {
       setIsPaused(false);
       setChipsetStatus(`Monitor Active (CH ${channel})`);
       setStatusLevel('success');
-      setStatusMessage(`Monitor initialized. Chip: ${report?.chip || 'RTL8812AU'}`);
+      setStatusMessage(`Monitor initialized. Chip: ${report?.chip || device?.chipsetModel || 'RTL8812AU'}`);
 
       startRxLoop(device);
     } catch (err) {
@@ -3313,7 +3313,7 @@ export default function AlfaWifiWorkbench() {
               <div className="text-emerald-300 font-bold mt-0.5 text-[13px] truncate" title={hardwareStatus.firmwareVersion}>
                 {hardwareStatus.firmwareVersion || 'v2.4.1 (rtl8812au_fw)'}
               </div>
-              <div className="text-[9px] text-slate-500 mt-0.5">Realtek Microcode Revision</div>
+              <div className="text-[9px] text-slate-500 mt-0.5">{activeDeviceProfile?.driverType === 'ralink' ? 'Ralink MCU / rt2800usb Revision' : 'Realtek Microcode Revision'}</div>
             </div>
 
             <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
@@ -3321,7 +3321,7 @@ export default function AlfaWifiWorkbench() {
               <div className="text-purple-300 font-bold mt-0.5 text-[13px] truncate" title={hardwareStatus.chipsetModel}>
                 {hardwareStatus.chipsetModel || 'Realtek RTL8812AU'}
               </div>
-              <div className="text-[9px] text-slate-500 mt-0.5">2T2R 802.11a/b/g/n/ac PHY</div>
+              <div className="text-[9px] text-slate-500 mt-0.5">{activeDeviceProfile ? `${activeDeviceProfile.maxMimo || '2x2:2'} ${activeDeviceProfile.standard || '802.11 PHY'}` : '2T2R 802.11a/b/g/n/ac PHY'}</div>
             </div>
 
             <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">

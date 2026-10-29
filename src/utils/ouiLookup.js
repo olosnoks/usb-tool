@@ -135,6 +135,10 @@ export const OUI_DATABASE = {
   // Alfa Network
   '00C0CA': 'Alfa Network',
 
+  // Panda Wireless & Ralink
+  '9CEFD5': 'Panda Wireless',
+  '000C43': 'Ralink',
+
   // MikroTik
   '000C42': 'MikroTik',
   '2C6B7D': 'MikroTik',

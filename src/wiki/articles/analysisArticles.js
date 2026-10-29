@@ -142,6 +142,7 @@ Alfa Network USB adapters are the global gold standard for 802.11 monitor mode, 
 | **AWUS036NHA** | Qualcomm Atheros AR9271 | 2.4 GHz (802.11b/g/n) | 28 dBm | \`ath9k_htc\` (In-Tree) | 100% open-source firmware. Legendary frame injection and low-level MAC stability. |
 | **AWUS036AXM** | MediaTek MT7921AUN | 2.4, 5 & 6 GHz (Wi-Fi 6E) | Standard High Efficiency | \`mt7921u\` (Linux 5.18+) | Next-gen Wi-Fi 6E (802.11ax) capture supporting pristine 6GHz UNII-5 to UNII-8 channels. |
 | **AWUS036NH** | Ralink RT3070 | 2.4 GHz (802.11b/g/n) | 2000 mW (Ultra-High) | \`rt2800usb\` (In-Tree) | Exceptional receiver sensitivity for long-range rural or perimeter auditing. |
+| **Panda PAU09** | Ralink RT5572 | 2.4 GHz & 5 GHz (802.11a/b/g/n N600) | High Gain Dual-Band | \`rt2800usb\` (In-Tree) | Dual-band 2x2:2 MIMO (300Mbps + 300Mbps) with out-of-the-box monitor mode & frame injection. |
 
 #### 2. Kismet Daemon REST & WebSocket API Specification
 Kismet functions as a headless multi-threaded C++ RF capture engine serving real-time JSON and WebSockets on port \`2501\`:

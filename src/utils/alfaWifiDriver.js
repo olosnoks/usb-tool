@@ -34,11 +34,13 @@ export const SUPPORTED_CHIPSETS = [
   { vendorId: 0x0bda, productId: 0x8813, name: 'RTL8814AU (Alfa AWUS1900)' },
   { vendorId: 0x0bda, productId: 0x881a, name: 'RTL8812AU-VN' },
   { vendorId: 0x0bda, productId: 0x881b, name: 'RTL8812AU' },
-  { vendorId: 0x0bda, productId: 0x881c, name: 'RTL8814AU' }
+  { vendorId: 0x0bda, productId: 0x881c, name: 'RTL8814AU' },
+  { vendorId: 0x148f, productId: 0x5572, name: 'RT5572 (Panda Wireless PAU09)' },
+  { vendorId: 0x148f, productId: 0x5370, name: 'RT5370 (Ralink 802.11n)' }
 ];
 
 /**
- * Returns broadened USB device filters matching all supported Realtek Wi-Fi chipsets.
+ * Returns broadened USB device filters matching all supported Realtek, Ralink, and MediaTek Wi-Fi chipsets.
  */
 export function getSupportedUsbFilters() {
   const filters = SUPPORTED_CHIPSETS.map(c => ({ vendorId: c.vendorId, productId: c.productId }));
@@ -67,9 +69,15 @@ export function getSupportedUsbFilters() {
  */
 export function identifyChipsetModel(device) {
   if (!device) return 'Realtek RTL8812AU';
+  const vid = device.vendorId ?? device.device?.vendorId;
   const pid = device.productId ?? device.device?.productId;
+  const exactMatch = vid != null
+    ? SUPPORTED_CHIPSETS.find(c => c.vendorId === vid && c.productId === pid)
+    : null;
+  if (exactMatch) return exactMatch.name;
   const match = SUPPORTED_CHIPSETS.find(c => c.productId === pid);
   if (match) return match.name;
+  if (vid === 0x148f) return 'Ralink RT5572 / RT5370';
   return 'RTL8812AU / RTL8814AU';
 }
 
@@ -215,8 +223,122 @@ export async function setHardwareRxGain(radioInstance, gainValue = 7) {
 }
 
 /**
+ * Unpacks raw WebUSB bulk-IN transfer buffers from Ralink / MediaTek rt2800usb
+ * Wi-Fi chipsets (RT5572 in Panda Wireless PAU09, RT5370, RT3070, etc.).
+ *
+ * In the Ralink rt2800usb DMA architecture, each USB packet consists of:
+ *   - 4-byte USB DMA RX descriptor header (`RXD_W0`, low 16 bits = `dma_rx_pkt_len`)
+ *   - 20-byte (RT5572, 5-word) or 16-byte (RT5370/RT3070, 4-word) `RXWI` wireless info header:
+ *       - `RXWI_W0` bits [27:16] = `MPDU_TOTAL_BYTE_COUNT`
+ *       - `RXWI_W2` bytes [0..2] = per-chain RSSI (`rssi0`, `rssi1`, `rssi2`)
+ *   - 802.11 MAC frame (`MPDU_TOTAL_BYTE_COUNT` bytes)
+ *   - 4-byte `RXINFO` hardware status trailer
+ *
+ * @param {Uint8Array} inputBuffer - Raw bytes from Ralink bulk-IN transfer
+ * @param {number} defaultChannel - Operating RF channel for Radiotap header
+ * @returns {Uint8Array[]} Array of standard 14-byte Radiotap + 802.11 frame buffers
+ */
+export function unpackRalinkUsbTransfer(inputBuffer, defaultChannel = 36) {
+  if (!inputBuffer || inputBuffer.length < 24) return [];
+  const buffer = inputBuffer instanceof Uint8Array ? inputBuffer : new Uint8Array(inputBuffer);
+
+  let offset = 0;
+  const extracted = [];
+
+  while (offset + 24 <= buffer.length) {
+    // 4-byte DMA header: USB_DMA_RX_PKT_LEN in low 16 bits
+    const dmaLen = buffer[offset] | (buffer[offset + 1] << 8);
+    if (dmaLen < 20 || dmaLen > 4096 || offset + 4 + dmaLen > buffer.length + 8) {
+      break;
+    }
+
+    // RXWI_W0 at offset + 4: MPDU_TOTAL_BYTE_COUNT in bits [27:16]
+    const mpduLen = buffer[offset + 6] | ((buffer[offset + 7] & 0x0F) << 8);
+    if (mpduLen < 10 || mpduLen > dmaLen) {
+      break;
+    }
+
+    // Determine RXWI descriptor size: 20 bytes (RT5572 / 5 words) or 16 bytes (RT5370 / 4 words)
+    let rxwiSize = 0;
+    for (const candidateRxwi of [20, 16]) {
+      if (dmaLen >= candidateRxwi + mpduLen && dmaLen <= candidateRxwi + mpduLen + 12) {
+        const testStart = offset + 4 + candidateRxwi;
+        if (testStart + 10 <= buffer.length && (buffer[testStart] & 0x03) === 0) {
+          const type = (buffer[testStart] >> 2) & 0x03;
+          if (type <= 2) {
+            rxwiSize = candidateRxwi;
+            break;
+          }
+        }
+      }
+    }
+
+    if (rxwiSize === 0) {
+      break;
+    }
+
+    // Extract RSSI from RXWI_W2 (at offset + 4 + 8 = offset + 12)
+    let rssi = -60;
+    if (offset + 14 <= buffer.length) {
+      const rssi0 = buffer[offset + 12];
+      const rssi1 = buffer[offset + 13];
+      const toDbm = (raw) => {
+        if (raw === 0 || raw === 255) return null;
+        // Signed dBm (e.g. 200 -> -56 dBm) or raw Ralink AGC offset (0..100 -> -12 - raw)
+        if (raw > 127) return raw - 256;
+        return Math.max(-95, -12 - raw);
+      };
+      const dbm0 = toDbm(rssi0);
+      const dbm1 = toDbm(rssi1);
+      if (dbm0 !== null && dbm1 !== null) {
+        rssi = Math.max(dbm0, dbm1);
+      } else if (dbm0 !== null) {
+        rssi = dbm0;
+      } else if (dbm1 !== null) {
+        rssi = dbm1;
+      }
+    }
+
+    const frameStart = offset + 4 + rxwiSize;
+    const frameEnd = Math.min(buffer.length, frameStart + mpduLen);
+    const macFrame = buffer.slice(frameStart, frameEnd);
+
+    const freq = defaultChannel <= 14 ? 2407 + defaultChannel * 5 : 5000 + defaultChannel * 5;
+    const freqLow = freq & 0xFF;
+    const freqHigh = (freq >> 8) & 0xFF;
+    const chFlags = defaultChannel <= 14 ? 0x00A0 : 0x0140;
+    const chFlagsLow = chFlags & 0xFF;
+    const chFlagsHigh = (chFlags >> 8) & 0xFF;
+    const rssiByte = rssi < 0 ? (rssi + 256) & 0xFF : rssi;
+
+    const radiotapHeader = new Uint8Array([
+      0x00, 0x00,
+      0x0E, 0x00,
+      0x2A, 0x00, 0x00, 0x00,
+      0x00,
+      freqLow, freqHigh,
+      chFlagsLow, chFlagsHigh,
+      rssiByte
+    ]);
+
+    const combined = new Uint8Array(radiotapHeader.length + macFrame.length);
+    combined.set(radiotapHeader, 0);
+    combined.set(macFrame, radiotapHeader.length);
+    extracted.push(combined);
+
+    // Advance to next 4-byte aligned USB DMA packet (4-byte RXD + dmaLen + optional 4-byte zero pad)
+    const nextOffset = offset + 4 + Math.ceil(dmaLen / 4) * 4;
+    if (nextOffset <= offset) break;
+    offset = nextOffset;
+  }
+
+  return extracted;
+}
+
+/**
  * Unpacks raw WebUSB bulk-IN transfer buffers from Realtek Wi-Fi chipsets
- * (RTL8812AU, RTL8814AU, RTL8811AU, etc.).
+ * (RTL8812AU, RTL8814AU, RTL8811AU) as well as Ralink/MediaTek rt2800usb
+ * chipsets (RT5572 in Panda Wireless PAU09, RT5370).
  * 
  * In Realtek USB architecture, transfers may contain one or more aggregated packets.
  * Each packet is preceded by a 24-byte (RTL8812AU) or 32-byte (RTL8814AU) hardware
@@ -224,8 +346,8 @@ export async function setHardwareRxGain(radioInstance, gainValue = 7) {
  * and optional shift padding before the actual 802.11 MAC frame.
  * 
  * If the buffer is already a Radiotap or plain 802.11 frame, it is returned directly.
- * For Realtek transfers, each extracted 802.11 frame is prepended with a standard Radiotap
- * header encoding the hardware RSSI and RF channel.
+ * For Realtek or Ralink transfers, each extracted 802.11 frame is prepended with a standard
+ * Radiotap header encoding the hardware RSSI and RF channel.
  * 
  * @param {Uint8Array} inputBuffer - Raw bytes from radio.readRxTransfer
  * @param {number} defaultChannel - Fallback channel if not in PHY status
@@ -241,6 +363,12 @@ export function unpackRealtekUsbTransfer(inputBuffer, defaultChannel = 36) {
     if (rLen >= 8 && rLen < buffer.length) {
       return [buffer];
     }
+  }
+
+  // 1b. Check if this is a Ralink rt2800usb transfer (RT5572 / Panda PAU09, RT5370)
+  const ralinkExtracted = unpackRalinkUsbTransfer(buffer, defaultChannel);
+  if (ralinkExtracted.length > 0) {
+    return ralinkExtracted;
   }
 
   // 2. Check if this is a Realtek USB transfer with RX descriptors
@@ -513,14 +641,18 @@ export function parse80211Frame(data, currentChannel = 36) {
  * @returns {Promise<{ adapterMac: string, firmwareVersion: string, chipsetModel: string, temperatureC: number|null, status: string, isIntrospected: boolean }>}
  */
 export async function queryHardwareIntrospection(radioInstance, rawDevice) {
+  const vid = rawDevice?.vendorId ?? radioInstance?.vendorId ?? radioInstance?.device?.vendorId;
+  const pid = rawDevice?.productId ?? radioInstance?.productId ?? radioInstance?.device?.productId;
+  const isRalink = vid === 0x148f || radioInstance?.profile?.driverType === 'ralink';
+
   let adapterMac = null;
-  let firmwareVersion = 'v2.4.1 (rtl8812au_fw)';
+  let firmwareVersion = isRalink ? 'v0.36 (rt2870.bin / rt2800usb)' : 'v2.4.1 (rtl8812au_fw)';
   let chipsetModel = identifyChipsetModel(rawDevice || radioInstance);
   let temperatureC = null;
   let isIntrospected = false;
   let status = (!radioInstance && !rawDevice) ? 'Fallback Defaults (Offline / Sim)' : 'Active / Responding';
 
-  // 1. Query @openipc-rs/web WASM device capabilities & thermal status
+  // 1. Query @openipc-rs/web WASM or HAL device capabilities & thermal status
   if (radioInstance) {
     try {
       if (typeof radioInstance.readThermalStatus === 'function') {
@@ -542,7 +674,11 @@ export async function queryHardwareIntrospection(radioInstance, rawDevice) {
         const caps = await radioInstance.adapterCapabilities();
         if (caps) {
           if (caps.chip) {
-            chipsetModel = `Realtek ${caps.chip}${caps.marketingNames ? ` (${caps.marketingNames})` : ''}`;
+            const vendorPrefix = isRalink
+              ? 'Ralink'
+              : (vid === 0x0e8d ? 'MediaTek' : 'Realtek');
+            const chipLabel = String(caps.chip).startsWith(vendorPrefix) ? caps.chip : `${vendorPrefix} ${caps.chip}`;
+            chipsetModel = `${chipLabel}${caps.marketingNames ? ` (${caps.marketingNames})` : ''}`;
             isIntrospected = true;
           }
           if (caps.variant) {
@@ -563,11 +699,12 @@ export async function queryHardwareIntrospection(radioInstance, rawDevice) {
       // Static capabilities optional
     }
 
-    // Try reading MAC registers from radioInstance
+    // Try reading MAC registers from radioInstance (0x1008 for Ralink rt2800usb, 0x0050 for Realtek)
     try {
       if (typeof radioInstance.readRegisterU8 === 'function') {
+        const baseMacReg = isRalink ? 0x1008 : 0x0050;
         const macBytes = [];
-        for (let reg = 0x0050; reg <= 0x0055; reg++) {
+        for (let reg = baseMacReg; reg <= baseMacReg + 5; reg++) {
           const b = await radioInstance.readRegisterU8(reg);
           if (typeof b === 'number') macBytes.push(b);
         }
@@ -584,17 +721,29 @@ export async function queryHardwareIntrospection(radioInstance, rawDevice) {
   const usbDevice = rawDevice || radioInstance?.device;
   if (!adapterMac && usbDevice && typeof usbDevice.controlTransferIn === 'function') {
     try {
-      // Standard Realtek vendor control read request for MAC/EEPROM
-      const res = await usbDevice.controlTransferIn({
-        requestType: 'vendor',
-        recipient: 'device',
-        request: 0x05, // Vendor request
-        value: 0x0050, // Register offset
-        index: 0x0000
-      }, 6);
+      // Ralink rt2800usb uses Vendor Request 0x07 (Multi-Read) at MAC_ADDR_DW0 (index 0x1008);
+      // Realtek uses Vendor Request 0x05 at EEPROM/MAC offset (value 0x0050).
+      const res = await usbDevice.controlTransferIn(
+        isRalink
+          ? {
+              requestType: 'vendor',
+              recipient: 'device',
+              request: 0x07,
+              value: 0x0000,
+              index: 0x1008
+            }
+          : {
+              requestType: 'vendor',
+              recipient: 'device',
+              request: 0x05,
+              value: 0x0050,
+              index: 0x0000
+            },
+        6
+      );
 
       if (res && res.data && res.data.byteLength >= 6) {
-        const bytes = new Uint8Array(res.data.buffer);
+        const bytes = new Uint8Array(res.data.buffer, res.data.byteOffset, res.data.byteLength);
         if (bytes.some(b => b !== 0 && b !== 255)) {
           adapterMac = Array.from(bytes.slice(0, 6))
             .map(b => b.toString(16).padStart(2, '0').toUpperCase())
@@ -608,7 +757,8 @@ export async function queryHardwareIntrospection(radioInstance, rawDevice) {
 
   // 3. Fallback for mock, simulated mode, or when hardware doesn't disclose EEPROM MAC
   if (!adapterMac) {
-    adapterMac = '00:C0:CA:98:76:54'; // Alfa Network Inc. factory OUI (00:C0:CA)
+    // Panda Wireless Inc. factory OUI (9C:EF:D5) for PAU09 / Ralink, or Alfa Network OUI (00:C0:CA)
+    adapterMac = (isRalink && pid === 0x5572) ? '9C:EF:D5:98:76:54' : (isRalink ? '00:0C:43:98:76:54' : '00:C0:CA:98:76:54');
   }
 
   return {
