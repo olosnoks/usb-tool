@@ -57,7 +57,7 @@ export const SIDEBAR_SECTIONS = [
     id: 'rf',
     title: 'RF, WIRELESS & BADGES',
     items: [
-      { id: 'alfa-wifi', name: 'Alfa Wi-Fi (RTL8812AU)', icon: Wifi, accent: 'cyan', desc: 'WebUSB monitor mode & 802.11 frame capture for Alfa adapters' },
+      { id: 'alfa-wifi', name: 'Wi-Fi Monitor (Alfa / Panda PAU09)', icon: Wifi, accent: 'cyan', desc: 'WebUSB monitor mode & 802.11 frame capture for Alfa RTL8812AU & Panda PAU09 (RT5572)' },
       { id: 'flipper', name: 'Flipper Zero Suite', icon: Bot, accent: 'amber', desc: 'qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC & SD' },
       { id: 'proxmark', name: 'Proxmark3 / PM5 Suite', icon: Radio, accent: 'cyan', desc: '13.56MHz & 125kHz RFID cloner, raw NG framing & WebFlash' },
       { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF Sub-GHz RF deck, LCD screen & FREQMAN' },
@@ -71,7 +71,7 @@ export const SIDEBAR_SECTIONS = [
       { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript compiler, simulator & CyberChef obfuscator' },
       { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A BIOS flash, CMSIS-DAP, JTAG SVF & AVR ISP' },
       { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'PPS variable voltage trigger & VBUS analyzer' },
-      { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download — STM32, nRF & more' }
+      { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download â€” STM32, nRF & more' }
     ]
   },
   {
@@ -218,7 +218,7 @@ export default function Sidebar({
                     <button
                       key={item.id}
                       onClick={() => handleItemClick(item)}
-                      title={`${item.name} — ${item.desc}`}
+                      title={`${item.name} â€” ${item.desc}`}
                       className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs border transition-all text-left ${getAccentStyles(
                         item,
                         isActive
