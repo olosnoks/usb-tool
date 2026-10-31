@@ -1,35 +1,31 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { 
-  Wifi, 
-  Radio, 
-  Play, 
-  Pause, 
-  Square, 
-  RefreshCw, 
-  Trash2, 
-  Download, 
-  Sliders, 
-  Cpu, 
-  Activity, 
-  ShieldCheck, 
-  ShieldAlert, 
-  AlertTriangle, 
-  Terminal, 
-  Table, 
-  Filter, 
-  Search, 
-  CheckCircle2, 
-  HardDrive, 
-  Layers, 
-  Zap, 
-  Users, 
-  FileCode, 
-  ExternalLink, 
-  X, 
+import { useState, useEffect, useRef, useMemo } from 'react';
+import {
+  Wifi,
+  Radio,
+  Play,
+  Pause,
+  Square,
+  Trash2,
+  Download,
+  Sliders,
+  Cpu,
+  Activity,
+  ShieldCheck,
+  ShieldAlert,
+  AlertTriangle,
+  Terminal,
+  Table,
+  Filter,
+  Search,
+  CheckCircle2,
+  HardDrive,
+  Layers,
+  Zap,
+  Users,
+  FileCode,
+  X,
   Smartphone,
   ArrowUpDown,
-  ChevronLeft,
-  ChevronRight,
   ChevronDown,
   Clock,
   Lock,
@@ -58,24 +54,21 @@ import {
   Apple,
   Laptop,
   Monitor,
-  Flame,
   HelpCircle,
   Usb,
   Navigation
 } from 'lucide-react';
-import { 
-  initDriver, 
-  connectAlfaDevice, 
-  startMonitorMode, 
-  retuneChannel, 
+import {
+  connectAlfaDevice,
+  startMonitorMode,
+  retuneChannel,
   setHardwareRxGain,
-  bytesToHex, 
   identifyChipsetModel,
   queryHardwareIntrospection,
   unpackRealtekUsbTransfer,
-  MOCK_WIFI_FRAMES 
+  MOCK_WIFI_FRAMES
 } from '../../utils/alfaWifiDriver';
-import { AirtimeTracker, calculateAirtime } from '../../utils/airtimeCalculator';
+import { AirtimeTracker } from '../../utils/airtimeCalculator';
 import { fastFilterPacket, parseMacToBytes } from '../../utils/packetFilter';
 import { 
   parse80211Frame, 
@@ -87,25 +80,21 @@ import {
 } from '../../utils/wifiParser';
 import { generateHeuristicReport } from '../../utils/heuristicEngine';
 import { getVendor } from '../../utils/ouiLookup';
-import { downloadPcap, filterPacketsByMac, downloadTargetedPcap } from '../../utils/pcapExporter';
+import { downloadPcap, downloadTargetedPcap } from '../../utils/pcapExporter';
 import { LivePcapWriter } from '../../utils/livePcapWriter';
 import {
   RULE_EVENT_TYPES,
   RULE_ACTION_TYPES,
-  evaluateRules,
   evaluateAndExecuteRules,
-  executeRuleAction,
-  createRule,
   loadRulesFromStorage,
-  saveRulesToStorage,
-  playAudioBeep
+  saveRulesToStorage
 } from '../../utils/ruleEngine';
-import { parsePcap, readPcapFile, PcapReplayer } from '../../utils/pcapReader';
+import { readPcapFile, PcapReplayer } from '../../utils/pcapReader';
 import { HandshakeTracker, playHandshakeChime } from '../../utils/handshakeDetector';
 import { detectRogueAps } from '../../utils/widsRogueAp';
 import { downloadWigleCsv, calculateHaversineDistance } from '../../utils/wardrivingExporter';
 import TopologyView from './TopologyView';
-import SignalMapView from './SignalMapView';
+
 import SpectrumWaterfall from './SpectrumWaterfall';
 import ChannelOverlapChart from './ChannelOverlapChart';
 import { runOutputTest } from '../../utils/deviceWriteTest';
@@ -137,144 +126,19 @@ import GeospatialMap from './GeospatialMap';
 
 
 
-const POPULAR_CHANNELS = [
-  // 2.4 GHz
-  { ch: 1, freq: '2412 MHz', band: '2.4 GHz' },
-  { ch: 6, freq: '2437 MHz', band: '2.4 GHz' },
-  { ch: 11, freq: '2462 MHz', band: '2.4 GHz' },
-  // 5 GHz UNII-1
-  { ch: 36, freq: '5180 MHz', band: '5 GHz' },
-  { ch: 40, freq: '5200 MHz', band: '5 GHz' },
-  { ch: 44, freq: '5220 MHz', band: '5 GHz' },
-  { ch: 48, freq: '5240 MHz', band: '5 GHz' },
-  // 5 GHz UNII-2
-  { ch: 52, freq: '5260 MHz', band: '5 GHz' },
-  { ch: 60, freq: '5300 MHz', band: '5 GHz' },
-  // 5 GHz UNII-2e
-  { ch: 100, freq: '5500 MHz', band: '5 GHz' },
-  { ch: 140, freq: '5700 MHz', band: '5 GHz' },
-  // 5 GHz UNII-3
-  { ch: 149, freq: '5745 MHz', band: '5 GHz' },
-  { ch: 153, freq: '5765 MHz', band: '5 GHz' },
-  { ch: 157, freq: '5785 MHz', band: '5 GHz' },
-  { ch: 161, freq: '5805 MHz', band: '5 GHz' },
-  { ch: 165, freq: '5825 MHz', band: '5 GHz' }
-];
-
-const ALL_SPECTRUM_CHANNELS = [
-  // 2.4 GHz Channels 1 - 14
-  { ch: 1, freq: '2412 MHz', band: '2.4 GHz' },
-  { ch: 2, freq: '2417 MHz', band: '2.4 GHz' },
-  { ch: 3, freq: '2422 MHz', band: '2.4 GHz' },
-  { ch: 4, freq: '2427 MHz', band: '2.4 GHz' },
-  { ch: 5, freq: '2432 MHz', band: '2.4 GHz' },
-  { ch: 6, freq: '2437 MHz', band: '2.4 GHz' },
-  { ch: 7, freq: '2442 MHz', band: '2.4 GHz' },
-  { ch: 8, freq: '2447 MHz', band: '2.4 GHz' },
-  { ch: 9, freq: '2452 MHz', band: '2.4 GHz' },
-  { ch: 10, freq: '2457 MHz', band: '2.4 GHz' },
-  { ch: 11, freq: '2462 MHz', band: '2.4 GHz' },
-  { ch: 12, freq: '2467 MHz', band: '2.4 GHz' },
-  { ch: 13, freq: '2472 MHz', band: '2.4 GHz' },
-  { ch: 14, freq: '2484 MHz', band: '2.4 GHz' },
-  // 5 GHz UNII Channels
-  { ch: 36, freq: '5180 MHz', band: '5 GHz' },
-  { ch: 40, freq: '5200 MHz', band: '5 GHz' },
-  { ch: 44, freq: '5220 MHz', band: '5 GHz' },
-  { ch: 48, freq: '5240 MHz', band: '5 GHz' },
-  { ch: 52, freq: '5260 MHz', band: '5 GHz' },
-  { ch: 56, freq: '5280 MHz', band: '5 GHz' },
-  { ch: 60, freq: '5300 MHz', band: '5 GHz' },
-  { ch: 64, freq: '5320 MHz', band: '5 GHz' },
-  { ch: 100, freq: '5500 MHz', band: '5 GHz' },
-  { ch: 104, freq: '5520 MHz', band: '5 GHz' },
-  { ch: 108, freq: '5540 MHz', band: '5 GHz' },
-  { ch: 112, freq: '5560 MHz', band: '5 GHz' },
-  { ch: 116, freq: '5580 MHz', band: '5 GHz' },
-  { ch: 120, freq: '5600 MHz', band: '5 GHz' },
-  { ch: 124, freq: '5620 MHz', band: '5 GHz' },
-  { ch: 128, freq: '5640 MHz', band: '5 GHz' },
-  { ch: 132, freq: '5660 MHz', band: '5 GHz' },
-  { ch: 136, freq: '5680 MHz', band: '5 GHz' },
-  { ch: 140, freq: '5700 MHz', band: '5 GHz' },
-  { ch: 144, freq: '5720 MHz', band: '5 GHz' },
-  { ch: 149, freq: '5745 MHz', band: '5 GHz' },
-  { ch: 153, freq: '5765 MHz', band: '5 GHz' },
-  { ch: 157, freq: '5785 MHz', band: '5 GHz' },
-  { ch: 161, freq: '5805 MHz', band: '5 GHz' },
-  { ch: 165, freq: '5825 MHz', band: '5 GHz' }
-];
-
-const HOP_CHANNELS = [1, 6, 11, 36, 40, 44, 48];
-const PCAP_MAX_CAPACITY = 50000;
-const ROWS_PER_PAGE = 100;
-
-// Upper bound on tracked APs/clients held in React state. Without a cap the
-// dictionaries grow without limit on long or dense captures, and since each
-// 500ms flush shallow-clones the whole dictionary that cost climbs with every
-// new node. Once over the cap we age out the least-recently-seen entries.
-const MAX_TRACKED_NODES = 3000;
-
-// Delete the oldest entries (by timestamp field tsKey) from a keyed object
-// until it holds at most cap keys. Mutates and returns the same object.
-function pruneOldestEntries(dict, cap, tsKey) {
-  const key = tsKey || 'lastSeenTimestamp';
-  const keys = Object.keys(dict);
-  if (keys.length <= cap) return dict;
-  const sorted = keys.sort(function (a, b) {
-    const ta = (dict[a] && dict[a][key]) || 0;
-    const tb = (dict[b] && dict[b][key]) || 0;
-    return ta - tb;
-  });
-  const removeCount = keys.length - cap;
-  for (let i = 0; i < removeCount; i++) {
-    delete dict[sorted[i]];
-  }
-  return dict;
-}
-
-/**
- * Lightweight SVG sparkline tracking RSSI signal trends over time.
- * Dynamic color-coding: Emerald for strong, Cyan for moderate, Rose for weak.
- */
-function Sparkline({ data = [], width = 56, height = 18 }) {
-  if (!data || data.length < 2) {
-    return (
-      <span className="text-[10px] text-slate-600 font-mono italic select-none">
-        —
-      </span>
-    );
-  }
-  const min = -95;
-  const max = -30;
-  const range = max - min || 1;
-  const padY = 2;
-  const effH = height - padY * 2;
-  const points = data.map((val, idx) => {
-    const clamped = Math.max(min, Math.min(max, val));
-    const x = (idx / (data.length - 1)) * width;
-    const y = padY + effH - ((clamped - min) / range) * effH;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-
-  const lastVal = data[data.length - 1];
-  const stroke = lastVal > -60 ? '#10b981' : lastVal > -75 ? '#22d3ee' : '#f43f5e';
-  const lastPoint = points.split(' ').pop().split(',');
-
-  return (
-    <svg width={width} height={height} className="overflow-visible block" title={`Signal Trend (Last ${data.length} pkts): ${data.join(', ')} dBm`}>
-      <polyline
-        fill="none"
-        stroke={stroke}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        points={points}
-      />
-      <circle cx={lastPoint[0]} cy={lastPoint[1]} r="2" fill={stroke} />
-    </svg>
-  );
-}
+import { POPULAR_CHANNELS, ALL_SPECTRUM_CHANNELS, HOP_CHANNELS, PCAP_MAX_CAPACITY, ROWS_PER_PAGE, MAX_TRACKED_NODES, pruneOldestEntries, Sparkline } from './alfa/shared';
+import ApsTab from './alfa/ApsTab';
+import ClientsTab from './alfa/ClientsTab';
+import WatchlistTab from './alfa/WatchlistTab';
+import ProbingTab from './alfa/ProbingTab';
+import RoamingTab from './alfa/RoamingTab';
+import SpectrumTab from './alfa/SpectrumTab';
+import FramesTab from './alfa/FramesTab';
+import AnomaliesTab from './alfa/AnomaliesTab';
+import CleartextTab from './alfa/CleartextTab';
+import HeuristicsTab from './alfa/HeuristicsTab';
+import Layer3Tab from './alfa/Layer3Tab';
+import RulesTab from './alfa/RulesTab';
 
 export default function AlfaWifiWorkbench() {
   const [device, setDevice] = useState(null);
@@ -3240,7 +3104,7 @@ export default function AlfaWifiWorkbench() {
               try {
                 localStorage.setItem('alfa_wifi_gps_tagging', String(nextWardrive));
               } catch {}
-              showStatusNotice(
+              setStatusMessage(
                 nextWardrive
                   ? `Wardriving Mode active (${adapterPreset === 'pau09' ? 'Panda PAU09 RT5572' : 'Alfa RTL8812AU'}): GPS Tagging + Channel Hopping enabled.`
                   : 'Wardriving Mode paused.'
@@ -4646,1465 +4510,115 @@ export default function AlfaWifiWorkbench() {
 
           {/* Tab 1: Access Points (BSSIDs) */}
           {activeTab === 'aps' && (
-            <div>
-              <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
-                {apList.length === 0 ? (
-                  <div className="p-8 text-center text-xs space-y-4 max-w-xl mx-auto my-4 bg-slate-900/40 rounded-xl border border-slate-800/80">
-                    <div className="w-12 h-12 rounded-full bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mx-auto text-cyan-400">
-                      <Radar className={`w-6 h-6 ${isMonitoring ? 'animate-spin' : ''}`} style={{ animationDuration: '4s' }} />
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold text-slate-200">
-                        {isMonitoring ? 'Scanning Airwaves — No Networks Captured Yet' : 'Monitor Inactive — Adapter Ready'}
-                      </div>
-                      <div className="text-slate-400 text-[11px] mt-1 max-w-md mx-auto">
-                        {isMonitoring
-                          ? `Listening on Channel ${channel} (${Number(channel) > 14 ? '5 GHz' : '2.4 GHz'}). If you're on a 5GHz channel without local APs, try hopping to 2.4GHz where beacon traffic is highest.`
-                          : 'Click Start Monitor to begin capturing 802.11 beacons and probe frames with your Alfa adapter.'}
-                      </div>
-                    </div>
-
-                    {/* Quick Diagnostic Actions */}
-                    <div className="flex flex-wrap items-center justify-center gap-2 pt-2 border-t border-slate-800/60">
-                      {!isMonitoring && (
-                        <button
-                          type="button"
-                          onClick={handleStartMonitor}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition shadow-emerald-glow"
-                        >
-                          <Play className="w-3.5 h-3.5 fill-current" />
-                          <span>Start Monitor</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleChannelChange(1)}
-                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
-                          channel === 1 || channel === '1'
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                        }`}
-                        title="Tune hardware to 2.4 GHz Channel 1"
-                      >
-                        Tune Ch 1 (2.4G)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleChannelChange(6)}
-                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
-                          channel === 6 || channel === '6'
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                        }`}
-                        title="Tune hardware to 2.4 GHz Channel 6"
-                      >
-                        Tune Ch 6 (2.4G)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleChannelChange(11)}
-                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
-                          channel === 11 || channel === '11'
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                        }`}
-                        title="Tune hardware to 2.4 GHz Channel 11"
-                      >
-                        Tune Ch 11 (2.4G)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsAutoHop(prev => !prev)}
-                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition ${
-                          isAutoHop
-                            ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
-                            : 'bg-slate-950 text-purple-300 border-slate-800 hover:border-slate-700'
-                        }`}
-                        title="Toggle automatic channel hopping across 2.4G and 5G bands"
-                      >
-                        {isAutoHop ? 'Disable Auto-Hop' : 'Enable Auto-Hop Scan'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsSimulateRf(true);
-                          if (!isMonitoring) {
-                            setIsMonitoring(true);
-                            isCapturingRef.current = true;
-                          }
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-cyan-300 hover:border-cyan-500/40 text-xs font-semibold transition"
-                        title="Generate realistic simulated 802.11 beacon, probe, and handshake traffic"
-                      >
-                        Simulate RF (Demo)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSetupGuideError(null);
-                          setIsSetupGuideOpen(true);
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-amber-300 hover:border-amber-500/40 text-xs font-semibold transition"
-                        title="Open Windows WebUSB WinUSB Driver Configuration Guide"
-                      >
-                        Driver Guide
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                      <tr>
-                        <th className="py-2.5 px-3 w-8 text-center">⭐</th>
-                        <th className="py-2.5 px-3">BSSID</th>
-                        <th className="py-2.5 px-3">IP Address</th>
-                        <th className="py-2.5 px-3">SSID / Network Name</th>
-                        <th className="py-2.5 px-3">Cluster</th>
-                        <th className="py-2.5 px-3">Security</th>
-                        <th className="py-2.5 px-3">Roaming</th>
-                        <th className="py-2.5 px-3">Handshake</th>
-                        <th className="py-2.5 px-3">RSSI</th>
-                        <th className="py-2.5 px-3">SNR</th>
-                        <th className="py-2.5 px-3">Signal Trend</th>
-                        <th className="py-2.5 px-3">CH</th>
-                        {isGpsTagging && <th className="py-2.5 px-3">Distance</th>}
-                        <th className="py-2.5 px-3">Vendor</th>
-                        <th className="py-2.5 px-3">Packets</th>
-                        <th className="py-2.5 px-3 text-right">Last Seen</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-900">
-                      {isGroupByCluster ? (
-                        clusteredApDisplayList.map((entry) => {
-                          if (entry.isCluster) {
-                            const isExpanded = Boolean(expandedClusters[entry.id]);
-                            const totalPkts = entry.devices.reduce((acc, d) => acc + (d.packetCount || 1), 0);
-                            return (
-                              <React.Fragment key={entry.id}>
-                                <tr
-                                  onClick={() => setExpandedClusters(prev => ({ ...prev, [entry.id]: !prev[entry.id] }))}
-                                  className="bg-slate-900/80 hover:bg-slate-800/80 cursor-pointer border-l-4 border-cyan-500 transition-colors"
-                                >
-                                  <td className="py-2.5 px-3 text-center">
-                                    {isExpanded ? (
-                                      <ChevronDown className="w-4 h-4 text-cyan-400 inline-block" />
-                                    ) : (
-                                      <ChevronRight className="w-4 h-4 text-cyan-400 inline-block" />
-                                    )}
-                                  </td>
-                                  <td className="py-2.5 px-3 font-mono font-bold text-cyan-300 whitespace-nowrap">
-                                    {entry.bssid}
-                                  </td>
-                                  <td className="py-2.5 px-3 whitespace-nowrap text-slate-600 font-mono text-[10px]">—</td>
-                                  <td className="py-2.5 px-3 whitespace-nowrap">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-bold text-slate-100">{entry.name}</span>
-                                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold">
-                                        Cluster ({entry.count} BSSIDs)
-                                      </span>
-                                    </div>
-                                  </td>
-                                  <td className="py-2.5 px-3 whitespace-nowrap">
-                                    <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800 font-semibold inline-flex items-center gap-1">
-                                      <Layers className="w-3 h-3 text-cyan-400" />
-                                      Node Group ({entry.count})
-                                    </span>
-                                  </td>
-                                  <td className="py-2.5 px-3 whitespace-nowrap text-slate-300">{entry.security}</td>
-                                  <td className="py-2.5 px-3 whitespace-nowrap text-slate-600 font-mono text-[10px]">—</td>
-                                  <td className="py-2.5 px-3 whitespace-nowrap text-slate-600 font-mono text-[10px]">—</td>
-                                  <td className="py-2.5 px-3 whitespace-nowrap font-bold text-cyan-400">
-                                    <span className={`px-2 py-0.5 rounded text-[10px] border ${getRssiBadge(entry.rssi)}`}>
-                                      {entry.rssi} dBm
-                                    </span>
-                                  </td>
-                                  <td className="py-2.5 px-3 whitespace-nowrap text-slate-600 font-mono text-[10px]">—</td>
-                                  <td className="py-2.5 px-3 whitespace-nowrap text-slate-600 font-mono text-[10px]">—</td>
-                                  <td className="py-2.5 px-3 text-cyan-300 font-mono whitespace-nowrap">CH {entry.channel}</td>
-                                  {isGpsTagging && <td className="py-2.5 px-3 text-slate-600 font-mono text-[10px]">—</td>}
-                                  <td className="py-2.5 px-3 text-slate-300 font-semibold whitespace-nowrap">{entry.vendor}</td>
-                                  <td className="py-2.5 px-3 text-purple-300 font-semibold whitespace-nowrap">{totalPkts}</td>
-                                  <td className="py-2.5 px-3 text-right text-cyan-400 font-semibold text-[11px] whitespace-nowrap">
-                                    {isExpanded ? 'Collapse ▲' : 'Expand ▼'}
-                                  </td>
-                                </tr>
-
-                                {isExpanded && entry.devices.map((dev) => {
-                                  const isNew = isNewDeviceSinceBaseline(dev);
-                                  const devAnnotation = deviceAnnotations[dev.bssid.toUpperCase()] || null;
-                                  return (
-                                    <tr 
-                                      key={dev.bssid} 
-                                      onClick={() => setSelectedItem({ type: 'ap', data: dev })}
-                                      style={devAnnotation?.customColor ? { borderLeftColor: devAnnotation.customColor, borderLeftWidth: '4px' } : undefined}
-                                      className={`hover:bg-slate-900/60 cursor-pointer transition-colors bg-slate-950/90 ${
-                                        devAnnotation?.customColor ? '' : 'border-l-2 border-cyan-500/40'
-                                      } ${
-                                        selectedItem?.data?.bssid === dev.bssid ? 'bg-cyan-950/40' : ''
-                                      }`}
-                                    >
-                                      <td 
-                                        className="py-2 px-3 text-center whitespace-nowrap pl-4"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          toggleWatchlist(dev.bssid);
-                                        }}
-                                      >
-                                        <button
-                                          type="button"
-                                          title={watchlist.includes(dev.bssid.toUpperCase()) ? 'Remove from Watchlist' : 'Add to Watchlist'}
-                                          className="p-1 hover:scale-125 transition-transform"
-                                        >
-                                          <Star className={`w-3.5 h-3.5 ${
-                                            watchlist.includes(dev.bssid.toUpperCase()) 
-                                              ? 'text-amber-400 fill-amber-400' 
-                                              : 'text-slate-600 hover:text-amber-300'
-                                          }`} />
-                                        </button>
-                                      </td>
-                                      <td className="py-2 px-3 font-bold text-slate-300 whitespace-nowrap pl-5">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="text-slate-500">↳</span>
-                                          <span className="font-mono">{dev.bssid}</span>
-                                          {isNew && (
-                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 shrink-0">
-                                              NEW
-                                            </span>
-                                          )}
-                                        </div>
-                                      </td>
-                                      <td className="py-2 px-3 font-mono text-cyan-300 whitespace-nowrap">
-                                        {dev.ipAddress ? (
-                                          <span className="px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-800 text-[11px] text-cyan-300 font-bold">
-                                            {dev.ipAddress}
-                                          </span>
-                                        ) : (
-                                          <span className="text-slate-600 font-mono text-[10px]">—</span>
-                                        )}
-                                      </td>
-                                      <td className="py-2 px-3 whitespace-nowrap">
-                                        {devAnnotation?.customLabel ? (
-                                          <div className="flex flex-col">
-                                            <div className="flex items-center gap-1 font-bold text-amber-300">
-                                              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: devAnnotation.customColor || '#f59e0b' }} />
-                                              <span className="truncate max-w-[140px]">{devAnnotation.customLabel}</span>
-                                            </div>
-                                            <span className="text-[10px] text-slate-400 truncate max-w-[140px] font-mono">
-                                              {dev.ssid}
-                                            </span>
-                                          </div>
-                                        ) : (
-                                          <span className={`font-semibold ${
-                                            dev.ssid === '<Hidden SSID>' ? 'text-slate-500 italic' : 'text-cyan-300'
-                                          }`}>
-                                            {dev.ssid}
-                                          </span>
-                                        )}
-                                      </td>
-                                      <td className="py-2 px-3 whitespace-nowrap">
-                                        <span className="text-[10px] text-slate-500 font-mono">Cluster Member</span>
-                                      </td>
-                                      <td className="py-2 px-3 whitespace-nowrap">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSecurityBadge(dev.security)}`}>
-                                            {dev.security || 'Open'}
-                                          </span>
-                                          {dev.isWifi6 && (
-                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">
-                                              Wi-Fi 6
-                                            </span>
-                                          )}
-                                          {(dev.isMfpRequired || dev.isMfpCapable || dev.mfp) && (
-                                            <span 
-                                              className="text-emerald-400 cursor-help flex items-center"
-                                              title={dev.isMfpRequired || dev.mfp === 'required' ? "802.11w MFP Required" : "802.11w MFP Supported"}
-                                            >
-                                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                                            </span>
-                                          )}
-                                        </div>
-                                      </td>
-                                      <td className="py-2 px-3 whitespace-nowrap">
-                                        <div className="flex items-center gap-1">
-                                          {dev.roaming?.k && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">k</span>}
-                                          {dev.roaming?.v && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">v</span>}
-                                          {dev.roaming?.r && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">r</span>}
-                                          {!dev.roaming?.k && !dev.roaming?.v && !dev.roaming?.r && <span className="text-slate-600 font-mono text-[10px]">—</span>}
-                                        </div>
-                                      </td>
-                                      <td className="py-2 px-3 whitespace-nowrap">
-                                        {handshakes[dev.bssid]?.isComplete || dev.hasHandshake ? (
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                                            <Lock className="w-3 h-3 text-emerald-400" /> Complete
-                                          </span>
-                                        ) : (
-                                          <span className="text-slate-600 font-mono pl-2">-</span>
-                                        )}
-                                      </td>
-                                      <td className="py-2 px-3 whitespace-nowrap">
-                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getRssiBadge(dev.rssi)}`}>
-                                          {dev.rssi} dBm
-                                        </span>
-                                      </td>
-                                      <td className="py-2 px-3 whitespace-nowrap">
-                                        {dev.snr !== null && dev.snr !== undefined ? (
-                                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSnrBadge(dev.snr)}`}>
-                                            {dev.snr} dB
-                                          </span>
-                                        ) : (
-                                          <span className="text-slate-600 font-mono text-[10px]">—</span>
-                                        )}
-                                      </td>
-                                      <td className="py-2 px-3 whitespace-nowrap">
-                                        <Sparkline data={dev.rssiHistory} />
-                                      </td>
-                                      <td className="py-2 px-3 text-slate-300 whitespace-nowrap">CH {dev.channel}</td>
-                                      {isGpsTagging && <td className="py-2 px-3 text-slate-600 font-mono text-[10px]">—</td>}
-                                      <td className="py-2 px-3 text-slate-400 whitespace-nowrap font-medium">{dev.vendor || getVendor(dev.bssid)}</td>
-                                      <td className="py-2 px-3 text-purple-300 font-semibold whitespace-nowrap">{dev.packetCount}</td>
-                                      <td className="py-2 px-3 text-right text-slate-500 whitespace-nowrap">{dev.lastSeen}</td>
-                                    </tr>
-                                  );
-                                })}
-                              </React.Fragment>
-                            );
-                          }
-
-                          const singleDev = entry.devices ? entry.devices[0] : entry;
-                          const isNew = isNewDeviceSinceBaseline(singleDev);
-                          const singleDevAnnotation = deviceAnnotations[singleDev.bssid.toUpperCase()] || null;
-                          return (
-                            <tr 
-                              key={singleDev.bssid} 
-                              onClick={() => setSelectedItem({ type: 'ap', data: singleDev })}
-                              style={singleDevAnnotation?.customColor ? { borderLeftColor: singleDevAnnotation.customColor, borderLeftWidth: '4px' } : undefined}
-                              className={`hover:bg-slate-900/60 cursor-pointer transition-colors ${
-                                singleDevAnnotation?.customColor ? '' : selectedItem?.data?.bssid === singleDev.bssid ? 'bg-cyan-950/30 border-l-2 border-cyan-400' : isNew ? 'bg-purple-950/20 border-l-2 border-purple-500' : ''
-                              }`}
-                            >
-                              <td 
-                                className="py-2 px-3 text-center whitespace-nowrap"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleWatchlist(singleDev.bssid);
-                                }}
-                              >
-                                <button
-                                  type="button"
-                                  title={watchlist.includes(singleDev.bssid.toUpperCase()) ? 'Remove from Watchlist' : 'Add to Watchlist'}
-                                  className="p-1 hover:scale-125 transition-transform"
-                                >
-                                  <Star className={`w-3.5 h-3.5 ${
-                                    watchlist.includes(singleDev.bssid.toUpperCase()) 
-                                      ? 'text-amber-400 fill-amber-400' 
-                                      : 'text-slate-600 hover:text-amber-300'
-                                  }`} />
-                                </button>
-                              </td>
-                              <td className="py-2 px-3 font-bold text-slate-300 whitespace-nowrap">
-                                <div className="flex items-center gap-1.5">
-                                  <span>{singleDev.bssid}</span>
-                                  {isNew && (
-                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 shrink-0">
-                                      NEW
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-2 px-3 font-mono text-cyan-300 whitespace-nowrap">
-                                {singleDev.ipAddress ? (
-                                  <span className="px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-800 text-[11px] text-cyan-300 font-bold">
-                                    {singleDev.ipAddress}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-600 font-mono text-[10px]">—</span>
-                                )}
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                {singleDevAnnotation?.customLabel ? (
-                                  <div className="flex flex-col">
-                                    <div className="flex items-center gap-1 font-bold text-amber-300">
-                                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: singleDevAnnotation.customColor || '#f59e0b' }} />
-                                      <span className="truncate max-w-[140px]">{singleDevAnnotation.customLabel}</span>
-                                    </div>
-                                    <span className="text-[10px] text-slate-400 truncate max-w-[140px] font-mono">
-                                      {singleDev.ssid}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span className={`font-semibold ${
-                                    singleDev.ssid === '<Hidden SSID>' ? 'text-slate-500 italic' : 'text-cyan-300'
-                                  }`}>
-                                    {singleDev.ssid}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap text-slate-600 font-mono text-[10px]">
-                                —
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSecurityBadge(singleDev.security)}`}>
-                                    {singleDev.security || 'Open'}
-                                  </span>
-                                  {singleDev.isWifi6 && (
-                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">
-                                      Wi-Fi 6
-                                    </span>
-                                  )}
-                                  {(singleDev.isMixedMode || singleDev.security?.includes('Mixed')) && (
-                                    <span className="text-amber-400 cursor-help" title="Mixed-Mode Encryption (WPA2/WPA3)">
-                                      <ShieldAlert className="w-4 h-4 text-amber-400" />
-                                    </span>
-                                  )}
-                                  {(singleDev.isMfpRequired || singleDev.isMfpCapable || singleDev.mfp) && (
-                                    <span 
-                                      className="text-emerald-400 cursor-help flex items-center"
-                                      title={singleDev.isMfpRequired || singleDev.mfp === 'required' ? "802.11w MFP Required" : "802.11w MFP Supported"}
-                                    >
-                                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                <div className="flex items-center gap-1">
-                                  {singleDev.roaming?.k && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">k</span>}
-                                  {singleDev.roaming?.v && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">v</span>}
-                                  {singleDev.roaming?.r && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">r</span>}
-                                  {!singleDev.roaming?.k && !singleDev.roaming?.v && !singleDev.roaming?.r && <span className="text-slate-600 font-mono text-[10px]">—</span>}
-                                </div>
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                {handshakes[singleDev.bssid]?.isComplete || singleDev.hasHandshake ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                                    <Lock className="w-3 h-3 text-emerald-400" /> Complete
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-600 font-mono pl-2">-</span>
-                                )}
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getRssiBadge(singleDev.rssi)}`}>
-                                  {singleDev.rssi} dBm
-                                </span>
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                {singleDev.snr !== null && singleDev.snr !== undefined ? (
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSnrBadge(singleDev.snr)}`}>
-                                    {singleDev.snr} dB
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-600 font-mono text-[10px]">—</span>
-                                )}
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                <Sparkline data={singleDev.rssiHistory} />
-                              </td>
-                              <td className="py-2 px-3 text-slate-300 whitespace-nowrap">CH {singleDev.channel}</td>
-                              {isGpsTagging && <td className="py-2 px-3 text-slate-600 font-mono text-[10px]">—</td>}
-                              <td className="py-2 px-3 text-slate-400 whitespace-nowrap font-medium">{singleDev.vendor || getVendor(singleDev.bssid)}</td>
-                              <td className="py-2 px-3 text-purple-300 font-semibold whitespace-nowrap">{singleDev.packetCount}</td>
-                              <td className="py-2 px-3 text-right text-slate-500 whitespace-nowrap">{singleDev.lastSeen}</td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        visibleApList.map((dev) => {
-                          const isNew = isNewDeviceSinceBaseline(dev);
-                          const cluster = bssidClusterMap.get(dev.bssid);
-                          return (
-                            <tr 
-                              key={dev.bssid} 
-                              onClick={() => setSelectedItem({ type: 'ap', data: dev })}
-                              className={`hover:bg-slate-900/60 cursor-pointer transition-colors ${
-                                selectedItem?.data?.bssid === dev.bssid ? 'bg-cyan-950/30 border-l-2 border-cyan-400' : ''
-                              } ${isNew ? 'bg-purple-950/20 border-l-2 border-purple-500' : ''}`}
-                            >
-                              <td 
-                                className="py-2 px-3 text-center whitespace-nowrap"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleWatchlist(dev.bssid);
-                                }}
-                              >
-                                <button
-                                  type="button"
-                                  title={watchlist.includes(dev.bssid.toUpperCase()) ? 'Remove from Watchlist' : 'Add to Watchlist'}
-                                  className="p-1 hover:scale-125 transition-transform"
-                                >
-                                  <Star className={`w-3.5 h-3.5 ${
-                                    watchlist.includes(dev.bssid.toUpperCase()) 
-                                      ? 'text-amber-400 fill-amber-400' 
-                                      : 'text-slate-600 hover:text-amber-300'
-                                  }`} />
-                                </button>
-                              </td>
-                              <td className="py-2 px-3 font-bold text-slate-300 whitespace-nowrap">
-                                <div className="flex items-center gap-1.5">
-                                  <span>{dev.bssid}</span>
-                                  {isNew && (
-                                    <span 
-                                      className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 shrink-0"
-                                      title="Discovered after saved baseline snapshot"
-                                    >
-                                      NEW
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-2 px-3 font-mono text-cyan-300 whitespace-nowrap">
-                                {dev.ipAddress ? (
-                                  <span className="px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-800 text-[11px] text-cyan-300 font-bold">
-                                    {dev.ipAddress}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-600 font-mono text-[10px]">—</span>
-                                )}
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`font-semibold ${
-                                    dev.ssid === '<Hidden SSID>' ? 'text-slate-500 italic' : 'text-cyan-300'
-                                  }`}>
-                                    {dev.ssid}
-                                  </span>
-                                  {(dev.isUnmasked || dev.originalHidden) && dev.ssid !== '<Hidden SSID>' && (
-                                    <span 
-                                      className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 shrink-0"
-                                      title="Hidden SSID unmasked via correlated client probe/association frames"
-                                    >
-                                      <Lock className="w-2.5 h-2.5 text-amber-400" />
-                                      <span>(Unmasked)</span>
-                                    </span>
-                                  )}
-                                  {dev.isRogueSuspect && (
-                                    <span 
-                                      className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-600/30 text-rose-300 border border-rose-500/50 flex items-center gap-1 shrink-0"
-                                      title={dev.rogueReason || 'Rogue AP / Evil Twin Suspect'}
-                                    >
-                                      <AlertTriangle className="w-2.5 h-2.5" /> Rogue Suspect
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                {cluster ? (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setIsGroupByCluster(true);
-                                      setExpandedClusters(prev => ({ ...prev, [cluster.id]: true }));
-                                    }}
-                                    className="px-2 py-0.5 rounded text-[10px] bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 font-semibold inline-flex items-center gap-1 transition"
-                                    title={`${cluster.name}\nClick to view grouped cluster`}
-                                  >
-                                    <Layers className="w-3 h-3 text-cyan-400" />
-                                    <span>Node Group ({cluster.count})</span>
-                                  </button>
-                                ) : (
-                                  <span className="text-slate-600 font-mono text-[10px]">—</span>
-                                )}
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                <div className="flex items-center gap-1.5">
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSecurityBadge(dev.security)}`}>
-                                    {dev.security || 'Open'}
-                                  </span>
-                                  {dev.isWifi6 && (
-                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">
-                                      Wi-Fi 6
-                                    </span>
-                                  )}
-                                  {(dev.isMixedMode || dev.security?.includes('Mixed')) && (
-                                    <span 
-                                      className="text-amber-400 cursor-help"
-                                      title="Mixed-Mode Encryption (WPA2/WPA3)"
-                                    >
-                                      <ShieldAlert className="w-4 h-4 text-amber-400" />
-                                    </span>
-                                  )}
-                                  {(dev.isMfpRequired || dev.isMfpCapable || dev.mfp) && (
-                                    <span 
-                                      className="text-emerald-400 cursor-help flex items-center"
-                                      title={dev.isMfpRequired || dev.mfp === 'required' ? "802.11w MFP Required" : "802.11w MFP Supported"}
-                                    >
-                                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-2 px-3 whitespace-nowrap">
-                                <div className="flex items-center gap-1">
-                                  {dev.roaming?.k && (
-                                    <span 
-                                      className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-help"
-                                      title="802.11k: Radio Resource Measurement (neighbor reports & channel load)"
-                                    >
-                                      k
-                                    </span>
-                                  )}
-                                  {dev.roaming?.v && (
-                                    <span 
-                                      className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-help"
-                                      title="802.11v: Wireless Network Management (BSS Transition Management)"
-                                    >
-                                      v
-                                    </span>
-                                  )}
-                                  {dev.roaming?.r && (
-                                    <span 
-                                      className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-help"
-                                      title="802.11r: Fast BSS Transition (FT handshake across APs)"
-                                    >
-                                      r
-                                    </span>
-                                  )}
-                                  {!dev.roaming?.k && !dev.roaming?.v && !dev.roaming?.r && (
-                                    <span className="text-slate-600 font-mono text-[10px]">—</span>
-                                  )}
-                                </div>
-                              </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              {handshakes[dev.bssid]?.isComplete || dev.hasHandshake ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                                  <Lock className="w-3 h-3 text-emerald-400" />
-                                  Complete
-                                </span>
-                              ) : (
-                                <span className="text-slate-600 font-mono pl-2">-</span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getRssiBadge(dev.rssi)}`}>
-                                {dev.rssi} dBm
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              {dev.snr !== null && dev.snr !== undefined ? (
-                                <span 
-                                  className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSnrBadge(dev.snr)}`}
-                                  title={`SNR: ${dev.snr} dB (RSSI: ${dev.rssi} dBm, Noise: ${dev.noiseFloor ?? -95} dBm)`}
-                                >
-                                  {dev.snr} dB
-                                </span>
-                              ) : (
-                                <span className="text-slate-600 font-mono text-[10px]">—</span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <Sparkline data={dev.rssiHistory} />
-                            </td>
-                            <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
-                              CH {dev.channel}
-                            </td>
-                            {isGpsTagging && (
-                              <td className="py-2 px-3 text-cyan-300 font-mono whitespace-nowrap">
-                                {(() => {
-                                  if (dev.latitude != null && dev.longitude != null && currentGps?.latitude != null && currentGps?.longitude != null) {
-                                    const dist = calculateHaversineDistance(
-                                      currentGps.latitude,
-                                      currentGps.longitude,
-                                      dev.latitude,
-                                      dev.longitude
-                                    );
-                                    return dist !== null ? `${dist.toLocaleString()} m` : '—';
-                                  }
-                                  return <span className="text-slate-600 font-mono">—</span>;
-                                })()}
-                              </td>
-                            )}
-                            <td className="py-2 px-3 text-slate-400 whitespace-nowrap font-medium">
-                              {dev.vendor || getVendor(dev.bssid)}
-                            </td>
-                            <td className="py-2 px-3 text-purple-300 font-semibold whitespace-nowrap">
-                              {dev.packetCount}
-                            </td>
-                            <td className="py-2 px-3 text-right text-slate-500 whitespace-nowrap">
-                              {dev.lastSeen}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              {/* Pagination controls if rows > 100 */}
-              {apList.length > ROWS_PER_PAGE && (
-                <div className="px-4 py-2 bg-slate-900/60 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-                  <div>
-                    Showing {(tablePage - 1) * ROWS_PER_PAGE + 1} - {Math.min(tablePage * ROWS_PER_PAGE, apList.length)} of {apList.length} APs
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      disabled={tablePage === 1}
-                      onClick={() => setTablePage(p => Math.max(1, p - 1))}
-                      className="px-2.5 py-1 rounded bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-slate-200 flex items-center gap-1"
-                    >
-                      <ChevronLeft className="w-3.5 h-3.5" />
-                      <span>Prev</span>
-                    </button>
-                    <span className="font-semibold text-slate-300">
-                      Page {tablePage} / {Math.ceil(apList.length / ROWS_PER_PAGE)}
-                    </span>
-                    <button
-                      disabled={tablePage >= Math.ceil(apList.length / ROWS_PER_PAGE)}
-                      onClick={() => setTablePage(p => p + 1)}
-                      className="px-2.5 py-1 rounded bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-slate-200 flex items-center gap-1"
-                    >
-                      <span>Next</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <ApsTab
+              apList={apList}
+              bssidClusterMap={bssidClusterMap}
+              channel={channel}
+              clusteredApDisplayList={clusteredApDisplayList}
+              currentGps={currentGps}
+              deviceAnnotations={deviceAnnotations}
+              expandedClusters={expandedClusters}
+              getRssiBadge={getRssiBadge}
+              getSecurityBadge={getSecurityBadge}
+              getSnrBadge={getSnrBadge}
+              handleChannelChange={handleChannelChange}
+              handleStartMonitor={handleStartMonitor}
+              handshakes={handshakes}
+              isAutoHop={isAutoHop}
+              isCapturingRef={isCapturingRef}
+              isGpsTagging={isGpsTagging}
+              isGroupByCluster={isGroupByCluster}
+              isMonitoring={isMonitoring}
+              isNewDeviceSinceBaseline={isNewDeviceSinceBaseline}
+              selectedItem={selectedItem}
+              setExpandedClusters={setExpandedClusters}
+              setIsAutoHop={setIsAutoHop}
+              setIsGroupByCluster={setIsGroupByCluster}
+              setIsMonitoring={setIsMonitoring}
+              setIsSetupGuideOpen={setIsSetupGuideOpen}
+              setIsSimulateRf={setIsSimulateRf}
+              setSelectedItem={setSelectedItem}
+              setSetupGuideError={setSetupGuideError}
+              setTablePage={setTablePage}
+              tablePage={tablePage}
+              toggleWatchlist={toggleWatchlist}
+              visibleApList={visibleApList}
+              watchlist={watchlist}
+            />
           )}
 
           {/* Tab 2: Client Stations (STAs) */}
           {activeTab === 'clients' && (
-            <div>
-              <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
-                {clientList.length === 0 ? (
-                  <div className="p-12 text-center text-slate-600 text-xs space-y-2">
-                    <div>No client devices detected yet.</div>
-                    <div className="text-slate-500">
-                      Client devices are detected from live Data frames and Probe Requests.
-                    </div>
-                  </div>
-                ) : (
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                      <tr>
-                        <th className="py-2.5 px-3 w-8 text-center">⭐</th>
-                        <th className="py-2.5 px-3">Client MAC</th>
-                        <th className="py-2.5 px-3">IP Address</th>
-                        <th className="py-2.5 px-3">Associated BSSID</th>
-                        <th className="py-2.5 px-3">Vendor OUI</th>
-                        <th className="py-2.5 px-3">Signature</th>
-                        <th className="py-2.5 px-3">RSSI</th>
-                        <th className="py-2.5 px-3">SNR</th>
-                        <th className="py-2.5 px-3">Signal Trend</th>
-                        <th className="py-2.5 px-3">CH</th>
-                        <th className="py-2.5 px-3">Packets</th>
-                        <th className="py-2.5 px-3 text-right">Last Seen</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-900">
-                      {visibleClientList.map((cli) => {
-                        const isNew = isNewDeviceSinceBaseline(cli);
-                        const cliAnnotation = deviceAnnotations[cli.clientMac.toUpperCase()] || null;
-                        return (
-                          <tr 
-                            key={cli.clientMac} 
-                            onClick={() => setSelectedItem({ type: 'client', data: cli })}
-                            style={cliAnnotation?.customColor ? { borderLeftColor: cliAnnotation.customColor, borderLeftWidth: '4px' } : undefined}
-                            className={`hover:bg-slate-900/60 cursor-pointer transition-colors ${
-                              cliAnnotation?.customColor ? '' : selectedItem?.data?.clientMac === cli.clientMac ? 'bg-purple-950/30 border-l-2 border-purple-400' : isNew ? 'bg-purple-950/20 border-l-2 border-purple-500' : ''
-                            }`}
-                          >
-                            <td 
-                              className="py-2 px-3 text-center whitespace-nowrap"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleWatchlist(cli.clientMac);
-                              }}
-                            >
-                              <button
-                                type="button"
-                                title={watchlist.includes(cli.clientMac.toUpperCase()) ? 'Remove from Watchlist' : 'Add to Watchlist'}
-                                className="p-1 hover:scale-125 transition-transform"
-                              >
-                                <Star className={`w-3.5 h-3.5 ${
-                                  watchlist.includes(cli.clientMac.toUpperCase()) 
-                                    ? 'text-amber-400 fill-amber-400' 
-                                    : 'text-slate-600 hover:text-amber-300'
-                                }`} />
-                              </button>
-                            </td>
-                            <td className="py-2 px-3 font-bold text-purple-300 whitespace-nowrap">
-                              <div className="flex items-center gap-1.5">
-                                {renderClientOsIcon(cli)}
-                                {cliAnnotation?.customLabel ? (
-                                  <div className="flex flex-col">
-                                    <div className="flex items-center gap-1 font-bold text-amber-300">
-                                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: cliAnnotation.customColor || '#a855f7' }} />
-                                      <span className="truncate max-w-[140px]">{cliAnnotation.customLabel}</span>
-                                    </div>
-                                    <span className="text-[10px] text-slate-400 font-mono">
-                                      {cli.clientMac}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span>{cli.clientMac}</span>
-                                )}
-                                {isNew && (
-                                  <span 
-                                    className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 shrink-0"
-                                    title="Discovered after saved baseline snapshot"
-                                  >
-                                    NEW
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="py-2 px-3 font-mono whitespace-nowrap">
-                              {cli.ipAddress ? (
-                                <div className="flex flex-col">
-                                  <span className="text-cyan-300 font-bold text-[11px]">{cli.ipAddress}</span>
-                                  {cli.dhcpHostname && (
-                                    <span className="text-[10px] text-amber-300 font-sans">({cli.dhcpHostname})</span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-slate-600 font-mono text-[10px]">—</span>
-                              )}
-                            </td>
-                          <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
-                            {cli.bssid}
-                          </td>
-                          <td className="py-2 px-3 text-slate-400 whitespace-nowrap font-medium">
-                            {cli.vendor || getVendor(cli.clientMac)}
-                          </td>
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            <div className="flex items-center gap-1.5">
-                              <span 
-                                className="font-mono text-[10px] text-slate-400 max-w-[110px] truncate block" 
-                                title={cli.signature || 'No IE tags captured'}
-                              >
-                                {cli.signature || '—'}
-                              </span>
-                              {signatureRandomizedMacs.has(cli.clientMac) && (
-                                <span 
-                                  className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0"
-                                  title="Multiple hardware addresses broadcast the exact same Information Element signature within 10 min window"
-                                >
-                                  Potential Randomization
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getRssiBadge(cli.rssi)}`}>
-                              {cli.rssi} dBm
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            {cli.snr !== null && cli.snr !== undefined ? (
-                              <span 
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSnrBadge(cli.snr)}`}
-                                title={`SNR: ${cli.snr} dB (RSSI: ${cli.rssi} dBm, Noise: ${cli.noiseFloor ?? -95} dBm)`}
-                              >
-                                {cli.snr} dB
-                              </span>
-                            ) : (
-                              <span className="text-slate-600 font-mono text-[10px]">—</span>
-                            )}
-                          </td>
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            <Sparkline data={cli.rssiHistory} />
-                          </td>
-                          <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
-                            CH {cli.channel}
-                          </td>
-                          <td className="py-2 px-3 text-cyan-300 font-semibold whitespace-nowrap">
-                            {cli.packetCount}
-                          </td>
-                          <td className="py-2 px-3 text-right text-slate-500 whitespace-nowrap">
-                            {cli.lastSeen}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              {/* Pagination controls if clients > 100 */}
-              {clientList.length > ROWS_PER_PAGE && (
-                <div className="px-4 py-2 bg-slate-900/60 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-                  <div>
-                    Showing {(tablePage - 1) * ROWS_PER_PAGE + 1} - {Math.min(tablePage * ROWS_PER_PAGE, clientList.length)} of {clientList.length} Clients
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      disabled={tablePage === 1}
-                      onClick={() => setTablePage(p => Math.max(1, p - 1))}
-                      className="px-2.5 py-1 rounded bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-slate-200 flex items-center gap-1"
-                    >
-                      <ChevronLeft className="w-3.5 h-3.5" />
-                      <span>Prev</span>
-                    </button>
-                    <span className="font-semibold text-slate-300">
-                      Page {tablePage} / {Math.ceil(clientList.length / ROWS_PER_PAGE)}
-                    </span>
-                    <button
-                      disabled={tablePage >= Math.ceil(clientList.length / ROWS_PER_PAGE)}
-                      onClick={() => setTablePage(p => p + 1)}
-                      className="px-2.5 py-1 rounded bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-slate-200 flex items-center gap-1"
-                    >
-                      <span>Next</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <ClientsTab
+              clientList={clientList}
+              deviceAnnotations={deviceAnnotations}
+              getRssiBadge={getRssiBadge}
+              getSnrBadge={getSnrBadge}
+              isNewDeviceSinceBaseline={isNewDeviceSinceBaseline}
+              renderClientOsIcon={renderClientOsIcon}
+              selectedItem={selectedItem}
+              setSelectedItem={setSelectedItem}
+              setTablePage={setTablePage}
+              signatureRandomizedMacs={signatureRandomizedMacs}
+              tablePage={tablePage}
+              toggleWatchlist={toggleWatchlist}
+              visibleClientList={visibleClientList}
+              watchlist={watchlist}
+            />
           )}
 
           {/* Tab: Target Watchlist */}
           {activeTab === 'watchlist' && (
-            <div>
-              <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
-                {watchlistList.length === 0 ? (
-                  <div className="p-12 text-center text-slate-600 text-xs space-y-2">
-                    <Star className="w-8 h-8 text-amber-500/40 mx-auto" />
-                    <div className="font-semibold text-slate-300">Your Watchlist is empty.</div>
-                    <div className="text-slate-500 max-w-sm mx-auto">
-                      Click the <span className="text-amber-400 font-bold">⭐ Star</span> icon in the Access Points or Clients table to pin targets for dedicated surveillance and offline tracking.
-                    </div>
-                  </div>
-                ) : (
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                      <tr>
-                        <th className="py-2.5 px-3 w-8 text-center">⭐</th>
-                        <th className="py-2.5 px-3">Target Identifier</th>
-                        <th className="py-2.5 px-3">Node Type</th>
-                        <th className="py-2.5 px-3">SSID / Network Name</th>
-                        <th className="py-2.5 px-3">Vendor</th>
-                        <th className="py-2.5 px-3">RSSI</th>
-                        <th className="py-2.5 px-3">Signal Trend</th>
-                        <th className="py-2.5 px-3">CH</th>
-                        <th className="py-2.5 px-3">Packets</th>
-                        <th className="py-2.5 px-3 text-right">Status / Last Seen</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-900">
-                      {visibleWatchlistList.map((node) => {
-                        // Check if device has not been seen for over 60 seconds
-                        let isMissing = node.isMissing || false;
-                        if (!isMissing && node.lastSeen) {
-                          const parts = node.lastSeen.split(/[:.]/);
-                          if (parts.length >= 3) {
-                            const now = new Date();
-                            const lastSeenDate = new Date();
-                            lastSeenDate.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), parseInt(parts[2], 10), parseInt(parts[3] || 0, 10));
-                            if (now - lastSeenDate > 60000) {
-                              isMissing = true;
-                            }
-                          }
-                        }
-
-                        return (
-                          <tr 
-                            key={node.targetIdentifier}
-                            onClick={() => {
-                              if (node.watchType === 'ap') setSelectedItem({ type: 'ap', data: node });
-                              else if (node.watchType === 'client') setSelectedItem({ type: 'client', data: node });
-                            }}
-                            className={`cursor-pointer transition-colors ${
-                              isMissing
-                                ? 'bg-rose-950/30 hover:bg-rose-950/50 border-l-2 border-rose-500'
-                                : 'hover:bg-slate-900/60'
-                            }`}
-                          >
-                            <td 
-                              className="py-2 px-3 text-center whitespace-nowrap"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleWatchlist(node.targetIdentifier);
-                              }}
-                            >
-                              <button
-                                type="button"
-                                title="Remove from Watchlist"
-                                className="p-1 hover:scale-125 transition-transform"
-                              >
-                                <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                              </button>
-                            </td>
-                            <td className="py-2 px-3 font-mono font-bold text-amber-300 whitespace-nowrap">
-                              {node.targetIdentifier}
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                node.watchType === 'ap'
-                                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                                  : node.watchType === 'client'
-                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
-                                  : 'bg-slate-800 text-slate-400'
-                              }`}>
-                                {node.watchType === 'ap' ? 'Access Point' : node.watchType === 'client' ? 'Client Station' : 'Target'}
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <span className="font-semibold text-slate-200">
-                                {node.ssid || node.probedSsid || node.bssid || '—'}
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 text-slate-400 whitespace-nowrap">
-                              {node.vendor || getVendor(node.targetIdentifier)}
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getRssiBadge(node.rssi)}`}>
-                                {node.rssi != null ? `${node.rssi} dBm` : '—'}
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <Sparkline data={node.rssiHistory} />
-                            </td>
-                            <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
-                              {node.channel ? `CH ${node.channel}` : '—'}
-                            </td>
-                            <td className="py-2 px-3 font-semibold text-cyan-300 whitespace-nowrap">
-                              {node.packetCount || 0}
-                            </td>
-                            <td className="py-2 px-3 text-right whitespace-nowrap">
-                              {isMissing ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-600/30 text-rose-300 border border-rose-500/50">
-                                  <AlertTriangle className="w-3 h-3 text-rose-400" />
-                                  Missing (&gt;60s)
-                                </span>
-                              ) : (
-                                <span className="text-slate-400 text-xs font-mono">
-                                  {node.lastSeen || 'Active'}
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
+            <WatchlistTab
+              getRssiBadge={getRssiBadge}
+              setSelectedItem={setSelectedItem}
+              toggleWatchlist={toggleWatchlist}
+              visibleWatchlistList={visibleWatchlistList}
+              watchlistList={watchlistList}
+            />
           )}
 
           {/* Tab: Probing Clients (STAs seeking networks) */}
           {activeTab === 'probing' && (
-            <div>
-              <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
-                {probingClientList.length === 0 ? (
-                  <div className="p-12 text-center text-slate-600 text-xs space-y-2">
-                    <div>No probing client stations detected yet.</div>
-                    <div className="text-slate-500">
-                      Unassociated devices broadcast Probe Requests searching for preferred networks.
-                    </div>
-                  </div>
-                ) : (
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                      <tr>
-                        <th className="py-2.5 px-3">Client Station MAC</th>
-                        <th className="py-2.5 px-3">Vendor (OUI)</th>
-                        <th className="py-2.5 px-3">Probed Networks (SSIDs)</th>
-                        <th className="py-2.5 px-3">RSSI</th>
-                        <th className="py-2.5 px-3">Signal Trend</th>
-                        <th className="py-2.5 px-3">CH</th>
-                        <th className="py-2.5 px-3">Packets</th>
-                        <th className="py-2.5 px-3 text-right">Last Seen</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-900">
-                      {visibleProbingClientList.map((cli) => (
-                        <tr 
-                          key={cli.clientMac} 
-                          onClick={() => setSelectedItem({ type: 'client', data: cli })}
-                          className={`hover:bg-slate-900/60 cursor-pointer transition-colors ${
-                            selectedItem?.data?.clientMac === cli.clientMac ? 'bg-amber-950/30 border-l-2 border-amber-400' : ''
-                          }`}
-                        >
-                          <td className="py-2 px-3 font-bold text-amber-300 whitespace-nowrap">
-                            <div className="flex items-center gap-1.5">
-                              {renderClientOsIcon(cli)}
-                              <span>{cli.clientMac}</span>
-                            </div>
-                          </td>
-                          <td className="py-2 px-3 text-slate-400 whitespace-nowrap font-medium">
-                            {cli.vendor || getVendor(cli.clientMac)}
-                          </td>
-                          <td className="py-2 px-3">
-                            <div className="flex flex-wrap items-center gap-1 max-w-xs">
-                              {cli.probedSsids && cli.probedSsids.length > 0 ? (
-                                cli.probedSsids.map((s, idx) => (
-                                  <span key={idx} className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30 font-mono">
-                                    {s}
-                                  </span>
-                                ))
-                              ) : cli.probedSsid ? (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30 font-mono">
-                                  {cli.probedSsid}
-                                </span>
-                              ) : (
-                                <span className="text-slate-600 text-[10px] italic">Wildcard Probes Only</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getRssiBadge(cli.rssi)}`}>
-                              {cli.rssi} dBm
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            <Sparkline data={cli.rssiHistory} />
-                          </td>
-                          <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
-                            CH {cli.channel}
-                          </td>
-                          <td className="py-2 px-3 text-amber-300 font-semibold whitespace-nowrap">
-                            {cli.packetCount}
-                          </td>
-                          <td className="py-2 px-3 text-right text-slate-500 whitespace-nowrap">
-                            {cli.lastSeen}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              {/* Pagination controls if probing clients > 100 */}
-              {probingClientList.length > ROWS_PER_PAGE && (
-                <div className="px-4 py-2 bg-slate-900/60 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-                  <div>
-                    Showing {(tablePage - 1) * ROWS_PER_PAGE + 1} - {Math.min(tablePage * ROWS_PER_PAGE, probingClientList.length)} of {probingClientList.length} Probing Clients
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      disabled={tablePage === 1}
-                      onClick={() => setTablePage(p => Math.max(1, p - 1))}
-                      className="px-2.5 py-1 rounded bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-slate-200 flex items-center gap-1"
-                    >
-                      <ChevronLeft className="w-3.5 h-3.5" />
-                      <span>Prev</span>
-                    </button>
-                    <span className="font-semibold text-slate-300">
-                      Page {tablePage} / {Math.ceil(probingClientList.length / ROWS_PER_PAGE)}
-                    </span>
-                    <button
-                      disabled={tablePage >= Math.ceil(probingClientList.length / ROWS_PER_PAGE)}
-                      onClick={() => setTablePage(p => p + 1)}
-                      className="px-2.5 py-1 rounded bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-slate-200 flex items-center gap-1"
-                    >
-                      <span>Next</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <ProbingTab
+              getRssiBadge={getRssiBadge}
+              probingClientList={probingClientList}
+              renderClientOsIcon={renderClientOsIcon}
+              selectedItem={selectedItem}
+              setSelectedItem={setSelectedItem}
+              setTablePage={setTablePage}
+              tablePage={tablePage}
+              visibleProbingClientList={visibleProbingClientList}
+            />
           )}
 
           {/* Tab: Client Roaming Handoff Analysis */}
           {activeTab === 'roaming' && (
-            <div className="p-4 space-y-4">
-              {/* Top Controls & KPI Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl">
-                  <div className="text-[10px] text-slate-500 uppercase font-semibold">Total Roam Events</div>
-                  <div className="text-xl font-bold text-cyan-300 font-mono mt-0.5">
-                    {roamHistory.length}
-                  </div>
-                </div>
-                <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl">
-                  <div className="text-[10px] text-slate-500 uppercase font-semibold">Fastest Roam</div>
-                  <div className="text-xl font-bold text-emerald-400 font-mono mt-0.5">
-                    {roamHistory.length > 0 ? `${Math.min(...roamHistory.map(r => r.roamTime))} ms` : '—'}
-                  </div>
-                </div>
-                <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl">
-                  <div className="text-[10px] text-slate-500 uppercase font-semibold">Avg Roam Time</div>
-                  <div className="text-xl font-bold text-amber-300 font-mono mt-0.5">
-                    {roamHistory.length > 0 
-                      ? `${Math.round(roamHistory.reduce((acc, r) => acc + r.roamTime, 0) / roamHistory.length)} ms`
-                      : '—'}
-                  </div>
-                </div>
-                <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl flex items-center justify-between">
-                  <div>
-                    <div className="text-[10px] text-slate-500 uppercase font-semibold">Roaming Clients</div>
-                    <div className="text-xl font-bold text-purple-300 font-mono mt-0.5">
-                      {new Set(roamHistory.map(r => r.clientMac)).size}
-                    </div>
-                  </div>
-                  {roamHistory.length > 0 && (
-                    <button
-                      onClick={() => setRoamHistory([])}
-                      className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-300 text-[10px] font-semibold border border-slate-700 transition"
-                      title="Clear roaming event log"
-                    >
-                      Clear Log
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Roaming Events Table */}
-              <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
-                {roamHistory.length === 0 ? (
-                  <div className="p-12 text-center text-slate-500 text-xs">
-                    <ArrowRightLeft className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
-                    <p className="font-semibold text-slate-400">No client roaming handoffs detected yet.</p>
-                    <p className="text-[11px] text-slate-600 mt-1 max-w-md mx-auto">
-                      A roaming handoff is automatically logged when a client station switches association between Access Points within 30 seconds.
-                    </p>
-                  </div>
-                ) : (
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-[11px] text-slate-400 font-semibold uppercase">
-                      <tr>
-                        <th className="py-2.5 px-3">Timestamp</th>
-                        <th className="py-2.5 px-3">Client MAC</th>
-                        <th className="py-2.5 px-3">From BSSID</th>
-                        <th className="py-2.5 px-3">To BSSID</th>
-                        <th className="py-2.5 px-3">Roam Time</th>
-                        <th className="py-2.5 px-3">CH</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-900">
-                      {roamHistory.map((roam) => {
-                        const clientAnnotation = deviceAnnotations[roam.clientMac?.toUpperCase()] || null;
-                        const clientVendor = lookupVendor(roam.clientMac);
-
-                        let timeBadge = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
-                        if (roam.roamTime > 1000) {
-                          timeBadge = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
-                        } else if (roam.roamTime > 300) {
-                          timeBadge = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-                        }
-
-                        return (
-                          <tr 
-                            key={roam.id}
-                            className="hover:bg-slate-900/50 transition-colors"
-                          >
-                            <td className="py-2 px-3 text-slate-400 font-mono whitespace-nowrap">
-                              {roam.timestamp}
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <div className="flex flex-col">
-                                {clientAnnotation?.customLabel ? (
-                                  <span className="font-bold text-amber-300">{clientAnnotation.customLabel}</span>
-                                ) : null}
-                                <span className="font-mono text-cyan-300 font-bold">{roam.clientMac}</span>
-                                <span className="text-[10px] text-slate-500">{clientVendor}</span>
-                              </div>
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap font-mono text-rose-300/90">
-                              {roam.fromBssid}
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap font-mono text-emerald-300/90">
-                              {roam.toBssid}
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${timeBadge}`}>
-                                {roam.roamTime} ms
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap text-slate-400">
-                              CH {roam.channel || '—'}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
+            <RoamingTab
+              deviceAnnotations={deviceAnnotations}
+              roamHistory={roamHistory}
+              setRoamHistory={setRoamHistory}
+            />
           )}
 
           {/* Tab 3: Spectrum Channel Utilization & Congestion */}
           {activeTab === 'spectrum' && (
-            <div className="p-4 space-y-4">
-              {/* Top Controls & KPI Cards */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-                {/* Band Selector */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400 font-semibold">Band Filter:</span>
-                  <div className="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800 text-xs">
-                    <button
-                      onClick={() => setSpectrumBand('all')}
-                      className={`px-2.5 py-1 rounded font-semibold transition ${
-                        spectrumBand === 'all' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      All Channels ({ALL_SPECTRUM_CHANNELS.length})
-                    </button>
-                    <button
-                      onClick={() => setSpectrumBand('2.4')}
-                      className={`px-2.5 py-1 rounded font-semibold transition ${
-                        spectrumBand === '2.4' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      2.4 GHz (1-14)
-                    </button>
-                    <button
-                      onClick={() => setSpectrumBand('5')}
-                      className={`px-2.5 py-1 rounded font-semibold transition ${
-                        spectrumBand === '5' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      5 GHz (36-165)
-                    </button>
-                  </div>
-                </div>
-
-                {/* KPI Metrics */}
-                <div className="flex flex-wrap items-center gap-3 text-xs">
-                  <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
-                    <span className="text-slate-500 text-[10px] uppercase block">Total Logged</span>
-                    <span className="font-bold text-cyan-300 text-sm">{spectrumStats.totalPkts.toLocaleString()} pkts</span>
-                  </div>
-                  <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
-                    <span className="text-slate-500 text-[10px] uppercase block">Peak Congestion</span>
-                    <span className="font-bold text-rose-400 text-sm">
-                      {spectrumStats.maxCh ? `CH ${spectrumStats.maxCh} (${spectrumStats.maxPkts} pkts)` : 'None'}
-                    </span>
-                  </div>
-                  <div className="px-3 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-500/40">
-                    <span className="text-emerald-400 text-[10px] uppercase font-bold block">Recommended Channel</span>
-                    <span className="font-bold text-emerald-300 text-sm">
-                      CH {spectrumStats.recommendedCh} (Least Traffic)
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bar Chart Visualization */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span className="font-semibold text-slate-300">
-                    Channel Packet Density (Click any channel bar to retune radio)
-                  </span>
-                  <div className="flex items-center gap-3 text-[11px]">
-                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Low Traffic</span>
-                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500"></span> Moderate</span>
-                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Congested</span>
-                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm border-2 border-cyan-400 bg-cyan-500/40"></span> Active CH</span>
-                  </div>
-                </div>
-
-                <div className="h-64 bg-slate-900/50 border border-slate-800 rounded-xl p-3 flex items-end gap-1 sm:gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-800">
-                  {spectrumChannels.map(c => {
-                    const count = channelStats[c.ch] || 0;
-                    const pct = spectrumStats.maxPkts > 0 ? Math.round((count / spectrumStats.maxPkts) * 100) : 0;
-                    const isActive = channel === c.ch;
-
-                    let barColor = 'bg-slate-800 hover:bg-slate-700';
-                    if (count > 0) {
-                      if (pct > 60) barColor = 'bg-rose-500 hover:bg-rose-400 shadow-rose-glow';
-                      else if (pct > 25) barColor = 'bg-amber-500 hover:bg-amber-400';
-                      else barColor = 'bg-emerald-500 hover:bg-emerald-400';
-                    }
-                    if (isActive) {
-                      barColor += ' ring-2 ring-cyan-400 ring-offset-1 ring-offset-slate-950';
-                    }
-
-                    const barHeightPct = Math.max(pct, count > 0 ? 8 : 3);
-
-                    return (
-                      <div
-                        key={c.ch}
-                        onClick={() => handleChannelChange(c.ch)}
-                        title={`CH ${c.ch} (${c.freq}): ${count} packets (${pct}% relative congestion). Click to tune.`}
-                        className="flex-1 min-w-[28px] max-w-[48px] h-full flex flex-col justify-end items-center cursor-pointer group select-none transition"
-                      >
-                        {/* Packet Count label */}
-                        <div className="text-[9px] text-slate-400 group-hover:text-cyan-300 font-mono mb-1 truncate">
-                          {count > 0 ? count : ''}
-                        </div>
-
-                        {/* Bar */}
-                        <div
-                          style={{ height: `${barHeightPct}%` }}
-                          className={`w-full rounded-t-sm transition-all duration-300 ${barColor}`}
-                        />
-
-                        {/* Channel Number Label */}
-                        <div className={`mt-2 text-[10px] font-bold font-mono transition ${
-                          isActive ? 'text-cyan-400 font-extrabold' : 'text-slate-400 group-hover:text-slate-200'
-                        }`}>
-                          {c.ch}
-                        </div>
-
-                        {/* Band Badge */}
-                        <div className="text-[8px] text-slate-500">
-                          {c.band.replace(' GHz', 'G')}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Spectrum Guidance Note */}
-              <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg text-xs text-slate-400 flex items-start gap-2.5">
-                <BarChart2 className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-bold text-slate-200">Spectrum Optimization Guide:</span>{' '}
-                  In 2.4 GHz, use non-overlapping channels <span className="font-mono text-cyan-300 font-semibold">1, 6, or 11</span> to minimize co-channel interference. In 5 GHz, UNII channels (<span className="font-mono text-cyan-300">36-48</span> and <span className="font-mono text-cyan-300">149-165</span>) provide wider 80MHz bandwidth and significantly less noise.
-                </div>
-              </div>
-            </div>
+            <SpectrumTab
+              channel={channel}
+              channelStats={channelStats}
+              handleChannelChange={handleChannelChange}
+              setSpectrumBand={setSpectrumBand}
+              spectrumBand={spectrumBand}
+              spectrumChannels={spectrumChannels}
+              spectrumStats={spectrumStats}
+            />
           )}
 
           {/* Tab 4: Live Frames Feed */}
           {activeTab === 'frames' && (
-            <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
-              {frames.length === 0 ? (
-                <div className="p-12 text-center text-slate-600 text-xs">
-                  No frames captured yet.
-                </div>
-              ) : (
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-[11px] text-slate-400 font-semibold uppercase">
-                    <tr>
-                      <th className="py-2 px-3">Time</th>
-                      <th className="py-2 px-3">Type</th>
-                      <th className="py-2 px-3">SSID / Info</th>
-                      <th className="py-2 px-3">Station / Source</th>
-                      <th className="py-2 px-3">BSSID</th>
-                      <th className="py-2 px-3">CH</th>
-                      <th className="py-2 px-3 text-right">RSSI</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-900">
-                    {frames.map((f, idx) => (
-                      <tr key={idx} className="hover:bg-slate-900/40 transition-colors">
-                        <td className="py-1.5 px-3 text-slate-500 whitespace-nowrap">{f.timestamp || f.lastSeen}</td>
-                        <td className="py-1.5 px-3 whitespace-nowrap">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            f.isDeauth ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
-                            f.frameCategory === 'Data' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40' :
-                            'bg-slate-800 text-slate-300'
-                          }`}>
-                            {f.type}
-                          </span>
-                        </td>
-                        <td className="py-1.5 px-3 text-cyan-300 whitespace-nowrap font-medium">
-                          {f.ssid || f.reasonDescription || f.direction || '-'}
-                        </td>
-                        <td className="py-1.5 px-3 text-slate-300 whitespace-nowrap">{f.stationMac || f.sourceMac}</td>
-                        <td className="py-1.5 px-3 text-slate-400 whitespace-nowrap">{f.bssid}</td>
-                        <td className="py-1.5 px-3 text-slate-300 whitespace-nowrap">CH {f.channel}</td>
-                        <td className="py-1.5 px-3 text-right whitespace-nowrap font-bold text-cyan-400">
-                          {f.rssi} dBm
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+            <FramesTab
+              frames={frames}
+            />
           )}
 
           {/* Tab 4: Raw Hex View */}
@@ -6137,113 +4651,11 @@ export default function AlfaWifiWorkbench() {
 
           {/* Tab 6: Identifier Anomaly Tracking */}
           {activeTab === 'anomalies' && (
-            <div className="p-4 space-y-4">
-              {/* Header Guidance Banner */}
-              <div className="p-3.5 bg-rose-950/20 border border-rose-800/40 rounded-xl flex items-start gap-3 text-xs">
-                <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <div className="font-bold text-rose-300">
-                    MAC Address Rotation & Identifier Anomaly Detection
-                  </div>
-                  <p className="text-slate-300 leading-relaxed text-[11px]">
-                    Mobile operating systems (iOS, Android, Windows) randomize their hardware MAC addresses for privacy.
-                    However, devices often maintain a persistent list of probed networks. When multiple distinct MAC identifiers
-                    broadcast the <span className="font-bold text-rose-300">exact same sequence of probed SSIDs</span> in close temporal proximity,
-                    they are correlated and flagged as a <span className="font-bold text-rose-300">Potential Identifier Rotation Anomaly</span>.
-                  </p>
-                </div>
-              </div>
-
-              {/* Anomalies List */}
-              {anomalies.length === 0 ? (
-                <div className="p-12 text-center text-slate-500 text-xs bg-slate-900/30 rounded-xl border border-slate-800">
-                  <ShieldCheck className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
-                  <p className="font-bold text-slate-300">No Identifier Rotation Anomalies Detected</p>
-                  <p className="text-[11px] text-slate-500 mt-1 max-w-md mx-auto">
-                    All observed probe requests originate from consistent hardware identifiers. Anomalies will be flagged in real time if multiple MACs broadcast matching probe request fingerprints.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {anomalies.map((anom) => (
-                    <div
-                      key={anom.id}
-                      className="bg-slate-900/60 border border-rose-800/50 rounded-xl p-4 space-y-3 hover:border-rose-600/70 transition shadow-lg"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 uppercase tracking-wider">
-                            {anom.type}
-                          </span>
-                          <span className="text-xs font-mono font-bold text-slate-200">
-                            {anom.deviceCount} Observed Hardware Identifiers
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 font-mono">
-                          Last Seen: <span className="text-slate-300 font-bold">{anom.lastSeen}</span>
-                        </div>
-                      </div>
-
-                      {/* Sequence of Probed Networks */}
-                      <div className="space-y-1">
-                        <div className="text-[10px] uppercase font-semibold text-slate-500">
-                          Correlated Probed Network Sequence:
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1.5 font-mono text-xs">
-                          {anom.probedSequence.map((ssid, sIdx) => (
-                            <React.Fragment key={sIdx}>
-                              <span className="px-2 py-1 bg-slate-950 text-cyan-300 border border-slate-800 rounded font-semibold">
-                                {ssid}
-                              </span>
-                              {sIdx < anom.probedSequence.length - 1 && (
-                                <span className="text-slate-600 font-bold">➔</span>
-                              )}
-                            </React.Fragment>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Correlated MAC Identifiers Table */}
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs font-mono">
-                          <thead>
-                            <tr className="border-b border-slate-800 text-[10px] text-slate-500 uppercase">
-                              <th className="py-1 px-2">Observed MAC</th>
-                              <th className="py-1 px-2">Vendor OUI</th>
-                              <th className="py-1 px-2">RSSI</th>
-                              <th className="py-1 px-2">Channel</th>
-                              <th className="py-1 px-2 text-right">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/60">
-                            {anom.clients.map((cli, cIdx) => (
-                              <tr key={cli.mac || cIdx} className="hover:bg-slate-800/40">
-                                <td className="py-1.5 px-2 text-rose-300 font-bold">{cli.mac}</td>
-                                <td className="py-1.5 px-2 text-slate-300">{cli.vendor}</td>
-                                <td className="py-1.5 px-2">
-                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getRssiBadge(cli.rssi)}`}>
-                                    {cli.rssi} dBm
-                                  </span>
-                                </td>
-                                <td className="py-1.5 px-2 text-slate-400">CH {cli.channel}</td>
-                                <td className="py-1.5 px-2 text-right">
-                                  <button
-                                    onClick={() => setSelectedItem({ type: 'client', data: cli })}
-                                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] transition"
-                                  >
-                                    Inspect
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <AnomaliesTab
+              anomalies={anomalies}
+              getRssiBadge={getRssiBadge}
+              setSelectedItem={setSelectedItem}
+            />
           )}
 
           {/* Tab 7: Signal Spatial Mapping Heatmap */}
@@ -6281,686 +4693,47 @@ export default function AlfaWifiWorkbench() {
 
           {/* Tab 9: Observable Cleartext Protocol Telemetry */}
           {activeTab === 'cleartext' && (
-            <div className="overflow-x-auto max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
-              {cleartextMetadata.length === 0 ? (
-                <div className="p-12 text-center text-slate-600 text-xs space-y-2">
-                  <Globe className="w-8 h-8 text-slate-600 mx-auto" />
-                  <div>No unencrypted cleartext telemetry observed yet.</div>
-                  <div className="text-slate-500">
-                    Cleartext DNS queries (UDP 53) and HTTP request streams (TCP 80) from unencrypted Data frames will be logged here.
-                  </div>
-                </div>
-              ) : (
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                    <tr>
-                      <th className="py-2.5 px-3">Timestamp</th>
-                      <th className="py-2.5 px-3">Protocol</th>
-                      <th className="py-2.5 px-3">Client Station MAC</th>
-                      <th className="py-2.5 px-3">Target BSSID</th>
-                      <th className="py-2.5 px-3">Observed Domain / Endpoint</th>
-                      <th className="py-2.5 px-3">CH</th>
-                      <th className="py-2.5 px-3 text-right">RSSI</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-900">
-                    {cleartextMetadata.map((meta, idx) => (
-                      <tr key={idx} className="hover:bg-slate-900/60 transition-colors">
-                        <td className="py-2 px-3 text-slate-500 whitespace-nowrap">{meta.timestamp}</td>
-                        <td className="py-2 px-3 whitespace-nowrap">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                            meta.protocol === 'DNS' 
-                              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' 
-                              : 'bg-purple-500/20 text-purple-300 border-purple-500/40'
-                          }`}>
-                            {meta.protocol} {meta.type || ''}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 font-mono font-bold text-slate-200 whitespace-nowrap">{meta.clientMac || '—'}</td>
-                        <td className="py-2 px-3 font-mono text-slate-400 whitespace-nowrap">{meta.bssid || '—'}</td>
-                        <td className="py-2 px-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-amber-300 font-mono">{meta.domain}</span>
-                            {meta.endpoint && (
-                              <span className="text-slate-400 font-mono text-[11px]">{meta.endpoint}</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-2 px-3 text-slate-300 whitespace-nowrap">CH {meta.channel || '—'}</td>
-                        <td className="py-2 px-3 text-right font-bold text-cyan-400 whitespace-nowrap">
-                          {meta.rssi != null ? `${meta.rssi} dBm` : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+            <CleartextTab
+              cleartextMetadata={cleartextMetadata}
+            />
           )}
 
           {/* Tab 10: Security Heuristics Vulnerability Audit */}
           {activeTab === 'heuristics' && (
-            <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
-              {/* Summary KPIs */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3">
-                  <div className="text-[11px] text-slate-400 uppercase font-semibold">Total Vulnerabilities</div>
-                  <div className={`text-2xl font-bold mt-1 ${heuristicReport.totalVulnerabilities > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                    {heuristicReport.totalVulnerabilities}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Across {heuristicReport.scannedCount} evaluated APs</div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-amber-500/30 rounded-xl p-3">
-                  <div className="text-[11px] text-amber-300 uppercase font-semibold">Default Factory SSIDs</div>
-                  <div className="text-2xl font-bold text-amber-400 mt-1">
-                    {heuristicReport.defaultSSIDs.length}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Unhardened out-of-the-box names</div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-rose-500/30 rounded-xl p-3">
-                  <div className="text-[11px] text-rose-300 uppercase font-semibold">Weak Legacy Encryption</div>
-                  <div className="text-2xl font-bold text-rose-400 mt-1">
-                    {heuristicReport.weakEncryption.length}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Deprecated WEP / WPA-TKIP ciphers</div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-yellow-500/30 rounded-xl p-3">
-                  <div className="text-[11px] text-yellow-300 uppercase font-semibold">Open / Unencrypted</div>
-                  <div className="text-2xl font-bold text-yellow-400 mt-1">
-                    {heuristicReport.openNetworks.length}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Cleartext link-layer broadcast</div>
-                </div>
-              </div>
-
-              {/* Zero Vulnerabilities State */}
-              {heuristicReport.totalVulnerabilities === 0 && (
-                <div className="p-8 text-center bg-slate-900/40 border border-emerald-500/30 rounded-xl space-y-2">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
-                  <div className="text-sm font-bold text-emerald-200">All Discovered Networks Pass Heuristic Baseline</div>
-                  <div className="text-xs text-slate-400 max-w-md mx-auto">
-                    No factory-default vendor SSIDs, legacy WEP/TKIP ciphers, or unencrypted open broadcast networks were detected in the current RF airspace.
-                  </div>
-                </div>
-              )}
-
-              {/* Category 1: Default SSIDs */}
-              {heuristicReport.defaultSSIDs.length > 0 && (
-                <div className="bg-slate-900/60 border border-amber-500/40 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                        <AlertTriangle className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-sm text-slate-200">Default Factory SSIDs ({heuristicReport.defaultSSIDs.length})</div>
-                        <div className="text-[11px] text-slate-400">Identifies hardware vendor and indicates default router configuration with potential default credentials.</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                      Medium Risk
-                    </span>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead className="text-[11px] text-slate-400 uppercase border-b border-slate-800">
-                        <tr>
-                          <th className="py-2 px-3">BSSID</th>
-                          <th className="py-2 px-3">Default SSID</th>
-                          <th className="py-2 px-3">Vendor</th>
-                          <th className="py-2 px-3">Security</th>
-                          <th className="py-2 px-3">Actionable Recommendation</th>
-                          <th className="py-2 px-3 text-right">Inspect</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60">
-                        {heuristicReport.defaultSSIDs.map((dev, i) => (
-                          <tr key={dev.bssid || i} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="py-2 px-3 font-mono font-bold text-slate-300">{dev.bssid}</td>
-                            <td className="py-2 px-3 font-bold text-amber-300">{dev.ssid}</td>
-                            <td className="py-2 px-3 text-slate-300">{dev.vendor || '—'}</td>
-                            <td className="py-2 px-3 text-slate-400">{dev.security || 'Open'}</td>
-                            <td className="py-2 px-3 text-[11px] text-slate-400">{dev.recommendation}</td>
-                            <td className="py-2 px-3 text-right">
-                              <button
-                                onClick={() => setSelectedItem({ type: 'ap', data: dev })}
-                                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-semibold transition"
-                              >
-                                Inspect
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Category 2: Weak Encryption */}
-              {heuristicReport.weakEncryption.length > 0 && (
-                <div className="bg-slate-900/60 border border-rose-500/50 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                        <ShieldAlert className="w-4 h-4 text-rose-400" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-sm text-slate-200">Deprecated Legacy Encryption ({heuristicReport.weakEncryption.length})</div>
-                        <div className="text-[11px] text-slate-400">WEP (RC4) and WPA-TKIP suffer from practical mathematical key recovery attacks and message forgery.</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-600/30 text-rose-300 border border-rose-500/50">
-                      Critical Risk
-                    </span>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead className="text-[11px] text-slate-400 uppercase border-b border-slate-800">
-                        <tr>
-                          <th className="py-2 px-3">BSSID</th>
-                          <th className="py-2 px-3">SSID</th>
-                          <th className="py-2 px-3">Flawed Security Suite</th>
-                          <th className="py-2 px-3">Vendor</th>
-                          <th className="py-2 px-3">Remediation Guidance</th>
-                          <th className="py-2 px-3 text-right">Inspect</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60">
-                        {heuristicReport.weakEncryption.map((dev, i) => (
-                          <tr key={dev.bssid || i} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="py-2 px-3 font-mono font-bold text-slate-300">{dev.bssid}</td>
-                            <td className="py-2 px-3 font-bold text-slate-100">{dev.ssid}</td>
-                            <td className="py-2 px-3">
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                                {dev.security || 'WEP/TKIP'}
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 text-slate-300">{dev.vendor || '—'}</td>
-                            <td className="py-2 px-3 text-[11px] text-rose-200/90">{dev.recommendation}</td>
-                            <td className="py-2 px-3 text-right">
-                              <button
-                                onClick={() => setSelectedItem({ type: 'ap', data: dev })}
-                                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-semibold transition"
-                              >
-                                Inspect
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Category 3: Open Networks */}
-              {heuristicReport.openNetworks.length > 0 && (
-                <div className="bg-slate-900/60 border border-yellow-500/40 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-lg bg-yellow-500/20 text-yellow-300 border border-yellow-500/40">
-                        <Lock className="w-4 h-4 text-yellow-400" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-sm text-slate-200">Open Unencrypted Broadcast Networks ({heuristicReport.openNetworks.length})</div>
-                        <div className="text-[11px] text-slate-400">All wireless frames are transmitted in cleartext, enabling passive packet capture and session hijacking.</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-500/20 text-yellow-300 border border-yellow-500/40">
-                      High Risk
-                    </span>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead className="text-[11px] text-slate-400 uppercase border-b border-slate-800">
-                        <tr>
-                          <th className="py-2 px-3">BSSID</th>
-                          <th className="py-2 px-3">SSID</th>
-                          <th className="py-2 px-3">Channel</th>
-                          <th className="py-2 px-3">Vendor</th>
-                          <th className="py-2 px-3">Hardening Recommendation</th>
-                          <th className="py-2 px-3 text-right">Inspect</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60">
-                        {heuristicReport.openNetworks.map((dev, i) => (
-                          <tr key={dev.bssid || i} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="py-2 px-3 font-mono font-bold text-slate-300">{dev.bssid}</td>
-                            <td className="py-2 px-3 font-bold text-yellow-300">{dev.ssid}</td>
-                            <td className="py-2 px-3 text-slate-300">CH {dev.channel || '—'}</td>
-                            <td className="py-2 px-3 text-slate-300">{dev.vendor || '—'}</td>
-                            <td className="py-2 px-3 text-[11px] text-slate-300">{dev.recommendation}</td>
-                            <td className="py-2 px-3 text-right">
-                              <button
-                                onClick={() => setSelectedItem({ type: 'ap', data: dev })}
-                                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-semibold transition"
-                              >
-                                Inspect
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
+            <HeuristicsTab
+              heuristicReport={heuristicReport}
+              setSelectedItem={setSelectedItem}
+            />
           )}
 
           {/* Tab 11: Layer 3 Mappings */}
           {activeTab === 'layer3' && (
-            <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
-              {/* Summary KPIs */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3">
-                  <div className="text-[11px] text-slate-400 uppercase font-semibold">Total Mappings</div>
-                  <div className="text-2xl font-bold mt-1 text-cyan-400">
-                    {layer3Mappings.length}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Correlated IP/MAC pairs</div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-cyan-500/30 rounded-xl p-3">
-                  <div className="text-[11px] text-cyan-300 uppercase font-semibold">ARP Resolutions</div>
-                  <div className="text-2xl font-bold text-cyan-300 mt-1">
-                    {layer3Mappings.filter(m => m.protocol === 'ARP').length}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">EtherType 0x0806 queries</div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl p-3">
-                  <div className="text-[11px] text-purple-300 uppercase font-semibold">DHCP Leases</div>
-                  <div className="text-2xl font-bold text-purple-400 mt-1">
-                    {layer3Mappings.filter(m => m.protocol === 'DHCP').length}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Port 67/68 transactions</div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-amber-500/30 rounded-xl p-3">
-                  <div className="text-[11px] text-amber-300 uppercase font-semibold">Hostnames Identified</div>
-                  <div className="text-2xl font-bold text-amber-400 mt-1">
-                    {layer3Mappings.filter(m => Boolean(m.hostname)).length}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">DHCP Option 12 host tags</div>
-                </div>
-              </div>
-
-              {/* Table or Empty State */}
-              {layer3Mappings.length === 0 ? (
-                <div className="p-12 text-center bg-slate-900/40 border border-slate-800/80 rounded-xl space-y-2">
-                  <Network className="w-10 h-10 text-cyan-400/60 mx-auto" />
-                  <div className="text-sm font-bold text-slate-200">No Layer 3 IP Mappings Captured Yet</div>
-                  <div className="text-xs text-slate-400 max-w-md mx-auto">
-                    As unencrypted Address Resolution Protocol (ARP) announcements or DHCP lease allocations transit the airspace, sender IP and MAC addresses will be decoded and correlated here in real-time.
-                  </div>
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                      <tr>
-                        <th className="py-2.5 px-3">Protocol</th>
-                        <th className="py-2.5 px-3">IP Address</th>
-                        <th className="py-2.5 px-3">MAC Address</th>
-                        <th className="py-2.5 px-3">DHCP Hostname</th>
-                        <th className="py-2.5 px-3">Vendor OUI</th>
-                        <th className="py-2.5 px-3">Associated BSSID</th>
-                        <th className="py-2.5 px-3">Last Seen</th>
-                        <th className="py-2.5 px-3 text-right">Inspect</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60 font-sans">
-                      {layer3Mappings.map((mapping, idx) => {
-                        const targetAp = devices[mapping.mac] || (mapping.bssid ? devices[mapping.bssid] : null);
-                        const targetClient = clients[mapping.mac];
-                        const inspectTarget = targetClient 
-                          ? { type: 'client', data: targetClient } 
-                          : targetAp 
-                          ? { type: 'ap', data: targetAp } 
-                          : null;
-
-                        return (
-                          <tr key={`${mapping.mac}-${mapping.ip}-${idx}`} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                mapping.protocol === 'DHCP'
-                                  ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
-                                  : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
-                              }`}>
-                                {mapping.protocol || 'ARP'}
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 font-mono font-bold text-cyan-300 whitespace-nowrap">
-                              <span className="px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-800 text-[11px]">
-                                {mapping.ip}
-                              </span>
-                            </td>
-                            <td className="py-2 px-3 font-mono font-bold text-slate-300 whitespace-nowrap">
-                              {mapping.mac}
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              {mapping.hostname ? (
-                                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono text-[11px] font-semibold">
-                                  {mapping.hostname}
-                                </span>
-                              ) : (
-                                <span className="text-slate-600 font-mono text-[10px]">—</span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
-                              {mapping.vendor || getVendor(mapping.mac) || '—'}
-                            </td>
-                            <td className="py-2 px-3 font-mono text-slate-400 whitespace-nowrap">
-                              {mapping.bssid || '—'}
-                            </td>
-                            <td className="py-2 px-3 text-slate-400 whitespace-nowrap">
-                              {mapping.timestamp ? new Date(mapping.timestamp).toLocaleTimeString() : '—'}
-                            </td>
-                            <td className="py-2 px-3 text-right whitespace-nowrap">
-                              {inspectTarget ? (
-                                <button
-                                  onClick={() => setSelectedItem(inspectTarget)}
-                                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-semibold transition"
-                                >
-                                  Inspect
-                                </button>
-                              ) : (
-                                <span className="text-slate-600 font-mono text-[10px]">—</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+            <Layer3Tab
+              clients={clients}
+              devices={devices}
+              layer3Mappings={layer3Mappings}
+              setSelectedItem={setSelectedItem}
+            />
           )}
 
           {/* 18. Automation Rule Engine View */}
           {activeTab === 'rules' && (
-            <div className="p-4 space-y-5">
-              {/* Top KPI Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div className="bg-slate-900/90 border border-amber-500/30 rounded-xl p-3">
-                  <div className="text-[11px] text-amber-300 uppercase font-semibold">Total Rules</div>
-                  <div className="text-2xl font-bold text-amber-400 mt-1">{rules.length}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Persisted in local storage</div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-emerald-500/30 rounded-xl p-3">
-                  <div className="text-[11px] text-emerald-300 uppercase font-semibold">Active Rules</div>
-                  <div className="text-2xl font-bold text-emerald-400 mt-1">
-                    {rules.filter(r => r.enabled !== false).length}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Actively evaluating events</div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl p-3">
-                  <div className="text-[11px] text-purple-300 uppercase font-semibold">Webhooks Configured</div>
-                  <div className="text-2xl font-bold text-purple-400 mt-1">
-                    {rules.filter(r => r.actionType === RULE_ACTION_TYPES.WEBHOOK).length}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">HTTP POST integrations</div>
-                </div>
-
-                <div className="bg-slate-900/90 border border-cyan-500/30 rounded-xl p-3">
-                  <div className="text-[11px] text-cyan-300 uppercase font-semibold">Notifications & Audio</div>
-                  <div className="text-2xl font-bold text-cyan-400 mt-1">
-                    {rules.filter(r => r.actionType === RULE_ACTION_TYPES.NATIVE_NOTIFICATION || r.actionType === RULE_ACTION_TYPES.AUDIO_BEEP).length}
-                  </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Real-time alert actions</div>
-                </div>
-              </div>
-
-              {/* Rule Creation Form Card */}
-              <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 shadow-lg space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-                  <div className="flex items-center gap-2">
-                    <Sliders className="w-4 h-4 text-amber-400" />
-                    <span className="font-bold text-xs uppercase text-slate-200">Create Automation Rule</span>
-                  </div>
-                  <span className="text-[11px] text-slate-500">Configure triggers, targets, and reactive actions</span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {/* Rule Name */}
-                  <div>
-                    <label className="text-[10px] text-slate-400 font-semibold block mb-1">
-                      Rule Name:
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Alert on VIP Laptop or Rogue AP"
-                      value={newRuleName}
-                      onChange={(e) => setNewRuleName(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-600 outline-none focus:border-amber-400 font-medium"
-                    />
-                  </div>
-
-                  {/* Trigger Event Type */}
-                  <div>
-                    <label className="text-[10px] text-slate-400 font-semibold block mb-1">
-                      Trigger Event Type:
-                    </label>
-                    <select
-                      value={newRuleEventType}
-                      onChange={(e) => setNewRuleEventType(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-400 font-medium"
-                    >
-                      <option value={RULE_EVENT_TYPES.DEVICE_CONNECTED}>DEVICE_CONNECTED (Discovered / Associated)</option>
-                      <option value={RULE_EVENT_TYPES.DEVICE_DISCONNECTED}>DEVICE_DISCONNECTED (Inactive / Missing &gt;60s)</option>
-                      <option value={RULE_EVENT_TYPES.ANOMALY_DETECTED}>ANOMALY_DETECTED (Deauth Flood / Rogue AP)</option>
-                    </select>
-                  </div>
-
-                  {/* Target MAC */}
-                  <div>
-                    <label className="text-[10px] text-slate-400 font-semibold block mb-1">
-                      Target MAC Address (* for Any):
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. 00:11:22:33:44:55 or *"
-                      value={newRuleTargetMac}
-                      onChange={(e) => setNewRuleTargetMac(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-600 outline-none focus:border-amber-400 font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-                  {/* Action Type */}
-                  <div>
-                    <label className="text-[10px] text-slate-400 font-semibold block mb-1">
-                      Action Type:
-                    </label>
-                    <select
-                      value={newRuleActionType}
-                      onChange={(e) => setNewRuleActionType(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-400 font-medium"
-                    >
-                      <option value={RULE_ACTION_TYPES.NATIVE_NOTIFICATION}>NATIVE_NOTIFICATION (Desktop Push Alert)</option>
-                      <option value={RULE_ACTION_TYPES.AUDIO_BEEP}>AUDIO_BEEP (Web Audio Chime / Beep)</option>
-                      <option value={RULE_ACTION_TYPES.WEBHOOK}>WEBHOOK (HTTP POST JSON Payload)</option>
-                    </select>
-                  </div>
-
-                  {/* Action Payload */}
-                  <div className="md:col-span-2">
-                    <label className="text-[10px] text-slate-400 font-semibold block mb-1">
-                      Action Payload / Parameters:
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder={
-                          newRuleActionType === RULE_ACTION_TYPES.WEBHOOK
-                            ? 'https://example.com/api/webhook (Full URL for JSON POST)'
-                            : newRuleActionType === RULE_ACTION_TYPES.AUDIO_BEEP
-                            ? 'Beep frequency in Hz (default 880)'
-                            : 'Custom notification message body (optional)'
-                        }
-                        value={newRuleActionPayload}
-                        onChange={(e) => setNewRuleActionPayload(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-600 outline-none focus:border-amber-400 font-medium"
-                      />
-                      <button
-                        onClick={() => {
-                          if (!newRuleName.trim()) {
-                            setStatusMessage('Please enter a descriptive rule name.');
-                            setStatusLevel('warning');
-                            return;
-                          }
-                          const rule = createRule({
-                            name: newRuleName,
-                            eventType: newRuleEventType,
-                            targetMac: newRuleTargetMac,
-                            actionType: newRuleActionType,
-                            actionPayload: newRuleActionPayload
-                          });
-                          setRules(prev => [rule, ...prev]);
-                          setNewRuleName('');
-                          setNewRuleTargetMac('');
-                          setNewRuleActionPayload('');
-                          setStatusMessage(`Created automation rule "${rule.name}"`);
-                          setStatusLevel('success');
-                        }}
-                        className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition shrink-0 shadow-sm"
-                      >
-                        Add Rule
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Rules List Table or Empty State */}
-              {rules.length === 0 ? (
-                <div className="p-12 text-center bg-slate-900/40 border border-slate-800/80 rounded-xl space-y-2">
-                  <Bell className="w-10 h-10 text-amber-400/60 mx-auto" />
-                  <div className="text-sm font-bold text-slate-300">No Automation Rules Configured</div>
-                  <div className="text-xs text-slate-500 max-w-md mx-auto">
-                    Define custom rules above to dispatch HTTP webhooks, trigger desktop notifications, or sound audible chimes when devices connect, disconnect, or exhibit security anomalies.
-                  </div>
-                </div>
-              ) : (
-                <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950 shadow-lg">
-                  <table className="w-full text-left text-xs text-slate-300 border-collapse">
-                    <thead className="bg-slate-900/90 sticky top-0 border-b border-slate-800 text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-                      <tr>
-                        <th className="py-2.5 px-3">Status</th>
-                        <th className="py-2.5 px-3">Rule Name</th>
-                        <th className="py-2.5 px-3">Event Trigger</th>
-                        <th className="py-2.5 px-3">Target MAC</th>
-                        <th className="py-2.5 px-3">Action Type</th>
-                        <th className="py-2.5 px-3">Action Payload</th>
-                        <th className="py-2.5 px-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60 font-sans">
-                      {rules.map((rule) => (
-                        <tr key={rule.id} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            <button
-                              onClick={() => {
-                                setRules(prev => prev.map(r => r.id === rule.id ? { ...r, enabled: !r.enabled } : r));
-                              }}
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
-                                rule.enabled !== false
-                                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                                  : 'bg-slate-800 text-slate-500 border-slate-700'
-                              }`}
-                            >
-                              {rule.enabled !== false ? 'ENABLED' : 'DISABLED'}
-                            </button>
-                          </td>
-                          <td className="py-2 px-3 font-semibold text-slate-100 whitespace-nowrap">
-                            {rule.name}
-                          </td>
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                              rule.eventType === RULE_EVENT_TYPES.DEVICE_CONNECTED
-                                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
-                                : rule.eventType === RULE_EVENT_TYPES.DEVICE_DISCONNECTED
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                                : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                            }`}>
-                              {rule.eventType}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 font-mono font-bold text-cyan-300 whitespace-nowrap">
-                            <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-[11px]">
-                              {rule.targetMac || '*'}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                              rule.actionType === RULE_ACTION_TYPES.WEBHOOK
-                                ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
-                                : rule.actionType === RULE_ACTION_TYPES.AUDIO_BEEP
-                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                                : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
-                            }`}>
-                              {rule.actionType}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 font-mono text-slate-400 text-[11px] max-w-xs truncate" title={rule.actionPayload || 'Default'}>
-                            {rule.actionPayload || '—'}
-                          </td>
-                          <td className="py-2 px-3 text-right whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    const testDevice = {
-                                      bssid: rule.targetMac !== '*' ? rule.targetMac : '00:C0:CA:98:76:54',
-                                      clientMac: rule.targetMac !== '*' ? rule.targetMac : '00:C0:CA:98:76:54',
-                                      ssid: 'Test-Network',
-                                      vendor: 'Alfa Test Device',
-                                      rssi: -55
-                                    };
-                                    await executeRuleAction(rule, testDevice, rule.eventType);
-                                    setStatusMessage(`Triggered test execution for rule "${rule.name}"`);
-                                    setStatusLevel('success');
-                                  } catch (testErr) {
-                                    setStatusMessage(`Test rule failed: ${testErr.message || testErr}`);
-                                    setStatusLevel('error');
-                                  }
-                                }}
-                                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 text-[11px] font-semibold transition"
-                              >
-                                Test
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setRules(prev => prev.filter(r => r.id !== rule.id));
-                                  setStatusMessage(`Deleted rule "${rule.name}"`);
-                                  setStatusLevel('info');
-                                }}
-                                className="p-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[11px] border border-rose-500/30 transition"
-                                title="Delete Rule"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+            <RulesTab
+              newRuleActionPayload={newRuleActionPayload}
+              newRuleActionType={newRuleActionType}
+              newRuleEventType={newRuleEventType}
+              newRuleName={newRuleName}
+              newRuleTargetMac={newRuleTargetMac}
+              rules={rules}
+              setNewRuleActionPayload={setNewRuleActionPayload}
+              setNewRuleActionType={setNewRuleActionType}
+              setNewRuleEventType={setNewRuleEventType}
+              setNewRuleName={setNewRuleName}
+              setNewRuleTargetMac={setNewRuleTargetMac}
+              setRules={setRules}
+              setStatusLevel={setStatusLevel}
+              setStatusMessage={setStatusMessage}
+            />
           )}
         </div>
 

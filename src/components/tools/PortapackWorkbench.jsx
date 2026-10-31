@@ -1,52 +1,40 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Radio, 
-  RotateCcw, 
-  Sparkles, 
-  Sliders, 
-  Layers, 
-  Terminal as TerminalIcon, 
-  HardDrive, 
-  Activity, 
-  Download, 
-  Play, 
-  Disc, 
-  Plane, 
-  Headphones, 
-  Volume2, 
-  Send, 
-  Zap, 
-  RefreshCw, 
-  ChevronUp, 
-  ChevronDown, 
-  ChevronLeft, 
-  ChevronRight, 
-  Circle, 
-  Trash2,
+import { useState, useEffect, useRef } from 'react';
+import {
+  Radio,
+  RotateCcw,
+  Sliders,
+  Terminal as TerminalIcon,
+  Activity,
+  Disc,
+  Send,
+  Zap,
+  RefreshCw,
+  ChevronUp,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   FileText,
   AlertTriangle,
   CheckCircle2,
   Cpu,
   MapPin,
-  Map,
   ExternalLink,
   Flame,
-  RadioTower,
-  ShieldCheck,
-  Shield,
   Scan,
   Monitor
 } from 'lucide-react';
-import { 
-  MayhemPortaPackDriver, 
-  FREQMAN_PRESETS, 
-  MAYHEM_APPS 
-} from '../../utils/mayhemDriver';
+import { MayhemPortaPackDriver, MAYHEM_APPS } from '../../utils/mayhemDriver';
 import TacticalMapDeck from './TacticalMapDeck';
 import HamRadioDeck from './hackrf/HamRadioDeck';
 import SensorHubDeck from './hackrf/SensorHubDeck';
 import LookingGlassDeck from './hackrf/LookingGlassDeck';
 import StatusBadge from '../common/StatusBadge';
+import AudioView from './portapack/AudioView';
+import DisplayView from './portapack/DisplayView';
+import TxView from './portapack/TxView';
+import FreqmanView from './portapack/FreqmanView';
+import CaptureView from './portapack/CaptureView';
+import CliView from './portapack/CliView';
 
 export default function PortapackWorkbench() {
   const [driver] = useState(() => new MayhemPortaPackDriver());
@@ -935,73 +923,16 @@ export default function PortapackWorkbench() {
 
           {/* Subtab 1: Audio & Waterfall (RocketGod Port) */}
           {activeTab === 'audio' && (
-            <div className="space-y-4 flex-1 flex flex-col font-mono text-xs">
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-400 font-bold">DEMOD:</span>
-                  <div className="flex items-center bg-slate-900 border border-slate-700 rounded p-0.5 text-xs">
-                    {['WFM', 'NFM', 'AM', 'USB', 'LSB'].map(m => (
-                      <button
-                        key={m}
-                        onClick={() => setAudioMode(m)}
-                        className={`px-2 py-0.5 rounded transition ${audioMode === m ? 'bg-purple-600 text-white font-bold' : 'text-slate-400'}`}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1.5 text-amber-300">
-                    <span>SQUELCH:</span>
-                    <input
-                      type="range"
-                      min="-110"
-                      max="-40"
-                      value={squelchDb}
-                      onChange={(e) => setSquelchDb(parseInt(e.target.value))}
-                      className="w-20 accent-amber-500"
-                    />
-                    <span className="w-12 text-right">{squelchDb} dB</span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 text-cyan-300">
-                    <Volume2 className="w-3.5 h-3.5" />
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={volume}
-                      onChange={(e) => setVolume(parseInt(e.target.value))}
-                      className="w-16 accent-cyan-500"
-                    />
-                    <span className="w-8 text-right">{volume}%</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Real-time Spectrum Trace & Inferno Waterfall Canvas */}
-              <div className="relative bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl flex-1 min-h-[360px]">
-                <canvas
-                  ref={waterfallCanvasRef}
-                  width={1200}
-                  height={360}
-                  className="w-full h-full block"
-                />
-              </div>
-
-              {/* RocketGod Waterfall Information Footer */}
-              <div className="flex items-center justify-between text-[11px] text-slate-400 bg-slate-950/60 border border-slate-800/60 rounded-lg px-3 py-1.5">
-                <span className="flex items-center gap-1.5 text-purple-300">
-                  <Flame className="w-3.5 h-3.5 text-orange-400" />
-                  <strong>Inferno Waterfall:</strong> 40 dB dynamic range • Carrier auto-label • Median noise floor
-                </span>
-                <span className="text-emerald-400 font-bold">
-                  AGC: {agcEnabled ? 'RMS Locked (7-22 counts)' : 'Manual Trim'}
-                </span>
-              </div>
-            </div>
+            <AudioView
+              agcEnabled={agcEnabled}
+              audioMode={audioMode}
+              setAudioMode={setAudioMode}
+              setSquelchDb={setSquelchDb}
+              setVolume={setVolume}
+              squelchDb={squelchDb}
+              volume={volume}
+              waterfallCanvasRef={waterfallCanvasRef}
+            />
           )}
 
           {/* Subtab: HAM Radio & Digital Decoders (RocketGod Port) */}
@@ -1043,491 +974,71 @@ export default function PortapackWorkbench() {
 
           {/* Subtab 2: RF Tuner & Gains */}
           {activeTab === 'display' && (
-            <div className="space-y-4 flex-1">
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4">
-                <label className="text-xs font-mono text-slate-400 block mb-1">
-                  SYNTHESIZER FREQUENCY (MHz)
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={customFreqInput}
-                    onChange={(e) => setCustomFreqInput(e.target.value)}
-                    className="flex-1 bg-slate-900 border border-slate-700 text-cyan-300 font-mono px-3 py-1.5 rounded-lg text-sm focus:outline-none focus:border-cyan-500"
-                    placeholder="e.g. 433.920"
-                  />
-                  <button
-                    onClick={handleCustomTune}
-                    className="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold font-mono text-xs rounded-lg transition"
-                  >
-                    TUNE
-                  </button>
-                </div>
-
-                {/* Quick frequency presets */}
-                <div className="flex flex-wrap gap-1.5 mt-3">
-                  {[
-                    { label: '315 MHz', freq: 315.0 },
-                    { label: '433.92 MHz', freq: 433.92 },
-                    { label: '868.3 MHz', freq: 868.3 },
-                    { label: '915.0 MHz', freq: 915.0 },
-                    { label: '1090 ADS-B', freq: 1090.0 },
-                    { label: '162.4 NOAA', freq: 162.4 }
-                  ].map(p => (
-                    <button
-                      key={p.label}
-                      onClick={() => {
-                        setCustomFreqInput(p.freq.toString());
-                        driver.sendCommand(`freq ${Math.round(p.freq * 1000000)}`);
-                      }}
-                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded text-[11px] font-mono transition"
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* AGC (Automatic Gain Control - RocketGod Mayhem Feature) */}
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-200">AUTOMATIC GAIN CONTROL (AGC)</span>
-                    <span className="text-[10px] px-1.5 py-0.2 bg-purple-900/60 border border-purple-500/40 text-purple-300 rounded font-mono">RocketGod DSP</span>
-                  </div>
-                  <span className="text-[10px] text-slate-400">Holds 8-bit ADC RMS level between 7 and 22 counts for optimal dynamic range</span>
-                </div>
-                <button
-                  onClick={() => setAgcEnabled(!agcEnabled)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition flex items-center gap-1.5 ${
-                    agcEnabled
-                      ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
-                      : 'bg-slate-800 text-slate-400 border border-slate-700'
-                  }`}
-                >
-                  <Activity className="w-3.5 h-3.5" />
-                  {agcEnabled ? 'AGC ACTIVE' : 'AGC OFF (MANUAL)'}
-                </button>
-              </div>
-
-              {/* Gains Deck */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5">
-                  <div className="flex items-center justify-between text-xs font-mono mb-2">
-                    <span className="text-slate-400">LNA GAIN (IF)</span>
-                    <span className="text-emerald-400 font-bold">{state.lnaGain} dB</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="40"
-                    step="8"
-                    value={state.lnaGain}
-                    onChange={(e) => driver.sendCommand(`lna ${e.target.value}`)}
-                    className="w-full accent-emerald-500"
-                  />
-                  <span className="text-[10px] text-slate-500 block mt-1">Steps: 0, 8, 16, 24, 32, 40 dB</span>
-                </div>
-
-                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5">
-                  <div className="flex items-center justify-between text-xs font-mono mb-2">
-                    <span className="text-slate-400">VGA GAIN (BASEBAND)</span>
-                    <span className="text-cyan-400 font-bold">{state.vgaGain} dB</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="62"
-                    step="2"
-                    value={state.vgaGain}
-                    onChange={(e) => driver.sendCommand(`vga ${e.target.value}`)}
-                    className="w-full accent-cyan-500"
-                  />
-                  <span className="text-[10px] text-slate-500 block mt-1">Steps: 0 to 62 dB (2 dB res)</span>
-                </div>
-              </div>
-
-              {/* Amp Toggle & Sample Rate */}
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-slate-200 block">RF FRONTEND AMPLIFIER (+14 dB)</span>
-                  <span className="text-[10px] text-slate-400">MAX2837 RX/TX pre-amp driver</span>
-                </div>
-                <button
-                  onClick={() => driver.sendCommand(`amp ${state.amp > 0 ? '0' : '1'}`)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition ${
-                    state.amp > 0
-                      ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/30'
-                      : 'bg-slate-800 text-slate-400 border border-slate-700'
-                  }`}
-                >
-                  {state.amp > 0 ? 'ENABLED (+14dB)' : 'BYPASS (0dB)'}
-                </button>
-              </div>
-
-              {/* Quick App Launcher */}
-              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5">
-                <span className="text-xs font-mono text-slate-400 block mb-2">LAUNCH MAYHEM APPLICATION</span>
-                <div className="grid grid-cols-3 gap-2">
-                  {MAYHEM_APPS.slice(1, 7).map(app => (
-                    <button
-                      key={app.id}
-                      onClick={() => driver.sendCommand(`app ${app.id}`)}
-                      className="px-2.5 py-1.5 bg-slate-900 hover:bg-purple-900/30 border border-slate-800 hover:border-purple-500/40 text-slate-300 rounded text-xs font-mono transition text-left truncate"
-                    >
-                      {app.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <DisplayView
+              agcEnabled={agcEnabled}
+              customFreqInput={customFreqInput}
+              driver={driver}
+              handleCustomTune={handleCustomTune}
+              setAgcEnabled={setAgcEnabled}
+              setCustomFreqInput={setCustomFreqInput}
+              state={state}
+            />
           )}
 
           {/* Subtab 3: Transmit Lab (RocketGod Port) */}
           {activeTab === 'tx' && (
-            <div className="space-y-4 flex-1 flex flex-col font-mono text-xs">
-              {!txConfirmed ? (
-                <div className="bg-amber-950/60 border border-amber-500/50 rounded-xl p-5 text-amber-200 space-y-3">
-                  <div className="flex items-center gap-2 text-sm font-bold text-amber-300">
-                    <Shield className="w-5 h-5 text-amber-400" />
-                    <span>RF TRANSMIT SAFETY CONFIRMATION (RocketGod Protocol)</span>
-                  </div>
-                  <p className="text-xs text-amber-300/90 leading-relaxed">
-                    Do you have an antenna or dummy load connected? In accordance with RF regulations, 
-                    transmissions must only be operated on permitted amateur frequencies or into a 50Ω dummy load.
-                  </p>
-                  <button
-                    onClick={() => setTxConfirmed(true)}
-                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-lg text-xs transition flex items-center gap-2 shadow-lg"
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                    I Have an Antenna / Dummy Load Connected (Enable TX)
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 font-bold">TRANSMIT MODE</span>
-                      <div className="flex items-center bg-slate-900 border border-slate-700 rounded p-0.5 text-xs">
-                        {[
-                          { id: 'tone', name: '1 kHz Tone' },
-                          { id: 'cw', name: 'CW Carrier' },
-                          { id: 'pocsag', name: 'POCSAG Pager' },
-                          { id: 'adsb', name: 'ADS-B Burst' }
-                        ].map(m => (
-                          <button
-                            key={m.id}
-                            onClick={() => setTxMode(m.id)}
-                            className={`px-2.5 py-1 rounded transition ${txMode === m.id ? 'bg-rose-600 text-white font-bold' : 'text-slate-400'}`}
-                          >
-                            {m.name}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
-                      <div>
-                        <div className="flex justify-between text-slate-400 mb-1">
-                          <span>TX VGA GAIN</span>
-                          <span className="text-rose-400 font-bold">{txVga} dB</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="47"
-                          step="1"
-                          value={txVga}
-                          onChange={(e) => setTxVga(parseInt(e.target.value))}
-                          className="w-full accent-rose-500"
-                        />
-                        <span className="text-[10px] text-slate-500">Range: 0 to 47 dB</span>
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between text-slate-400 mb-1">
-                          <span>TX AMP (+14 dB)</span>
-                          <span className={state.amp > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'}>
-                            {state.amp > 0 ? 'ACTIVE' : 'BYPASS'}
-                          </span>
-                        </div>
-                        <button
-                          onClick={() => driver.sendCommand(`amp ${state.amp > 0 ? '0' : '1'}`)}
-                          className={`w-full py-1 rounded border text-xs transition ${
-                            state.amp > 0 ? 'bg-rose-600/30 border-rose-500 text-rose-300' : 'bg-slate-900 border-slate-700 text-slate-400'
-                          }`}
-                        >
-                          {state.amp > 0 ? 'RF Pre-Amp Enabled (+14 dB)' : 'RF Pre-Amp Bypassed'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {txMode === 'pocsag' && (
-                      <div className="pt-2">
-                        <label className="text-[10px] text-slate-400 block mb-1">PAGER ALPHANUMERIC MESSAGE</label>
-                        <input
-                          type="text"
-                          value={txText}
-                          onChange={(e) => setTxText(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-xs text-rose-300 font-mono"
-                        />
-                      </div>
-                    )}
-
-                    <div className="pt-2 flex items-center justify-between">
-                      <div className="text-[11px] text-slate-400">
-                        Carrier: <span className="text-white font-bold">{(state.frequency / 1e6).toFixed(4)} MHz</span>
-                      </div>
-                      <button
-                        onClick={async () => {
-                          setIsTransmitting(true);
-                          driver.log(`[TX RocketGod] Emitting ${txMode.toUpperCase()} burst on ${(state.frequency / 1e6).toFixed(4)} MHz...`, 'warning');
-                          setTimeout(() => {
-                            setIsTransmitting(false);
-                            driver.log(`[TX RocketGod] Transmission complete. Transceiver returned to RX mode.`, 'success');
-                          }, 2500);
-                        }}
-                        disabled={isTransmitting}
-                        className={`px-5 py-2 rounded-lg font-bold transition flex items-center gap-2 shadow-lg ${
-                          isTransmitting
-                            ? 'bg-rose-600 text-white animate-pulse'
-                            : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30'
-                        }`}
-                      >
-                        <RadioTower className="w-4 h-4" />
-                        {isTransmitting ? 'TRANSMITTING RF...' : 'TRANSMIT BURST (PTT)'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            <TxView
+              driver={driver}
+              isTransmitting={isTransmitting}
+              setIsTransmitting={setIsTransmitting}
+              setTxConfirmed={setTxConfirmed}
+              setTxMode={setTxMode}
+              setTxText={setTxText}
+              setTxVga={setTxVga}
+              state={state}
+              txConfirmed={txConfirmed}
+              txMode={txMode}
+              txText={txText}
+              txVga={txVga}
+            />
           )}
 
 
           {/* Subtab 2: FREQMAN (Frequency Manager) */}
           {activeTab === 'freqman' && (
-            <div className="space-y-4 flex-1 flex flex-col">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono text-slate-400">
-                  /FREQMAN/ DATABASE ({driver.freqList.length} FREQUENCIES)
-                </span>
-                <button
-                  onClick={handleExportFreqman}
-                  className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded text-xs font-mono transition flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" /> Export FREQMAN.TXT
-                </button>
-              </div>
-
-              {/* Frequency List Table */}
-              <div className="flex-1 bg-slate-950 border border-slate-800 rounded-xl overflow-y-auto max-h-64 divide-y divide-slate-800/60 font-mono text-xs">
-                {driver.freqList.map((item) => (
-                  <div key={item.id} className="p-2.5 flex items-center justify-between hover:bg-slate-900/60 transition">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-cyan-400">
-                          {(item.freq / 1000000).toFixed(4)} MHz
-                        </span>
-                        <span className="text-[10px] px-1.5 py-0.2 bg-purple-950/60 text-purple-300 border border-purple-500/30 rounded">
-                          {item.mod}
-                        </span>
-                        <span className="text-[10px] text-slate-500">{item.category}</span>
-                      </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">{item.label}</div>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleTunePreset(item)}
-                        className="px-2 py-1 bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 rounded text-[11px] transition"
-                      >
-                        TUNE
-                      </button>
-                      <button
-                        onClick={() => driver.deleteFrequency(item.id)}
-                        className="p-1 hover:text-rose-400 text-slate-500 transition"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Add Custom Frequency Entry */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 grid grid-cols-1 md:grid-cols-4 gap-2">
-                <input
-                  type="text"
-                  value={customFreqInput}
-                  onChange={(e) => setCustomFreqInput(e.target.value)}
-                  placeholder="Freq (MHz)"
-                  className="bg-slate-900 border border-slate-700 text-slate-200 font-mono px-2.5 py-1 rounded text-xs"
-                />
-                <select
-                  value={customMod}
-                  onChange={(e) => setCustomMod(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 text-slate-200 font-mono px-2 py-1 rounded text-xs"
-                >
-                  <option value="NFM">NFM (Narrow)</option>
-                  <option value="WFM">WFM (Wide)</option>
-                  <option value="AM">AM (Voice)</option>
-                  <option value="SPEC">SPEC (Raw)</option>
-                  <option value="ASK">ASK (OOK)</option>
-                </select>
-                <input
-                  type="text"
-                  value={customLabel}
-                  onChange={(e) => setCustomLabel(e.target.value)}
-                  placeholder="Description label"
-                  className="bg-slate-900 border border-slate-700 text-slate-200 font-mono px-2.5 py-1 rounded text-xs"
-                />
-                <button
-                  onClick={handleAddCustomFreq}
-                  className="bg-purple-600 hover:bg-purple-500 text-white font-mono text-xs font-bold rounded py-1 transition"
-                >
-                  + ADD
-                </button>
-              </div>
-            </div>
+            <FreqmanView
+              customFreqInput={customFreqInput}
+              customLabel={customLabel}
+              customMod={customMod}
+              driver={driver}
+              handleAddCustomFreq={handleAddCustomFreq}
+              handleExportFreqman={handleExportFreqman}
+              handleTunePreset={handleTunePreset}
+              setCustomFreqInput={setCustomFreqInput}
+              setCustomLabel={setCustomLabel}
+              setCustomMod={setCustomMod}
+            />
           )}
 
           {/* Subtab 3: Raw IQ & C16 Inspector */}
           {activeTab === 'capture' && (
-            <div className="space-y-4 flex-1">
-              <div className="border-2 border-dashed border-slate-700 hover:border-purple-500/50 rounded-xl p-6 text-center bg-slate-950/60 transition cursor-pointer">
-                <Disc className="w-8 h-8 text-purple-400 mx-auto mb-2 animate-pulse" />
-                <div className="text-xs font-bold text-slate-200">
-                  DRAG & DROP MAYHEM .C16 RAW IQ CAPTURE FILE
-                </div>
-                <div className="text-[11px] text-slate-400 mt-1">
-                  Or click to inspect sample capture (433.92 MHz Weather Station / OOK TPMS)
-                </div>
-                <button
-                  onClick={() => {
-                    setIqFileStats({
-                      name: 'capture_433M92_2MSPS.C16',
-                      sizeBytes: 16777216,
-                      sampleRate: '2.0 MSPS',
-                      duration: '2.097 seconds',
-                      format: 'Signed 16-bit Complex (I/Q interleaved)',
-                      centerFreq: '433.920 MHz'
-                    });
-                    driver.log('Loaded 16MB sample capture: capture_433M92_2MSPS.C16', 'success');
-                  }}
-                  className="mt-3 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-purple-300 border border-slate-700 rounded text-xs font-mono transition"
-                >
-                  Load Sample C16 File
-                </button>
-              </div>
-
-              {iqFileStats && (
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 font-mono text-xs space-y-2">
-                  <div className="flex justify-between border-b border-slate-800 pb-2">
-                    <span className="text-slate-400">File:</span>
-                    <span className="text-cyan-300 font-bold">{iqFileStats.name}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Format:</span>
-                    <span className="text-slate-200">{iqFileStats.format}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Center Frequency:</span>
-                    <span className="text-emerald-400 font-bold">{iqFileStats.centerFreq}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Sample Rate:</span>
-                    <span className="text-slate-200">{iqFileStats.sampleRate}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Duration:</span>
-                    <span className="text-amber-400">{iqFileStats.duration}</span>
-                  </div>
-
-                  <div className="pt-2 flex gap-2">
-                    <button
-                      onClick={() => {
-                        driver.sendCommand('app replay');
-                        driver.log(`Transmitting replay buffer at ${iqFileStats.centerFreq}`, 'warning');
-                      }}
-                      className="flex-1 py-1.5 bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/40 rounded text-xs font-bold transition flex items-center justify-center gap-1.5"
-                    >
-                      <Play className="w-3.5 h-3.5" /> Replay Over HackRF
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <CaptureView
+              driver={driver}
+              iqFileStats={iqFileStats}
+              setIqFileStats={setIqFileStats}
+            />
           )}
 
           {/* Subtab 4: Mayhem CLI Console */}
           {activeTab === 'cli' && (
-            <div className="space-y-3 flex-1 flex flex-col">
-              <div 
-                ref={logContainerRef}
-                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-xs overflow-y-auto max-h-56 space-y-1"
-              >
-                {logs.length === 0 ? (
-                  <div className="text-slate-500 text-center py-8">
-                    No PortaPack serial activity yet.
-                  </div>
-                ) : (
-                  logs.map((l, i) => (
-                    <div 
-                      key={i} 
-                      className={`leading-relaxed ${
-                        l.type === 'error' ? 'text-rose-400 font-bold' :
-                        l.type === 'warning' ? 'text-amber-400' :
-                        l.type === 'success' ? 'text-emerald-400' :
-                        l.type === 'sent' ? 'text-cyan-400' :
-                        'text-slate-300'
-                      }`}
-                    >
-                      <span className="text-slate-600 mr-2">[{l.time}]</span>
-                      {l.text}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Command Input Bar */}
-              <form onSubmit={handleSendCli} className="flex gap-2">
-                <input
-                  type="text"
-                  value={cliInput}
-                  onChange={(e) => setCliInput(e.target.value)}
-                  placeholder="e.g. freq 433920000, amp 1, lna 32, app adsb, version"
-                  className="flex-1 bg-slate-950 border border-slate-800 text-slate-100 font-mono px-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-purple-500"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-mono text-xs font-bold rounded-lg transition"
-                >
-                  SEND
-                </button>
-              </form>
-
-              {/* Quick CLI actions */}
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { label: 'version', cmd: 'version' },
-                  { label: 'amp 1', cmd: 'amp 1' },
-                  { label: 'amp 0', cmd: 'amp 0' },
-                  { label: 'screenshot', cmd: 'screenshot' },
-                  { label: 'reboot', cmd: 'reboot' },
-                  { label: 'dfu', cmd: 'dfu' }
-                ].map(b => (
-                  <button
-                    key={b.label}
-                    onClick={() => driver.sendCommand(b.cmd)}
-                    className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded text-[10px] font-mono transition"
-                  >
-                    {b.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <CliView
+              cliInput={cliInput}
+              driver={driver}
+              handleSendCli={handleSendCli}
+              logContainerRef={logContainerRef}
+              logs={logs}
+              setCliInput={setCliInput}
+            />
           )}
         </div>
       </div>
