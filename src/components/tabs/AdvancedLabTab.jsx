@@ -70,7 +70,8 @@ export default function AdvancedLabTab() {
     addLog,
     boards,
     activeBoardId,
-    setActiveBoardId
+    setActiveBoardId,
+    setConsolePaused
   } = useSerial();
 
   const [activeModule, setActiveModule] = useState('plotter');
@@ -151,7 +152,7 @@ export default function AdvancedLabTab() {
         {activeModule === 'alerts' && (
           <CrashAlertDeck
             latestTextStream={latestRxText}
-            onPauseTerminal={() => {}}
+            onPauseTerminal={setConsolePaused}
             onLogMessage={addLog}
           />
         )}

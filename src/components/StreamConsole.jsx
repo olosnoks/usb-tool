@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useConsolePause } from '../context/SerialContext';
 import { 
   Terminal as TerminalIcon, 
   Send, 
@@ -96,7 +97,13 @@ export default function StreamConsole({
   const [inputText, setInputText] = useState('');
   const [lineEnding, setLineEnding] = useState('\r\n');
   const [autoScroll, setAutoScroll] = useState(true);
-  const [isPaused, setIsPaused] = useState(false);
+  // Pause freezes the view on a snapshot of the log (new data keeps being
+  // logged and streamed to disk); the flag is shared via SerialContext.
+  const [isPaused, setIsPaused] = useConsolePause();
+  const frozenRef = useRef(null);
+  if (isPaused && !frozenRef.current) frozenRef.current = entries;
+  if (!isPaused) frozenRef.current = null;
+  const shownEntries = isPaused ? frozenRef.current : entries;
   const [showTimestamps, setShowTimestamps] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [history, setHistory] = useState([]);
@@ -227,7 +234,7 @@ export default function StreamConsole({
   };
 
   // Calculate high-resolution delta timing between entries (Wireshark style)
-  const entriesWithDeltas = entries.map((entry, idx, arr) => {
+  const entriesWithDeltas = shownEntries.map((entry, idx, arr) => {
     let deltaMs = 0;
     if (idx > 0) {
       const prev = arr[idx - 1];

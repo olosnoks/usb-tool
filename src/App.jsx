@@ -76,7 +76,8 @@ function AppContent() {
     addLog,
     boards,
     activeBoardId,
-    setActiveBoardId
+    setActiveBoardId,
+    setConsolePaused
   } = useSerial();
 
   // Active Tool identifier (defaults to 'flasher' or ?tool= param)
@@ -303,7 +304,7 @@ function AppContent() {
               <div className="w-full">
                 <CrashAlertDeck
                   latestTextStream={latestRxText}
-                  onPauseTerminal={() => {}}
+                  onPauseTerminal={setConsolePaused}
                   onLogMessage={addLog}
                 />
               </div>
@@ -461,7 +462,23 @@ function AppContent() {
         onSetBaud={setBaudRate}
         onOpenHardwareIntel={() => setIsHardwareIntelOpen(true)}
         onOpenPinouts={() => setIsPinoutModalOpen(true)}
-        onExportSession={() => {}}
+        onExportSession={() => {
+          // Every board's settings and log, as JSON.
+          const session = {
+            exportedAt: new Date().toISOString(),
+            boards: boards.map((b) => ({
+              id: b.id, name: b.name, baudRate: b.baudRate, serialConfig: b.serialConfig,
+              portInfo: b.portInfo, isConnected: b.isConnected,
+              entries: (b.entries || []).map((e) => ({ timestamp: e.timestamp, type: e.type, text: e.text }))
+            }))
+          };
+          const url = URL.createObjectURL(new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' }));
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `usb-tool-session-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }}
         isConnected={isConnected}
       />
 

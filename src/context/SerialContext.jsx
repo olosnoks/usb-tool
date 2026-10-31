@@ -48,6 +48,8 @@ export const INITIAL_BOARD = {
 export function SerialProvider({ children }) {
   const [boards, setBoards] = useState([INITIAL_BOARD]);
   const [activeBoardId, setActiveBoardId] = useState('board-1');
+  // Console freeze, shared so tools (e.g. Crash Alerts) can pause the view.
+  const [consolePaused, setConsolePaused] = useState(false);
 
   // Device & API Detection
   const hasWebSerialSupport = typeof navigator !== 'undefined' && 'serial' in navigator;
@@ -669,6 +671,8 @@ export function SerialProvider({ children }) {
     reconfigureActivePort,
     borrowPort: borrowActivePort,
     subscribeRx,
+    consolePaused,
+    setConsolePaused,
     addLog,
     clearLogs: () => updateBoard(activeBoardId, { entries: [] }),
     clearHexStream: () => {
@@ -724,4 +728,15 @@ export function useSerial() {
     throw new Error('useSerial must be used within a SerialProvider');
   }
   return context;
+}
+
+/**
+ * Console pause shared through SerialContext (so tools like Crash Alerts can
+ * freeze the terminal view); falls back to local state outside the provider.
+ */
+export function useConsolePause() {
+  const ctx = useContext(SerialContext);
+  const [local, setLocal] = useState(false);
+  if (ctx && ctx.setConsolePaused) return [ctx.consolePaused, ctx.setConsolePaused];
+  return [local, setLocal];
 }
