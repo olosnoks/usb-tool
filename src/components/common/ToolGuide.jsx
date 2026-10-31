@@ -329,17 +329,19 @@ export const TOOL_GUIDES = {
   },
   'logic-analyzer': {
     title: '24MHz 8-Channel USB Logic Analyzer',
-    shortDesc: 'Capture digital waveforms up to 24MS/s over WebUSB with interactive zoom, timeline cursors, and protocol decoders.',
+    shortDesc: 'Capture 8 digital channels from a SUMP device or an fx2lafw board, decode eight protocols, and swap captures with PulseView.',
     steps: [
-      'Connect your $5 Saleae / USBee FX2LP 8-channel logic analyzer via USB.',
-      'Select your sample rate (1 MHz to 24 MHz) and sample depth (10k to 100k samples).',
-      'Click "CAPTURE SIGNAL" to acquire digital levels across channels D0–D7.',
-      'Use the zoom buttons and timeline pan slider to navigate high-frequency transitions.',
-      'View automatic I2C and UART protocol decoder bubbles rendered directly below the waveforms.'
+      'Connect a SUMP device over serial, or an FX2 "24MHz 8CH" board over USB (load fx2lafw firmware if asked). Or open a .vcd / .sr file.',
+      'Pick the sample rate and depth, then click "CAPTURE SIGNAL".',
+      'Choose a decoder tab (I2C, UART, SPI, 1-Wire, CAN, WS2812, IR, SWD) and map it to your channels. Decoded bytes appear under the waveforms and in the table.',
+      'Click a decoded row to jump to it. Click the waveform to set cursor A, shift-click for cursor B.',
+      'Use FIND to step through edges, glitches or channel patterns; export VCD, PulseView .sr or the decoded table as CSV.'
     ],
     tips: [
-      'Nyquist rule: Your sample rate should be at least 4x to 5x higher than the highest signal frequency (e.g. use 4MHz+ for 400kHz I2C).',
-      'Move cursors A and B to measure precise time differences (ΔT) and calculated frequency (1/ΔT).'
+      'Sample at least 4x the fastest signal: 4 MS/s for 400 kHz I2C or 500 kbit/s CAN, 8 MS/s or more for WS2812.',
+      'For CAN, probe the RX pin of the transceiver (logic level), not CANH/CANL.',
+      'UART AUTO-BAUD guesses the rate from the shortest pulses; it needs a few bytes with alternating bits.',
+      'Ctrl + mouse wheel zooms, plain wheel pans.'
     ],
     shortcuts: 'Digital waveform analysis & decoding'
   },
