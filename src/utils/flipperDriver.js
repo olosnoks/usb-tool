@@ -520,6 +520,35 @@ export class FlipperZeroDriver {
   }
 
   /**
+   * Send one multi-part request: every part shares one command_id, all but the
+   * last carry has_next, and the Flipper answers once, after the last part
+   * (rpc_storage.c). A new command_id per part would reopen the file each time
+   * and never be answered until the final part, so each part used to time out.
+   */
+  sendRpcMultipart(fieldNum, parts, timeoutMs = 10000) {
+    if (!this.isConnected || !this.writer) {
+      return Promise.reject(new Error('Flipper Zero is not connected.'));
+    }
+    const commandId = ++this.rpcCommandId;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingRpc.delete(commandId);
+        reject(new Error(`RPC request timeout (cmdId: ${commandId}, tag: ${fieldNum})`));
+      }, timeoutMs);
+      this.pendingRpc.set(commandId, { resolve, reject, timer, fieldNum, accumulator: [] });
+      (async () => {
+        for (let i = 0; i < parts.length; i++) {
+          await this.writeBinary(buildRpcPacket(commandId, fieldNum, parts[i], i < parts.length - 1));
+        }
+      })().catch((err) => {
+        clearTimeout(timer);
+        this.pendingRpc.delete(commandId);
+        reject(err);
+      });
+    });
+  }
+
+  /**
    * Handle incoming binary chunks during RPC mode with self-healing stream resync
    */
   handleRpcChunk(chunk) {
@@ -1088,15 +1117,12 @@ export class FlipperZeroDriver {
         chunks.push(new Uint8Array(0));
       }
 
-      for (let i = 0; i < chunks.length; i++) {
-        const isLast = (i === chunks.length - 1);
-        const fileSubmessage = encodeBytes(4, chunks[i]);
-        const reqPayload = [
-          ...encodeString(1, filePath),
-          ...encodeSubmessage(2, fileSubmessage)
-        ];
-        await this.sendRpcRequest(11, reqPayload, !isLast, 4000);
-      }
+      const parts = chunks.map((chunk) => [
+        ...encodeString(1, filePath),
+        ...encodeSubmessage(2, encodeBytes(4, chunk))
+      ]);
+      // ~4 s per chunk of headroom, at least 10 s.
+      await this.sendRpcMultipart(11, parts, Math.max(10000, parts.length * 4000));
 
       this.log(`[Storage RPC] Successfully wrote ${filePath}`, 'success');
       return true;
