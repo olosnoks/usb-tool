@@ -79,6 +79,24 @@ export default function PortapackWorkbench() {
   const [iqFileStats, setIqFileStats] = useState(null);
   const [connectError, setConnectError] = useState(null);
   const [showVirtualLcd, setShowVirtualLcd] = useState(false);
+  // Real screen mirror (serial console `screenframeshort`)
+  const [mirrorTick, setMirrorTick] = useState(0);
+  const [mirrorLive, setMirrorLive] = useState(false);
+  const mirrorBusyRef = useRef(false);
+  const isSerialHw = !state.isDemo && state.connectionType === 'serial';
+  const captureMirror = async () => {
+    if (mirrorBusyRef.current) return;
+    mirrorBusyRef.current = true;
+    try { await driver.captureScreen(); setMirrorTick((t) => t + 1); }
+    catch (e) { driver.log(`screenframeshort failed: ${e.message}`, 'error'); }
+    finally { mirrorBusyRef.current = false; }
+  };
+  useEffect(() => {
+    if (!mirrorLive || !isSerialHw || !showVirtualLcd) return undefined;
+    captureMirror();
+    const iv = setInterval(captureMirror, 1500);
+    return () => clearInterval(iv);
+  }, [mirrorLive, isSerialHw, showVirtualLcd]);
 
   // RocketGod HackRF DSP & Transmit States
   const [agcEnabled, setAgcEnabled] = useState(true);
@@ -228,6 +246,27 @@ export default function PortapackWorkbench() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+
+    if (!state.isDemo) {
+      ctx.fillStyle = '#020617';
+      ctx.fillRect(0, 0, 320, 240);
+      const f = driver.lastFrame;
+      if (state.connectionType === 'serial' && f) {
+        const off = document.createElement('canvas');
+        off.width = f.width; off.height = f.height;
+        off.getContext('2d').putImageData(new ImageData(f.rgba, f.width, f.height), 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(off, 0, 0, 320, 240);
+      } else {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '11px monospace';
+        const msg = state.connectionType === 'serial'
+          ? ['Press Refresh or Live to pull', 'the real screen from the PortaPack.']
+          : ['Screen mirroring needs the serial console:', 'put the PortaPack in normal mode', 'and connect over serial.'];
+        msg.forEach((m, i) => ctx.fillText(m, 16, 100 + i * 16));
+      }
+      return undefined;
+    }
 
     let tick = 0;
     const waterfallHistory = [];
@@ -523,7 +562,7 @@ export default function PortapackWorkbench() {
     return () => {
       cancelAnimationFrame(animId);
     };
-  }, [state, showVirtualLcd]);
+  }, [state, showVirtualLcd, mirrorTick]);
 
   const handleTunePreset = (preset) => {
     driver.sendCommand(`freq ${preset.freq}`);
@@ -579,7 +618,7 @@ export default function PortapackWorkbench() {
               PORTAPACK MAYHEM & HACKRF
             </span>
             <span className="text-[10px] px-2 py-0.5 bg-purple-950/80 border border-purple-500/40 text-purple-300 rounded font-mono font-semibold">
-              {state.firmwareVersion || 'Mayhem v2.0.0'}
+              {state.firmwareVersion || (state.isDemo ? 'Mayhem v2.0.0' : 'Mayhem (version unknown)')}
             </span>
             <StatusBadge status={state.isDemo ? 'info' : 'success'} text={state.isDemo ? 'DEMO' : 'CONNECTED'} />
             <span className="text-slate-600 text-xs">•</span>
@@ -602,8 +641,13 @@ export default function PortapackWorkbench() {
         {/* Center/Right: Hardware Chip & Connect Actions */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-cyan-950/60 border border-cyan-500/30 rounded text-[11px] font-mono text-cyan-300">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-            <span>HackRF One (1D50:6089 WinUSB)</span>
+            <CheckCircle2 className={`w-3.5 h-3.5 flex-shrink-0 ${state.isConnected && !state.isDemo ? 'text-emerald-400' : 'text-slate-500'}`} />
+            <span>
+              {state.isDemo ? 'Demo (no device)'
+                : !state.isConnected ? 'Not connected'
+                : state.connectionType === 'serial' ? 'Mayhem serial console (1D50:6018)'
+                : 'HackRF One (1D50:6089 WinUSB)'}
+            </span>
           </div>
 
           {!state.isDemo ? (
@@ -702,9 +746,18 @@ export default function PortapackWorkbench() {
               <Radio className="w-4 h-4" /> 320x240 LCD SCREEN // ILI9341 & HARDWARE CONTROLS
             </span>
             <div className="flex items-center gap-3 text-[10px] text-slate-400 font-mono">
-              <span>BAT: {state.batteryMv}mV</span>
-              <span>•</span>
-              <span>SD: FAT32</span>
+              {isSerialHw ? (
+                <>
+                  <button onClick={captureMirror} className="px-2 py-0.5 rounded bg-slate-800 text-[10px] border border-slate-700 text-cyan-300 hover:text-white">Refresh</button>
+                  <button onClick={() => setMirrorLive((v) => !v)} className={`px-2 py-0.5 rounded text-[10px] border ${mirrorLive ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>{mirrorLive ? 'Live ●' : 'Live'}</button>
+                </>
+              ) : state.isDemo ? (
+                <>
+                  <span>BAT: {state.batteryMv}mV (demo)</span>
+                  <span>•</span>
+                  <span>SD: FAT32 (demo)</span>
+                </>
+              ) : null}
               <button
                 onClick={() => setShowVirtualLcd(false)}
                 className="text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 text-[10px] border border-slate-700 transition"
@@ -722,9 +775,16 @@ export default function PortapackWorkbench() {
                 width={320}
                 height={240}
                 className="rounded-lg shadow-inner cursor-pointer"
-                title="Click on screen to simulate touch coordinates"
+                title={isSerialHw ? 'Click to touch the real screen' : 'Click on screen to simulate touch coordinates'}
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
+                  const f = driver.lastFrame;
+                  if (isSerialHw && f) {
+                    const x = Math.floor(((e.clientX - rect.left) / rect.width) * f.width);
+                    const y = Math.floor(((e.clientY - rect.top) / rect.height) * f.height);
+                    driver.sendTouch(x, y).then(() => captureMirror()).catch((err) => driver.log(`touch failed: ${err.message}`, 'error'));
+                    return;
+                  }
                   const x = Math.floor(e.clientX - rect.left);
                   const y = Math.floor(e.clientY - rect.top);
                   driver.log(`Touch Event at (${x}, ${y})`, 'info');

@@ -2,9 +2,37 @@ import { globalAdsbDecoder } from './adsbDecoder.js';
 import { requestPortFor, releasePort, closeSerialPort } from './portManager';
 import { powerSpectrumFromIQ } from './fft.js';
 
+/*
+ * Two real transports plus a labeled demo:
+ *   - Serial: the Mayhem "USB Serial Console" (ChibiOS shell, prompt `ch>`) in
+ *     normal mode. Commands used here: info, setfreq <Hz>, button <1-8>,
+ *     touch <x> <y>, keyboard <hex>, screenframeshort, applist,
+ *     appstart <name>, reboot, dfu. The shell has no RF amp / LNA / VGA
+ *     commands; those work only in HackRF mode (WebUSB).
+ *   - WebUSB libhackrf (HackRF mode): raw IQ, tuning, amp and gains.
+ *   - Demo: everything simulated, labeled DEMO in the UI.
+ * screenframeshort: one text line per screen row, one char per pixel,
+ * char - 32 = 6-bit colour 00RRGGBB.
+ */
 export const MAYHEM_USB_IDS = {
+  MAYHEM_SERIAL: { vid: '1d50', pid: '6018', name: 'PortaPack Mayhem USB Serial Console (normal mode)' },
   HACKRF_RUNTIME: { vid: '1d50', pid: '6089', name: 'Great Scott Gadgets HackRF One / PortaPack Mayhem' },
   LPC43XX_DFU: { vid: '1fc9', pid: '000c', name: 'NXP LPC43xx DFU Bootloader (HackRF SPI Flashing)' }
+};
+
+// Mayhem physical buttons as exposed by the `button N` console command.
+export const MAYHEM_BUTTONS = {
+  right: 1, left: 2, down: 3, up: 4, select: 5, dfu: 6, rotaryLeft: 7, rotaryRight: 8
+};
+
+// The demo's made-up identity. Real connections start blank and read `info`.
+const DEMO_IDENTITY = {
+  firmwareVersion: 'Mayhem v2.0.0 (Nightly-Git)',
+  boardId: 'HackRF One (rev. r9)',
+  cpldVersion: 'CPLD v1.0.0',
+  batteryMv: 4050,
+  sdCardMounted: true,
+  sdCardFreeGb: '14.2 GB / 16 GB'
 };
 
 export const FREQMAN_PRESETS = [
@@ -54,12 +82,13 @@ export class MayhemPortaPackDriver {
     this.sampleRate = 2000000; // 2 MSPS
     this.activeApp = 'menu';
     this.selectedMenuIndex = 0;
-    this.firmwareVersion = 'Mayhem v2.0.0 (Nightly-Git)';
-    this.boardId = 'HackRF One (rev. r9)';
-    this.cpldVersion = 'CPLD v1.0.0';
-    this.batteryMv = 4050; // 4.05V (~90%)
-    this.sdCardMounted = true;
-    this.sdCardFreeGb = '14.2 GB / 16 GB';
+    Object.assign(this, DEMO_IDENTITY);
+
+    // Serial console state
+    this.rxBuffer = '';               // partial line carried between chunks
+    this.consoleWaiter = null;        // in-flight command: { buffer, resolve, timer }
+    this._consoleChain = Promise.resolve();   // one console command at a time
+    this.lastFrame = null;            // last screenframeshort { width, height, rgba }
 
     // Virtual Screen Buffer (320x240 RGB565)
     this.width = 320;
@@ -97,6 +126,7 @@ export class MayhemPortaPackDriver {
       this.onStateChangeCallback({
         isConnected: this.isConnected,
         isDemo: this.isDemo,
+        connectionType: this.connectionType,
         frequency: this.frequency,
         amp: this.amp,
         lnaGain: this.lnaGain,
@@ -116,8 +146,10 @@ export class MayhemPortaPackDriver {
   }
 
   async connectDemo() {
+    Object.assign(this, DEMO_IDENTITY);
     this.isConnected = true;
     this.isDemo = true;
+    this.connectionType = 'demo';
     this.log('Connected to Virtual PortaPack Mayhem H2+ (Demo Mode)', 'success');
     this.log('Hardware: HackRF One (LPC4330 + MAX2837 + R820T2 + XC6SLX9 CPLD)', 'info');
     this.log(`Firmware: ${this.firmwareVersion}`, 'info');
@@ -152,15 +184,20 @@ export class MayhemPortaPackDriver {
       this.isConnected = true;
       this.isDemo = false;
       this.connectionType = 'serial';
+      // Drop the demo's identity; fill in only what the device reports.
+      this.firmwareVersion = null; this.boardId = null; this.cpldVersion = null;
+      this.batteryMv = null; this.sdCardMounted = null; this.sdCardFreeGb = null;
+      this.rxBuffer = ''; this.consoleWaiter = null; this.lastFrame = null;
 
       const info = this.port.getInfo ? this.port.getInfo() : {};
       const vidHex = info.usbVendorId ? '0x' + info.usbVendorId.toString(16).toUpperCase() : '1D50';
       const pidHex = info.usbProductId ? '0x' + info.usbProductId.toString(16).toUpperCase() : '6018';
 
-      this.log(`PortaPack Hardware connected on serial port at ${baudRate} baud (${vidHex}:${pidHex}).`, 'success');
-      this.sendCommand('version');
+      this.log(`PortaPack serial console connected (${vidHex}:${pidHex} @ ${baudRate} baud).`, 'success');
+      this.log('Keep the PortaPack in NORMAL mode (not the blue HackRF screen) for the console to answer.', 'info');
 
       this._readLoop = this.startReading();
+      try { await this.refreshInfo(); } catch (e) { this.log(`info query failed: ${e.message}`, 'warning'); }
       this.notifyState();
       return true;
     } catch (err) {
@@ -434,16 +471,7 @@ export class MayhemPortaPackDriver {
       while (this.isConnected) {
         const { value, done } = await reader.read();
         if (done) break;
-        if (value) {
-          const lines = value.split('\n');
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed) {
-              this.log(`[MAYHEM] ${trimmed}`, 'info');
-              this.parseResponse(trimmed);
-            }
-          }
-        }
+        if (value) this.handleSerialText(value);
       }
     } catch (err) {
       if (this.isConnected) {
@@ -452,6 +480,128 @@ export class MayhemPortaPackDriver {
     } finally {
       try { reader.releaseLock(); } catch (_) {}
     }
+  }
+
+  // A chunk can end mid-line and hold a reply plus unrelated output: feed an
+  // in-flight console command until its `ch>` prompt; otherwise split into
+  // whole lines, carrying the partial last line to the next chunk.
+  handleSerialText(text) {
+    if (this.consoleWaiter) {
+      this.consoleWaiter.buffer += text;
+      const i = this.consoleWaiter.buffer.indexOf('ch>');
+      if (i < 0) return;
+      const w = this.consoleWaiter;
+      this.consoleWaiter = null;
+      clearTimeout(w.timer);
+      const rest = w.buffer.slice(i + 3);
+      w.resolve(w.buffer.slice(0, i + 3));
+      if (rest) this.handleSerialText(rest);
+      return;
+    }
+    this.rxBuffer += text;
+    let nl;
+    while ((nl = this.rxBuffer.indexOf('\n')) >= 0) {
+      const line = this.rxBuffer.slice(0, nl).replace(/\r$/, '').trim();
+      this.rxBuffer = this.rxBuffer.slice(nl + 1);
+      if (line && line !== 'ch>') {
+        this.log(`[MAYHEM] ${line}`, 'info');
+        this.parseResponse(line);
+      }
+    }
+    if (this.rxBuffer.length > 65536) this.rxBuffer = this.rxBuffer.slice(-4096);
+  }
+
+  // One command at a time: send it and read until the `ch>` prompt returns.
+  // Resolves with the output (echo and prompt stripped); on timeout, with
+  // whatever arrived.
+  sendConsoleCommand(cmd, { timeoutMs = 4000 } = {}) {
+    const run = () => this._consoleCommand(cmd, timeoutMs);
+    const p = this._consoleChain.then(run, run);
+    this._consoleChain = p.catch(() => {});
+    return p;
+  }
+
+  async _consoleCommand(cmd, timeoutMs) {
+    if (this.connectionType !== 'serial' || !this.port || !this.port.writable) {
+      throw new Error('Serial console not connected');
+    }
+    const raw = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.consoleWaiter && this.consoleWaiter.timer === timer) {
+          const partial = this.consoleWaiter.buffer;
+          this.consoleWaiter = null;
+          resolve(partial);
+        }
+      }, timeoutMs);
+      this.consoleWaiter = { buffer: '', resolve, timer };
+      let writer;
+      try { writer = this.port.writable.getWriter(); }
+      catch (e) { clearTimeout(timer); this.consoleWaiter = null; reject(e); return; }
+      writer.write(new TextEncoder().encode(cmd + '\r\n'))
+        .catch((e) => { clearTimeout(timer); this.consoleWaiter = null; reject(e); })
+        .finally(() => { try { writer.releaseLock(); } catch (_) {} });
+    });
+    let out = raw;
+    const firstNl = out.indexOf('\n');
+    if (firstNl >= 0 && out.slice(0, firstNl).trim().startsWith(cmd.split(' ')[0])) out = out.slice(firstNl + 1);
+    return out.replace(/\r?\n?ch>\s*$/, '').replace(/ch>\s*$/, '');
+  }
+
+  async refreshInfo() {
+    const info = await this.sendConsoleCommand('info');
+    const first = info.trim().split(/\r?\n/)[0] || '';
+    this.firmwareVersion = (info.match(/Mayhem[^\r\n]*/) || [null])[0] || first || null;
+    if (this.firmwareVersion) this.log(`Device info: ${this.firmwareVersion}`, 'info');
+    this.notifyState();
+    return info;
+  }
+
+  async setFrequency(hz) {
+    const f = Math.round(hz);
+    await this.sendConsoleCommand(`setfreq ${f}`);
+    this.frequency = f;
+    this.notifyState();
+  }
+
+  async press(name) {
+    const n = MAYHEM_BUTTONS[name];
+    if (!n) throw new Error(`unknown button: ${name}`);
+    await this.sendConsoleCommand(`button ${n}`, { timeoutMs: 1500 });
+  }
+
+  async sendTouch(x, y) {
+    await this.sendConsoleCommand(`touch ${Math.round(x)} ${Math.round(y)}`, { timeoutMs: 1500 });
+  }
+
+  async sendKeyboard(text) {
+    const hex = Array.from(new TextEncoder().encode(text)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    await this.sendConsoleCommand(`keyboard ${hex}`);
+  }
+
+  listApps() { return this.sendConsoleCommand('applist'); }
+  startApp(name) { return this.sendConsoleCommand(`appstart ${name}`); }
+
+  /** Live LCD via `screenframeshort`, decoded to RGBA. Size comes from the reply. */
+  async captureScreen() {
+    const raw = await this.sendConsoleCommand('screenframeshort', { timeoutMs: 6000 });
+    const lines = raw.split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.length > 0 && l !== 'ch>');
+    if (!lines.length) return null;
+    const widths = {};
+    for (const l of lines) widths[l.length] = (widths[l.length] || 0) + 1;
+    const width = parseInt(Object.keys(widths).sort((a, b) => widths[b] - widths[a])[0], 10);
+    const rows = lines.filter((l) => l.length === width);
+    const height = rows.length;
+    if (!width || !height) return null;
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const v = rows[y].charCodeAt(x) - 32;
+        const i = (y * width + x) * 4;
+        rgba[i] = ((v >> 4) & 3) * 85; rgba[i + 1] = ((v >> 2) & 3) * 85; rgba[i + 2] = (v & 3) * 85; rgba[i + 3] = 255;
+      }
+    }
+    this.lastFrame = { width, height, rgba };
+    return this.lastFrame;
   }
 
   parseResponse(text) {
@@ -496,11 +646,26 @@ export class MayhemPortaPackDriver {
       return;
     }
 
-    if (!this.port || !this.port.writable) return;
-    const encoder = new TextEncoder();
-    const writer = this.port.writable.getWriter();
-    await writer.write(encoder.encode(cmd + '\r\n'));
-    writer.releaseLock();
+    if (this.connectionType !== 'serial') return;
+    // The UI's verbs, mapped onto the Mayhem shell. Anything else is sent as typed.
+    const parts = cmd.trim().split(/\s+/);
+    const action = parts[0].toLowerCase();
+    try {
+      if (action === 'freq' && parts[1]) {
+        await this.setFrequency(parseInt(parts[1], 10));
+      } else if (action === 'version') {
+        await this.refreshInfo();
+      } else if (action === 'app' && parts[1]) {
+        await this.startApp(parts[1]);
+      } else if (action === 'amp' || action === 'lna' || action === 'vga') {
+        this.log(`'${action}' isn't available over the Mayhem serial console. Switch the PortaPack to HackRF mode and connect over WebUSB to set the RF amp and gains.`, 'warning');
+      } else {
+        const out = await this.sendConsoleCommand(cmd.trim(), { timeoutMs: action === 'reboot' || action === 'dfu' ? 1000 : 4000 });
+        for (const line of out.split(/\r?\n/)) if (line.trim()) this.log(`[MAYHEM] ${line.trim()}`, 'info');
+      }
+    } catch (e) {
+      this.log(`${action} failed: ${e.message}`, 'error');
+    }
   }
 
   handleDemoCommand(cmd) {
@@ -568,6 +733,17 @@ export class MayhemPortaPackDriver {
 
   // Keypad & D-Pad Navigation Controls
   pressKey(key) {
+    if (this.connectionType === 'serial' && !this.isDemo) {
+      const map = { up: 'up', down: 'down', left: 'left', right: 'right', select: 'select',
+                    step_up: 'rotaryRight', step_down: 'rotaryLeft', back: 'left' };
+      const name = map[key];
+      if (name) this.press(name).catch((e) => this.log(`button failed: ${e.message}`, 'error'));
+      return;
+    }
+    if (this.connectionType === 'webusb' && !this.isDemo) {
+      this.log('Buttons need the serial console: switch the PortaPack to normal mode and connect over serial.', 'warning');
+      return;
+    }
     if (this.activeApp === 'menu') {
       const total = MAYHEM_APPS.length;
       if (key === 'up') {
@@ -633,6 +809,8 @@ export class MayhemPortaPackDriver {
       try { await this.usbDevice.close(); } catch (_) {}
       this.usbDevice = null;
     }
+    if (this.consoleWaiter) { clearTimeout(this.consoleWaiter.timer); this.consoleWaiter.resolve(this.consoleWaiter.buffer); this.consoleWaiter = null; }
+    this.rxBuffer = '';
     const port = this.port, reader = this.reader, readLoop = this._readLoop, pipe = this._pipe;
     this.port = null; this.reader = null; this._readLoop = null; this._pipe = null;
     if (port) {
