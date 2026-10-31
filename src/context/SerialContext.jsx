@@ -61,6 +61,7 @@ export function SerialProvider({ children }) {
   const boardPortOwnersRef = useRef({});  // boardId -> port-manager owner
   const disconnectRef = useRef(null);     // latest handleDisconnect, for takeovers
   const rxListenersRef = useRef(new Set()); // subscribeRx(): every received chunk, unbatched
+  const boardWriteChainsRef = useRef({});  // boardId -> promise of the last queued write
   // Stable identity, so subscribers' effects don't re-run on every render.
   const subscribeRx = useCallback((fn) => { rxListenersRef.current.add(fn); return () => { rxListenersRef.current.delete(fn); }; }, []);
   const boardKeepReadingRef = useRef({});
@@ -383,12 +384,16 @@ export function SerialProvider({ children }) {
     }));
 
     if (currentBoard.port && currentBoard.port.writable) {
-      const writer = currentBoard.port.writable.getWriter();
-      try {
-        await writer.write(uint8Array);
-      } finally {
-        writer.releaseLock();
-      }
+      // One write at a time per board: a second getWriter() while the first
+      // write is pending throws "locked", which silently dropped that send.
+      const port = currentBoard.port;
+      const prev = boardWriteChainsRef.current[targetBoardId] || Promise.resolve();
+      const next = prev.then(async () => {
+        const writer = port.writable.getWriter();
+        try { await writer.write(uint8Array); } finally { writer.releaseLock(); }
+      });
+      boardWriteChainsRef.current[targetBoardId] = next.catch(() => {});
+      await next;
     }
   };
 

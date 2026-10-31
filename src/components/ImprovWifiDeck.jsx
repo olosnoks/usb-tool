@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSerial } from '../context/SerialContext';
+import { ImprovParser, improvRpc, improvWifiSettings, IMPROV_CMD, parseCwlapLine, parseMicropythonScan } from '../utils/improvSerial';
 import { 
   Wifi, 
   WifiOff, 
@@ -47,76 +49,115 @@ export default function ImprovWifiDeck({
   const [showPassword, setShowPassword] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
-  const [improvState, setImprovState] = useState(IMPROV_STATE_AUTHORIZED);
-  const [assignedIp, setAssignedIp] = useState('');
+  // Nothing is assumed: the state, networks and device info come from the device.
+  const [improvState, setImprovState] = useState(IMPROV_STATE_UNKNOWN);
+  const [assignedIp, setAssignedIp] = useState('');   // IP, or the URL an Improv device returns
   const [statusMessage, setStatusMessage] = useState('Ready to scan or provision Wi-Fi');
+  const [deviceInfo, setDeviceInfo] = useState(null);  // Improv GET_INFO: [firmware, version, chip, name]
+  const [scannedNetworks, setScannedNetworks] = useState([]);
+  const [scanned, setScanned] = useState(false);
 
-  // Scanned AP list
-  const [scannedNetworks, setScannedNetworks] = useState([
-    { ssid: 'Lab-IoT-5G', rssi: -48, secure: true },
-    { ssid: 'Embedded_Workbench', rssi: -58, secure: true },
-    { ssid: 'Field-Sensor-Mesh', rssi: -72, secure: true },
-    { ssid: 'Guest-Open', rssi: -82, secure: false }
-  ]);
+  const { subscribeRx } = useSerial();
+  const parserRef = useRef(new ImprovParser());
+  const scanAccRef = useRef([]);
+  const scanTimerRef = useRef(null);
+  const textBufRef = useRef('');
+  const modeRef = useRef(provisionMode);
+  modeRef.current = provisionMode;
 
-  const lastProcessedTextRef = useRef('');
-
-  // Inspect incoming serial data for Improv frames or Wi-Fi responses
-  useEffect(() => {
-    if (!latestRxText || latestRxText === lastProcessedTextRef.current) return;
-    const newText = latestRxText.slice(lastProcessedTextRef.current.length);
-    lastProcessedTextRef.current = latestRxText;
-
-    // Look for IP addresses: e.g. 192.168.1.100 or "ip": "..." or "STAIP,..."
-    const ipMatch = newText.match(/\b(?:192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)\b/);
-    if (ipMatch) {
-      setAssignedIp(ipMatch[0]);
-      setImprovState(IMPROV_STATE_PROVISIONED);
-      setIsProvisioning(false);
-      setStatusMessage(`Device connected successfully! IP: ${ipMatch[0]}`);
-      onLogMessage?.(`[WI-FI PROVISIONED] Device connected: ${ipMatch[0]}`, 'sys');
-    }
-
-    if (newText.includes('WIFI CONNECTED') || newText.includes('WIFI GOT IP') || newText.includes('Connected with IP')) {
-      setImprovState(IMPROV_STATE_PROVISIONED);
-      setIsProvisioning(false);
-    }
-
-    if (newText.includes('WIFI DISCONNECT') || newText.includes('FAIL') || newText.includes('NO AP FOUND')) {
-      setIsProvisioning(false);
-      setStatusMessage('Connection failed: Invalid password or AP out of range');
-    }
-  }, [latestRxText, onLogMessage]);
-
-  // Construct Improv Wi-Fi packet
-  const buildImprovFrame = (packetType, dataPayload) => {
-    // Header: 'IMPROV', Version: 1
-    const header = [0x49, 0x4D, 0x50, 0x52, 0x4F, 0x56, 0x01];
-    const type = [packetType];
-    const len = [dataPayload.length];
-    const frame = [...header, ...type, ...len, ...dataPayload];
-
-    // Checksum: sum of all bytes modulo 256
-    let sum = 0;
-    for (let i = 0; i < frame.length; i++) {
-      sum = (sum + frame[i]) & 0xFF;
-    }
-    frame.push(sum);
-    return new Uint8Array(frame);
+  const finishScan = (list, note) => {
+    clearTimeout(scanTimerRef.current);
+    const byName = new Map();
+    for (const n of list) if (n.ssid && (!byName.has(n.ssid) || byName.get(n.ssid).rssi < n.rssi)) byName.set(n.ssid, n);
+    const sorted = [...byName.values()].sort((a, b) => b.rssi - a.rssi);
+    setScannedNetworks(sorted);
+    setScanned(true);
+    setIsScanning(false);
+    setStatusMessage(note || `Found ${sorted.length} network${sorted.length === 1 ? '' : 's'}. Select one below.`);
   };
 
-  // 1. Send Improv Scan Request (RPC command 0x02)
+  const handleText = (line) => {
+    const mode = modeRef.current;
+    if (mode === 'at') {
+      const net = parseCwlapLine(line);
+      if (net) { scanAccRef.current.push(net); return; }
+      if (/^OK\b/.test(line) && scanAccRef.current.length) { finishScan(scanAccRef.current); scanAccRef.current = []; return; }
+    }
+    if (mode === 'micropython') {
+      const nets = parseMicropythonScan(line);
+      if (nets) { finishScan(nets); return; }
+    }
+    if (mode !== 'improv') {
+      const ipMatch = line.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+      if (ipMatch && ipMatch[0] !== '0.0.0.0' && /IP|ip|CIFSR|STAIP/.test(line)) {
+        setAssignedIp(ipMatch[0]);
+        setImprovState(IMPROV_STATE_PROVISIONED);
+        setIsProvisioning(false);
+        setStatusMessage(`Device connected. IP: ${ipMatch[0]}`);
+        onLogMessage?.(`[WI-FI PROVISIONED] Device connected: ${ipMatch[0]}`, 'sys');
+      } else if (/WIFI DISCONNECT|FAIL|NO AP FOUND|\+CWJAP:\d/.test(line)) {
+        setIsProvisioning(false);
+        setStatusMessage('Connection failed: wrong password or network out of range.');
+      }
+    }
+  };
+
+  const handleImprov = (pkt) => {
+    if (pkt.kind === 'state') {
+      setImprovState(pkt.state);
+      if (pkt.state === IMPROV_STATE_PROVISIONING) setStatusMessage('Device is connecting to the network…');
+    } else if (pkt.kind === 'error' && pkt.code !== 0) {
+      setIsProvisioning(false);
+      setIsScanning(false);
+      setStatusMessage(`Device reported an error: ${pkt.message}.`);
+      onLogMessage?.(`[IMPROV] Error: ${pkt.message}`, 'sys');
+    } else if (pkt.kind === 'result') {
+      if (pkt.command === IMPROV_CMD.SCAN) {
+        if (!pkt.strings.length) { finishScan(scanAccRef.current); scanAccRef.current = []; return; }   // empty = end of list
+        const [name, rssi, auth] = pkt.strings;
+        scanAccRef.current.push({ ssid: name, rssi: parseInt(rssi, 10) || -100, secure: auth !== 'NO' });
+      } else if (pkt.command === IMPROV_CMD.WIFI_SETTINGS) {
+        setIsProvisioning(false);
+        setImprovState(IMPROV_STATE_PROVISIONED);
+        const url = pkt.strings[0] || '';
+        setAssignedIp(url);
+        setStatusMessage(url ? `Provisioned. Device page: ${url}` : 'Provisioned.');
+        onLogMessage?.(`[IMPROV] Provisioned${url ? ': ' + url : ''}`, 'sys');
+      } else if (pkt.command === IMPROV_CMD.GET_INFO) {
+        setDeviceInfo(pkt.strings);
+      }
+    }
+  };
+
+  // Every received chunk: Improv packets (binary) and text lines (AT / MicroPython).
+  useEffect(() => {
+    if (!subscribeRx) return undefined;
+    const dec = new TextDecoder();
+    return subscribeRx((bytes) => {
+      for (const pkt of parserRef.current.push(bytes)) handleImprov(pkt);
+      textBufRef.current += dec.decode(bytes, { stream: true });
+      const lines = textBufRef.current.split(/\r?\n/);
+      textBufRef.current = lines.pop().slice(-4096);
+      for (const l of lines) if (l.trim()) handleText(l.trim());
+    });
+  }, [subscribeRx]);
+
+  // Improv: ask for the current state and device info when connected.
+  useEffect(() => {
+    if (!isConnected || provisionMode !== 'improv') return;
+    setImprovState(IMPROV_STATE_UNKNOWN);
+    onSendRawBytes?.(improvRpc(IMPROV_CMD.GET_STATE));
+    onSendRawBytes?.(improvRpc(IMPROV_CMD.GET_INFO));
+  }, [isConnected, provisionMode]);
+
   const handleScanNetworks = () => {
     if (!isConnected) return;
     setIsScanning(true);
+    scanAccRef.current = [];
     setStatusMessage('Scanning nearby Wi-Fi access points...');
-
     if (provisionMode === 'improv') {
-      // Send Improv RPC Scan (Command 0x02)
-      const scanRpcPayload = [0x02]; // Command 0x02: Scan
-      const frame = buildImprovFrame(0x03, scanRpcPayload);
-      onSendRawBytes?.(frame);
-      onLogMessage?.('[IMPROV] Sent RPC Wi-Fi Scan command over serial', 'tx');
+      onSendRawBytes?.(improvRpc(IMPROV_CMD.SCAN));
+      onLogMessage?.('[IMPROV] Sent RPC 0x04 (request scanned networks)', 'tx');
     } else if (provisionMode === 'at') {
       onSendString?.('AT+CWLAP\r\n');
       onLogMessage?.('[AT] Sent AT+CWLAP (Scan APs)', 'tx');
@@ -124,44 +165,27 @@ export default function ImprovWifiDeck({
       onSendString?.("import network; w = network.WLAN(network.STA_IF); w.active(True); print('SCAN_RES:', w.scan())\r\n");
       onLogMessage?.('[MICROPYTHON] Triggered wlan.scan()', 'tx');
     }
-
-    setTimeout(() => {
-      setIsScanning(false);
-      setStatusMessage('Scan completed. Select network below.');
-    }, 2000);
+    clearTimeout(scanTimerRef.current);
+    scanTimerRef.current = setTimeout(() => {
+      if (scanAccRef.current.length) finishScan(scanAccRef.current);
+      else { setIsScanning(false); setStatusMessage('No scan reply from the device. Check the mode (Improv / AT / MicroPython) and that the firmware supports it.'); }
+      scanAccRef.current = [];
+    }, 15000);
   };
 
-  // 2. Send Improv Provision Request (RPC command 0x01: SSID + Password)
   const handleProvision = (e) => {
     e.preventDefault();
     if (!ssid || !isConnected) return;
-
     setIsProvisioning(true);
-    setImprovState(IMPROV_STATE_PROVISIONING);
     setStatusMessage(`Provisioning network "${ssid}"...`);
-
     if (provisionMode === 'improv') {
-      // Improv RPC 0x01: [0x01, len(ssid), ...ssid_bytes, len(pass), ...pass_bytes]
-      const encoder = new TextEncoder();
-      const ssidBytes = encoder.encode(ssid);
-      const passBytes = encoder.encode(password);
-
-      const rpcData = [
-        0x01, // Command 0x01: Send Wi-Fi Settings
-        ssidBytes.length,
-        ...ssidBytes,
-        passBytes.length,
-        ...passBytes
-      ];
-
-      const frame = buildImprovFrame(0x03, rpcData);
-      onSendRawBytes?.(frame);
-      onLogMessage?.(`[IMPROV] Provisioning "${ssid}" via Improv serial frame`, 'tx');
+      onSendRawBytes?.(improvWifiSettings(ssid, password));
+      onLogMessage?.(`[IMPROV] Provisioning "${ssid}" via Improv RPC 0x01`, 'tx');
     } else if (provisionMode === 'at') {
       onSendString?.(`AT+CWMODE=1\r\nAT+CWJAP="${ssid}","${password}"\r\n`);
       onLogMessage?.(`[AT] Sent AT+CWJAP for "${ssid}"`, 'tx');
     } else if (provisionMode === 'micropython') {
-      const uPyScript = `import network; w=network.WLAN(network.STA_IF); w.active(True); w.connect('${ssid}', '${password}'); import time; time.sleep(1); print('IP:', w.ifconfig()[0])\r\n`;
+      const uPyScript = `import network; w=network.WLAN(network.STA_IF); w.active(True); w.connect('${ssid}', '${password}'); import time; time.sleep(5); print('IP:', w.ifconfig()[0])\r\n`;
       onSendString?.(uPyScript);
       onLogMessage?.(`[MICROPYTHON] Sent Wi-Fi connect script for "${ssid}"`, 'tx');
     }
@@ -246,7 +270,17 @@ export default function ImprovWifiDeck({
             </button>
           </div>
 
+          {deviceInfo && deviceInfo.length > 0 && (
+            <div className="text-[11px] text-slate-400">
+              Device: {deviceInfo.filter(Boolean).join(' · ')}
+            </div>
+          )}
           <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+            {scannedNetworks.length === 0 && (
+              <div className="py-4 text-center text-[11px] text-slate-500">
+                {scanned ? 'The device reported no networks.' : 'No scan yet. Press SCAN APs to ask the device.'}
+              </div>
+            )}
             {scannedNetworks.map(net => (
               <div
                 key={net.ssid}
@@ -293,12 +327,13 @@ export default function ImprovWifiDeck({
               <div>
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">DEVICE STATUS:</span>
                 <span className="font-bold text-xs">{IMPROV_STATE_NAMES[improvState]}</span>
+                <span className="block text-[11px] text-slate-400 mt-0.5">{statusMessage}</span>
               </div>
             </div>
 
             {assignedIp && (
               <a
-                href={`http://${assignedIp}`}
+                href={/^https?:\/\//.test(assignedIp) ? assignedIp : `http://${assignedIp}`}
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors shadow-emerald-glow"
