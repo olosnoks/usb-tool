@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Usb,
   Smartphone,
@@ -13,14 +13,20 @@ import {
   Rocket,
   Info,
   Sparkles,
-  Loader2
+  Loader2,
+  Package
 } from 'lucide-react';
 import {
   FastbootDevice,
+  FastbootUsbTransport,
+  findFastbootInterface,
   requestFastbootDevice,
   createSimulatedFastboot,
   summarizeVars
 } from '../../utils/fastbootDriver';
+import {
+  isSparse, parseSparse, imageParts, resolvePartition, flashImage, readFactoryZip, flashFactory, checkRequirements
+} from '../../utils/fastbootTools';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
@@ -43,8 +49,18 @@ export default function FastbootWorkbench() {
   const [progress, setProgress] = useState(null);
 
   const [partition, setPartition] = useState('boot');
+  const [slotChoice, setSlotChoice] = useState('current');
   const [image, setImage] = useState(null); // { name, data }
   const fileRef = useRef(null);
+
+  // Factory image
+  const [factory, setFactory] = useState(null); // plan + fileName
+  const [skip, setSkip] = useState([]);
+  const [wipe, setWipe] = useState(false);
+  const [steps, setSteps] = useState([]);
+  const zipRef = useRef(null);
+  const devRef = useRef(null);
+  useEffect(() => { devRef.current = dev; }, [dev]);
 
   const webUsbAvailable = typeof navigator !== 'undefined' && 'usb' in navigator;
 
@@ -57,6 +73,32 @@ export default function FastbootWorkbench() {
     const { vars: v } = await device.getAllVars();
     setVars(v);
     setSummary(summarizeVars(v));
+  };
+
+  /** After a reboot into the bootloader or fastbootd, find the same phone again (no new permission prompt needed). */
+  const reconnect = async (timeoutMs = 90000) => {
+    const old = devRef.current;
+    if (!old) throw new Error('No device.');
+    if (isSimulated) return old; // the simulated bootloader keeps its state across "reboots"
+    const serial = old.transport.device?.serialNumber;
+    try { await old.close(); } catch (e) { /* already gone */ }
+    addLog('Waiting for the device to come back in fastboot mode...', 'info');
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const devices = await navigator.usb.getDevices();
+      const found = devices.find((d) => (!serial || d.serialNumber === serial) && (d.configurations || []).some((c) => findFastbootInterface(c)));
+      if (!found) continue;
+      try {
+        const fresh = new FastbootDevice(new FastbootUsbTransport(found), { logger: addLog });
+        await fresh.open();
+        devRef.current = fresh;
+        setDev(fresh);
+        addLog('Reconnected.', 'ok');
+        return fresh;
+      } catch (e) { /* still enumerating */ }
+    }
+    throw new Error('The device did not come back in fastboot mode. Reconnect it manually and continue.');
   };
 
   const connect = async (simulated) => {
@@ -131,11 +173,47 @@ export default function FastbootWorkbench() {
   const handleFlash = () => guard('flash', async () => {
     if (!image) throw new Error('Choose an image file first.');
     if (!partition.trim()) throw new Error('Enter a partition name.');
-    await dev.flash(partition.trim(), image.data, {
-      onProgress: (p) => setProgress(p)
+    const slots = slotChoice === 'both' ? ['a', 'b'] : slotChoice === 'current' ? [null] : [slotChoice];
+    for (const slot of slots) {
+      const target = await resolvePartition(dev, partition.trim(), slot);
+      const n = await flashImage(dev, target, image.data, {
+        onProgress: (p) => setProgress({ phase: 'download', percent: Math.round(p.fraction * 100), part: p.part, parts: p.parts })
+      });
+      addLog(`Flashed ${image.name} to ${target}${n > 1 ? ` in ${n} sparse pieces` : ''}.`, 'ok');
+    }
+  }, `Flash "${image?.name || '(no file)'}" to the "${partition}" partition${slotChoice === 'both' ? ' on both slots' : slotChoice !== 'current' ? ` (slot ${slotChoice})` : ''}? Flashing the wrong image to the wrong partition can brick the device.`);
+
+  const onFactoryFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setBusy('zip');
+    try {
+      addLog(`Reading ${file.name} (${(file.size / 1048576).toFixed(0)} MB)...`, 'info');
+      const plan = await readFactoryZip(new Uint8Array(await file.arrayBuffer()));
+      setFactory({ ...plan, fileName: file.name });
+      setSkip([]);
+      setSteps([]);
+    } catch (err) {
+      addLog(`Could not read ${file.name}: ${err.message}${/allocation|memory|Array buffer/i.test(err.message) ? ' (too big for the browser: open the inner image-*.zip instead)' : ''}`, 'err');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const handleFactoryFlash = () => guard('factory', async () => {
+    setSteps([]);
+    await flashFactory(factory, {
+      fb: () => devRef.current,
+      reconnect,
+      wipe,
+      skip,
+      onStep: (st) => { setSteps((prev) => [...prev, st]); addLog(st, 'info'); },
+      onProgress: (f) => setProgress({ phase: 'download', percent: Math.round(f * 100) })
     });
-    addLog(`Flashed ${image.name} to ${partition}.`, 'ok');
-  }, `Flash "${image?.name || '(no file)'}" to the "${partition}" partition? Flashing the wrong image to the wrong partition can brick the device.`);
+    await refreshVars(devRef.current);
+    addLog('Factory image flashed. Reboot to system when ready.', 'ok');
+  }, `Flash ${factory?.fileName}?\n\nThis rewrites the bootloader, radio and system partitions${wipe ? ' and ERASES ALL USER DATA' : ''}. Use only an image built for this exact device, and keep the cable connected until it finishes.`);
 
   const handleErase = () => guard('erase', async () => {
     await dev.erase(partition.trim());
@@ -151,6 +229,12 @@ export default function FastbootWorkbench() {
   const handleReboot = (target) => guard('reboot', async () => {
     addLog(`Rebooting to ${target || 'system'}...`, 'info');
     await dev.reboot(target);
+    if (target === 'bootloader' || target === 'fastboot') {
+      // Still a fastboot device afterwards: wait for it and carry on.
+      const fresh = await reconnect();
+      await refreshVars(fresh);
+      return;
+    }
     // After a reboot the USB endpoint is gone; drop the stale handle.
     await disconnect();
   });
@@ -173,7 +257,8 @@ export default function FastbootWorkbench() {
             </h2>
             <p className="text-[11px] text-slate-400 max-w-3xl">
               Talk to an Android device in fastboot/bootloader mode over WebUSB: read variables, unlock your own bootloader,
-              flash or erase partitions, boot an image, and reboot. Put the phone in fastboot mode first
+              flash (sparse images split automatically, either or both A/B slots) or erase partitions, boot an image, flash a whole
+              factory image zip, and reboot. Put the phone in fastboot mode first
               (power off, then hold Volume-Down + Power, or <code>adb reboot bootloader</code>).
             </p>
           </div>
@@ -289,10 +374,31 @@ export default function FastbootWorkbench() {
             <button onClick={() => fileRef.current?.click()} disabled={!!busy} className="px-3 py-1 rounded bg-slate-900 text-cyan-300 border border-slate-800 font-bold disabled:opacity-40">
               {image ? image.name : 'CHOOSE IMAGE...'}
             </button>
+            {summary?.currentSlot && (
+              <>
+                <label className="text-slate-500">Slot</label>
+                <select value={slotChoice} onChange={(e) => setSlotChoice(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200">
+                  <option value="current">current ({summary.currentSlot})</option>
+                  <option value="a">A</option>
+                  <option value="b">B</option>
+                  <option value="both">both</option>
+                </select>
+              </>
+            )}
           </div>
+          {image && (
+            <p className="text-[11px] text-slate-400">
+              {(() => {
+                const sparse = isSparse(image.data);
+                const raw = sparse ? parseSparse(image.data).rawSize : image.data.length;
+                const parts = imageParts(image.data, dev.maxDownloadSize).length;
+                return `${sparse ? 'Android sparse image' : 'Raw image'}, ${(image.data.length / 1048576).toFixed(1)} MB${sparse ? ` (${(raw / 1048576).toFixed(1)} MB written)` : ''}. ${parts > 1 ? `Larger than max-download-size, so it is sent as ${parts} sparse pieces.` : 'Fits in one download.'}`;
+              })()}
+            </p>
+          )}
           {progress && (
             <div className="space-y-1">
-              <div className="flex justify-between text-[11px] text-cyan-400"><span>{progress.phase === 'download' ? 'Uploading to device' : 'Working'}</span><span>{progress.percent}%</span></div>
+              <div className="flex justify-between text-[11px] text-cyan-400"><span>{progress.phase === 'download' ? 'Uploading to device' : 'Working'}{progress.parts > 1 ? ` (piece ${progress.part} of ${progress.parts})` : ''}</span><span>{progress.percent}%</span></div>
               <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all" style={{ width: `${progress.percent}%` }} /></div>
             </div>
           )}
@@ -307,6 +413,60 @@ export default function FastbootWorkbench() {
               <Trash2 className="w-3.5 h-3.5" /> ERASE PARTITION
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Factory image */}
+      {dev && (
+        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+          <span className="font-bold text-slate-200 flex items-center gap-2"><Package className="w-4 h-4 text-amber-400" /> FACTORY IMAGE (FLASH-ALL)</span>
+          <p className="text-[11px] text-slate-400">
+            Open a factory image zip (for example from developers.google.com/android/images) or its inner image-*.zip. The steps follow flash-all.sh and
+            fastboot update: bootloader and radio with a reboot after each, boot/vbmeta-type images in the bootloader, then the dynamic partitions in fastbootd.
+            The whole zip is read into memory, so a very large zip may need its inner image zip instead.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="file" ref={zipRef} accept=".zip" onChange={onFactoryFile} className="hidden" />
+            <button onClick={() => zipRef.current?.click()} disabled={!!busy} className="px-3 py-1 rounded bg-slate-900 text-amber-300 border border-slate-800 font-bold disabled:opacity-40">
+              {busy === 'zip' ? 'READING...' : factory ? factory.fileName : 'OPEN FACTORY ZIP...'}
+            </button>
+          </div>
+          {factory && (
+            <>
+              {factory.requirements.length > 0 && vars && (
+                <div className="space-y-0.5">
+                  {checkRequirements(factory.requirements, vars).map((r) => (
+                    <div key={r.name} className={r.ok ? 'text-emerald-300' : r.name === 'product' ? 'text-rose-300 font-bold' : 'text-amber-300'}>
+                      {r.ok ? '✓' : '✗'} {r.name}: needs {r.want}, device has {r.have ?? 'unknown'}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {[...(factory.bootloader ? ['bootloader'] : []), ...(factory.radio ? ['radio'] : []), ...factory.images.map((i) => i.name)].map((name) => {
+                  const img = factory.images.find((i) => i.name === name);
+                  return (
+                    <label key={name} className={`flex items-center gap-1 px-2 py-0.5 rounded border ${skip.includes(name) ? 'border-slate-800 text-slate-600 line-through' : 'border-slate-700 text-slate-200'}`}>
+                      <input type="checkbox" checked={!skip.includes(name)} onChange={(e) => setSkip((prev) => (e.target.checked ? prev.filter((x) => x !== name) : [...prev, name]))} className="accent-amber-500" />
+                      {name}{img?.logical ? ' (fastbootd)' : ''}
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-1 text-rose-300"><input type="checkbox" checked={wipe} onChange={(e) => setWipe(e.target.checked)} className="accent-rose-500" /> wipe user data (like flash-all.sh -w)</label>
+                <button onClick={handleFactoryFlash} disabled={!!busy || !unlocked} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold disabled:opacity-40">
+                  <Upload className="w-3.5 h-3.5" /> {busy === 'factory' ? 'FLASHING...' : 'FLASH FACTORY IMAGE'}
+                </button>
+                {!unlocked && <span className="text-amber-300/80">Unlock the bootloader first.</span>}
+              </div>
+              {steps.length > 0 && (
+                <ol className="list-decimal list-inside text-[11px] text-slate-300 space-y-0.5">
+                  {steps.map((st, i) => <li key={i} className={i === steps.length - 1 && busy === 'factory' ? 'text-cyan-300' : ''}>{st}</li>)}
+                </ol>
+              )}
+            </>
+          )}
         </div>
       )}
 

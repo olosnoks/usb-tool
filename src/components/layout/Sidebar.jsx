@@ -79,7 +79,7 @@ export const SIDEBAR_SECTIONS = [
       { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash, CMSIS-DAP debugger (RTT, SWO, flash), JTAG / SVF and AVR ISP' },
       { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'Fixed-voltage requests and contract readout through an STUSB4500 sink' },
       { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more' },
-      { id: 'fastboot', name: 'Android Fastboot', icon: Smartphone, accent: 'emerald', desc: 'Bootloader unlock, flash/erase partitions and reboot over WebUSB' },
+      { id: 'fastboot', name: 'Android Fastboot', icon: Smartphone, accent: 'emerald', desc: 'Unlock, sparse-aware flashing, A/B slots, factory image zips, reboot over WebUSB' },
       { id: 'adb', name: 'Android ADB', icon: Smartphone, accent: 'emerald', desc: 'Device info, shell, files, apps, logcat, screen with tap control, wireless ADB' }
     ]
   },
