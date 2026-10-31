@@ -13,6 +13,8 @@
  * References: USBTMC 1.0 and USBTMC-USB488 1.0 (USB-IF).
  */
 
+import { buildIeeeBlock, demoWaveform, demoScreenshotBmp } from './scpiTools';
+
 export const USBTMC_CLASS = { classCode: 0xfe, subclassCode: 0x03 }; // Application / Test & Measurement
 export const MSGID = { DEV_DEP_MSG_OUT: 1, REQUEST_DEV_DEP_MSG_IN: 2, DEV_DEP_MSG_IN: 2 };
 
@@ -175,7 +177,8 @@ export async function requestUsbTmcDevice() {
 
 /**
  * A simulated SCPI instrument for the workbench demo (opt-in, labeled). Answers
- * *IDN?, a few common queries, and echoes unknown queries.
+ * *IDN?, measurements, waveform (:WAV:PRE? / :WAV:DATA?) and screenshot
+ * (:DISP:DATA?) queries, and echoes unknown queries.
  */
 export function createSimulatedUsbTmc() {
   let pending = null; // bytes to return on next IN
@@ -186,6 +189,9 @@ export function createSimulatedUsbTmc() {
     if (Q === '*OPC?') return '1';
     if (Q.startsWith('MEAS') || Q.startsWith('MEASURE')) return (3.300 + Math.random() * 0.01).toFixed(4);
     if (Q === 'SYST:ERR?' || Q === 'SYSTEM:ERROR?') return '0,"No error"';
+    if (Q === ':WAV:PRE?') return demoWaveform().preamble;
+    if (Q === ':WAV:DATA?') return buildIeeeBlock(demoWaveform().data);
+    if (Q.startsWith(':DISP:DATA?')) return buildIeeeBlock(demoScreenshotBmp());
     if (Q.endsWith('?')) return `SIMULATED response to ${q.trim()}`;
     return null;
   };
@@ -199,7 +205,7 @@ export function createSimulatedUsbTmc() {
         const cmd = td.decode(bytes.slice(12, 12 + size));
         state.lastWrite = cmd.trim();
         const resp = answer(cmd);
-        pending = resp != null ? te.encode(resp + '\n') : null;
+        pending = resp == null ? null : resp instanceof Uint8Array ? resp : te.encode(resp + '\n');
       } else if (bytes[0] === MSGID.REQUEST_DEV_DEP_MSG_IN) {
         const data = pending || new Uint8Array();
         const out = new Uint8Array(12 + align4(data.length));
