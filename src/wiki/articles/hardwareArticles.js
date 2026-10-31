@@ -1101,6 +1101,187 @@ Dense 802.11 deployments frequently suffer from co-channel interference and spec
 `
 
 
+  },
+  {
+    id: 'fastboot',
+    toolId: 'fastboot',
+    category: 'programmers',
+    title: 'Android Fastboot — Bootloader Unlock, Partition Flashing & Reboot',
+    summary: 'Drive an Android device in bootloader/fastboot mode over WebUSB: read variables, unlock your own bootloader, flash and erase partitions, boot a transient image, and reboot — the clean path to repurposing a phone as a homelab server.',
+    tags: ['Fastboot', 'Android', 'Bootloader', 'Unlock', 'Flash', 'WebUSB', 'Partition', 'Recovery', 'A/B slots', 'Homelab'],
+    readTime: '18 min read',
+    content: `
+# Android Fastboot — Bootloader & Partition Workbench
+
+The **Fastboot** workbench talks to an Android device that is in **bootloader / fastboot mode** over WebUSB. Fastboot is Google's small, text-based protocol spoken by the bootloader before Android boots; it is how you read device variables, unlock the bootloader of a device you own, and flash or erase partitions.
+
+> **Scope — owner operations only.** This tool issues standard fastboot commands. It can request a bootloader unlock, but the **phone itself** displays the confirmation and you approve it with the hardware keys; the unlock **wipes all user data**. It cannot bypass a screen-lock PIN, and it cannot defeat Factory Reset Protection or a Google/Samsung account lock — those are cleared by recovering the account and doing a normal factory reset, not by fastboot.
+
+---
+
+### 1. What is fastboot, and when do you see it?
+
+Android devices expose several USB modes:
+
+| Mode | What runs | Protocol | This tool |
+| :--- | :--- | :--- | :--- |
+| **Android** | The OS | ADB (when enabled) | — |
+| **Recovery** | Recovery image | ADB / sideload | — |
+| **Bootloader / fastboot** | The bootloader | **fastboot** | **Yes** |
+| **fastbootd** | Userspace fastboot (in recovery) | fastboot | Yes |
+| **Download / EDL** | Vendor loaders (Odin, Qualcomm EDL) | vendor-specific | No |
+
+Enter fastboot mode by powering the device off and holding **Volume-Down + Power** (the exact keys vary by model), or from a running device with \`adb reboot bootloader\`.
+
+---
+
+### 2. The fastboot protocol
+
+Fastboot is a request/response protocol on one **bulk endpoint pair**, on the USB interface with class \`0xFF\`, subclass \`0x42\`, protocol \`0x03\`. The host writes an ASCII command (at most 64 bytes); the device replies with one or more 4-byte-tagged packets:
+
+| Tag | Meaning |
+| :--- | :--- |
+| \`OKAY\` | Success; the rest of the packet is the result value. |
+| \`FAIL\` | The command failed; the rest is the reason. |
+| \`DATA\` + 8 hex | The device is ready to receive (or send) that many bytes. |
+| \`INFO\` / \`TEXT\` | Progress text; more packets follow. |
+
+**Flashing** is a two-step dance: the host sends \`download:<size>\`, the device answers \`DATA<size>\`, the host streams exactly that many raw bytes into the device's download buffer and reads \`OKAY\`, then the host sends \`flash:<partition>\` to write the buffer. The \`max-download-size\` variable caps a single transfer; larger system images are split into **sparse** chunks.
+
+---
+
+### 3. UI control mapping
+
+| UI Element | Purpose |
+| :--- | :--- |
+| **Connect Fastboot (WebUSB)** | Opens a device in fastboot mode, claims the fastboot interface and reads \`getvar:all\`. |
+| **Demo** | Runs a simulated bootloader so you can learn the flow with no device (labeled as simulated). |
+| **Device panel** | Product, bootloader version, serial, active A/B slot, and the locked/unlocked badge. |
+| **Unlock bootloader** | Sends \`flashing unlock\` (falling back to \`oem unlock\`). The phone asks you to confirm; this **wipes user data**. |
+| **Flash image** | Loads a file, runs the download handshake, then \`flash:<partition>\`, with a progress bar. |
+| **Boot once** | Downloads an image and \`boot\`s it without flashing — handy for testing a recovery or boot image. |
+| **Erase partition** | \`erase:<partition>\`. |
+| **Set active slot** | \`set_active:a\`/\`b\` on A/B devices. |
+| **Reboot** | \`reboot\`, \`reboot-bootloader\`, \`reboot-fastboot\`, \`reboot-recovery\`. |
+
+Every destructive action asks for confirmation first, and flashing/erasing is refused by the bootloader while it is locked.
+
+---
+
+### 4. Walkthrough: reclaim an old phone as a homelab box
+
+1. Back up anything you still want — unlocking erases the device.
+2. If the phone has a forgotten PIN or account, first do a normal factory reset and recover the Google/Samsung account; fastboot does not bypass those.
+3. Boot to the bootloader and click **Connect Fastboot (WebUSB)**. Confirm the product and serial.
+4. **Unlock bootloader** and approve the prompt on the phone. It reboots and wipes.
+5. Flash a custom recovery (\`flash recovery twrp.img\`) or a ROM per its install guide, or just re-lock and run the stock OS with **Termux** for small always-on services.
+6. For a headless server, enable ADB and use \`adb tcpip 5555\` so you can reach it over the network.
+
+---
+
+### 5. Implementation & Architecture
+
+- **Driver:** [\`src/utils/fastbootDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fastbootDriver.js) owns the protocol with no React or \`navigator.usb\` dependency: \`FastbootDevice\` serializes commands on the shared bulk pipe, \`parseResponse\` splits the tag, \`download()\` runs the DATA handshake and chunks the upload, and \`getAllVars()\` parses \`getvar:all\` (splitting on the **last** colon, since names like \`partition-type:boot\` contain colons). \`createSimulatedFastboot()\` backs the demo.
+- **Transport:** \`FastbootUsbTransport\` finds the class \`ff/42/03\` interface and its bulk endpoints.
+- **Workbench:** [\`src/components/tools/FastbootWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/FastbootWorkbench.jsx) renders the device summary, the lock/flash/erase/boot/reboot panels and the variable table, with a confirmation on every destructive step.
+- **Tests:** [\`tests/fastboot.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fastboot.test.js) runs the driver against a simulated bootloader covering getvar, the download handshake, lock-gated flashing, erase, slots, boot and reboot.
+
+---
+
+### 6. References
+
+| Resource | Source |
+| :--- | :--- |
+| Fastboot protocol | AOSP \`platform/system/core\` — \`fastboot/README.md\` |
+| Android flashing & A/B | source.android.com — Flashing, A/B (Seamless) Updates |
+| WebUSB | W3C WebUSB specification |
+`
+  },
+  {
+    id: 'adb',
+    toolId: 'adb',
+    category: 'programmers',
+    title: 'Android ADB over WebUSB — Shell, File Transfer & Wireless',
+    summary: 'Connect to an Android device with USB debugging enabled: run shell commands, push and pull files, restart ADB over Wi-Fi, and reboot — all in the browser, with the RSA "Allow USB debugging" handshake handled for you.',
+    tags: ['ADB', 'Android', 'Shell', 'Push', 'Pull', 'WebUSB', 'RSA', 'adbd', 'Wireless', 'Homelab', 'Termux'],
+    readTime: '20 min read',
+    content: `
+# Android ADB over WebUSB
+
+The **ADB** workbench speaks the Android Debug Bridge transport protocol straight from the browser to a device that has **USB debugging** turned on. It is the companion to the Fastboot tool: once a phone is set up (reset, re-logged-in, ROM of your choice), ADB is how you actually use it — run commands, move files on and off it, and turn on wireless ADB so you can manage it headless.
+
+> **Scope.** This does exactly what desktop \`adb\` does after you approve the on-device prompt. It is not a lock bypass: an unauthorized host never receives the device's \`CNXN\`, so the connect call simply reports that the prompt wasn't accepted.
+
+---
+
+### 1. The authentication handshake
+
+ADB over USB is a small framed protocol: 24-byte headers (command, two args, length, checksum, magic) followed by a payload. The commands are \`CNXN\`, \`AUTH\`, \`OPEN\`, \`OKAY\`, \`WRTE\` and \`CLSE\`.
+
+The interesting part is **AUTH**. When you connect:
+
+1. The host sends \`CNXN\`.
+2. adbd replies \`AUTH\` with a 20-byte random **token**.
+3. The host signs the token with its RSA-2048 private key — **PKCS#1 v1.5 over the SHA-1 DigestInfo of the token** — and sends \`AUTH SIGNATURE\`.
+4. If the device already trusts this key, it sends \`CNXN\` back and you're in. If not, the host sends \`AUTH RSAPUBLICKEY\` with its public key in Android's custom \`android_pubkey\` format, and the phone shows **"Allow USB debugging?"**. Tap *Always allow* and it remembers the key.
+
+Web Crypto can't do step 3 directly (adbd's token is already a hash, and \`SubtleCrypto.sign\` would hash it again), so the tool generates the key with Web Crypto but performs the modular exponentiation with BigInt. The key is stored in the browser so the device keeps trusting it across sessions.
+
+---
+
+### 2. Streams and services
+
+After \`CNXN\`, everything happens on **streams**. The host \`OPEN\`s a service by name; the device answers \`OKAY\` with its stream id; data flows as \`WRTE\` packets that the other side must \`OKAY\` (that acknowledgement is the flow control); either side ends it with \`CLSE\`.
+
+| Service | What it does |
+| :--- | :--- |
+| \`shell:<cmd>\` | Runs a command; the output comes back as WRTE packets. |
+| \`sync:\` | The file-transfer sub-protocol: \`SEND\`/\`DATA\`/\`DONE\` to push, \`RECV\` to pull, each a 4-char id with a length (except \`DONE\`, whose second word is an mtime). |
+| \`tcpip:<port>\` | Restarts adbd listening on TCP so you can go wireless. |
+| \`reboot:<target>\` | Reboots to system / bootloader / recovery / fastbootd. |
+
+---
+
+### 3. UI control mapping
+
+| UI Element | Purpose |
+| :--- | :--- |
+| **Connect ADB (WebUSB)** | Opens the device, runs the auth handshake (approve the prompt on the phone). |
+| **Demo** | A simulated device with a few canned shell replies and an in-memory filesystem (labeled as simulated). |
+| **Shell** | Run a command and see its output. |
+| **Push file** | Upload a local file to a path on the device. |
+| **Pull file** | Download a file from the device to your computer. |
+| **Restart ADB over TCP/IP** | \`tcpip:5555\`; afterwards run \`adb connect <ip>:5555\` from any machine. |
+| **Reboot** | Reboot to the chosen mode (Bootloader lands you in the Fastboot tool). |
+
+---
+
+### 4. Walkthrough: a phone as a headless homelab box
+
+1. Enable Developer options (tap Build number 7×), then turn on **USB debugging**.
+2. **Connect ADB (WebUSB)** and tap **Always allow** on the phone.
+3. Install **Termux** (from F-Droid) and push any scripts or binaries your service needs with **Push file**.
+4. In **Shell**, start your service (or set it up to start on boot with Termux:Boot).
+5. **Restart ADB over TCP/IP**, note the phone's IP, and from then on manage it over Wi-Fi with no cable.
+
+---
+
+### 5. Implementation & Architecture
+
+- **Crypto:** [\`src/utils/adbCrypto.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbCrypto.js) — RSA key generation, \`android_pubkey\` encoding (modulus, Montgomery \`n0inv\` and \`rr\`), and PKCS#1 v1.5 token signing by BigInt modexp.
+- **Protocol:** [\`src/utils/adbDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbDriver.js) — message framing, the CNXN/AUTH handshake, the OPEN/OKAY/WRTE/CLSE stream with flow control, and the shell / sync / tcpip / reboot services. \`createSimulatedAdb()\` backs the demo.
+- **Workbench:** [\`src/components/tools/AdbWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/AdbWorkbench.jsx).
+- **Tests:** [\`tests/adbCrypto.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/adbCrypto.test.js) proves a signed token verifies as a valid PKCS#1 block and the public-key blob round-trips; [\`tests/adb.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/adb.test.js) runs the full handshake, shell, and file push/pull against a simulated adbd.
+
+---
+
+### 6. References
+
+| Resource | Source |
+| :--- | :--- |
+| ADB protocol | AOSP \`system/core/adb/protocol.txt\`, \`SERVICES.TXT\` |
+| Public key format | AOSP \`libcrypto_utils/android_pubkey.c\` |
+| WebUSB | W3C WebUSB specification |
+`
   }
 ];
-

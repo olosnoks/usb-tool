@@ -50,6 +50,14 @@ const ProtocolPacketLab = React.lazy(() => import('./components/tools/ProtocolPa
 const GpsNavigationSuite = React.lazy(() => import('./components/tools/GpsNavigationSuite'));
 const HardwareProgrammersSuite = React.lazy(() => import('./components/tools/HardwareProgrammersSuite'));
 const DfuFlasher = React.lazy(() => import('./components/tools/DfuFlasher'));
+const FastbootWorkbench = React.lazy(() => import('./components/tools/FastbootWorkbench'));
+const UsbDescriptorExplorer = React.lazy(() => import('./components/tools/UsbDescriptorExplorer'));
+const AdbWorkbench = React.lazy(() => import('./components/tools/AdbWorkbench'));
+const HidInspectorWorkbench = React.lazy(() => import('./components/tools/HidInspectorWorkbench'));
+const UsbTmcWorkbench = React.lazy(() => import('./components/tools/UsbTmcWorkbench'));
+const MassStorageWorkbench = React.lazy(() => import('./components/tools/MassStorageWorkbench'));
+const PtpWorkbench = React.lazy(() => import('./components/tools/PtpWorkbench'));
+const Fido2Workbench = React.lazy(() => import('./components/tools/Fido2Workbench'));
 const BleExplorer = React.lazy(() => import('./components/tools/BleExplorer'));
 
 // Modals
@@ -377,6 +385,54 @@ function AppContent() {
             {activeTool === 'dfu' && (
               <div className="w-full">
                 <DfuFlasher />
+              </div>
+            )}
+
+            {activeTool === 'fastboot' && (
+              <div className="w-full">
+                <FastbootWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'adb' && (
+              <div className="w-full">
+                <AdbWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'usb-descriptors' && (
+              <div className="w-full">
+                <UsbDescriptorExplorer />
+              </div>
+            )}
+
+            {activeTool === 'hid' && (
+              <div className="w-full">
+                <HidInspectorWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'usbtmc' && (
+              <div className="w-full">
+                <UsbTmcWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'mass-storage' && (
+              <div className="w-full">
+                <MassStorageWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'ptp' && (
+              <div className="w-full">
+                <PtpWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'fido2' && (
+              <div className="w-full">
+                <Fido2Workbench />
               </div>
             )}
 

@@ -1514,8 +1514,60 @@ Sharing technical findings with non-technical stakeholders or presenting during 
    - **Classic Light**: Clean light-gray and slate styling tailored for standard office environments, documentation, and high-visibility displays.
    - Theme selections persist across browser sessions via \`localStorage\`.
 `
+  },
+  {
+    id: 'usbtmc',
+    toolId: 'usbtmc',
+    category: 'analysis',
+    title: 'USBTMC Instrument Control — SCPI over WebUSB',
+    summary: 'Drive oscilloscopes, DMMs, power supplies and signal generators from the browser with SCPI commands over the USB Test & Measurement Class — query values, change settings, and read waveform data.',
+    tags: ['USBTMC', 'SCPI', 'Oscilloscope', 'DMM', 'Power Supply', 'Instrument', 'WebUSB', 'USB488', 'IEEE 488.2'],
+    readTime: '12 min read',
+    content: `
+# USBTMC Instrument Control
+
+The **USBTMC** workbench talks to bench test equipment the standard way: the **USB Test & Measurement Class** carrying **SCPI** text commands. Most modern oscilloscopes, digital multimeters, programmable power supplies and signal/function generators present a USBTMC interface, and they all answer \`*IDN?\`.
+
+---
+
+### 1. USBTMC framing
+
+USBTMC wraps your SCPI text in small bulk-transfer messages with a 12-byte header:
+
+- **DEV_DEP_MSG_OUT** — the host sends a command. Header: MsgID=1, a rolling \`bTag\` (1–255) and its complement, a 4-byte TransferSize, and a \`bmTransferAttributes\` byte whose bit 0 (**EOM**) marks the last fragment. The payload is padded to a 4-byte boundary.
+- **REQUEST_DEV_DEP_MSG_IN** then **DEV_DEP_MSG_IN** — to read a response, the host first asks (MsgID=2, the max size it will accept), then reads back a DEV_DEP_MSG_IN with the data and an EOM flag; long responses arrive as several fragments reassembled until EOM.
+
+SCPI itself is the familiar hierarchical text: \`*IDN?\`, \`MEAS:VOLT:DC?\`, \`SOUR:VOLT 5.0\`, \`SYST:ERR?\`.
+
+---
+
+### 2. UI control mapping
+
+| UI Element | Purpose |
+| :--- | :--- |
+| **Connect Instrument (WebUSB)** | Opens a USBTMC device (class FE / subclass 03) and reads \`*IDN?\`. |
+| **Demo** | A simulated instrument that answers \`*IDN?\`, measurements and errors (labeled as simulated). |
+| **SCPI line** | Send any command; lines containing \`?\` are treated as queries and the reply is shown. |
+| **Quick buttons** | \`*IDN?\`, \`*RST\`, \`*CLS\`, \`SYST:ERR?\`, \`MEAS:VOLT:DC?\`. |
+| **Exchange log** | Every command (») and response («). |
+
+---
+
+### 3. Implementation & Architecture
+
+- **Driver:** [\`src/utils/usbtmcDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/usbtmcDriver.js) — \`buildMsgOut\`/\`buildRequestIn\`/\`parseMsgIn\` for the framing, \`UsbTmcDevice\` with a rolling bTag, \`write\`/\`read\`/\`query\`/\`queryBinary\`, and fragment reassembly until EOM. \`createSimulatedUsbTmc()\` backs the demo.
+- **Workbench:** [\`src/components/tools/UsbTmcWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/UsbTmcWorkbench.jsx).
+- **Tests:** [\`tests/usbtmc.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/usbtmc.test.js) checks the header building/parsing and runs \`*IDN?\` and measurement queries against a simulated instrument.
+
+---
+
+### 4. References
+
+| Resource | Source |
+| :--- | :--- |
+| USBTMC | USB-IF USBTMC 1.0 and USBTMC-USB488 1.0 |
+| Command syntax | SCPI 1999 / IEEE 488.2 |
+| WebUSB | W3C WebUSB specification |
+`
   }
 ];
-
-
-

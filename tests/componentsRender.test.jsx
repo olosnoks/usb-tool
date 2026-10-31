@@ -10,6 +10,14 @@ import CmsisDapDebugger from '../src/components/tools/CmsisDapDebugger';
 import CanBusWorkbench from '../src/components/tools/CanBusWorkbench';
 import LogicAnalyzerWorkbench from '../src/components/tools/LogicAnalyzerWorkbench';
 import UsbPdWorkbench from '../src/components/tools/UsbPdWorkbench';
+import FastbootWorkbench from '../src/components/tools/FastbootWorkbench';
+import UsbDescriptorExplorer from '../src/components/tools/UsbDescriptorExplorer';
+import AdbWorkbench from '../src/components/tools/AdbWorkbench';
+import HidInspectorWorkbench from '../src/components/tools/HidInspectorWorkbench';
+import UsbTmcWorkbench from '../src/components/tools/UsbTmcWorkbench';
+import MassStorageWorkbench from '../src/components/tools/MassStorageWorkbench';
+import PtpWorkbench from '../src/components/tools/PtpWorkbench';
+import Fido2Workbench from '../src/components/tools/Fido2Workbench';
 import BusExplorerWorkbench from '../src/components/tools/BusExplorerWorkbench';
 import JtagWorkbench from '../src/components/tools/JtagWorkbench';
 import ModbusWorkbench from '../src/components/tools/ModbusWorkbench';
@@ -59,6 +67,14 @@ describe('UI Workbench Render Sanity Check', () => {
     { name: 'CanBusWorkbench', comp: <CanBusWorkbench /> },
     { name: 'LogicAnalyzerWorkbench', comp: <LogicAnalyzerWorkbench /> },
     { name: 'UsbPdWorkbench', comp: <UsbPdWorkbench /> },
+    { name: 'FastbootWorkbench', comp: <FastbootWorkbench /> },
+    { name: 'UsbDescriptorExplorer', comp: <UsbDescriptorExplorer /> },
+    { name: 'AdbWorkbench', comp: <AdbWorkbench /> },
+    { name: 'HidInspectorWorkbench', comp: <HidInspectorWorkbench /> },
+    { name: 'UsbTmcWorkbench', comp: <UsbTmcWorkbench /> },
+    { name: 'MassStorageWorkbench', comp: <MassStorageWorkbench /> },
+    { name: 'PtpWorkbench', comp: <PtpWorkbench /> },
+    { name: 'Fido2Workbench', comp: <Fido2Workbench /> },
     { name: 'BusExplorerWorkbench', comp: <BusExplorerWorkbench /> },
     { name: 'JtagWorkbench', comp: <JtagWorkbench /> },
     { name: 'ModbusWorkbench', comp: <ModbusWorkbench /> },

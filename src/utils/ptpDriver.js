@@ -1,0 +1,315 @@
+/**
+ * ptpDriver.js — PTP / MTP (Picture Transfer Protocol) over WebUSB, for pulling
+ * photos and metadata off cameras and phones in PTP mode.
+ *
+ * I/O goes through an injected transport so the container framing and dataset
+ * parsing are testable against a fake camera (see tests/ptp.test.js):
+ *
+ *     transport.write(Uint8Array) -> Promise<void>   (bulk OUT)
+ *     transport.read(maxLength)   -> Promise<Uint8Array> (bulk IN)
+ *     transport.close()           -> Promise<void>
+ *
+ * References: PIMA 15740 / ISO 15740 (PTP); MTP is PTP with vendor extensions.
+ */
+
+export const PTP_CLASS = { classCode: 0x06, subclassCode: 0x01, protocolCode: 0x01 }; // Still Image / PTP
+
+export const PTP_TYPE = { COMMAND: 1, DATA: 2, RESPONSE: 3, EVENT: 4 };
+export const PTP_OP = {
+  GetDeviceInfo: 0x1001, OpenSession: 0x1002, CloseSession: 0x1003,
+  GetStorageIDs: 0x1004, GetStorageInfo: 0x1005, GetNumObjects: 0x1006,
+  GetObjectHandles: 0x1007, GetObjectInfo: 0x1008, GetObject: 0x1009,
+  GetThumb: 0x100a, DeleteObject: 0x100b, InitiateCapture: 0x100e
+};
+export const PTP_RESP = { OK: 0x2001, SessionNotOpen: 0x2003, SessionAlreadyOpen: 0x201e };
+
+const OBJECT_FORMATS = {
+  0x3000: 'Undefined', 0x3001: 'Association (folder)', 0x3002: 'Script', 0x3006: 'DPOF',
+  0x300a: 'Text', 0x300b: 'HTML', 0x3801: 'JPEG (EXIF)', 0x3804: 'BMP', 0x3808: 'TIFF',
+  0x380b: 'PNG', 0x380d: 'TIFF', 0xb101: 'RAW', 0x3000: 'Undefined', 0xb982: 'MP4', 0x300c: 'DPOF'
+};
+export const objectFormatName = (code) => OBJECT_FORMATS[code] || `0x${code.toString(16)}`;
+
+export class PtpError extends Error {
+  constructor(message, responseCode) { super(message); this.responseCode = responseCode; }
+}
+
+// --- container framing ------------------------------------------------------
+
+export function buildContainer(type, code, transactionId, params = [], payload = null) {
+  const paramBytes = params.length * 4;
+  const extra = payload ? payload.length : paramBytes;
+  const len = 12 + extra;
+  const buf = new Uint8Array(len);
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(0, len, true);
+  dv.setUint16(4, type, true);
+  dv.setUint16(6, code, true);
+  dv.setUint32(8, transactionId >>> 0, true);
+  if (payload) buf.set(payload, 12);
+  else params.forEach((p, i) => dv.setUint32(12 + i * 4, p >>> 0, true));
+  return buf;
+}
+
+export function parseContainerHeader(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { length: dv.getUint32(0, true), type: dv.getUint16(4, true), code: dv.getUint16(6, true), transactionId: dv.getUint32(8, true) };
+}
+
+// --- dataset readers --------------------------------------------------------
+
+export class DataReader {
+  constructor(bytes, offset = 0) { this.b = bytes; this.dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); this.o = offset; }
+  u8() { return this.b[this.o++]; }
+  u16() { const v = this.dv.getUint16(this.o, true); this.o += 2; return v; }
+  u32() { const v = this.dv.getUint32(this.o, true); this.o += 4; return v; }
+  u64() { const lo = this.u32(); const hi = this.u32(); return hi * 0x100000000 + lo; }
+  arr16() { const n = this.u32(); const out = []; for (let i = 0; i < n; i++) out.push(this.u16()); return out; }
+  arr32() { const n = this.u32(); const out = []; for (let i = 0; i < n; i++) out.push(this.u32()); return out; }
+  str() {
+    const n = this.u8();
+    if (n === 0) return '';
+    let s = '';
+    for (let i = 0; i < n; i++) { const c = this.u16(); if (c) s += String.fromCharCode(c); }
+    return s;
+  }
+}
+
+export function parseDeviceInfo(bytes) {
+  const r = new DataReader(bytes);
+  const info = {
+    standardVersion: r.u16(),
+    vendorExtensionId: r.u32(),
+    vendorExtensionVersion: r.u16(),
+    vendorExtensionDesc: r.str(),
+    functionalMode: r.u16(),
+    operationsSupported: r.arr16(),
+    eventsSupported: r.arr16(),
+    devicePropertiesSupported: r.arr16(),
+    captureFormats: r.arr16(),
+    imageFormats: r.arr16(),
+    manufacturer: r.str(),
+    model: r.str(),
+    deviceVersion: r.str(),
+    serialNumber: r.str()
+  };
+  return info;
+}
+
+export function parseObjectInfo(bytes) {
+  const r = new DataReader(bytes);
+  return {
+    storageId: r.u32(),
+    objectFormat: r.u16(),
+    protectionStatus: r.u16(),
+    compressedSize: r.u32(),
+    thumbFormat: r.u16(),
+    thumbCompressedSize: r.u32(),
+    thumbPixWidth: r.u32(),
+    thumbPixHeight: r.u32(),
+    imagePixWidth: r.u32(),
+    imagePixHeight: r.u32(),
+    imageBitDepth: r.u32(),
+    parentObject: r.u32(),
+    associationType: r.u16(),
+    associationDesc: r.u32(),
+    sequenceNumber: r.u32(),
+    filename: r.str(),
+    captureDate: r.str(),
+    modificationDate: r.str(),
+    keywords: r.str()
+  };
+}
+
+// --- device -----------------------------------------------------------------
+
+class Reader {
+  constructor(transport) { this.transport = transport; this.buf = new Uint8Array(0); }
+  async _more() {
+    const c = await this.transport.read(512 * 1024);
+    if (c && c.length) { const m = new Uint8Array(this.buf.length + c.length); m.set(this.buf); m.set(c, this.buf.length); this.buf = m; }
+    return c ? c.length : 0;
+  }
+  async container() {
+    while (this.buf.length < 12) if (!(await this._more())) throw new PtpError('Camera closed the connection.');
+    const length = new DataView(this.buf.buffer, this.buf.byteOffset, 4).getUint32(0, true);
+    while (this.buf.length < length) if (!(await this._more())) throw new PtpError('Truncated PTP container.');
+    const whole = this.buf.slice(0, length);
+    this.buf = this.buf.slice(length);
+    const header = parseContainerHeader(whole);
+    return { ...header, payload: whole.slice(12) };
+  }
+}
+
+export class PtpDevice {
+  constructor(transport, { logger = () => {} } = {}) {
+    this.transport = transport;
+    this.logger = logger;
+    this.reader = new Reader(transport);
+    this.txid = 0;
+    this.sessionOpen = false;
+    this.chain = Promise.resolve();
+  }
+
+  _serialize(fn) { const r = this.chain.then(fn, fn); this.chain = r.then(() => {}, () => {}); return r; }
+
+  async open() { if (this.transport.open) await this.transport.open(); }
+
+  /**
+   * One PTP transaction. Optionally sends a data phase; collects an incoming
+   * data phase; returns { responseCode, params, data }.
+   */
+  transaction(code, params = [], dataToSend = null) {
+    return this._serialize(async () => {
+      const txid = (this.txid = (this.txid + 1) >>> 0);
+      await this.transport.write(buildContainer(PTP_TYPE.COMMAND, code, txid, params));
+      if (dataToSend) await this.transport.write(buildContainer(PTP_TYPE.DATA, code, txid, [], dataToSend));
+      let data = null;
+      for (;;) {
+        const c = await this.reader.container();
+        if (c.type === PTP_TYPE.DATA) data = c.payload;
+        else if (c.type === PTP_TYPE.RESPONSE) {
+          const dv = new DataView(c.payload.buffer, c.payload.byteOffset, c.payload.byteLength);
+          const rparams = []; for (let i = 0; i + 4 <= c.payload.length; i += 4) rparams.push(dv.getUint32(i, true));
+          if (c.code !== PTP_RESP.OK) throw new PtpError(`PTP operation 0x${code.toString(16)} failed (response 0x${c.code.toString(16)}).`, c.code);
+          return { responseCode: c.code, params: rparams, data };
+        }
+      }
+    });
+  }
+
+  async getDeviceInfo() { return parseDeviceInfo((await this.transaction(PTP_OP.GetDeviceInfo)).data); }
+
+  async openSession(sessionId = 1) {
+    try { await this.transaction(PTP_OP.OpenSession, [sessionId]); }
+    catch (e) { if (e.responseCode !== PTP_RESP.SessionAlreadyOpen) throw e; }
+    this.sessionOpen = true;
+  }
+
+  async closeSession() {
+    if (this.sessionOpen) { try { await this.transaction(PTP_OP.CloseSession); } catch (e) { /* ignore */ } }
+    this.sessionOpen = false;
+  }
+
+  async getStorageIds() { return new DataReader((await this.transaction(PTP_OP.GetStorageIDs)).data).arr32(); }
+
+  /** List object handles. storageId 0xffffffff = all; format 0 = all; parent 0 = root (0xffffffff = all). */
+  async getObjectHandles(storageId = 0xffffffff, format = 0, parent = 0xffffffff) {
+    return new DataReader((await this.transaction(PTP_OP.GetObjectHandles, [storageId, format, parent])).data).arr32();
+  }
+
+  async getObjectInfo(handle) { return parseObjectInfo((await this.transaction(PTP_OP.GetObjectInfo, [handle])).data); }
+
+  async getObject(handle) { return (await this.transaction(PTP_OP.GetObject, [handle])).data; }
+
+  async getThumb(handle) { try { return (await this.transaction(PTP_OP.GetThumb, [handle])).data; } catch (e) { return null; } }
+
+  async close() { if (this.transport.close) await this.transport.close(); }
+}
+
+// --- WebUSB transport -------------------------------------------------------
+
+export function findPtpInterface(configuration) {
+  for (const iface of configuration?.interfaces || []) {
+    for (const alt of iface.alternates || []) {
+      if (alt.interfaceClass === 0x06 && alt.interfaceSubclass === 0x01) {
+        const out = alt.endpoints.find((e) => e.type === 'bulk' && e.direction === 'out');
+        const inn = alt.endpoints.find((e) => e.type === 'bulk' && e.direction === 'in');
+        if (out && inn) return { interfaceNumber: iface.interfaceNumber, epOut: out.endpointNumber, epIn: inn.endpointNumber };
+      }
+    }
+  }
+  return null;
+}
+
+export class PtpUsbTransport {
+  constructor(device) { this.device = device; }
+  async open() {
+    const d = this.device;
+    if (!d.opened) await d.open();
+    if (d.configuration === null) await d.selectConfiguration(1);
+    const found = findPtpInterface(d.configuration);
+    if (!found) throw new PtpError('No PTP/still-image interface (class 06). Put the camera/phone in PTP mode (not MTP file transfer, not charging).');
+    this.interfaceNumber = found.interfaceNumber;
+    this.epOut = found.epOut; this.epIn = found.epIn;
+    await d.claimInterface(this.interfaceNumber);
+  }
+  async write(bytes) { const r = await this.device.transferOut(this.epOut, bytes); if (r.status !== 'ok') throw new PtpError(`USB OUT ${r.status}`); }
+  async read(maxLength) { const r = await this.device.transferIn(this.epIn, maxLength); if (r.status !== 'ok' && !r.data) throw new PtpError(`USB IN ${r.status}`); return new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength); }
+  async close() {
+    try { await this.device.releaseInterface(this.interfaceNumber); } catch (e) { /* ignore */ }
+    try { await this.device.close(); } catch (e) { /* ignore */ }
+  }
+}
+
+export const PTP_USB_FILTERS = [{ classCode: 0x06, subclassCode: 0x01 }];
+
+export async function requestPtpDevice() {
+  if (typeof navigator === 'undefined' || !navigator.usb) throw new PtpError('WebUSB needs Chrome or Edge over HTTPS.');
+  const device = await navigator.usb.requestDevice({ filters: PTP_USB_FILTERS });
+  return new PtpUsbTransport(device);
+}
+
+// --- simulated camera (demo + tests) ---------------------------------------
+
+function ptpString(s) {
+  if (!s) return Uint8Array.from([0]);
+  const out = new Uint8Array(1 + (s.length + 1) * 2);
+  out[0] = s.length + 1;
+  const dv = new DataView(out.buffer);
+  for (let i = 0; i < s.length; i++) dv.setUint16(1 + i * 2, s.charCodeAt(i), true);
+  return out;
+}
+const concat = (arrs) => { let n = 0; arrs.forEach((a) => (n += a.length)); const o = new Uint8Array(n); let k = 0; arrs.forEach((a) => { o.set(a, k); k += a.length; }); return o; };
+const u32a = (n) => Uint8Array.from([n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff]);
+const u16a = (n) => Uint8Array.from([n & 0xff, (n >>> 8) & 0xff]);
+const arr32 = (list) => concat([u32a(list.length), ...list.map(u32a)]);
+const arr16 = (list) => concat([u32a(list.length), ...list.map(u16a)]);
+
+export function createSimulatedPtp() {
+  const objects = {
+    1: { info: { storageId: 0x10001, objectFormat: 0x3801, compressedSize: 12, imagePixWidth: 4000, imagePixHeight: 3000, filename: 'IMG_0001.JPG', captureDate: '20240131T101500' }, data: new TextEncoder().encode('JPEGDATA0001') },
+    2: { info: { storageId: 0x10001, objectFormat: 0x3801, compressedSize: 12, imagePixWidth: 4000, imagePixHeight: 3000, filename: 'IMG_0002.JPG', captureDate: '20240131T101530' }, data: new TextEncoder().encode('JPEGDATA0002') }
+  };
+  const state = { simulated: true, sessionOpen: false, objects };
+  let pending = [];
+  const devInfo = () => concat([
+    u16a(100), u32a(0), u16a(100), ptpString('sim'), u16a(0),
+    arr16([0x1001, 0x1002, 0x1003, 0x1004, 0x1007, 0x1008, 0x1009]),
+    arr16([]), arr16([]), arr16([]), arr16([0x3801]),
+    ptpString('Simulated Optics'), ptpString('SimCam X1'), ptpString('1.0'), ptpString('SNCAM00001')
+  ]);
+  const objInfo = (h) => {
+    const i = objects[h].info;
+    return concat([
+      u32a(i.storageId), u16a(i.objectFormat), u16a(0), u32a(i.compressedSize),
+      u16a(0), u32a(0), u32a(0), u32a(0), u32a(i.imagePixWidth), u32a(i.imagePixHeight),
+      u32a(24), u32a(0), u16a(0), u32a(0), u32a(h),
+      ptpString(i.filename), ptpString(i.captureDate), ptpString(''), ptpString('')
+    ]);
+  };
+  const reply = (type, code, txid, payload) => pending.push(buildContainer(type, code, txid, [], payload));
+  const ok = (txid) => pending.push(buildContainer(PTP_TYPE.RESPONSE, PTP_RESP.OK, txid));
+  return {
+    state,
+    async open() {}, async close() {},
+    async write(bytes) {
+      const h = parseContainerHeader(bytes);
+      if (h.type !== PTP_TYPE.COMMAND) return; // ignore our own data phases (none expected)
+      const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const p = []; for (let o = 12; o + 4 <= h.length; o += 4) p.push(dv.getUint32(o, true));
+      switch (h.code) {
+        case PTP_OP.OpenSession: state.sessionOpen = true; ok(h.transactionId); break;
+        case PTP_OP.CloseSession: state.sessionOpen = false; ok(h.transactionId); break;
+        case PTP_OP.GetDeviceInfo: reply(PTP_TYPE.DATA, h.code, h.transactionId, devInfo()); ok(h.transactionId); break;
+        case PTP_OP.GetStorageIDs: reply(PTP_TYPE.DATA, h.code, h.transactionId, arr32([0x10001])); ok(h.transactionId); break;
+        case PTP_OP.GetObjectHandles: reply(PTP_TYPE.DATA, h.code, h.transactionId, arr32(Object.keys(objects).map(Number))); ok(h.transactionId); break;
+        case PTP_OP.GetObjectInfo: reply(PTP_TYPE.DATA, h.code, h.transactionId, objInfo(p[0])); ok(h.transactionId); break;
+        case PTP_OP.GetObject: reply(PTP_TYPE.DATA, h.code, h.transactionId, objects[p[0]].data); ok(h.transactionId); break;
+        case PTP_OP.GetThumb: pending.push(buildContainer(PTP_TYPE.RESPONSE, 0x2001, h.transactionId)); break;
+        default: pending.push(buildContainer(PTP_TYPE.RESPONSE, 0x2005, h.transactionId)); // OperationNotSupported
+      }
+    },
+    async read() { return pending.length ? pending.shift() : new Uint8Array(); }
+  };
+}

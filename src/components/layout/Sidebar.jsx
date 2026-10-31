@@ -28,7 +28,10 @@ import {
   ShieldCheck,
   Keyboard,
   Download,
-  Bluetooth
+  Bluetooth,
+  Smartphone,
+  Camera,
+  KeyRound
 } from 'lucide-react';
 
 export const SIDEBAR_SECTIONS = [
@@ -51,7 +54,8 @@ export const SIDEBAR_SECTIONS = [
       { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', desc: 'I2C scan, chip ID, register read/write and SPI through a Bus Pirate' },
       { id: 'modbus-rtu', name: 'Modbus RTU & RS-485', icon: Activity, accent: 'amber', desc: 'Industrial holding registers & inverter telemetry' },
       { id: 'plotter', name: 'Oscilloscope Plotter', icon: Activity, accent: 'rose', desc: 'Multi-channel live waveforms' },
-      { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer' }
+      { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer' },
+      { id: 'usbtmc', name: 'USBTMC Instrument', icon: Gauge, accent: 'cyan', desc: 'SCPI control of scopes, DMMs and supplies over WebUSB' }
     ]
   },
   {
@@ -74,7 +78,9 @@ export const SIDEBAR_SECTIONS = [
       { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript compiler, simulator & CyberChef obfuscator' },
       { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash, CMSIS-DAP SWD debugger, JTAG / SVF and AVR ISP' },
       { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'Fixed-voltage requests and contract readout through an STUSB4500 sink' },
-      { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more' }
+      { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more' },
+      { id: 'fastboot', name: 'Android Fastboot', icon: Smartphone, accent: 'emerald', desc: 'Bootloader unlock, flash/erase partitions and reboot over WebUSB' },
+      { id: 'adb', name: 'Android ADB', icon: Smartphone, accent: 'emerald', desc: 'Shell, push/pull files, wireless ADB and reboot over WebUSB' }
     ]
   },
   {
@@ -86,7 +92,12 @@ export const SIDEBAR_SECTIONS = [
       { id: 'telemetry', name: 'Telemetry Gauges', icon: Gauge, accent: 'cyan', desc: 'Speedometer sensor dials' },
       { id: 'alerts', name: 'Crash & Panic Alerts', icon: ShieldAlert, accent: 'rose', desc: 'Auto-detect kernel panics' },
       { id: 'automation', name: 'Test Runner & Scripts', icon: Bot, accent: 'purple', desc: 'Automated JS test routines' },
-      { id: 'autopsy', name: 'USB Recon & Autopsy', icon: Usb, accent: 'amber', desc: 'Mystery chip descriptor analysis' }
+      { id: 'autopsy', name: 'USB Recon & Autopsy', icon: Usb, accent: 'amber', desc: 'Mystery chip descriptor analysis' },
+      { id: 'usb-descriptors', name: 'USB Descriptor Explorer', icon: Usb, accent: 'cyan', desc: 'lsusb -v in the browser: configs, interfaces, endpoints' },
+      { id: 'hid', name: 'HID Inspector', icon: Keyboard, accent: 'purple', desc: 'Decode keyboards, mice, gamepads and their live reports (WebHID)' },
+      { id: 'mass-storage', name: 'Mass Storage Inspector', icon: HardDrive, accent: 'amber', desc: 'Read-only SCSI: identity, capacity and raw sectors over WebUSB' },
+      { id: 'ptp', name: 'PTP / MTP Camera', icon: Camera, accent: 'purple', desc: 'Pull photos and metadata off cameras and phones over WebUSB' },
+      { id: 'fido2', name: 'FIDO2 Security Key', icon: KeyRound, accent: 'emerald', desc: 'Read a security key: versions, AAGUID, options (WebHID, read-only)' }
     ]
   },
   {

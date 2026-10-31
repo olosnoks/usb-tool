@@ -601,5 +601,324 @@ The inspector verifies whether physical devices are protected against hardware t
 | **ESP32 Technical Reference Manual (eFuse Controller)** | Espressif Systems | [espressif.com Documentation](https://www.espressif.com) | Hardware Specification |
 | **JEDEC Solid State Technology Association Standard** | JEDEC Standard JESD216 (Serial Flash Discoverable Parameters - SFDP) | [jedec.org](https://www.jedec.org) | Open Industry Standard |
 `
+  },
+  {
+    id: 'usb-descriptors',
+    toolId: 'usb-descriptors',
+    category: 'utilities',
+    title: 'USB Descriptor Explorer — lsusb -v in the Browser',
+    summary: 'Pick any USB device and read its descriptor tree — configurations, interfaces, alternate settings, endpoints and string descriptors — with class / subclass / protocol codes decoded into plain language. Read-only.',
+    tags: ['USB', 'Descriptor', 'lsusb', 'WebUSB', 'Endpoint', 'Interface', 'Class Codes', 'Enumeration'],
+    readTime: '10 min read',
+    content: `
+# USB Descriptor Explorer
+
+The **USB Descriptor Explorer** is a WebUSB equivalent of \`lsusb -v\`: choose a device from the browser's picker and see exactly how it describes itself to the host — how many configurations it has, what interfaces and alternate settings each one exposes, and the endpoints under each interface. Every class / subclass / protocol triple is decoded into a human label. It is strictly **read-only**: it reads the descriptors the browser already parsed and never sends data to the device.
+
+It's the natural first stop before driving an unfamiliar device with any of the other tools — it tells you which interface and endpoints a protocol lives on.
+
+---
+
+### 1. How USB devices describe themselves
+
+When a device is plugged in, it answers a fixed series of **GET_DESCRIPTOR** requests. The descriptors nest:
+
+\`\`\`
+Device
+ └─ Configuration (power, number of interfaces)
+     └─ Interface (a function: HID, CDC, Mass Storage, vendor...)
+         ├─ Alternate setting (e.g. different bandwidth for a camera)
+         └─ Endpoint (a one-way pipe: control / bulk / interrupt / isochronous)
+\`\`\`
+
+- **Class codes** identify the function. They live either at the device level, or — far more commonly — per interface, so a single gadget can be several things at once (a "composite" device: serial + storage + HID).
+- **Endpoint addresses** carry a direction bit: \`0x81\` is endpoint 1 **IN** (device → host), \`0x01\` is endpoint 1 **OUT**.
+
+---
+
+### 2. What the tool decodes
+
+| Field | Example | Meaning |
+| :--- | :--- | :--- |
+| VID:PID | \`04e8:6860\` | Vendor and product ID (hex). |
+| USB version | \`2.00\` | bcdUSB. |
+| Class triple | \`[255/66/3]\` → "Android fastboot" | Interface class / subclass / protocol. |
+| Endpoint | \`0x81 Bulk 512B\` | Address, transfer type, max packet size. |
+
+Known triples it names on sight include SCSI Bulk-Only mass storage (\`8/6/50\`), HID boot keyboard/mouse, CDC ACM serial, DFU, PTP still-image, USBTMC, and Android ADB/fastboot.
+
+---
+
+### 3. UI control mapping
+
+| UI Element | Purpose |
+| :--- | :--- |
+| **Inspect a USB device** | Opens the browser picker; the chosen device's tree is rendered. |
+| **Example** | Loads an illustrative composite (CDC + Mass Storage) device so you can explore the view with no hardware (labeled as an example). |
+| **Previously allowed devices** | Re-inspect a device the page was already granted, without the picker. |
+| **Copy report** | Copies a plain-text, \`lsusb\`-style dump for pasting into a bug report. |
+
+---
+
+### 4. Implementation & Architecture
+
+- **Driver:** [\`src/utils/usbDescriptors.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/usbDescriptors.js) — all pure functions. \`describeDevice\` walks the USBDevice tree into a named structure, \`classDetail\` decodes class/subclass/protocol, \`describeEndpoint\` rebuilds the address byte and names the transfer type, and \`toTextReport\` renders the copyable dump.
+- **Workbench:** [\`src/components/tools/UsbDescriptorExplorer.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/UsbDescriptorExplorer.jsx) renders the summary, the nested configuration/interface/endpoint view, and the granted-device list (\`navigator.usb.getDevices()\`).
+- **Tests:** [\`tests/usbDescriptors.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/usbDescriptors.test.js) checks class decoding, BCD/ID formatting, endpoint address assembly and the full tree against hand-built device objects.
+
+---
+
+### 5. References
+
+| Resource | Source |
+| :--- | :--- |
+| Descriptor layout | USB 2.0 Specification, Chapter 9 |
+| Class codes | USB-IF "Defined Class Codes" |
+| WebUSB device model | W3C WebUSB specification |
+`
+  },
+  {
+    id: 'hid',
+    toolId: 'hid',
+    category: 'utilities',
+    title: 'HID Inspector — Decode Keyboards, Mice, Gamepads & Their Live Reports',
+    summary: 'Open any HID device over WebHID, read its report descriptor decoded into named usages, and watch input reports turn into named fields — buttons, axes, keys — in real time.',
+    tags: ['HID', 'WebHID', 'Keyboard', 'Mouse', 'Gamepad', 'Report Descriptor', 'Usage Tables', 'Input Report'],
+    readTime: '12 min read',
+    content: `
+# HID Inspector
+
+The **HID Inspector** opens a Human Interface Device over WebHID and shows two things: the **report descriptor** (what fields the device defines, decoded from USB HID usage codes into names like "X", "Button 2", "Caps Lock") and the **live input reports** (each movement or keypress decoded into those named fields in real time). It's the quickest way to understand an unfamiliar controller, macro pad, or vendor gadget.
+
+It is read-only for input; it only ever writes to a device if you explicitly send an output report.
+
+---
+
+### 1. How HID describes itself
+
+Every HID device ships a **report descriptor**: a compact program of items that defines one or more **reports**, each a packed bit-field. An item says "the next N fields are M bits each, they mean usage U on page P, their range is min..max." The browser parses this for you into \`device.collections\`, and this tool turns those into readable field lists.
+
+- A **usage page** groups usages: Generic Desktop (axes, mouse, keyboard), Button, LED, Consumer (media keys), Digitizer, Vendor-defined.
+- A **variable** item is one value per usage (X, Y, each button bit). An **array** item is a list of slots that each hold a usage code — how keyboards report "these keys are currently down."
+
+---
+
+### 2. Decoding a live report
+
+When the device sends an input report, WebHID hands you the report id and a \`DataView\` (without the id byte). The tool walks the matching report's fields bit by bit (LSB-first, sign-extending signed axes) and labels each value by its usage. A boot mouse becomes \`Button 1 = 1, X = +5, Y = -3\`; a keyboard becomes the set of key usages currently held.
+
+---
+
+### 3. UI control mapping
+
+| UI Element | Purpose |
+| :--- | :--- |
+| **Open HID device** | Browser picker; opens the device and subscribes to its input reports. |
+| **Demo** | A simulated mouse emitting random reports, to explore the live view with no hardware (labeled as simulated). |
+| **Live input** | The most recent report as raw hex and as decoded, named fields. |
+| **Report descriptor** | Every collection's input / output / feature reports and their fields. |
+
+---
+
+### 4. Implementation & Architecture
+
+- **Driver:** [\`src/utils/hidInspector.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/hidInspector.js) — pure functions: usage-page/usage naming, \`describeCollections\` to summarize the descriptor, \`readBits\` for LSB-first signed/unsigned bit extraction, and \`decodeReport\` to turn report bytes into named fields (handling both variable and array items).
+- **Workbench:** [\`src/components/tools/HidInspectorWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/HidInspectorWorkbench.jsx) subscribes to \`inputreport\` events and renders the decoded fields live.
+- **Tests:** [\`tests/hidInspector.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/hidInspector.test.js) decodes a boot mouse (buttons + signed motion) and a boot keyboard (modifiers + key array) from raw report bytes.
+
+---
+
+### 5. References
+
+| Resource | Source |
+| :--- | :--- |
+| HID class | USB Device Class Definition for HID 1.11 |
+| Usage codes | USB-IF HID Usage Tables 1.4 |
+| WebHID | W3C WebHID specification |
+`
+  },
+  {
+    id: 'mass-storage',
+    toolId: 'mass-storage',
+    category: 'utilities',
+    title: 'USB Mass Storage Inspector — SCSI Identity, Capacity & Raw Sectors',
+    summary: 'Read a USB drive at the block level over the Bulk-Only Transport: its SCSI INQUIRY identity, READ CAPACITY geometry, and raw sectors via READ(10). Strictly read-only — no WRITE command is implemented.',
+    tags: ['Mass Storage', 'SCSI', 'BOT', 'INQUIRY', 'READ CAPACITY', 'Sector', 'WebUSB', 'Forensics', 'Read-only'],
+    readTime: '12 min read',
+    content: `
+# USB Mass Storage Inspector (Read-Only)
+
+The **Mass Storage Inspector** talks to a USB drive the way the operating system does — at the block level — but only to *read*. It reports what the drive says it is (SCSI **INQUIRY**), how big it is (**READ CAPACITY**), and lets you dump any **sector** (**READ(10)**). No WRITE command exists in the driver, so it cannot change the drive.
+
+> **It claims the drive.** WebUSB takes exclusive control of the interface for the tab, so the OS loses access to that drive until you disconnect. Use a drive that is **not mounted / in use**, and never one with data you cannot afford to disturb. Reading is safe; yanking a mounted disk out from under the OS is not.
+
+---
+
+### 1. Bulk-Only Transport (BOT)
+
+Mass-storage devices (class \`08\`, protocol \`50\`) wrap SCSI commands in three phases over two bulk endpoints:
+
+1. **CBW** — a 31-byte *Command Block Wrapper* (signature \`USBC\`, a tag, the data length, a direction flag, and the SCSI command bytes) sent on bulk OUT.
+2. **Data** — the payload moves on bulk IN or OUT.
+3. **CSW** — a 13-byte *Command Status Wrapper* (signature \`USBS\`, the matching tag, a residue, and a status byte: 0 = passed).
+
+The SCSI commands used here are **INQUIRY** (0x12), **READ CAPACITY(10)** (0x25) and **READ(10)** (0x28) — all read-only.
+
+---
+
+### 2. UI control mapping
+
+| UI Element | Purpose |
+| :--- | :--- |
+| **Inspect a drive (WebUSB)** | Claims the drive (after a warning) and reads INQUIRY + capacity. |
+| **Demo** | A simulated 8 MiB drive with a boot-signature sector 0 (labeled as simulated). |
+| **Identity panel** | Vendor, product, revision, device type, removable flag. |
+| **Capacity panel** | Block size, block count, total capacity. |
+| **Sector viewer** | Enter an LBA and dump that 512-byte sector as hex + ASCII. |
+
+---
+
+### 3. Implementation & Architecture
+
+- **Driver:** [\`src/utils/massStorageDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/massStorageDriver.js) — \`buildCbw\`/\`parseCsw\`, \`parseInquiry\`/\`parseCapacity\`, and \`MassStorageDevice\` with \`testUnitReady\`/\`inquiry\`/\`readCapacity\`/\`read\`. No write path exists. \`createSimulatedMassStorage()\` backs the demo.
+- **Workbench:** [\`src/components/tools/MassStorageWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/MassStorageWorkbench.jsx) — identity, capacity and a hex sector viewer, behind a claim-the-drive confirmation.
+- **Tests:** [\`tests/massStorage.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/massStorage.test.js) checks CBW/CSW framing and INQUIRY/capacity/sector reads against a simulated drive.
+
+> SMART and ATA pass-through (SAT) are not included; this is a block-level inspector, not a health tool.
+
+---
+
+### 4. References
+
+| Resource | Source |
+| :--- | :--- |
+| BOT | USB Mass Storage Class — Bulk-Only Transport 1.0 |
+| SCSI commands | SCSI Primary (SPC) and Block (SBC) command sets |
+| WebUSB | W3C WebUSB specification |
+`
+  },
+  {
+    id: 'ptp',
+    toolId: 'ptp',
+    category: 'utilities',
+    title: 'PTP / MTP Camera — Pull Photos & Metadata over WebUSB',
+    summary: 'Connect a camera or phone in PTP mode and browse its files: device info, storages, object handles with filenames, formats, dimensions and dates, and one-click download of any object.',
+    tags: ['PTP', 'MTP', 'Camera', 'Photos', 'WebUSB', 'Still Image', 'PIMA 15740', 'Object Info'],
+    readTime: '12 min read',
+    content: `
+# PTP / MTP Camera
+
+The **PTP** workbench pulls photos and their metadata off a camera or phone using the **Picture Transfer Protocol** — the standard "camera" USB mode (MTP is PTP with vendor extensions). Put the device in PTP mode (on a phone, choose **Transfer photos / PTP** from the USB notification) and you can list every file, read its info, and download it. Browsing is read-only.
+
+---
+
+### 1. The protocol
+
+PTP is a transaction protocol over bulk endpoints. Everything is a **container** with a 12-byte header (length, type, operation/response code, transaction id):
+
+- **Command** containers carry an operation and up to five 32-bit parameters.
+- **Data** containers carry a dataset (device info, an object's info, or an object's bytes).
+- **Response** containers end the transaction (\`0x2001\` = OK).
+
+A read like \`GetObjectInfo\` is: send the Command (with the object handle), read the Data container (the ObjectInfo dataset), read the Response. Datasets use PTP's own encoding — little-endian integers, length-prefixed UTF-16 strings, and count-prefixed arrays.
+
+Key operations: \`OpenSession\`, \`GetDeviceInfo\`, \`GetStorageIDs\`, \`GetObjectHandles\`, \`GetObjectInfo\`, \`GetObject\`, \`GetThumb\`, \`CloseSession\`.
+
+---
+
+### 2. UI control mapping
+
+| UI Element | Purpose |
+| :--- | :--- |
+| **Connect Camera (WebUSB)** | Opens the device, opens a session, reads device info, and lists files. |
+| **Demo** | A simulated camera with two JPEGs (labeled as simulated). |
+| **Device panel** | Manufacturer, model, firmware, serial. |
+| **Files table** | Filename, format, size, pixel dimensions, capture date, and a **get** button to download. |
+| **Refresh** | Re-list the files (after taking a new photo, say). |
+
+---
+
+### 3. Implementation & Architecture
+
+- **Driver:** [\`src/utils/ptpDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/ptpDriver.js) — \`buildContainer\`/\`parseContainerHeader\`, a \`DataReader\` for PTP strings/arrays, \`parseDeviceInfo\`/\`parseObjectInfo\`, and \`PtpDevice\` whose \`transaction()\` runs the command/data/response phases (reassembling large data across USB transfers). \`createSimulatedPtp()\` backs the demo.
+- **Workbench:** [\`src/components/tools/PtpWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/PtpWorkbench.jsx).
+- **Tests:** [\`tests/ptp.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/ptp.test.js) covers container framing, PTP string/array decoding, and the session/device-info/handles/object-info/download flow against a simulated camera.
+
+---
+
+### 4. References
+
+| Resource | Source |
+| :--- | :--- |
+| PTP | PIMA 15740 / ISO 15740 |
+| MTP | Microsoft Media Transfer Protocol (PTP extension) |
+| WebUSB | W3C WebUSB specification |
+`
+  },
+  {
+    id: 'fido2',
+    toolId: 'fido2',
+    category: 'utilities',
+    title: 'FIDO2 / U2F Security Key Inspector — CTAP-HID over WebHID',
+    summary: 'Read a FIDO2 / U2F authenticator over CTAP-HID: allocate a channel with CTAPHID_INIT, read authenticatorGetInfo (versions, AAGUID, options, limits), and run a PING round-trip. Strictly read-only.',
+    tags: ['FIDO2', 'U2F', 'CTAP', 'CTAP-HID', 'WebAuthn', 'Security Key', 'CBOR', 'AAGUID', 'WebHID'],
+    readTime: '12 min read',
+    content: `
+# FIDO2 / U2F Security Key Inspector
+
+The **FIDO2** workbench reads what a security key (YubiKey, SoloKey, Titan, a platform authenticator, …) says about itself over **CTAP-HID**. It allocates a channel, asks the key for its capabilities with **authenticatorGetInfo**, and can run a **PING** round-trip. It is read-only: it never creates, lists, or deletes credentials, never changes the PIN, and never resets the key.
+
+---
+
+### 1. CTAP-HID framing
+
+A security key is a HID device on usage page \`0xF1D0\`. Messages travel in 64-byte reports:
+
+- An **init packet**: channel id (4), command (1, high bit set), payload length (2, big-endian), and up to 57 bytes of data.
+- **Continuation packets**: channel id (4), a sequence number (1), and up to 59 bytes.
+
+You start with **CTAPHID_INIT** on the broadcast channel \`0xFFFFFFFF\`, sending an 8-byte nonce; the key echoes the nonce and returns a freshly allocated channel id plus its CTAPHID capabilities (does it do CBOR? wink?). Everything after uses that channel.
+
+### 2. CTAP2 and CBOR
+
+FIDO2 commands are **CBOR**-encoded. \`authenticatorGetInfo\` is CTAP2 command \`0x04\` with no parameters; the reply is a status byte (0 = OK) followed by a CBOR map keyed by small integers:
+
+| Key | Field |
+| :--- | :--- |
+| 1 | versions (e.g. \`U2F_V2\`, \`FIDO_2_0\`, \`FIDO_2_1\`) |
+| 3 | AAGUID (the 16-byte model identifier) |
+| 4 | options (\`rk\` resident keys, \`uv\` user verification, \`clientPin\`, …) |
+| 5 | maxMsgSize |
+| 6 | PIN/UV auth protocols |
+| 9 | transports |
+
+---
+
+### 3. UI control mapping
+
+| UI Element | Purpose |
+| :--- | :--- |
+| **Read Security Key (WebHID)** | INIT + authenticatorGetInfo; shows versions, AAGUID, options and limits. |
+| **Demo** | A simulated FIDO 2.1 key (labeled as simulated). |
+| **PING** | A CTAPHID_PING round-trip that checks the echoed bytes match. |
+
+---
+
+### 4. Implementation & Architecture
+
+- **Driver:** [\`src/utils/fido2Driver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fido2Driver.js) — a small CBOR decoder (\`decodeCbor\`), \`buildPackets\` for CTAP-HID framing, \`parseGetInfo\`/\`aaguidToString\`, and \`Fido2Device\` with \`init\`/\`getInfo\`/\`ping\`. \`createSimulatedFido2()\` backs the demo. No credential or reset operations exist.
+- **Workbench:** [\`src/components/tools/Fido2Workbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/Fido2Workbench.jsx).
+- **Tests:** [\`tests/fido2.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fido2.test.js) covers CBOR decoding, AAGUID formatting, packet framing, and INIT / GetInfo / PING against a simulated key.
+
+---
+
+### 5. References
+
+| Resource | Source |
+| :--- | :--- |
+| CTAP | FIDO Alliance Client to Authenticator Protocol 2.1 |
+| CBOR | RFC 8949 |
+| WebHID | W3C WebHID specification |
+`
   }
 ];
