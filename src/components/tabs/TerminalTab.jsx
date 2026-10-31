@@ -140,8 +140,8 @@ export default function TerminalTab() {
         <div className={activeSidePanel !== 'none' ? 'lg:col-span-7 xl:col-span-8' : 'w-full'}>
           <StreamConsole
             entries={entries}
-            onSendText={(text, lineEnding) => sendString(text, lineEnding)}
-            onClearLog={clearLogs}
+            onSend={(text, lineEnding) => sendString(text, lineEnding)}
+            onClear={clearLogs}
             isConnected={isConnected}
           />
         </div>
