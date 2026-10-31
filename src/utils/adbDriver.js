@@ -22,6 +22,7 @@
  */
 
 import { generateAdbKey, signAdbToken, encodeAdbPublicKey } from './adbCrypto';
+import { demoPhoneScreen } from './adbTools';
 
 const A_CNXN = 0x4e584e43;
 const A_AUTH = 0x48545541;
@@ -174,9 +175,8 @@ export class AdbConnection {
     }
   }
 
-  /** Run a shell command and collect its full output as text. */
-  async shell(command) {
-    const stream = await this.open(`shell:${command}`);
+  /** Read a stream to its end and return all bytes. */
+  async _collect(stream) {
     const chunks = [];
     for (;;) {
       const data = await stream.read();
@@ -186,7 +186,17 @@ export class AdbConnection {
     let total = 0; chunks.forEach((c) => (total += c.length));
     const all = new Uint8Array(total);
     let off = 0; chunks.forEach((c) => { all.set(c, off); off += c.length; });
-    return td.decode(all);
+    return all;
+  }
+
+  /** Run a shell command and collect its full output as text. */
+  async shell(command) {
+    return td.decode(await this._collect(await this.open(`shell:${command}`)));
+  }
+
+  /** Run a command without a pty and return its raw output bytes (binary-safe, e.g. screencap -p). */
+  async execOut(command) {
+    return this._collect(await this.open(`exec:${command}`));
   }
 
   /** Put adbd into TCP/IP mode on `port`, so you can `adb connect ip:port`. */
@@ -249,6 +259,35 @@ export class AdbConnection {
       const all = new Uint8Array(total);
       let off = 0; chunks.forEach((c) => { all.set(c, off); off += c.length; });
       return all;
+    } finally {
+      await s.quitSync();
+    }
+  }
+
+  /** List a directory with the sync protocol: [{ name, mode, size, mtime, isDir, isLink }]. */
+  async list(remotePath) {
+    const s = await this._syncOpen();
+    try {
+      await s.write(syncPacket('LIST', te.encode(remotePath)));
+      const out = [];
+      for (;;) {
+        const head = await s.readBytes(4);
+        const id = String.fromCharCode(...head);
+        if (id === 'DONE') { await s.readBytes(16); break; }
+        if (id === 'FAIL') {
+          const len = new DataView((await s.readBytes(4)).buffer).getUint32(0, true);
+          throw new AdbError(`list failed: ${td.decode(await s.readBytes(len))}`);
+        }
+        if (id !== 'DENT') throw new AdbError(`list: unexpected "${id}".`);
+        const b = await s.readBytes(16);
+        const dv = new DataView(b.buffer, b.byteOffset, 16);
+        const mode = dv.getUint32(0, true);
+        const name = td.decode(await s.readBytes(dv.getUint32(12, true)));
+        if (name === '.' || name === '..') continue;
+        const type = mode & 0o170000;
+        out.push({ name, mode, size: dv.getUint32(4, true), mtime: dv.getUint32(8, true), isDir: type === 0o040000, isLink: type === 0o120000 });
+      }
+      return out.sort((a, b) => (b.isDir - a.isDir) || a.name.localeCompare(b.name));
     } finally {
       await s.quitSync();
     }
@@ -331,17 +370,27 @@ export class AdbStream {
     return this.inbox.length ? this.inbox.shift() : null;
   }
 
+  async _need(n) {
+    while (this.syncBuf.length < n) {
+      const more = await this.read();
+      if (more === null) throw new AdbError('Stream closed mid sync packet.');
+      const merged = new Uint8Array(this.syncBuf.length + more.length);
+      merged.set(this.syncBuf); merged.set(more, this.syncBuf.length);
+      this.syncBuf = merged;
+    }
+  }
+
+  /** Exactly `n` bytes of the stream, spanning WRTE chunks. */
+  async readBytes(n) {
+    await this._need(n);
+    const out = this.syncBuf.slice(0, n);
+    this.syncBuf = this.syncBuf.slice(n);
+    return out;
+  }
+
   // Read one sync sub-packet (id + length-prefixed data), spanning WRTE chunks.
   async readSync() {
-    const need = async (n) => {
-      while (this.syncBuf.length < n) {
-        const more = await this.read();
-        if (more === null) throw new AdbError('Stream closed mid sync packet.');
-        const merged = new Uint8Array(this.syncBuf.length + more.length);
-        merged.set(this.syncBuf); merged.set(more, this.syncBuf.length);
-        this.syncBuf = merged;
-      }
-    };
+    const need = (n) => this._need(n);
     await need(8);
     const dv = new DataView(this.syncBuf.buffer, this.syncBuf.byteOffset, 8);
     const id = String.fromCharCode(this.syncBuf[0], this.syncBuf[1], this.syncBuf[2], this.syncBuf[3]);
@@ -441,10 +490,39 @@ export function createSimulatedAdb() {
   const out = [];
   const state = { files: {}, streams: {}, remote: 100, rebooted: null, tcpipPort: null, simulated: true };
   const send = (c, a0, a1, p) => out.push(packMessage(c, a0, a1, p));
-  const SHELL = {
-    'getprop ro.product.model': 'Pixel 3 (simulated)\n',
-    'getprop ro.build.version.release': '12\n',
-    'echo hi': 'hi\n'
+  const PROPS = {
+    'ro.product.manufacturer': 'Google', 'ro.product.model': 'Pixel 3 (simulated)', 'ro.product.device': 'blueline',
+    'ro.build.version.release': '12', 'ro.build.version.sdk': '31', 'ro.build.version.security_patch': '2022-10-05',
+    'ro.build.display.id': 'SP1A.210812.016.C2', 'ro.product.cpu.abi': 'arm64-v8a', 'ro.hardware': 'blueline',
+    'ro.serialno': 'SIM0000001', 'ro.boot.flash.locked': '1', 'ro.boot.verifiedbootstate': 'green', 'ro.debuggable': '0'
+  };
+  state.packages = ['com.android.chrome', 'com.example.demo', 'org.fdroid.fdroid'];
+  state.logSeq = 0;
+  const two = (n) => String(n).padStart(2, '0');
+  const logLines = (n) => {
+    const tags = [['I', 'ActivityManager', 'Start proc 4242:com.example.demo/u0a123 for activity'], ['D', 'WifiService', 'RSSI changed: -61'], ['W', 'BatteryStats', 'Battery temperature high: 41.2C'], ['E', 'AndroidRuntime', 'FATAL EXCEPTION: main (simulated)'], ['I', 'chatty', 'uid=1000 system_server expire 3 lines']];
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const d = new Date(Date.now() - (n - i) * 7);
+      const [lvl, tag, msg] = tags[(state.logSeq++) % tags.length];
+      out.push(`${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}  1234  1250 ${lvl} ${tag}: ${msg}`);
+    }
+    return out.join('\n') + '\n';
+  };
+  const shellReply = (cmd) => {
+    if (cmd === 'echo hi') return 'hi\n';
+    if (cmd === 'getprop') return Object.entries(PROPS).map(([k, v]) => `[${k}]: [${v}]`).join('\n') + '\n';
+    if (cmd.startsWith('getprop ')) return `${PROPS[cmd.slice(8).trim()] ?? ''}\n`;
+    if (cmd.startsWith('logcat')) return logLines(cmd.includes('-T') ? 2 : 12);
+    if (cmd.startsWith('pm list packages')) return state.packages.map((p) => (cmd.includes('-f') ? `package:/data/app/${p}-1/base.apk=${p}` : `package:${p}`)).join('\n') + '\n';
+    if (cmd.startsWith('pm path ')) return `package:/data/app/${cmd.slice(8).trim()}-1/base.apk\n`;
+    if (cmd.startsWith('pm uninstall')) { const p = cmd.split(/\s+/).pop(); const had = state.packages.includes(p); state.packages = state.packages.filter((x) => x !== p); return had ? 'Success\n' : 'Failure [DELETE_FAILED_INTERNAL_ERROR]\n'; }
+    if (cmd.startsWith('pm install')) { state.packages.push('com.example.installed'); return 'Performing Streamed Install\nSuccess\n'; }
+    if (cmd.startsWith('dumpsys package ')) return 'versionCode=42 minSdk=24 targetSdk=33\n    versionName=1.4.2\n    firstInstallTime=2024-05-17 12:30:00\n    lastUpdateTime=2024-06-01 09:00:00\n';
+    if (cmd === 'dumpsys battery') return 'Current Battery Service state:\n  AC powered: false\n  USB powered: true\n  status: 2\n  health: 2\n  level: 76\n  voltage: 4012\n  temperature: 291\n';
+    if (cmd === 'wm size') return 'Physical size: 216x432\n';
+    if (cmd.startsWith('input ') || cmd.startsWith('rm ') || cmd.startsWith('am ') || cmd.startsWith('monkey')) { state.lastInput = cmd; return ''; }
+    return `/system/bin/sh: ${cmd}: simulated — only a few commands are canned\n`;
   };
   const handleSync = (st, data) => {
     const m = new Uint8Array(st.buf.length + data.length); m.set(st.buf); m.set(data, st.buf.length); st.buf = m;
@@ -467,6 +545,28 @@ export function createSimulatedAdb() {
         const f = state.files[td.decode(body)];
         if (!f) send(A_WRTE, st.remoteId, st.localId, syncPacket('FAIL', te.encode('No such file')));
         else { for (let o = 0; o < f.length; o += 65536) send(A_WRTE, st.remoteId, st.localId, syncPacket('DATA', f.subarray(o, o + 65536))); send(A_WRTE, st.remoteId, st.localId, syncPacket('DONE')); }
+      } else if (id === 'LIST') {
+        const dir = td.decode(body).replace(/\/?$/, '/');
+        const dent = (name, mode, size) => {
+          const n = te.encode(name);
+          const pkt = new Uint8Array(20 + n.length);
+          const pv = new DataView(pkt.buffer);
+          pkt.set(te.encode('DENT'));
+          pv.setUint32(4, mode, true); pv.setUint32(8, size, true); pv.setUint32(12, 1700000000, true); pv.setUint32(16, n.length, true);
+          pkt.set(n, 20);
+          return pkt;
+        };
+        const names = new Map();
+        for (const [path, data] of Object.entries(state.files)) {
+          if (!path.startsWith(dir)) continue;
+          const rest = path.slice(dir.length).split('/');
+          names.set(rest[0], rest.length > 1 ? null : data.length);
+        }
+        if (dir === '/sdcard/') { names.set('DCIM', null); names.set('Download', null); }
+        const parts = [dent('.', 0o40755, 0), ...[...names].map(([n, size]) => dent(n, size === null ? 0o40755 : 0o100644, size || 0)), new Uint8Array([68, 79, 78, 69, ...new Array(16).fill(0)])];
+        const all = new Uint8Array(parts.reduce((a, p) => a + p.length, 0));
+        let o = 0; for (const p of parts) { all.set(p, o); o += p.length; }
+        send(A_WRTE, st.remoteId, st.localId, all);
       } else if (id === 'QUIT') send(A_CLSE, st.remoteId, st.localId);
     }
   };
@@ -476,7 +576,8 @@ export function createSimulatedAdb() {
       const service = td.decode(m.data).replace(/\u0000+$/, ''); const localId = m.arg0; const remoteId = state.remote++;
       send(A_OKAY, remoteId, localId);
       const st = { service, localId, remoteId, buf: new Uint8Array(0) }; state.streams[remoteId] = st;
-      if (service.startsWith('shell:')) { const cmd = service.slice(6); send(A_WRTE, remoteId, localId, te.encode(SHELL[cmd] ?? `/system/bin/sh: ${cmd}: simulated — only a few commands are canned\n`)); send(A_CLSE, remoteId, localId); }
+      if (service.startsWith('shell:')) { const reply = shellReply(service.slice(6)); if (reply) send(A_WRTE, remoteId, localId, te.encode(reply)); send(A_CLSE, remoteId, localId); }
+      else if (service.startsWith('exec:')) { const c = service.slice(5); const out2 = c.startsWith('screencap') ? demoPhoneScreen() : te.encode(shellReply(c)); for (let o = 0; o < out2.length; o += MAX_PAYLOAD) send(A_WRTE, remoteId, localId, out2.subarray(o, o + MAX_PAYLOAD)); send(A_CLSE, remoteId, localId); }
       else if (service.startsWith('tcpip:')) { state.tcpipPort = Number(service.slice(6)); send(A_WRTE, remoteId, localId, te.encode(`restarting in TCP mode port: ${state.tcpipPort}\n`)); send(A_CLSE, remoteId, localId); }
       else if (service.startsWith('reboot:')) { state.rebooted = service.slice(7); send(A_CLSE, remoteId, localId); }
     } else if (m.command === A_WRTE) { const st = state.streams[m.arg1]; if (st) { send(A_OKAY, st.remoteId, st.localId); if (st.service === 'sync:') handleSync(st, m.data); } }
