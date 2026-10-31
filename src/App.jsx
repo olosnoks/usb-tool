@@ -42,6 +42,7 @@ const ScriptRunner = React.lazy(() => import('./components/ScriptRunner'));
 const UsbReconDeck = React.lazy(() => import('./components/UsbReconDeck'));
 const EspMemoryInspector = React.lazy(() => import('./components/EspMemoryInspector'));
 const AlfaWifiWorkbench = React.lazy(() => import('./components/workbenches/AlfaWifiWorkbench'));
+const WarhogPigletWorkbench = React.lazy(() => import('./components/workbenches/WarhogPigletWorkbench'));
 
 // Composite Tool Suites
 const BadUsbPayloadSuite = React.lazy(() => import('./components/tools/BadUsbPayloadSuite'));
@@ -49,6 +50,7 @@ const ProtocolPacketLab = React.lazy(() => import('./components/tools/ProtocolPa
 const GpsNavigationSuite = React.lazy(() => import('./components/tools/GpsNavigationSuite'));
 const HardwareProgrammersSuite = React.lazy(() => import('./components/tools/HardwareProgrammersSuite'));
 const DfuFlasher = React.lazy(() => import('./components/tools/DfuFlasher'));
+const BleExplorer = React.lazy(() => import('./components/tools/BleExplorer'));
 
 // Modals
 import CommandPalette from './components/CommandPalette';
@@ -381,6 +383,12 @@ function AppContent() {
               </div>
             )}
 
+            {activeTool === 'ble' && (
+              <div className="w-full">
+                <BleExplorer />
+              </div>
+            )}
+
             {activeTool === 'bus-explorer' && (
               <div className="w-full">
                 <BusExplorerWorkbench />
@@ -396,6 +404,12 @@ function AppContent() {
             {activeTool === 'alfa-wifi' && (
               <div className="w-full min-w-0 max-w-full">
                 <AlfaWifiWorkbench />
+              </div>
+            )}
+
+            {activeTool === 'warhog-piglet' && (
+              <div className="w-full min-w-0 max-w-full">
+                <WarhogPigletWorkbench />
               </div>
             )}
 
