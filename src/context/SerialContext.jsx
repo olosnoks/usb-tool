@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { parseHexInput } from '../utils/checksums';
 import { requestWebUsbSerialPort } from '../utils/webUsbSerial';
+import { requestBleSerialPort } from '../utils/bleSerial';
 import { identifyUsbChip, shortChipLabel } from '../utils/usbDatabase';
 import { claimForTool, releasePort, closeSerialPort, stopReader } from '../utils/portManager';
 
@@ -20,7 +21,7 @@ export const INITIAL_BOARD = {
     parity: 'none',
     flowControl: 'none'
   },
-  transportType: 'serial', // 'serial' | 'webusb'
+  transportType: 'serial', // 'serial' | 'webusb' | 'ble'
   hardwareSignals: {
     dtr: false,
     rts: false,
@@ -54,6 +55,7 @@ export function SerialProvider({ children }) {
   // Device & API Detection
   const hasWebSerialSupport = typeof navigator !== 'undefined' && 'serial' in navigator;
   const hasWebUsbSupport = typeof navigator !== 'undefined' && 'usb' in navigator;
+  const hasWebBluetoothSupport = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
   const isMobileDevice = typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   const isAppleDevice = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -323,6 +325,50 @@ export function SerialProvider({ children }) {
     }
   };
 
+  // Connect a BLE UART peripheral (Nordic UART, HM-10, Microchip, Flipper ...).
+  // `existing` is an already-chosen BleSerialPort (from the BLE Explorer); with
+  // none, the browser's Bluetooth picker opens.
+  const handleConnectBle = async (targetBoardId = activeBoardIdRef.current, existing = null, pickerOptions = {}) => {
+    let blePort = existing;
+    try {
+      updateBoard(targetBoardId, { isConnecting: true });
+      // Free the board first if it already holds a port.
+      const cur = boardsStateRef.current.find(b => b.id === targetBoardId);
+      if (cur?.isConnected) await handleDisconnect(targetBoardId);
+
+      if (!blePort) {
+        addLogToBoard(targetBoardId, '[BLE] Choose a Bluetooth serial device...', 'sys');
+        blePort = await requestBleSerialPort(pickerOptions);
+      }
+      addLogToBoard(targetBoardId, `[BLE] Connecting to ${blePort.device.name || 'device'}...`, 'sys');
+      await blePort.open();
+      // The link can drop (out of range, device reset): tear the board down cleanly.
+      blePort.ondisconnect = () => {
+        addLogToBoard(targetBoardId, '[BLE] Link lost.', 'sys');
+        if (disconnectRef.current) disconnectRef.current(targetBoardId);
+      };
+
+      const label = blePort.profile ? blePort.profile.name : 'custom UART';
+      boardKeepReadingRef.current[targetBoardId] = true;
+      updateBoard(targetBoardId, {
+        port: blePort,
+        portInfo: blePort.getInfo(),
+        isConnected: true,
+        isConnecting: false,
+        name: `BLE: ${blePort.device.name || 'device'}`,
+        transportType: 'ble'
+      });
+      addLogToBoard(targetBoardId, `[BLE] Connected over ${label}. Writes go out in ${blePort.chunkSize}-byte packets.`, 'sys');
+      if (!blePort.tx) addLogToBoard(targetBoardId, '[BLE] This device has no writable characteristic: receive only.', 'sys');
+      boardReadLoopsRef.current[targetBoardId] = startReading(targetBoardId, blePort);
+    } catch (err) {
+      console.error(err);
+      if (blePort) { try { await blePort.close(); } catch (e) { /* ignore */ } }
+      updateBoard(targetBoardId, { isConnecting: false });
+      addLogToBoard(targetBoardId, `BLE connection failed: ${err.message}`, 'sys');
+    }
+  };
+
   // Disconnect Port
   const handleDisconnect = async (targetBoardId = activeBoardId) => {
     if (boardPollIntervalsRef.current[targetBoardId]) {
@@ -471,7 +517,7 @@ export function SerialProvider({ children }) {
   // Automated Baud Scan Helper
   const handleRunBaudScan = async (testBaud, sendProbe = true) => {
     const currentBoard = activeBoard;
-    if (!currentBoard.port) return new Uint8Array(0);
+    if (!currentBoard.port || currentBoard.transportType === 'ble') return new Uint8Array(0);
 
     await haltReading(currentBoard.id);
     await closeSerialPort(currentBoard.port);
@@ -586,6 +632,11 @@ export function SerialProvider({ children }) {
     const boardId = activeBoardIdRef.current;
     const board = boardsStateRef.current.find(b => b.id === boardId);
     if (!board || !board.port) throw new Error('reconfigureActivePort: no open port');
+    if (board.transportType === 'ble') {
+      // A BLE link has no line settings; reopening would only drop the connection.
+      addLogToBoard(boardId, '[BLE] Baud rate and framing do not apply to a Bluetooth link.', 'sys');
+      return;
+    }
 
     await haltReading(boardId);
     await closeSerialPort(board.port);
@@ -661,6 +712,7 @@ export function SerialProvider({ children }) {
     // Active Board Actions
     connect: () => handleConnect(activeBoardId),
     disconnect: () => handleDisconnect(activeBoardId),
+    connectBle: (blePort = null, pickerOptions = {}) => handleConnectBle(activeBoardId, blePort, pickerOptions),
     sendString: (text, lineEnding) => handleSendString(activeBoardId, text, lineEnding),
     sendRawBytes: (bytes) => handleSendRawBytes(activeBoardId, bytes),
     toggleSignal: handleToggleSignal,
@@ -711,6 +763,7 @@ export function SerialProvider({ children }) {
     // Environment info
     hasWebSerialSupport,
     hasWebUsbSupport,
+    hasWebBluetoothSupport,
     isMobileDevice,
     isAppleDevice
   };

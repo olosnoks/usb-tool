@@ -14,7 +14,8 @@ import {
   BookOpen,
   Download,
   Smartphone,
-  PanelBottom
+  PanelBottom,
+  Bluetooth
 } from 'lucide-react';
 import { useSerial } from '../../context/SerialContext';
 import { identifyUsbChip } from '../../utils/usbDatabase';
@@ -38,6 +39,8 @@ export default function Header({
     setBaudRate,
     connect,
     disconnect,
+    connectBle,
+    hasWebBluetoothSupport,
     rxActivity,
     txActivity,
     transportType,
@@ -177,7 +180,19 @@ export default function Header({
               <RefreshCw className={`w-3.5 h-3.5 ${isConnecting ? 'animate-spin' : ''}`} />
               <span>{isConnecting ? '...' : 'CONNECT'}</span>
             </button>
-          ) : (
+          ) : null}
+          {!isConnected && hasWebBluetoothSupport && (
+            <button
+              onClick={() => connectBle()}
+              disabled={isConnecting}
+              title="Connect a Bluetooth LE serial device (Nordic UART, HM-10, Microchip, Flipper)"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-sky-300 border border-sky-500/40 text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+            >
+              <Bluetooth className="w-3.5 h-3.5" />
+              <span>BLE</span>
+            </button>
+          )}
+          {isConnected && (
             <button
               onClick={disconnect}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/50 hover:border-rose-400 text-xs font-bold transition-all active:scale-95"

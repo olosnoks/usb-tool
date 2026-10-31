@@ -12,14 +12,22 @@ import {
   Loader2,
   Radio,
   RefreshCw,
-  Tag
+  Tag,
+  Plus,
+  X,
+  TerminalSquare
 } from 'lucide-react';
 import {
   buildGattTree,
   readAllValues,
   parseCharacteristicValue,
-  bytesToHex
+  bytesToHex,
+  canonicalUuid,
+  STANDARD_SERVICE_UUIDS,
+  VENDOR_SERVICES
 } from '../../utils/bleDriver';
+import { BleSerialPort, BLE_UART_SERVICE_UUIDS, looksLikeUart, uartProfileFor } from '../../utils/bleSerial';
+import { useSerial } from '../../context/SerialContext';
 import StatusBadge from '../common/StatusBadge';
 
 const PROP_LABELS = [
@@ -32,6 +40,40 @@ const PROP_LABELS = [
 
 const hex16 = (n) => `0x${n.toString(16).padStart(4, '0')}`;
 
+// Custom service UUIDs the user added, kept between visits.
+const CUSTOM_KEY = 'bleExplorer.customServices';
+const FULL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function loadCustomServices() {
+  try {
+    const list = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]');
+    return Array.isArray(list) ? list.filter((u) => typeof u === 'string' && FULL_UUID.test(u)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Normalize user input ("ffe0", "0xFFE0", or a 128-bit UUID) or return null. */
+export function normalizeServiceInput(text) {
+  const u = canonicalUuid(String(text || '').trim());
+  return FULL_UUID.test(u) ? u : null;
+}
+
+/**
+ * Every service the browser should grant access to. Web Bluetooth hides any
+ * service not listed here, so this covers all SIG services, common vendor
+ * services, the BLE UART profiles and whatever the user added.
+ */
+export function buildOptionalServices(custom = []) {
+  const all = [
+    ...STANDARD_SERVICE_UUIDS.map((n) => canonicalUuid(n)),
+    ...Object.keys(VENDOR_SERVICES),
+    ...BLE_UART_SERVICE_UUIDS,
+    ...custom
+  ];
+  return [...new Set(all)];
+}
+
 export default function BleExplorer() {
   const [device, setDevice] = useState(null);
   const [server, setServer] = useState(null);
@@ -43,6 +85,9 @@ export default function BleExplorer() {
   const [reading, setReading] = useState(false);
   const [lastRead, setLastRead] = useState(null);
   const [log, setLog] = useState([]);
+  const [customServices, setCustomServices] = useState(loadCustomServices);
+  const [customInput, setCustomInput] = useState('');
+  const { connectBle, isConnected: serialConnected, transportType: serialTransport } = useSerial();
 
   // Live notify subscriptions: uuid -> { characteristic, handler }
   const notifyRefs = useRef({});
@@ -93,12 +138,10 @@ export default function BleExplorer() {
       setStatusMsg('Requesting device… pick one in the browser chooser.');
       // acceptAllDevices lets any peripheral appear; optionalServices must be
       // declared up-front or GATT access to those services is blocked.
+      // The browser silently drops blocklisted services (e.g. HID) from this list.
       const dev = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: [
-          0x1800, 0x1801, 0x180a, 0x180d, 0x180f, 0x181a, 0x1812, 0x1826,
-          0x1816, 0x1818, 0xfe59
-        ]
+        optionalServices: buildOptionalServices(customServices)
       });
 
       dev.addEventListener('gattserverdisconnected', () => {
@@ -194,6 +237,39 @@ export default function BleExplorer() {
     }
   };
 
+  const saveCustom = (list) => {
+    setCustomServices(list);
+    try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(list)); } catch { /* storage full or blocked */ }
+  };
+
+  const handleAddCustom = () => {
+    const u = normalizeServiceInput(customInput);
+    if (!u) {
+      addLog(`"${customInput}" is not a service UUID. Use 4 hex digits (ffe0) or a full 128-bit UUID.`, 'err');
+      return;
+    }
+    if (!customServices.includes(u)) saveCustom([...customServices, u]);
+    setCustomInput('');
+    addLog(`Added service ${u}. ${device ? 'Disconnect and connect again so the browser grants access to it.' : 'It will be requested on the next connect.'}`, 'ok');
+  };
+
+  // Hand a UART-style service to the Terminal (and every serial tool) as a port.
+  const handleUseAsSerial = async (service) => {
+    if (!device) return;
+    // Our own subscriptions on this service would double-deliver notifications.
+    for (const ch of service.characteristics) {
+      const sub = notifyRefs.current[ch.uuid];
+      if (sub) {
+        try { await ch._ref.stopNotifications(); } catch { /* ignore */ }
+        ch._ref.removeEventListener('characteristicvaluechanged', sub.handler);
+        delete notifyRefs.current[ch.uuid];
+        setValues((v) => ({ ...v, [ch.uuid]: { ...(v[ch.uuid] || {}), notifying: false } }));
+      }
+    }
+    addLog(`Opening ${service.name} as a serial port. Its output now shows in the Terminal.`, 'ok');
+    await connectBle(new BleSerialPort(device, { serviceUuid: service.uuid }));
+  };
+
   const totalChars = tree.reduce((a, s) => a + s.characteristics.length, 0);
   const totalDescs = tree.reduce((a, s) => a + s.characteristics.reduce((b, c) => b + (c.descriptors?.length || 0), 0), 0);
 
@@ -276,6 +352,39 @@ export default function BleExplorer() {
             </>
           )}
         </div>
+        <div className="space-y-1.5">
+          <div className="text-[11px] text-slate-500">
+            All Bluetooth SIG services and common vendor services (Nordic UART, HM-10, Microchip, Flipper, DFU)
+            are requested automatically. Add any other service UUID your device uses so the browser exposes it.
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={customInput}
+              onChange={(e) => setCustomInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddCustom(); }}
+              placeholder="ffe0 or 0000aaaa-0000-1000-8000-00805f9b34fb"
+              className="flex-1 min-w-[16rem] px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200 placeholder:text-slate-600"
+            />
+            <button
+              onClick={handleAddCustom}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-xs text-slate-200"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add service
+            </button>
+          </div>
+          {customServices.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {customServices.map((u) => (
+                <span key={u} className="flex items-center gap-1 px-2 py-0.5 rounded border border-slate-700 bg-slate-950 text-[11px] font-mono text-slate-300">
+                  {u}
+                  <button title="Remove" onClick={() => saveCustom(customServices.filter((x) => x !== u))} className="text-slate-500 hover:text-rose-400">
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
         {device && (
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
             <Field label="Name" value={device.name || '(no name)'} />
@@ -304,6 +413,19 @@ export default function BleExplorer() {
             <span className="ml-auto text-[11px] text-slate-500">
               {service.assigned ? 'SIG-assigned' : 'vendor-specific'} · {service.characteristics.length} characteristic{service.characteristics.length === 1 ? '' : 's'}
             </span>
+            {looksLikeUart(service.uuid, service.characteristics) && (
+              <button
+                onClick={() => handleUseAsSerial(service)}
+                disabled={serialConnected && serialTransport === 'ble'}
+                title={uartProfileFor(service.uuid)
+                  ? 'Open this UART service in the Terminal and the other serial tools'
+                  : 'This service has a notifying and a writable characteristic. Open it as a serial port'}
+                className="flex items-center gap-1 px-2 py-1 rounded border border-sky-500/40 bg-sky-950/40 hover:bg-sky-900/50 text-[11px] text-sky-300 disabled:opacity-40"
+              >
+                <TerminalSquare className="w-3.5 h-3.5" />
+                {serialConnected && serialTransport === 'ble' ? 'Serial port open' : 'Use as serial port'}
+              </button>
+            )}
           </div>
 
           <div className="p-3 space-y-2">
@@ -434,6 +556,9 @@ function ValueBlock({ val, canRead, canNotify }) {
     <div className="text-xs font-mono space-y-0.5">
       {val.decoded && (
         <div className="text-emerald-400">{val.decoded.label}: {val.decoded.text}</div>
+      )}
+      {val.formatted && val.formatted !== val.decoded && (
+        <div className="text-emerald-400">{val.formatted.label}: {val.formatted.text}</div>
       )}
       <div className="text-slate-300 break-all">
         <span className="text-slate-600">hex</span> {val.hex || '(empty)'}

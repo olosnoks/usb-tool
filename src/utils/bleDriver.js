@@ -24,6 +24,13 @@
 // UUID handling
 // ---------------------------------------------------------------------------
 
+import {
+  SIG_SERVICE_NAMES, SIG_CHARACTERISTIC_NAMES, VENDOR_SERVICES, VENDOR_CHARACTERISTICS,
+  EXTRA_PARSERS, applyPresentationFormat
+} from './bleAssigned.js';
+
+export { STANDARD_SERVICE_UUIDS, VENDOR_SERVICES } from './bleAssigned.js';
+
 // The Bluetooth Base UUID: 16-/32-bit UUIDs expand into this template.
 const BASE_UUID_SUFFIX = '-0000-1000-8000-00805f9b34fb';
 
@@ -55,54 +62,9 @@ export function shortUuid(input) {
   return null;
 }
 
-// Curated subset of SIG assigned numbers — the services/characteristics a user
-// actually meets on consumer and dev-board peripherals. Keyed by 16-bit value.
-export const GATT_SERVICE_NAMES = {
-  0x1800: 'Generic Access',
-  0x1801: 'Generic Attribute',
-  0x1802: 'Immediate Alert',
-  0x1803: 'Link Loss',
-  0x1804: 'Tx Power',
-  0x1805: 'Current Time',
-  0x180a: 'Device Information',
-  0x180d: 'Heart Rate',
-  0x180f: 'Battery',
-  0x1810: 'Blood Pressure',
-  0x1811: 'Alert Notification',
-  0x1812: 'Human Interface Device',
-  0x1816: 'Cycling Speed and Cadence',
-  0x1818: 'Cycling Power',
-  0x181a: 'Environmental Sensing',
-  0x181b: 'Body Composition',
-  0x181c: 'User Data',
-  0x181d: 'Weight Scale',
-  0x1826: 'Fitness Machine',
-  0x183b: 'Binary Sensor',
-  0x1843: 'Audio Input Control',
-  0xfe59: 'Nordic DFU (Secure)',
-  0xfd6f: 'Exposure Notification'
-};
-
-export const GATT_CHARACTERISTIC_NAMES = {
-  0x2a00: 'Device Name',
-  0x2a01: 'Appearance',
-  0x2a04: 'Peripheral Preferred Connection Parameters',
-  0x2a05: 'Service Changed',
-  0x2a19: 'Battery Level',
-  0x2a23: 'System ID',
-  0x2a24: 'Model Number String',
-  0x2a25: 'Serial Number String',
-  0x2a26: 'Firmware Revision String',
-  0x2a27: 'Hardware Revision String',
-  0x2a28: 'Software Revision String',
-  0x2a29: 'Manufacturer Name String',
-  0x2a37: 'Heart Rate Measurement',
-  0x2a38: 'Body Sensor Location',
-  0x2a39: 'Heart Rate Control Point',
-  0x2a6d: 'Pressure',
-  0x2a6e: 'Temperature',
-  0x2a6f: 'Humidity'
-};
+// Names come from the Bluetooth SIG assigned-numbers tables in bleAssigned.js.
+export const GATT_SERVICE_NAMES = SIG_SERVICE_NAMES;
+export const GATT_CHARACTERISTIC_NAMES = SIG_CHARACTERISTIC_NAMES;
 
 // GATT descriptor names (assigned numbers 0x29xx).
 export const GATT_DESCRIPTOR_NAMES = {
@@ -138,6 +100,8 @@ export function describeUuid(uuid, kind = 'characteristic') {
   if (short != null && table[short]) {
     return { name: table[short], short, assigned: true };
   }
+  const vendorName = (kind === 'service' ? VENDOR_SERVICES : VENDOR_CHARACTERISTICS)[canonicalUuid(uuid)];
+  if (vendorName) return { name: vendorName, short, assigned: false, vendor: true };
   return {
     name: short != null ? `Unknown (0x${short.toString(16)})` : 'Vendor-specific',
     short,
@@ -210,9 +174,9 @@ export function parseUtf8String(value) {
 
 // Map short UUID -> parser for the characteristics we can interpret.
 const VALUE_PARSERS = {
+  ...EXTRA_PARSERS,
   0x2a19: parseBatteryLevel,
   0x2a37: parseHeartRate,
-  0x2a01: parseAppearance,
   0x2a00: parseUtf8String,
   0x2a24: parseUtf8String,
   0x2a25: parseUtf8String,
@@ -226,7 +190,7 @@ const VALUE_PARSERS = {
  * Interpret a characteristic's raw value. Returns a decoded object when the
  * UUID is a known standard characteristic, always alongside a hex rendering.
  */
-export function parseCharacteristicValue(uuid, value) {
+export function parseCharacteristicValue(uuid, value, presentationFormat = null) {
   const dv = toDataView(value);
   const hex = bytesToHex(dv);
   const short = shortUuid(uuid);
@@ -239,7 +203,11 @@ export function parseCharacteristicValue(uuid, value) {
       decoded = null;
     }
   }
-  return { hex, byteLength: dv.byteLength, decoded, ascii: asciiPreview(dv), numbers: numericViews(dv) };
+  let formatted = null;
+  if (presentationFormat) {
+    try { formatted = applyPresentationFormat(dv, toDataView(presentationFormat)); } catch { formatted = null; }
+  }
+  return { hex, byteLength: dv.byteLength, decoded: decoded || formatted, formatted, ascii: asciiPreview(dv), numbers: numericViews(dv) };
 }
 
 /** Bytes as text: printable ASCII kept, everything else shown as '.'. */
@@ -287,6 +255,14 @@ export function parseDescriptorValue(uuid, value) {
     const v = dv.getUint16(0, true);
     const on = [v & 1 ? 'notifications' : null, v & 2 ? 'indications' : null].filter(Boolean);
     return { ...base, text: on.length ? `${on.join(' + ')} enabled` : 'notifications/indications off' };
+  }
+  if (short === 0x2904 && dv.byteLength >= 7) {
+    const fmt = dv.getUint8(0), exp = dv.getInt8(1), unit = dv.getUint16(2, true);
+    return { ...base, text: `format 0x${fmt.toString(16).padStart(2, '0')}, exponent ${exp}, unit 0x${unit.toString(16)}` };
+  }
+  if (short === 0x2900 && dv.byteLength >= 2) {
+    const v = dv.getUint16(0, true);
+    return { ...base, text: [v & 1 ? 'reliable write' : null, v & 2 ? 'writable auxiliaries' : null].filter(Boolean).join(', ') || 'none' };
   }
   return { ...base, text: null };
 }
@@ -398,14 +374,20 @@ export async function readAllValues(tree, onEach) {
   const put = (k, v) => { out[k] = v; if (onEach) onEach(k, v); };
   for (const service of tree) {
     for (const ch of service.characteristics) {
-      if (ch.properties.read) {
-        try { put(ch.uuid, { ...(await readCharacteristic(ch._ref)), ts: Date.now() }); }
-        catch (e) { put(ch.uuid, { error: e.message || String(e), ts: Date.now() }); }
-      }
+      let format = null; // raw 0x2904 Presentation Format, if the characteristic has one
       for (const d of ch.descriptors || []) {
         const key = `${ch.uuid}/${d.uuid}`;
-        try { put(key, { ...parseDescriptorValue(d.uuid, await d._ref.readValue()), ts: Date.now() }); }
-        catch (e) { put(key, { error: e.message || String(e), ts: Date.now() }); }
+        try {
+          const raw = await d._ref.readValue();
+          if (d.short === 0x2904) format = toDataView(raw);
+          put(key, { ...parseDescriptorValue(d.uuid, raw), ts: Date.now() });
+        } catch (e) { put(key, { error: e.message || String(e), ts: Date.now() }); }
+      }
+      if (ch.properties.read) {
+        try {
+          const raw = await ch._ref.readValue();
+          put(ch.uuid, { ...parseCharacteristicValue(ch.uuid, raw, format), ts: Date.now() });
+        } catch (e) { put(ch.uuid, { error: e.message || String(e), ts: Date.now() }); }
       }
     }
   }
