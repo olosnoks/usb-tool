@@ -18,6 +18,7 @@ import {
   AVR_CHIP_DATABASE 
 } from '../../utils/avrIspDriver';
 import StatusBadge from '../common/StatusBadge';
+import { DemoBanner } from '../common/DemoNotice';
 
 export default function AvrIspWorkbench() {
   const [client] = useState(() => new AvrIspClient(console.log));
@@ -79,6 +80,7 @@ export default function AvrIspWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
+      <DemoBanner demoOnly>No ISP programmer is driven. Signatures, fuses and bootloader burns below run against a simulated ATmega.</DemoBanner>
       {/* Top Controller Bar */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">

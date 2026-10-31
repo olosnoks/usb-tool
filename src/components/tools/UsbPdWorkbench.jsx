@@ -21,6 +21,7 @@ import {
   SAMPLE_CABLE_EMARKERS 
 } from '../../utils/usbPdDriver';
 import StatusBadge from '../common/StatusBadge';
+import { DemoBanner } from '../common/DemoNotice';
 
 export default function UsbPdWorkbench() {
   const [client] = useState(() => new UsbPdClient(console.log));
@@ -110,6 +111,7 @@ export default function UsbPdWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
+      <DemoBanner demoOnly>No USB-PD trigger or VBUS meter protocol is implemented. Voltages, currents and PDO requests below come from a simulated 100 W charger.</DemoBanner>
       {/* Top Controller Bar */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -128,10 +130,12 @@ export default function UsbPdWorkbench() {
               <>
                 <button
                   onClick={handleConnectHardware}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-amber-glow transition-all active:scale-95"
+                  disabled
+                  title="No PD trigger or VBUS meter protocol is implemented yet."
+                  className="disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-amber-glow transition-all active:scale-95"
                 >
                   <Power className="w-3.5 h-3.5" />
-                  <span>CONNECT USB-PD DONGLE</span>
+                  <span>CONNECT USB-PD DONGLE (NOT SUPPORTED YET)</span>
                 </button>
                 <button
                   onClick={handleConnectSimulation}

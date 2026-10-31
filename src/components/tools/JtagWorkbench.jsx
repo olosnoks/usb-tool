@@ -18,6 +18,7 @@ import {
   JTAG_DEVICE_DATABASE 
 } from '../../utils/jtagDriver';
 import StatusBadge from '../common/StatusBadge';
+import { DemoBanner } from '../common/DemoNotice';
 
 const SAMPLE_SVF_TEXT = `// Sample SVF: Initialize TAP & Read IDCODE
 FREQUENCY 10000000 HZ;
@@ -96,6 +97,7 @@ export default function JtagWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
+      <DemoBanner demoOnly>No JTAG adapter is driven. The chain scan, pin states and SVF playback below are simulated; TDO is never checked.</DemoBanner>
       {/* Top Controller Bar */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { DemoBanner } from '../../common/DemoNotice';
 import { 
   Scan, 
   Activity, 
@@ -22,22 +23,25 @@ const SWEEP_PRESETS = [
   { name: '2.4 GHz ISM / Wi-Fi (2400-2500 MHz)', startHz: 2400000000, endHz: 2500000000, stepHz: 1000000 }
 ];
 
-export default function LookingGlassDeck({ driver, centerFreq, sampleRate, onTuneFreq }) {
+export default function LookingGlassDeck({ driver, centerFreq, sampleRate, onTuneFreq, isDemo = true }) {
   const [selectedPreset, setSelectedPreset] = useState(SWEEP_PRESETS[1]);
   const [isSweeping, setIsSweeping] = useState(true);
   const [thresholdDb, setThresholdDb] = useState(-65);
   const canvasRef = useRef(null);
 
   // Peak emitters detected above threshold
-  const [peaks, setPeaks] = useState([
+  const [peaks, setPeaks] = useState(() => (isDemo ? [
     { id: 1, freqHz: 91100000, powerDb: -42, bwKhz: 180, type: 'WFM Broadcast', count: 124 },
     { id: 2, freqHz: 96500000, powerDb: -38, bwKhz: 200, type: 'WFM Broadcast', count: 210 },
     { id: 3, freqHz: 101300000, powerDb: -49, bwKhz: 190, type: 'WFM Broadcast', count: 86 },
     { id: 4, freqHz: 104500000, powerDb: -55, bwKhz: 180, type: 'WFM Broadcast', count: 42 }
-  ]);
+  ] : []));
 
-  // Spectrum canvas — renders the REAL HackRF IQ FFT when connected, else a
-  // synthetic sweep (no hardware / demo mode).
+  // Drop the demo's sample peaks once real hardware is connected.
+  useEffect(() => { if (!isDemo) setPeaks([]); }, [isDemo]);
+
+  // Spectrum canvas: the REAL HackRF IQ FFT when it is streaming. The synthetic
+  // sweep is drawn only in demo mode; on hardware with no data yet it waits.
   useEffect(() => {
     let animId;
     let sweepOffset = 0;
@@ -97,6 +101,11 @@ export default function LookingGlassDeck({ driver, centerFreq, sampleRate, onTun
           const y = dbfsToY(spec[i], h);
           if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         }
+      } else if (!isDemo) {
+        ctx.fillStyle = '#64748b';
+        ctx.font = '12px monospace';
+        ctx.fillText('Waiting for spectrum data from the HackRF…', 16, h / 2);
+        ctx.moveTo(0, h);
       } else {
         const numBins = 160;
         for (let i = 0; i < numBins; i++) {
@@ -151,10 +160,11 @@ export default function LookingGlassDeck({ driver, centerFreq, sampleRate, onTun
     return () => {
       if (animId) cancelAnimationFrame(animId);
     };
-  }, [isSweeping, thresholdDb, selectedPreset, driver, centerFreq, sampleRate]);
+  }, [isSweeping, thresholdDb, selectedPreset, driver, centerFreq, sampleRate, isDemo]);
 
   return (
     <div className="space-y-4 font-mono text-xs">
+      {isDemo && <DemoBanner>The sweep and peaks are synthetic until a real PortaPack is connected.</DemoBanner>}
       {/* Top Banner */}
       <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">

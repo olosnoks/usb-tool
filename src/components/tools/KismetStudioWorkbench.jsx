@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { DemoBanner } from '../common/DemoNotice';
 import {
   Radio,
   Wifi,
@@ -264,7 +265,7 @@ export default function KismetStudioWorkbench() {
   const [apiKey, setApiKey] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [useDemoMode, setUseDemoMode] = useState(true);
+  const [useDemoMode, setUseDemoMode] = useState(false);   // opt-in: real Kismet server by default
   const [activeTab, setActiveTab] = useState('inventory'); // inventory, spectrum, alerts, hardware
   
   // Hardware profile & command assistant
@@ -273,8 +274,10 @@ export default function KismetStudioWorkbench() {
   const [copiedCmd, setCopiedCmd] = useState(false);
 
   // Data states
-  const [devices, setDevices] = useState(MOCK_KISMET_DEVICES);
-  const [alerts, setAlerts] = useState(MOCK_WIDS_ALERTS);
+  // Empty until connected. Only the demo fills these (with MOCK_*); the real
+  // server path does not fetch devices or alerts yet.
+  const [devices, setDevices] = useState([]);
+  const [alerts, setAlerts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('ALL'); // ALL, AP, STA, 5G, 2.4G, WPA3, OPEN
   const [selectedDevice, setSelectedDevice] = useState(null);
@@ -338,8 +341,10 @@ kismet -c ${monIface} --no-ncurses`;
 
     setIsConnecting(true);
     if (useDemoMode) {
-      // Simulate fast local connection
+      // Demo: load the mock capture
       setTimeout(() => {
+        setDevices(MOCK_KISMET_DEVICES);
+        setAlerts(MOCK_WIDS_ALERTS);
         setIsConnected(true);
         setIsConnecting(false);
       }, 600);
@@ -350,6 +355,8 @@ kismet -c ${monIface} --no-ncurses`;
           headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}
         });
         if (res.ok) {
+          setDevices([]);
+          setAlerts([]);
           setIsConnected(true);
         } else {
           alert(`Kismet server returned status ${res.status}. Check API credentials.`);
@@ -431,6 +438,14 @@ kismet -c ${monIface} --no-ncurses`;
 
   return (
     <div className="flex flex-col gap-4 font-mono text-slate-100">
+      {isConnected && useDemoMode && (
+        <DemoBanner>The devices, alerts and rates below are a canned Alfa + Kismet capture, not your server.</DemoBanner>
+      )}
+      {isConnected && !useDemoMode && (
+        <div role="note" className="p-2.5 rounded-lg border border-sky-500/40 bg-sky-500/10 text-xs text-sky-200">
+          Connected to the Kismet server at {serverUrl}. Live device and alert listing from Kismet isn&apos;t implemented yet, so the tables below stay empty.
+        </div>
+      )}
       {/* Top Banner Card */}
       <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -524,9 +539,9 @@ kismet -c ${monIface} --no-ncurses`;
           <div>
             <div className="text-[10px] uppercase text-slate-400 font-semibold">Packet Telemetry</div>
             <div className="text-sm font-bold text-purple-400 mt-0.5">
-              {isConnected ? `${packetRate.toLocaleString()} pkts/s` : '0 pkts/s'}
+              {isConnected && useDemoMode ? `${packetRate.toLocaleString()} pkts/s` : '-- pkts/s'}
             </div>
-            <div className="text-[10px] text-slate-500">Uptime: {isConnected ? serverUptime : '--:--:--'}</div>
+            <div className="text-[10px] text-slate-500">Uptime: {isConnected && useDemoMode ? serverUptime : '--:--:--'}</div>
           </div>
           <Activity className="w-5 h-5 text-purple-400/40" />
         </div>

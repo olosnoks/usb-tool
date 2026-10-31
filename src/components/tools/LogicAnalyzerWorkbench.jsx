@@ -22,6 +22,7 @@ import {
   decodeI2C 
 } from '../../utils/logicAnalyzerDriver';
 import StatusBadge from '../common/StatusBadge';
+import { DemoBanner } from '../common/DemoNotice';
 
 const CHANNEL_DEFAULTS = [
   { id: 0, name: 'D0: SCL', color: '#22d3ee' },
@@ -177,6 +178,7 @@ export default function LogicAnalyzerWorkbench() {
 
   return (
     <div className="flex flex-col gap-4 font-mono">
+      <DemoBanner demoOnly>No capture hardware is supported yet. Waveforms and protocol decodes below are generated, not sampled.</DemoBanner>
       {/* Logic Analyzer Header Card */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">

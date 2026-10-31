@@ -18,6 +18,7 @@ import {
   I2C_CHIP_DATABASE 
 } from '../../utils/busExplorerDriver';
 import StatusBadge from '../common/StatusBadge';
+import { DemoBanner } from '../common/DemoNotice';
 
 export default function BusExplorerWorkbench() {
   const [client] = useState(() => new BusExplorerClient(console.log));
@@ -97,6 +98,7 @@ export default function BusExplorerWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
+      <DemoBanner demoOnly>No I2C / SPI adapter is driven. The scan results and register values below come from simulated sensors.</DemoBanner>
       {/* Top Controller Bar */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">

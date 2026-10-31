@@ -45,6 +45,9 @@ export const CORTEX_REG_NAMES = [
   'xPSR', 'MSP', 'PSP', 'PRIMASK'
 ];
 
+export const CMSIS_DAP_HW_UNSUPPORTED =
+  'Real CMSIS-DAP probes are not supported yet: halt, step, register and memory access are not implemented over WebHID. Use the demo target to explore the interface.';
+
 export class CmsisDapClient {
   constructor(logger = console.log) {
     this.hidDevice = null;
@@ -80,6 +83,15 @@ export class CmsisDapClient {
    * Connect via WebHID (CMSIS-DAP v1)
    */
   async connectHid() {
+    // The CMSIS-DAP command set (DAP_Transfer, DHCSR/DCRSR access, memory
+    // reads/writes) is not implemented yet. The old hardware path opened the
+    // probe and then reported success for halt/step/write without sending a
+    // single report, so it is refused rather than pretending.
+    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
+  }
+
+  // Kept for when the DAP protocol is implemented: opens the HID probe only.
+  async openHidProbe() {
     if (typeof navigator === 'undefined' || !navigator.hid) {
       throw new Error('WebHID API not available in this browser. Please use Chrome, Edge, or Opera.');
     }
@@ -149,9 +161,7 @@ export class CmsisDapClient {
       return this.virtualRegisters;
     }
 
-    // Hardware DHCSR write
-    this.targetState = 'halted';
-    return await this.readRegisters();
+    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
   }
 
   /**
@@ -168,8 +178,7 @@ export class CmsisDapClient {
       return true;
     }
 
-    this.targetState = 'running';
-    return true;
+    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
   }
 
   /**
@@ -187,7 +196,7 @@ export class CmsisDapClient {
       return this.virtualRegisters;
     }
 
-    return await this.readRegisters();
+    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
   }
 
   /**
@@ -201,8 +210,7 @@ export class CmsisDapClient {
       return Array.from(this.virtualRegisters);
     }
 
-    // Hardware mock response
-    return Array.from(this.virtualRegisters);
+    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
   }
 
   /**
@@ -228,7 +236,7 @@ export class CmsisDapClient {
       return words;
     }
 
-    return [];
+    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
   }
 
   /**
@@ -248,6 +256,6 @@ export class CmsisDapClient {
       return true;
     }
 
-    return true;
+    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
   }
 }

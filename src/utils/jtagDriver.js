@@ -115,7 +115,7 @@ export class JtagClient {
       }
     }
 
-    this.logger('[JTAG SVF] SVF stream execution complete. TDO verification PASSED.');
+    this.logger('[JTAG SVF] Simulated run finished: no JTAG adapter is driven and TDO is not checked.');
     return true;
   }
 }

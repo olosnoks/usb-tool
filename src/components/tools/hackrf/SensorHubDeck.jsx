@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { DemoBanner } from '../../common/DemoNotice';
 import { 
   Cpu, 
   CloudRain, 
@@ -17,12 +18,13 @@ import {
   Radio
 } from 'lucide-react';
 
-export default function SensorHubDeck({ centerFreq, onTuneFreq }) {
+export default function SensorHubDeck({ centerFreq, onTuneFreq, isDemo = true }) {
   const [activeCategory, setActiveCategory] = useState('subghz'); // 'subghz' | 'weather' | 'tpms' | 'pagers' | 'acars' | 'ble'
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Real-time sensor packet log
-  const [packets, setPackets] = useState([
+  // Decoded sensor packets. Only the demo has any: the PortaPack doesn't stream
+  // rtl_433 decodes over USB, so on real hardware this stays empty.
+  const [packets, setPackets] = useState(() => (isDemo ? [
     {
       id: 1,
       cat: 'subghz',
@@ -96,10 +98,11 @@ export default function SensorHubDeck({ centerFreq, onTuneFreq }) {
       uuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
       rssi: -49
     }
-  ]);
+  ] : []));
 
-  // Periodic simulated packet arrival from rtl_433 engine
+  // Demo mode only: invented packets on a timer.
   useEffect(() => {
+    if (!isDemo) { setPackets([]); return undefined; }
     const timer = setInterval(() => {
       const now = new Date();
       const timeStr = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}:${String(now.getUTCSeconds()).padStart(2, '0')}`;
@@ -162,7 +165,7 @@ export default function SensorHubDeck({ centerFreq, onTuneFreq }) {
     }, 5000);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [isDemo]);
 
   const filteredPackets = packets.filter(p => {
     if (activeCategory !== 'all' && p.cat !== activeCategory) return false;
@@ -191,6 +194,11 @@ export default function SensorHubDeck({ centerFreq, onTuneFreq }) {
 
   return (
     <div className="space-y-4 font-mono text-xs">
+      {isDemo ? (
+        <DemoBanner>These sensor packets are invented by the demo, not decoded from RF.</DemoBanner>
+      ) : (
+        <DemoBanner demoOnly>Decoding sensors needs an rtl_433 feed, which the PortaPack doesn&apos;t send over USB. Nothing below comes from your HackRF.</DemoBanner>
+      )}
       {/* Top Banner & Protocol Stats */}
       <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">

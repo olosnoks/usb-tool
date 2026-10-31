@@ -46,9 +46,9 @@ export const SIDEBAR_SECTIONS = [
     title: 'ANALYSIS & PROTOCOL LAB',
     items: [
       { id: 'packet-analyzer', name: 'Packet & Protocol Lab', icon: Activity, accent: 'purple', desc: 'Wi-Fi 802.11, PCAP, Hex Stream & Packet Framer' },
-      { id: 'logic-analyzer', name: '24MHz Logic Analyzer', icon: Activity, accent: 'cyan', desc: '8-channel digital waveforms & protocol decoders' },
+      { id: 'logic-analyzer', name: '24MHz Logic Analyzer', icon: Activity, accent: 'cyan', demoOnly: true, desc: '8-channel digital waveforms & protocol decoders (demo only, no capture hardware support yet)' },
       { id: 'can-bus', name: 'CAN Bus & OBD-II Scanner', icon: Gauge, accent: 'emerald', desc: 'Live packet sniffer & automotive diagnostics' },
-      { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', desc: '1-click chip identification & register watch' },
+      { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', demoOnly: true, desc: '1-click chip identification & register watch (demo only, no bus adapter support yet)' },
       { id: 'modbus-rtu', name: 'Modbus RTU & RS-485', icon: Activity, accent: 'amber', desc: 'Industrial holding registers & inverter telemetry' },
       { id: 'plotter', name: 'Oscilloscope Plotter', icon: Activity, accent: 'rose', desc: 'Multi-channel live waveforms' },
       { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer' }
@@ -72,9 +72,9 @@ export const SIDEBAR_SECTIONS = [
     title: 'HARDWARE & PAYLOADS',
     items: [
       { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript compiler, simulator & CyberChef obfuscator' },
-      { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A BIOS flash, CMSIS-DAP, JTAG SVF & AVR ISP' },
-      { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'PPS variable voltage trigger & VBUS analyzer' },
-      { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download Ã¢â‚¬â€ STM32, nRF & more' }
+      { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash (hardware); CMSIS-DAP, JTAG SVF & AVR ISP (demo only)' },
+      { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', demoOnly: true, desc: 'PPS variable voltage trigger & VBUS analyzer (demo only, no PD hardware support yet)' },
+      { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more' }
     ]
   },
   {
@@ -221,7 +221,7 @@ export default function Sidebar({
                     <button
                       key={item.id}
                       onClick={() => handleItemClick(item)}
-                      title={`${item.name} Ã¢â‚¬â€ ${item.desc}`}
+                      title={`${item.name}: ${item.desc}`}
                       className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs border transition-all text-left ${getAccentStyles(
                         item,
                         isActive
@@ -229,8 +229,11 @@ export default function Sidebar({
                     >
                       <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'scale-110' : 'opacity-70'}`} />
                       {!isCollapsed && (
-                        <div className="truncate flex-1">
+                        <div className="truncate flex-1 flex items-center gap-1.5">
                           <div className="truncate">{item.name}</div>
+                          {item.demoOnly && (
+                            <span className="shrink-0 px-1 rounded text-[9px] font-bold tracking-wide bg-amber-500/15 text-amber-300 border border-amber-500/40">DEMO</span>
+                          )}
                         </div>
                       )}
                     </button>

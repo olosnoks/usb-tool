@@ -78,6 +78,14 @@ export class UsbPdClient {
 
   // Connect physical WebUSB / WebHID PD device (Power-Z, ZY12PDN, CH224K, RP2040)
   async connectHardware() {
+    // No PD sink protocol (CH224K / RP2040 trigger / probe firmware) is
+    // implemented: a "connected" device would only have shown the simulation's
+    // made-up VBUS readings. Refuse instead of pretending.
+    throw new Error('USB-PD hardware is not supported yet: no PD trigger or VBUS meter protocol is implemented, so readings and voltage requests would not reach a real device. Use the simulated charger to explore the interface.');
+  }
+
+  // Kept for when a PD protocol is implemented: opens the USB device only.
+  async openUsbDevice() {
     if (!navigator.usb && !navigator.hid) {
       throw new Error('WebUSB / WebHID APIs are not supported in this browser.');
     }

@@ -949,6 +949,7 @@ export default function PortapackWorkbench() {
             <div className="flex-1">
               <HamRadioDeck
                 driver={driver}
+                isDemo={state.isDemo}
                 centerFreq={state.frequency}
                 onTuneFreq={(hz) => driver.sendCommand(`freq ${hz}`)}
               />
@@ -960,6 +961,7 @@ export default function PortapackWorkbench() {
             <div className="flex-1">
               <SensorHubDeck
                 driver={driver}
+                isDemo={state.isDemo}
                 centerFreq={state.frequency}
                 onTuneFreq={(hz) => driver.sendCommand(`freq ${hz}`)}
               />
@@ -971,6 +973,7 @@ export default function PortapackWorkbench() {
             <div className="flex-1">
               <LookingGlassDeck
                 driver={driver}
+                isDemo={state.isDemo}
                 centerFreq={state.frequency}
                 sampleRate={state.sampleRate}
                 onTuneFreq={(hz) => driver.sendCommand(`freq ${hz}`)}

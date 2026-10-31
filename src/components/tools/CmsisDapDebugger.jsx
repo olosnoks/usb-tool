@@ -19,6 +19,7 @@ import {
   CORTEX_REG_NAMES 
 } from '../../utils/cmsisDapDriver';
 import StatusBadge from '../common/StatusBadge';
+import { DemoBanner } from '../common/DemoNotice';
 
 export default function CmsisDapDebugger() {
   const [client] = useState(() => new CmsisDapClient(console.log));
@@ -108,6 +109,7 @@ export default function CmsisDapDebugger() {
 
   return (
     <div className="flex flex-col gap-4 font-mono">
+      <DemoBanner demoOnly>Real CMSIS-DAP probes are not supported yet. The demo below runs a virtual Cortex-M target; halting, stepping and memory edits never touch a device.</DemoBanner>
       {/* Probe Header Card */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -126,10 +128,12 @@ export default function CmsisDapDebugger() {
               <>
                 <button
                   onClick={handleConnectHardware}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-xs shadow-cyan-glow transition-all active:scale-95"
+                  disabled
+                  title="Halt, step, register and memory access are not implemented for real probes yet."
+                  className="disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-xs shadow-cyan-glow transition-all active:scale-95"
                 >
                   <Cpu className="w-3.5 h-3.5" />
-                  <span>CONNECT DAP PROBE (WEBHID)</span>
+                  <span>CONNECT DAP PROBE (WEBHID) (NOT SUPPORTED YET)</span>
                 </button>
                 <button
                   onClick={handleConnectSimulation}
