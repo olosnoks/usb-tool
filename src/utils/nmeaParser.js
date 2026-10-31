@@ -116,7 +116,7 @@ export function parseNmeaSentence(line) {
 
 /**
  * Parses wardriving WiFi & BLE beacon logs
- * Matches standard formats from Warhog CYD (M5Porkchop / SGT WARHOG), Piglet (ESP32-C5/S3),
+ * Matches standard formats from Warhog CYD, Piglet (ESP32-C5/S3),
  * WiGLE CSV v1.4 / v1.6, and ESP32 Marauder output.
  * @param {string} line
  * @returns {object|null}
@@ -154,7 +154,7 @@ export function parseWardriveLine(line) {
     }
   }
 
-  // Pattern 1: "[WARHOG] / [PORKCHOP] / [PIGLET] / [WIFI] BSSID: XX:XX:XX... | SSID: ... | RSSI: -XX | CH: X | AUTH: ..."
+  // Pattern 1: "[WARHOG] / [PIGLET] / [WIFI] BSSID: XX:XX:XX... | SSID: ... | RSSI: -XX | CH: X | AUTH: ..."
   if (clean.includes('BSSID') || clean.includes('bssid')) {
     const bssidMatch = clean.match(/(?:BSSID|bssid)[:= ]\s*([0-9a-fA-F:]{17})/i);
     const ssidMatch = clean.match(/(?:SSID|ssid|ESSID)[:= ]\s*["']?([^"'|,]+)["']?/i);
@@ -168,7 +168,7 @@ export function parseWardriveLine(line) {
     if (bssidMatch) {
       const lat = latMatch ? parseFloat(latMatch[1]) : gpsPairMatch ? parseFloat(gpsPairMatch[1]) : null;
       const lon = lonMatch ? parseFloat(lonMatch[1]) : gpsPairMatch ? parseFloat(gpsPairMatch[2]) : null;
-      const isWarhog = /WARHOG|PORKCHOP|CYD/i.test(clean);
+      const isWarhog = /WARHOG|CYD/i.test(clean);
       const isPiglet = /PIGLET/i.test(clean);
 
       return {
@@ -186,7 +186,7 @@ export function parseWardriveLine(line) {
     }
   }
 
-  // Pattern 2: CSV lines (WiGLE v1.6 14-col from Porkchop/Warhog CYD & Piglet, WiGLE v1.4 11-col, or 5-col simple CSV)
+  // Pattern 2: CSV lines (WiGLE v1.6 14-col from Warhog CYD & Piglet, WiGLE v1.4 11-col, or 5-col simple CSV)
   const parts = clean.split(',');
   if (parts.length >= 5) {
     const macCandidate = parts[0].trim().replace(/^"|"$/g, '');
@@ -242,7 +242,7 @@ export function parseWardriveLine(line) {
 }
 
 /**
- * Parses a full WiGLE v1.4 / v1.6 CSV file exported from Warhog CYD (M5Porkchop) or Piglet SD card
+ * Parses a full WiGLE v1.4 / v1.6 CSV file exported from Warhog CYD or Piglet SD card
  * @param {string} csvContent
  * @returns {{ metadata: object, aps: Array<object>, track: Array<{lat: number, lon: number}> }}
  */

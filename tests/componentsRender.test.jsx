@@ -118,61 +118,42 @@ describe('UI Workbench Render Sanity Check', () => {
     expect(wardriveHtml).toContain('Panda PAU09');
     expect(wardriveHtml).toContain('RT5572');
     expect(wardriveHtml).toContain('Warhog CYD');
-    expect(wardriveHtml).toContain('SGT WARHOG');
     expect(wardriveHtml).toContain('Piglet');
     expect(wardriveHtml).toContain('ESP32-C5');
     expect(wardriveHtml).toContain('Import SD .wigle.csv');
     expect(wardriveHtml).toContain('Connect PAU09 (WebUSB)');
-    expect(wardriveHtml).toContain('Simulate Wardrive Stream');
   });
 
-  it('renders WarhogPigletWorkbench with Piglet SD File Explorer and wardriver.config editor and round-trips config', () => {
+  it('renders WarhogPigletWorkbench with Piglet SD File Explorer and wardriver.cfg editor and round-trips config', () => {
     const html = renderToString(<SerialProvider><WarhogPigletWorkbench /></SerialProvider>);
-    expect(html).toContain('WARHOG CYD &amp; PIGLET SUITE');
-    expect(html).toContain('Piglet / Warhog SD File Explorer');
-    expect(html).toContain('wardriver.config &amp; porkchop.conf Editor');
+    expect(html).toContain('WARHOG &amp; PIGLET TOOLSUITE');
+    expect(html).toContain('SD Card File Explorer');
+    expect(html).toContain('wardriver.cfg Editor');
 
-    const iniText = serializeWardriverConfig({
-      device_name: 'Piglet-TestRig',
-      callsign: 'WARHOG_01',
-      hardware_preset: 'piglet-c5',
-      default_mode: 'warhog',
-      enable_24ghz: true,
-      enable_5ghz: true,
-      enable_ble_sweep: false,
-      hop_interval_ms: 250,
-      min_rssi_dbm: -85,
-      dedup_bloom_filter: true,
-      gps_rx_pin: 17,
-      gps_tx_pin: 16,
-      gps_baud: 115200,
-      require_gps_fix: true,
-      hdop_max_filter: 4.0,
-      timezone_offset: -5,
-      sd_cs_pin: 2,
-      sd_sck_pin: 8,
-      sd_miso_pin: 9,
-      sd_mosi_pin: 10,
-      log_dir: '/wardriving',
-      rotate_file_kb: 400,
-      sync_wifi_ssid: 'HomeNet',
-      sync_wifi_pass: 'secret',
-      wigle_api_name: 'AID123',
-      wigle_api_token: 'TOK456',
-      wpasec_key: 'WPA789',
-      auto_upload_on_home_wifi: true,
-      display_type: 'SSD1306_128X64',
-      tft_rotation: 1,
-      led_blink_on_ap: true,
-      sound_buzzer: false
-    }, 'ini');
+    const cfgText = serializeWardriverConfig({
+      deviceName: 'Piglet-TestRig',
+      board: 'c5',
+      scan24: true,
+      scan5: true,
+      bluetoothScan: false,
+      gpsBaud: 115200,
+      homeSsid: 'HomeNet',
+      homePsk: 'secret123',
+      wigleBasicToken: 'QUlEMTIzNDU...',
+      meshModeOnBoot: 'core',
+      autoStartAfterUpload: true,
+      uploadOnNetworkSeen: false
+    });
 
-    const parsed = parseWardriverConfigText(iniText);
-    expect(parsed.device_name).toBe('Piglet-TestRig');
-    expect(parsed.gps_rx_pin).toBe(17);
-    expect(parsed.gps_baud).toBe(115200);
-    expect(parsed.enable_5ghz).toBe(true);
-    expect(parsed.enable_ble_sweep).toBe(false);
-    expect(parsed.auto_upload_on_home_wifi).toBe(true);
+    const parsed = parseWardriverConfigText(cfgText);
+    expect(parsed.deviceName).toBe('Piglet-TestRig');
+    expect(parsed.board).toBe('c5');
+    expect(parsed.gpsBaud).toBe(115200);
+    expect(parsed.scan5).toBe(true);
+    expect(parsed.bluetoothScan).toBe(false);
+    expect(parsed.homeSsid).toBe('HomeNet');
+    expect(parsed.meshModeOnBoot).toBe('core');
+    expect(parsed.autoStartAfterUpload).toBe(true);
+    expect(parsed.uploadOnNetworkSeen).toBe(false);
   });
 });
