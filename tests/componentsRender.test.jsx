@@ -112,6 +112,11 @@ describe('UI Workbench Render Sanity Check', () => {
     const wardriveHtml = renderToString(<SerialProvider><GpsWardriverDeck isConnected={false} /></SerialProvider>);
     expect(wardriveHtml).toContain('Panda PAU09');
     expect(wardriveHtml).toContain('RT5572');
+    expect(wardriveHtml).toContain('Warhog CYD');
+    expect(wardriveHtml).toContain('SGT WARHOG');
+    expect(wardriveHtml).toContain('Piglet');
+    expect(wardriveHtml).toContain('ESP32-C5');
+    expect(wardriveHtml).toContain('Import SD .wigle.csv');
     expect(wardriveHtml).toContain('Connect PAU09 (WebUSB)');
     expect(wardriveHtml).toContain('Simulate Wardrive Stream');
   });

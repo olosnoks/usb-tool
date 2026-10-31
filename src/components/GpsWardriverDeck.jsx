@@ -18,9 +18,10 @@ import {
   Usb,
   Play,
   Square,
-  Cpu
+  Cpu,
+  Upload
 } from 'lucide-react';
-import { parseNmeaSentence, parseWardriveLine } from '../utils/nmeaParser';
+import { parseNmeaSentence, parseWardriveLine, parseWigleCsvFile } from '../utils/nmeaParser';
 import {
   connectAlfaDevice,
   startMonitorMode,
@@ -31,12 +32,26 @@ import { parse80211Frame } from '../utils/wifiParser';
 
 const WARDRIVE_CHANNELS_DUALBAND = [1, 6, 11, 36, 40, 44, 48, 149, 153, 157, 161];
 const SIMULATED_PAU09_APS = [
-  { bssid: '9C:EF:D5:44:12:01', ssid: 'PandaNet-5G-Uplink', rssi: -52, channel: 36, auth: 'WPA3-SAE' },
-  { bssid: '9C:EF:D5:88:3A:10', ssid: 'Tactical-Mesh-Node', rssi: -61, channel: 149, auth: 'WPA2-PSK' },
-  { bssid: '00:C0:CA:A8:19:42', ssid: 'Corp-Guest-WiFi', rssi: -68, channel: 6, auth: 'OPEN' },
-  { bssid: '24:5E:BE:11:90:CC', ssid: 'BuildingB-IoT-24', rssi: -64, channel: 1, auth: 'WPA2-PSK' },
-  { bssid: 'F0:9F:C2:71:0B:55', ssid: 'UniFi-Lab-5GHz', rssi: -58, channel: 44, auth: 'WPA2-EAP' },
-  { bssid: 'B4:FB:E4:33:E1:09', ssid: 'Field-Sensor-Bridge', rssi: -74, channel: 11, auth: 'WPA2-PSK' }
+  { bssid: '9C:EF:D5:44:12:01', ssid: 'PandaNet-5G-Uplink', rssi: -52, channel: 36, auth: 'WPA3-SAE', deviceType: 'WIFI' },
+  { bssid: '9C:EF:D5:88:3A:10', ssid: 'Tactical-Mesh-Node', rssi: -61, channel: 149, auth: 'WPA2-PSK', deviceType: 'WIFI' },
+  { bssid: '00:C0:CA:A8:19:42', ssid: 'Corp-Guest-WiFi', rssi: -68, channel: 6, auth: 'OPEN', deviceType: 'WIFI' },
+  { bssid: '24:5E:BE:11:90:CC', ssid: 'BuildingB-IoT-24', rssi: -64, channel: 1, auth: 'WPA2-PSK', deviceType: 'WIFI' },
+  { bssid: 'F0:9F:C2:71:0B:55', ssid: 'UniFi-Lab-5GHz', rssi: -58, channel: 44, auth: 'WPA2-EAP', deviceType: 'WIFI' },
+  { bssid: 'B4:FB:E4:33:E1:09', ssid: 'Field-Sensor-Bridge', rssi: -74, channel: 11, auth: 'WPA2-PSK', deviceType: 'WIFI' }
+];
+const SIMULATED_WARHOG_CYD_APS = [
+  { bssid: 'A0:B7:65:12:9F:01', ssid: 'WARHOG-CYD-Target01', rssi: -49, channel: 6, auth: 'WPA2-PSK', deviceType: 'WIFI' },
+  { bssid: 'C8:C9:A3:44:08:7B', ssid: 'Starbucks_Free_WiFi', rssi: -63, channel: 11, auth: 'OPEN', deviceType: 'WIFI' },
+  { bssid: 'E4:5F:01:88:31:D2', ssid: 'Flipper-BLE-Beacon', rssi: -57, channel: 37, auth: 'BLE-ADV', deviceType: 'BLE' },
+  { bssid: '70:4D:7B:91:CC:14', ssid: 'Porkchop-WPA-SEC-Lab', rssi: -54, channel: 1, auth: 'WPA2-PSK', deviceType: 'WIFI' },
+  { bssid: 'D8:3A:DD:19:50:4E', ssid: 'Skydio-Telemetry-24', rssi: -71, channel: 6, auth: 'WPA2-PSK', deviceType: 'WIFI' }
+];
+const SIMULATED_PIGLET_APS = [
+  { bssid: '30:3A:10:C5:55:01', ssid: 'Piglet-C5-5GHz-Backhaul', rssi: -48, channel: 36, auth: 'WPA3-SAE', deviceType: 'WIFI' },
+  { bssid: '30:3A:10:C5:88:19', ssid: 'ATGM336H-Field-Mesh', rssi: -59, channel: 149, auth: 'WPA2-PSK', deviceType: 'WIFI' },
+  { bssid: '64:6E:97:0A:41:2B', ssid: 'MidwestGadgets-AP', rssi: -62, channel: 6, auth: 'WPA2-PSK', deviceType: 'WIFI' },
+  { bssid: '8C:AA:B5:77:12:E0', ssid: 'Municipal-Free-5G', rssi: -66, channel: 48, auth: 'OPEN', deviceType: 'WIFI' },
+  { bssid: '58:BF:25:3D:90:11', ssid: 'ESP32C5-DualBand-Node', rssi: -55, channel: 157, auth: 'WPA2-PSK', deviceType: 'WIFI' }
 ];
 
 export default function GpsWardriverDeck({
@@ -64,7 +79,7 @@ export default function GpsWardriverDeck({
   const [copiedCoords, setCopiedCoords] = useState(false);
   const [radarZoom, setRadarZoom] = useState(1);
 
-  // Wardriver Wi-Fi Hardware Source Toggle ('pau09' | 'alfa' | 'serial')
+  // Wardriver Wi-Fi Hardware Source Toggle ('pau09' | 'alfa' | 'warhog-cyd' | 'piglet' | 'serial')
   const [wardriveSource, setWardriveSource] = useState(() => {
     try {
       return localStorage.getItem('wardriver_hardware_source') || 'pau09';
@@ -75,15 +90,80 @@ export default function GpsWardriverDeck({
   const [usbAdapter, setUsbAdapter] = useState(null);
   const [isUsbConnected, setIsUsbConnected] = useState(false);
   const [isUsbScanning, setIsUsbScanning] = useState(false);
+  const [isSerialRigConnected, setIsSerialRigConnected] = useState(false);
   const [isBrowserGps, setIsBrowserGps] = useState(false);
   const [isSimulatingWardrive, setIsSimulatingWardrive] = useState(false);
   const [scanChannel, setScanChannel] = useState(6);
   const [statusNotice, setStatusNotice] = useState(null);
 
   const canvasRef = useRef(null);
+  const fileInputRef = useRef(null);
   const lastProcessedTextRef = useRef('');
   const isScanningRef = useRef(false);
   const usbDeviceRef = useRef(null);
+  const serialPortRef = useRef(null);
+  const serialReaderRef = useRef(null);
+
+  const processIncomingTextLines = useCallback((rawText) => {
+    if (!rawText) return;
+    const lines = rawText.split(/\r?\n/);
+    for (const line of lines) {
+      if (!line.trim()) continue;
+
+      // Check NMEA ($GPGGA, $GNGGA, $GPRMC, $GNRMC)
+      if (line.includes('$GP') || line.includes('$GN')) {
+        const parsedGps = parseNmeaSentence(line);
+        if (parsedGps) {
+          setGpsData(prev => {
+            const next = { ...prev, ...parsedGps };
+            if (parsedGps.lat && parsedGps.lon) {
+              setTrackHistory(track => {
+                const last = track[track.length - 1];
+                if (!last || Math.abs(last.lat - parsedGps.lat) > 0.00005 || Math.abs(last.lon - parsedGps.lon) > 0.00005) {
+                  return [...track.slice(-200), { lat: parsedGps.lat, lon: parsedGps.lon }];
+                }
+                return track;
+              });
+            }
+            return next;
+          });
+        }
+      }
+
+      // Check WiFi / BLE Wardriving lines (Warhog CYD, Piglet, WiGLE CSV v1.6/v1.4, Marauder)
+      const parsedAp = parseWardriveLine(line);
+      if (parsedAp) {
+        setCapturedAps(prev => {
+          const map = new Map(prev.map(ap => [ap.bssid, ap]));
+          map.set(parsedAp.bssid, parsedAp);
+          return Array.from(map.values()).slice(-200);
+        });
+        // If Warhog CYD or Piglet line includes embedded GPS coordinates, update GPS & radar trail
+        if (parsedAp.lat && parsedAp.lon) {
+          setGpsData(prev => ({
+            ...prev,
+            lat: parsedAp.lat,
+            lon: parsedAp.lon,
+            altitude: parsedAp.altitude ?? prev.altitude,
+            fixLabel: parsedAp.sourceDevice === 'warhog-cyd'
+              ? 'Warhog CYD GPS Lock'
+              : parsedAp.sourceDevice === 'piglet'
+              ? 'Piglet ATGM336H Lock'
+              : 'Wardriver GPS Lock',
+            valid: true,
+            time: new Date().toISOString().slice(11, 19) + ' UTC'
+          }));
+          setTrackHistory(track => {
+            const last = track[track.length - 1];
+            if (!last || Math.abs(last.lat - parsedAp.lat) > 0.00005 || Math.abs(last.lon - parsedAp.lon) > 0.00005) {
+              return [...track.slice(-200), { lat: parsedAp.lat, lon: parsedAp.lon }];
+            }
+            return track;
+          });
+        }
+      }
+    }
+  }, []);
 
   const handleSelectWardriveSource = useCallback((source) => {
     setWardriveSource(source);
@@ -95,10 +175,121 @@ export default function GpsWardriverDeck({
         ? 'Panda Wireless PAU09 (RT5572 Dual-Band WebUSB)'
         : source === 'alfa'
         ? 'Alfa AWUS036ACH (RTL8812AU WebUSB)'
+        : source === 'warhog-cyd'
+        ? 'Warhog CYD (Porkchop SGT WARHOG / ESP32-2432S028R)'
+        : source === 'piglet'
+        ? 'Piglet Wardriver (Seeed XIAO ESP32-C5 / S3 Dual-Band + ATGM336H)'
         : 'Serial UART NMEA / ESP32 Stream';
     setStatusNotice(`Active Wardriver Source: ${label}`);
     onLogMessage?.(`[Wardriver] Switched adapter mode to ${label}`);
   }, [onLogMessage]);
+
+  const handleConnectSerialRig = async () => {
+    try {
+      if (typeof navigator === 'undefined' || !navigator.serial) {
+        setStatusNotice('WebSerial API unavailable in this browser. Use Chrome or Edge.');
+        return;
+      }
+      const filters =
+        wardriveSource === 'piglet'
+          ? [
+              { usbVendorId: 0x303a, usbProductId: 0x1001 }, // Seeed XIAO ESP32-C5 / S3 / C6 Native USB JTAG/Serial
+              { usbVendorId: 0x303a },
+              { usbVendorId: 0x1a86, usbProductId: 0x7523 },
+              { usbVendorId: 0x10c4, usbProductId: 0xea60 }
+            ]
+          : [
+              { usbVendorId: 0x1a86, usbProductId: 0x7523 }, // ESP32-2432S028R CYD CH340C
+              { usbVendorId: 0x1a86, usbProductId: 0x55d4 }, // CH9102F
+              { usbVendorId: 0x10c4, usbProductId: 0xea60 }, // CP2102
+              { usbVendorId: 0x303a }
+            ];
+      const port = await navigator.serial.requestPort({ filters });
+      await port.open({ baudRate: 115200 });
+      serialPortRef.current = port;
+      setIsSerialRigConnected(true);
+      const rigName = wardriveSource === 'warhog-cyd' ? 'Warhog CYD (SGT WARHOG)' : 'Piglet (ESP32-C5)';
+      setStatusNotice(`Connected ${rigName} over WebSerial @ 115200 baud`);
+      onLogMessage?.(`[Wardriver] Connected ${rigName} @ 115200 baud`);
+
+      const decoder = new TextDecoder();
+      let lineBuffer = '';
+      const reader = port.readable.getReader();
+      serialReaderRef.current = reader;
+      (async () => {
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) {
+              lineBuffer += decoder.decode(value, { stream: true });
+              const newlineIdx = lineBuffer.lastIndexOf('\n');
+              if (newlineIdx !== -1) {
+                const completeChunk = lineBuffer.slice(0, newlineIdx + 1);
+                lineBuffer = lineBuffer.slice(newlineIdx + 1);
+                processIncomingTextLines(completeChunk);
+              }
+            }
+          }
+        } catch {
+          // Port closed or disconnected
+        }
+      })();
+    } catch (err) {
+      setStatusNotice(`Serial connection cancelled or failed: ${err?.message || 'Port not selected'}`);
+    }
+  };
+
+  const handleDisconnectSerialRig = async () => {
+    try {
+      if (serialReaderRef.current) {
+        await serialReaderRef.current.cancel();
+        serialReaderRef.current.releaseLock();
+      }
+      if (serialPortRef.current) {
+        await serialPortRef.current.close();
+      }
+    } catch {}
+    serialReaderRef.current = null;
+    serialPortRef.current = null;
+    setIsSerialRigConnected(false);
+    setStatusNotice('Disconnected Serial Wardriver rig');
+  };
+
+  const handleImportWigleCsv = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const { metadata, aps, track } = parseWigleCsvFile(text);
+      if (aps.length > 0) {
+        setCapturedAps(prev => {
+          const map = new Map(prev.map(ap => [ap.bssid, ap]));
+          for (const ap of aps) map.set(ap.bssid, ap);
+          return Array.from(map.values()).slice(-500);
+        });
+      }
+      if (track.length > 0) {
+        const lastPt = track[track.length - 1];
+        setTrackHistory(prev => [...prev, ...track].slice(-300));
+        setGpsData(prev => ({
+          ...prev,
+          lat: lastPt.lat,
+          lon: lastPt.lon,
+          fixLabel: `${metadata.device || 'SD Card'} Log (${aps.length} APs)`,
+          valid: true
+        }));
+      }
+      setStatusNotice(
+        `Imported ${aps.length} networks & ${track.length} GPS track points from ${file.name} (${metadata.format})`
+      );
+      onLogMessage?.(`[Wardriver] Imported ${aps.length} APs from ${file.name}`);
+    } catch (err) {
+      setStatusNotice(`Failed to import CSV: ${err?.message || 'Invalid file'}`);
+    } finally {
+      e.target.value = '';
+    }
+  };
 
   const handleConnectUsbAdapter = async () => {
     try {
@@ -230,7 +421,7 @@ export default function GpsWardriverDeck({
     return () => navigator.geolocation.clearWatch(watchId);
   }, [isBrowserGps]);
 
-  // Simulated Panda PAU09 / Alfa Dual-Band Wardrive Stream
+  // Simulated Panda PAU09 / Alfa / Warhog CYD / Piglet Wardrive Stream
   useEffect(() => {
     if (!isSimulatingWardrive) return;
     let tick = 0;
@@ -251,13 +442,26 @@ export default function GpsWardriverDeck({
           speedKmh: 28.4,
           speedMph: 17.6,
           heading: nextHeading,
-          fixLabel: wardriveSource === 'pau09' ? 'PAU09 + Sim GPS Fix' : 'Sim GPS Fix (3D)',
+          fixLabel:
+            wardriveSource === 'warhog-cyd'
+              ? 'SGT WARHOG CYD Lock'
+              : wardriveSource === 'piglet'
+              ? 'Piglet ATGM336H Lock'
+              : wardriveSource === 'pau09'
+              ? 'PAU09 + Sim GPS Fix'
+              : 'Sim GPS Fix (3D)',
           valid: true,
           time: new Date().toISOString().slice(11, 19) + ' UTC'
         };
       });
 
-      const template = SIMULATED_PAU09_APS[tick % SIMULATED_PAU09_APS.length];
+      const pool =
+        wardriveSource === 'warhog-cyd'
+          ? SIMULATED_WARHOG_CYD_APS
+          : wardriveSource === 'piglet'
+          ? SIMULATED_PIGLET_APS
+          : SIMULATED_PAU09_APS;
+      const template = pool[tick % pool.length];
       const jitterRssi = Math.max(-92, Math.min(-38, template.rssi + Math.round((Math.random() - 0.5) * 8)));
       const apEntry = {
         ...template,
@@ -279,42 +483,8 @@ export default function GpsWardriverDeck({
     if (!latestTextStream) return;
     if (latestTextStream === lastProcessedTextRef.current) return;
     lastProcessedTextRef.current = latestTextStream;
-
-    const lines = latestTextStream.split(/\r?\n/);
-    for (const line of lines) {
-      if (!line.trim()) continue;
-
-      // Check NMEA
-      if (line.includes('$GP') || line.includes('$GN')) {
-        const parsedGps = parseNmeaSentence(line);
-        if (parsedGps) {
-          setGpsData(prev => {
-            const next = { ...prev, ...parsedGps };
-            if (parsedGps.lat && parsedGps.lon) {
-              setTrackHistory(track => {
-                const last = track[track.length - 1];
-                if (!last || Math.abs(last.lat - parsedGps.lat) > 0.00005 || Math.abs(last.lon - parsedGps.lon) > 0.00005) {
-                  return [...track.slice(-200), { lat: parsedGps.lat, lon: parsedGps.lon }];
-                }
-                return track;
-              });
-            }
-            return next;
-          });
-        }
-      }
-
-      // Check WiFi Wardriving lines
-      const parsedAp = parseWardriveLine(line);
-      if (parsedAp) {
-        setCapturedAps(prev => {
-          const map = new Map(prev.map(ap => [ap.bssid, ap]));
-          map.set(parsedAp.bssid, parsedAp);
-          return Array.from(map.values()).slice(-200);
-        });
-      }
-    }
-  }, [latestTextStream]);
+    processIncomingTextLines(latestTextStream);
+  }, [latestTextStream, processIncomingTextLines]);
 
   // Radar / Track Canvas Renderer
   useEffect(() => {
@@ -432,20 +602,47 @@ export default function GpsWardriverDeck({
 
   const handleExportWigleCsv = () => {
     if (capturedAps.length === 0) return;
-    const header = 'MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n';
+    const deviceTag =
+      wardriveSource === 'warhog-cyd'
+        ? 'Porkchop-Warhog-CYD'
+        : wardriveSource === 'piglet'
+        ? 'Piglet-ESP32C5'
+        : wardriveSource === 'pau09'
+        ? 'Panda-PAU09-RT5572'
+        : 'Skons-Wardriver';
+    const preHeader = `WigleWifi-1.6,appRelease=1.0,model=ESP32,release=1.0,device=${deviceTag},display=TFT,board=ESP32,brand=Skons\n`;
+    const header = 'MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type\n';
     const rows = capturedAps.map(ap => {
-      return `${ap.bssid},"${ap.ssid}",${ap.auth},${new Date().toISOString()},${ap.channel},${ap.rssi},${gpsData.lat || 0},${gpsData.lon || 0},${gpsData.altitude || 0},5,WIFI`;
+      const ch = Number(ap.channel) || 6;
+      const freq = ap.frequency || (ch > 14 ? 5000 + ch * 5 : 2407 + ch * 5);
+      const lat = ap.lat ?? gpsData.lat ?? 0;
+      const lon = ap.lon ?? gpsData.lon ?? 0;
+      const alt = ap.altitude ?? gpsData.altitude ?? 0;
+      const type = ap.deviceType || 'WIFI';
+      return `${ap.bssid},"${ap.ssid}",${ap.auth},${new Date().toISOString()},${ch},${freq},${ap.rssi},${lat},${lon},${alt},4.5,,,${type}`;
     }).join('\n');
 
-    const csv = header + rows;
+    const csv = preHeader + header + rows;
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `wardrive-wigle-${Date.now()}.csv`;
+    link.download = `${deviceTag.toLowerCase()}-${Date.now()}.wigle.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
+
+  const wardriveStats = useMemo(() => {
+    let wifi24 = 0;
+    let wifi5 = 0;
+    let ble = 0;
+    for (const ap of capturedAps) {
+      if (ap.deviceType === 'BLE') ble += 1;
+      else if (Number(ap.channel) > 14) wifi5 += 1;
+      else wifi24 += 1;
+    }
+    return { wifi24, wifi5, ble };
+  }, [capturedAps]);
 
   const filteredAps = useMemo(() => {
     if (!apSearch.trim()) return capturedAps;
@@ -467,11 +664,32 @@ export default function GpsWardriverDeck({
               ? 'Panda PAU09 (RT5572)'
               : wardriveSource === 'alfa'
               ? 'Alfa (RTL8812AU)'
+              : wardriveSource === 'warhog-cyd'
+              ? 'Warhog CYD (SGT WARHOG)'
+              : wardriveSource === 'piglet'
+              ? 'Piglet (ESP32-C5/S3)'
               : 'Serial UART'}
           </span>
         </div>
 
         <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.wigle.csv,.txt"
+            onChange={handleImportWigleCsv}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1 text-[11px] bg-slate-900 hover:bg-slate-800 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-500/30"
+            title="Import .wigle.csv or .csv SD card logs from Warhog CYD (/m5porkchop/wardriving/) or Piglet"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Import SD .wigle.csv</span>
+          </button>
+
           <button
             onClick={handleExportWigleCsv}
             disabled={capturedAps.length === 0}
@@ -531,20 +749,50 @@ export default function GpsWardriverDeck({
           </button>
           <button
             type="button"
+            onClick={() => handleSelectWardriveSource('warhog-cyd')}
+            className={`px-2.5 py-1 rounded text-[11px] font-bold transition flex items-center gap-1.5 ${
+              wardriveSource === 'warhog-cyd'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 border border-transparent'
+            }`}
+            title="Use Warhog CYD (Porkchop SGT WARHOG on ESP32-2432S028R Cheap Yellow Display) via WebSerial / SD WiGLE v1.6"
+          >
+            <span>Warhog CYD</span>
+            <span className="text-[9px] px-1 rounded bg-amber-950 text-amber-400 border border-amber-500/30">
+              SGT WARHOG
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSelectWardriveSource('piglet')}
+            className={`px-2.5 py-1 rounded text-[11px] font-bold transition flex items-center gap-1.5 ${
+              wardriveSource === 'piglet'
+                ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 border border-transparent'
+            }`}
+            title="Use Piglet Wardriver (Seeed XIAO ESP32-C5 / S3 Dual-Band 2.4/5GHz + ATGM336H GPS) via WebSerial / SD CSV"
+          >
+            <span>Piglet</span>
+            <span className="text-[9px] px-1 rounded bg-pink-950 text-pink-400 border border-pink-500/30">
+              ESP32-C5
+            </span>
+          </button>
+          <button
+            type="button"
             onClick={() => handleSelectWardriveSource('serial')}
             className={`px-2.5 py-1 rounded text-[11px] font-bold transition ${
               wardriveSource === 'serial'
                 ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 border border-transparent'
             }`}
-            title="Parse NMEA + Wi-Fi lines from Serial UART stream (ESP32 / Marauder / Flipper)"
+            title="Parse NMEA + Wi-Fi lines from generic Serial UART stream (ESP32 / Marauder / Flipper)"
           >
             Serial UART
           </button>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {wardriveSource !== 'serial' && (
+          {(wardriveSource === 'pau09' || wardriveSource === 'alfa') && (
             <>
               {!isUsbConnected ? (
                 <button
@@ -583,6 +831,37 @@ export default function GpsWardriverDeck({
             </>
           )}
 
+          {(wardriveSource === 'warhog-cyd' || wardriveSource === 'piglet') && (
+            <>
+              {!isSerialRigConnected ? (
+                <button
+                  type="button"
+                  onClick={handleConnectSerialRig}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold text-[11px] border transition ${
+                    wardriveSource === 'warhog-cyd'
+                      ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                      : 'bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 border-pink-500/40'
+                  }`}
+                >
+                  <Usb className="w-3.5 h-3.5" />
+                  <span>
+                    {wardriveSource === 'warhog-cyd'
+                      ? 'Connect Warhog CYD (Serial)'
+                      : 'Connect Piglet (Serial)'}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleDisconnectSerialRig}
+                  className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[11px] font-bold"
+                >
+                  Disconnect {wardriveSource === 'warhog-cyd' ? 'Warhog CYD' : 'Piglet'}
+                </button>
+              )}
+            </>
+          )}
+
           {/* Browser Geolocation GPS Lock Toggle */}
           <button
             type="button"
@@ -592,7 +871,7 @@ export default function GpsWardriverDeck({
                 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
                 : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
             }`}
-            title="Lock GPS coordinates using Browser Geolocation API while wardriving with USB Wi-Fi adapter"
+            title="Lock GPS coordinates using Browser Geolocation API while wardriving"
           >
             <Crosshair className="w-3.5 h-3.5" />
             <span>{isBrowserGps ? 'Browser GPS Active' : 'Browser GPS Lock'}</span>
@@ -607,13 +886,49 @@ export default function GpsWardriverDeck({
                 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                 : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
             }`}
-            title="Simulate dual-band 2.4/5GHz wardriving stream with Panda PAU09 / Alfa beacons"
+            title="Simulate wardriving stream with Warhog CYD, Piglet, or Panda PAU09 beacons"
           >
             <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
             <span>{isSimulatingWardrive ? `Simulating (CH ${scanChannel})` : 'Simulate Wardrive Stream'}</span>
           </button>
         </div>
       </div>
+
+      {/* Warhog CYD & Piglet Hardware Rig Profile Strip */}
+      {(wardriveSource === 'warhog-cyd' || wardriveSource === 'piglet') && (
+        <div
+          className={`rounded-lg px-3 py-2 border flex flex-wrap items-center justify-between gap-2 text-[11px] ${
+            wardriveSource === 'warhog-cyd'
+              ? 'bg-amber-950/20 border-amber-500/30 text-amber-200'
+              : 'bg-pink-950/20 border-pink-500/30 text-pink-200'
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-bold uppercase tracking-wider">
+              {wardriveSource === 'warhog-cyd'
+                ? '🐗 SGT WARHOG (Porkchop-CYD ESP32-2432S028R)'
+                : '🐷 Piglet Wardriver (Seeed XIAO ESP32-C5 / S3 + ATGM336H)'}
+            </span>
+            <span className="text-slate-400">|</span>
+            <span className="text-slate-300">
+              {wardriveSource === 'warhog-cyd'
+                ? '115200 UART (CH340/CP2102) • 2.4GHz + BLE Sweep • /m5porkchop/wardriving/*.wigle.csv'
+                : '115200 USB-JTAG (303a:1001) • Dual-Band 2.4/5GHz • WiGLE CSV v1.6 + ATGM336H NMEA'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-[10px] font-bold">
+            <span className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-cyan-300">
+              2.4GHz: {wardriveStats.wifi24}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-emerald-300">
+              5GHz: {wardriveStats.wifi5}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-purple-300">
+              BLE: {wardriveStats.ble}
+            </span>
+          </div>
+        </div>
+      )}
 
       {statusNotice && (
         <div className="bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center justify-between text-[11px] text-slate-300">

@@ -115,50 +115,174 @@ export function parseNmeaSentence(line) {
 }
 
 /**
- * Parses wardriving WiFi beacon logs
- * Matches standard formats like Wigle, Marauder, or Piglet wardriver output
+ * Parses wardriving WiFi & BLE beacon logs
+ * Matches standard formats from Warhog CYD (M5Porkchop / SGT WARHOG), Piglet (ESP32-C5/S3),
+ * WiGLE CSV v1.4 / v1.6, and ESP32 Marauder output.
  * @param {string} line
  * @returns {object|null}
  */
 export function parseWardriveLine(line) {
   if (!line || typeof line !== 'string') return null;
   const clean = line.trim();
+  if (!clean || clean.startsWith('WigleWifi-') || clean.startsWith('MAC,SSID,')) return null;
 
-  // Pattern 1: "[WIFI] BSSID: XX:XX:XX... | SSID: ... | RSSI: -XX | CH: X | AUTH: ..."
+  // Pattern 0: JSON telemetry line emitted by Piglet / Warhog CYD builds
+  if (clean.startsWith('{') && clean.endsWith('}')) {
+    try {
+      const obj = JSON.parse(clean);
+      const bssid = (obj.bssid || obj.mac || obj.BSSID || '').toUpperCase();
+      if (/^([0-9A-F]{2}[:-]){5}([0-9A-F]{2})$/.test(bssid)) {
+        const lat = obj.lat !== undefined ? parseFloat(obj.lat) : obj.latitude !== undefined ? parseFloat(obj.latitude) : null;
+        const lon = obj.lon !== undefined ? parseFloat(obj.lon) : obj.longitude !== undefined ? parseFloat(obj.longitude) : null;
+        return {
+          bssid: bssid.replace(/-/g, ':'),
+          ssid: obj.ssid || obj.essid || '<Hidden SSID>',
+          rssi: parseInt(obj.rssi ?? -70, 10),
+          channel: parseInt(obj.channel ?? obj.ch ?? 1, 10),
+          frequency: obj.freq || obj.frequency || null,
+          auth: obj.auth || obj.encryption || 'WPA2',
+          deviceType: (obj.type || 'WIFI').toUpperCase(),
+          sourceDevice: obj.src || obj.device || (obj.mode === 'WARHOG' ? 'warhog-cyd' : 'piglet'),
+          lat: !Number.isNaN(lat) && lat !== 0 ? lat : null,
+          lon: !Number.isNaN(lon) && lon !== 0 ? lon : null,
+          altitude: obj.alt !== undefined ? parseFloat(obj.alt) : null,
+          seenTime: obj.time || new Date().toLocaleTimeString()
+        };
+      }
+    } catch {
+      // fall through to regex/CSV parsers
+    }
+  }
+
+  // Pattern 1: "[WARHOG] / [PORKCHOP] / [PIGLET] / [WIFI] BSSID: XX:XX:XX... | SSID: ... | RSSI: -XX | CH: X | AUTH: ..."
   if (clean.includes('BSSID') || clean.includes('bssid')) {
     const bssidMatch = clean.match(/(?:BSSID|bssid)[:= ]\s*([0-9a-fA-F:]{17})/i);
     const ssidMatch = clean.match(/(?:SSID|ssid|ESSID)[:= ]\s*["']?([^"'|,]+)["']?/i);
     const rssiMatch = clean.match(/(?:RSSI|rssi)[:= ]\s*([+-]?\d+)/i);
     const chMatch = clean.match(/(?:CH|channel|Channel)[:= ]\s*(\d+)/i);
-    const authMatch = clean.match(/(?:AUTH|auth|ENCR|sec)[:= ]\s*([A-Za-z0-9_\-\/]+)/i);
+    const authMatch = clean.match(/(?:AUTH|auth|ENCR|sec)[:= ]\s*([A-Za-z0-9_\-\/+[\]]+)/i);
+    const latMatch = clean.match(/(?:LAT|lat)[:= ]\s*([+-]?\d+\.\d+)/);
+    const lonMatch = clean.match(/(?:LON|LNG|lon|lng)[:= ]\s*([+-]?\d+\.\d+)/);
+    const gpsPairMatch = clean.match(/GPS[:= ]\s*([+-]?\d+\.\d+)\s*[,/]\s*([+-]?\d+\.\d+)/i);
 
     if (bssidMatch) {
+      const lat = latMatch ? parseFloat(latMatch[1]) : gpsPairMatch ? parseFloat(gpsPairMatch[1]) : null;
+      const lon = lonMatch ? parseFloat(lonMatch[1]) : gpsPairMatch ? parseFloat(gpsPairMatch[2]) : null;
+      const isWarhog = /WARHOG|PORKCHOP|CYD/i.test(clean);
+      const isPiglet = /PIGLET/i.test(clean);
+
       return {
         bssid: bssidMatch[1].toUpperCase(),
         ssid: ssidMatch ? ssidMatch[1].trim() : '<Hidden SSID>',
         rssi: rssiMatch ? parseInt(rssiMatch[1], 10) : -70,
         channel: chMatch ? parseInt(chMatch[1], 10) : 1,
         auth: authMatch ? authMatch[1] : 'WPA2/WPA3',
+        deviceType: /\bBLE\b/i.test(clean) ? 'BLE' : 'WIFI',
+        sourceDevice: isWarhog ? 'warhog-cyd' : isPiglet ? 'piglet' : 'serial',
+        lat: lat && !Number.isNaN(lat) ? lat : null,
+        lon: lon && !Number.isNaN(lon) ? lon : null,
         seenTime: new Date().toLocaleTimeString()
       };
     }
   }
 
-  // Pattern 2: CSV line: MAC,SSID,Auth,Channel,RSSI...
+  // Pattern 2: CSV lines (WiGLE v1.6 14-col from Porkchop/Warhog CYD & Piglet, WiGLE v1.4 11-col, or 5-col simple CSV)
   const parts = clean.split(',');
   if (parts.length >= 5) {
-    const macCandidate = parts[0].trim();
+    const macCandidate = parts[0].trim().replace(/^"|"$/g, '');
     if (/^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/.test(macCandidate)) {
+      const stripQuotes = (s) => (s || '').trim().replace(/^"|"$/g, '');
+
+      // Check if parts[3] looks like a timestamp (YYYY-MM-DD or ISO8601) -> WiGLE CSV v1.4 or v1.6
+      const col3 = stripQuotes(parts[3]);
+      const isWigleFormat = /\d{4}-\d{2}-\d{2}|\d{2}:\d{2}:\d{2}/.test(col3) && parts.length >= 10;
+
+      if (isWigleFormat) {
+        // WiGLE v1.6 has 14 columns: MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type
+        // WiGLE v1.4 has 11 columns: MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type
+        const isV16 = parts.length >= 13 && parseInt(parts[5], 10) > 1000;
+        const channel = parseInt(parts[4], 10) || 1;
+        const frequency = isV16 ? parseInt(parts[5], 10) || null : null;
+        const rssi = parseInt(parts[isV16 ? 6 : 5], 10) || -70;
+        const rawLat = parseFloat(parts[isV16 ? 7 : 6]);
+        const rawLon = parseFloat(parts[isV16 ? 8 : 7]);
+        const rawAlt = parseFloat(parts[isV16 ? 9 : 8]);
+        const devType = stripQuotes(parts[isV16 ? 13 : 10]) || 'WIFI';
+
+        return {
+          bssid: macCandidate.toUpperCase().replace(/-/g, ':'),
+          ssid: stripQuotes(parts[1]) || '<Hidden SSID>',
+          auth: stripQuotes(parts[2]) || 'OPEN',
+          channel,
+          frequency,
+          rssi,
+          lat: !Number.isNaN(rawLat) && rawLat !== 0 ? rawLat : null,
+          lon: !Number.isNaN(rawLon) && rawLon !== 0 ? rawLon : null,
+          altitude: !Number.isNaN(rawAlt) ? rawAlt : null,
+          deviceType: devType.toUpperCase(),
+          sourceDevice: isV16 ? 'warhog-piglet-v16' : 'wigle-v14',
+          seenTime: col3.split(/[ T]/)[1] || new Date().toLocaleTimeString()
+        };
+      }
+
+      // Simple 5-column CSV: MAC,SSID,Auth,Channel,RSSI
       return {
-        bssid: macCandidate.toUpperCase(),
-        ssid: parts[1]?.trim() || '<Hidden SSID>',
-        auth: parts[2]?.trim() || 'WPA2',
+        bssid: macCandidate.toUpperCase().replace(/-/g, ':'),
+        ssid: stripQuotes(parts[1]) || '<Hidden SSID>',
+        auth: stripQuotes(parts[2]) || 'WPA2',
         channel: parseInt(parts[3], 10) || 1,
         rssi: parseInt(parts[4], 10) || -70,
+        deviceType: 'WIFI',
         seenTime: new Date().toLocaleTimeString()
       };
     }
   }
 
   return null;
+}
+
+/**
+ * Parses a full WiGLE v1.4 / v1.6 CSV file exported from Warhog CYD (M5Porkchop) or Piglet SD card
+ * @param {string} csvContent
+ * @returns {{ metadata: object, aps: Array<object>, track: Array<{lat: number, lon: number}> }}
+ */
+export function parseWigleCsvFile(csvContent) {
+  const result = {
+    metadata: { format: 'WigleWifi-1.6', device: 'Unknown', model: 'ESP32' },
+    aps: [],
+    track: []
+  };
+  if (!csvContent || typeof csvContent !== 'string') return result;
+
+  const lines = csvContent.split(/\r?\n/);
+  const apMap = new Map();
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (line.startsWith('WigleWifi-')) {
+      const tokens = line.split(',');
+      result.metadata.format = tokens[0];
+      for (const t of tokens.slice(1)) {
+        const [k, v] = t.split('=');
+        if (k && v) result.metadata[k.trim()] = v.trim();
+      }
+      continue;
+    }
+
+    const parsed = parseWardriveLine(line);
+    if (parsed) {
+      apMap.set(parsed.bssid, parsed);
+      if (parsed.lat && parsed.lon) {
+        const last = result.track[result.track.length - 1];
+        if (!last || Math.abs(last.lat - parsed.lat) > 0.00002 || Math.abs(last.lon - parsed.lon) > 0.00002) {
+          result.track.push({ lat: parsed.lat, lon: parsed.lon });
+        }
+      }
+    }
+  }
+
+  result.aps = Array.from(apMap.values());
+  return result;
 }
