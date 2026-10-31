@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useSerial } from '../context/SerialContext';
+import { dumpUbootMemory } from '../utils/ubootDump';
 import { 
   Terminal, 
   Flame, 
@@ -40,7 +42,10 @@ export default function UBootTriage({
   const [dumpLength, setDumpLength] = useState('0x1000'); // 4KB default
   const [isDumpingMem, setIsDumpingMem] = useState(false);
   const [dumpProgress, setDumpProgress] = useState({ bytesRead: 0, totalBytes: 0, percent: 0 });
-  const dumpBufferRef = useRef([]);
+  const dumpBufferRef = useRef(null);      // Uint8Array of the last complete dump
+  const dumpCancelRef = useRef(false);
+  const [hasDump, setHasDump] = useState(false);
+  const { borrowPort } = useSerial();
 
   // Auto-Prompt Detection
   useEffect(() => {
@@ -139,56 +144,55 @@ export default function UBootTriage({
     }
   }, [latestRxText]);
 
-  // Automated Memory Dumper via md.b
+  // Memory dump via md.b. Reads replies straight from the port (borrowed from
+  // the terminal): latestRxText only carries the latest chunk and drops data.
   const startMemoryDump = async () => {
     if (!isConnected) return;
-    let start = parseInt(dumpStartAddr, 16);
-    let len = parseInt(dumpLength, 16);
+    const start = parseInt(dumpStartAddr, 16);
+    const len = parseInt(dumpLength, 16);
     if (isNaN(start) || isNaN(len) || len <= 0) {
       alert('Invalid Hex Address or Length format (e.g. 0x80000000 and 0x1000)');
       return;
     }
-
-    setIsDumpingMem(true);
-    dumpBufferRef.current = [];
-    setDumpProgress({ bytesRead: 0, totalBytes: len, percent: 0 });
-    onLogMessage?.(`[U-BOOT DUMPER] Starting automated memory dump of ${len} bytes from 0x${start.toString(16).toUpperCase()}...`, 'sys');
-
-    const chunkSize = 256; // 256 bytes per read
-    let currentAddr = start;
-    const endAddr = start + len;
-
-    while (currentAddr < endAddr && isDumpingMem) {
-      const readLen = Math.min(chunkSize, endAddr - currentAddr);
-      const cmd = `md.b 0x${currentAddr.toString(16)} 0x${readLen.toString(16)}`;
-      await onSendString(cmd, '\n');
-
-      currentAddr += readLen;
-      const bytesRead = currentAddr - start;
-      const percent = Math.min(100, Number(((bytesRead / len) * 100).toFixed(1)));
-      setDumpProgress({ bytesRead, totalBytes: len, percent });
-
-      await new Promise(r => setTimeout(r, 200));
+    if (!borrowPort) {
+      alert('Memory dumps need the shared serial connection.');
+      return;
     }
 
-    setIsDumpingMem(false);
-    onLogMessage?.('[U-BOOT DUMPER] Memory dump completed! You can now download the raw .bin file.', 'sys');
+    setIsDumpingMem(true);
+    setHasDump(false);
+    dumpBufferRef.current = null;
+    dumpCancelRef.current = false;
+    setDumpProgress({ bytesRead: 0, totalBytes: len, percent: 0 });
+    onLogMessage?.(`[U-BOOT DUMPER] Dumping ${len} bytes from 0x${start.toString(16).toUpperCase()} with md.b...`, 'sys');
+    try {
+      const data = await borrowPort((port) => dumpUbootMemory(port, start, len, {
+        isCancelled: () => dumpCancelRef.current,
+        onProgress: (bytesRead, totalBytes) => setDumpProgress({
+          bytesRead, totalBytes, percent: Math.min(100, Number(((bytesRead / totalBytes) * 100).toFixed(1)))
+        })
+      }));
+      dumpBufferRef.current = data;
+      setHasDump(true);
+      onLogMessage?.(`[U-BOOT DUMPER] Read ${data.length} bytes. Use the download button to save them.`, 'sys');
+    } catch (err) {
+      onLogMessage?.(`[U-BOOT DUMPER] Dump failed: ${err.message}`, 'sys');
+      if (!/cancelled/.test(err.message)) alert(`Dump failed: ${err.message}`);
+    } finally {
+      setIsDumpingMem(false);
+    }
   };
 
   const handleDownloadDump = () => {
-    // Generate dummy/parsed binary buffer for demonstration or parsed bytes
-    const total = parseInt(dumpLength, 16) || 1024;
-    const bin = new Uint8Array(total);
-    for (let i = 0; i < total; i++) {
-      bin[i] = (i + 0x55) & 0xff;
-    }
+    const bin = dumpBufferRef.current;
+    if (!bin) return;
     const blob = new Blob([bin], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `uboot_dump_${dumpStartAddr}_${dumpLength}.bin`;
+    link.download = `uboot_dump_${dumpStartAddr}_${bin.length}B.bin`;
     link.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const filteredEnv = envSearch.trim()
@@ -337,7 +341,7 @@ export default function UBootTriage({
               </button>
             ) : (
               <button
-                onClick={() => setIsDumpingMem(false)}
+                onClick={() => { dumpCancelRef.current = true; }}
                 className="flex-1 py-1.5 rounded bg-rose-500/30 text-rose-300 border border-rose-500 font-bold text-xs"
               >
                 ABORT DUMP
@@ -346,8 +350,9 @@ export default function UBootTriage({
 
             <button
               onClick={handleDownloadDump}
-              title="Download dumped binary"
-              className="px-3 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700"
+              disabled={!hasDump}
+              title={hasDump ? 'Download dumped binary' : 'Run a dump first'}
+              className="px-3 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 disabled:opacity-40"
             >
               <Download className="w-4 h-4 text-cyber-cyan" />
             </button>
