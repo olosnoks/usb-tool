@@ -122,15 +122,25 @@ export class ObdOverSlcan {
     this.timeoutMs = timeoutMs;
     this.quietMs = quietMs;
     this.collector = null;
+    this._chain = Promise.resolve();   // one request on the bus at a time
   }
 
   onFrame(f) {
     if (this.collector && !f.isExtended && f.id >= 0x7e8 && f.id <= 0x7ef) this.collector(f);
   }
 
-  /** Send a service request; resolves with { ecuId: payload } for every ECU that answered. */
-  request(serviceBytes) {
-    if (this.collector) return Promise.reject(new Error('an OBD request is already running'));
+  /**
+   * Send a service request; resolves with { ecuId: payload } for every ECU that
+   * answered. Requests are queued, so polling and a DTC scan can't collide.
+   */
+  request(serviceBytes, opts = {}) {
+    const run = () => this._request(serviceBytes, opts);
+    const p = this._chain.then(run, run);
+    this._chain = p.catch(() => {});
+    return p;
+  }
+
+  _request(serviceBytes, { quietMs = this.quietMs, timeoutMs = this.timeoutMs } = {}) {
     const sf = new Uint8Array(8);
     sf[0] = serviceBytes.length;
     sf.set(serviceBytes, 1);
@@ -144,7 +154,7 @@ export class ObdOverSlcan {
         for (const [id, e] of ecus) if (e.data.length >= e.total) out[id] = Uint8Array.from(e.data.slice(0, e.total));
         resolve(out);
       };
-      const hard = setTimeout(finish, this.timeoutMs);
+      const hard = setTimeout(finish, timeoutMs);
       this.collector = (f) => {
         const pci = f.data[0] >> 4;
         if (pci === 0) {                                    // single frame
@@ -161,10 +171,23 @@ export class ObdOverSlcan {
           e.data.push(...f.data.subarray(1, 8));
         } else return;
         clearTimeout(quiet);
-        quiet = setTimeout(finish, this.quietMs);
+        quiet = setTimeout(finish, quietMs);
       };
       this.send(buildSlcanFrame(0x7df, sf));
     });
+  }
+
+  /**
+   * Mode 01 PID: data bytes (after 0x41, pid) from the first ECU that answers,
+   * or null when no ECU supports it.
+   */
+  async readPid(pid) {
+    const replies = await this.request([0x01, pid], { quietMs: 40, timeoutMs: 300 });
+    for (const id of Object.keys(replies).map(Number).sort()) {
+      const p = replies[id];
+      if (p[0] === 0x41 && p[1] === pid) return p.subarray(2);
+    }
+    return null;
   }
 
   /** Mode 03: stored DTCs from every ECU that answers. */

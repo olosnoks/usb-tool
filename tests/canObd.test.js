@@ -77,3 +77,33 @@ describe('SLCAN and OBD-II', () => {
     expect(await obd.clearDtcs()).toEqual({ confirmed: [], refused: [] });
   });
 });
+
+describe('OBD-II live PIDs', () => {
+  function makePidCar(values) {
+    let obd;
+    const send = (line) => {
+      const f = parseSlcanFrame(line);
+      if (!f || f.id !== 0x7df || f.data[1] !== 0x01) return;
+      const pid = f.data[2];
+      if (!(pid in values)) return;                       // unsupported: no reply
+      const d = [0x41, pid, ...values[pid]];
+      setTimeout(() => obd.onFrame(parseSlcanFrame(buildSlcanFrame(0x7e8, Uint8Array.from([d.length, ...d, 0, 0, 0, 0, 0, 0, 0].slice(0, 8))))), 3);
+    };
+    obd = new ObdOverSlcan(send, { timeoutMs: 300, quietMs: 30 });
+    return obd;
+  }
+
+  it('reads PIDs and returns null for unsupported ones', async () => {
+    const obd = makePidCar({ 0x0c: [0x1a, 0xf8], 0x0d: [0x3c] });
+    expect(Array.from(await obd.readPid(0x0c))).toEqual([0x1a, 0xf8]);   // 1726 rpm
+    expect(Array.from(await obd.readPid(0x0d))).toEqual([0x3c]);
+    expect(await obd.readPid(0x42)).toBe(null);
+  });
+
+  it('queues overlapping requests instead of rejecting them', async () => {
+    const obd = makePidCar({ 0x0c: [0x0f, 0xa0], 0x05: [0x7b] });
+    const [rpm, temp] = await Promise.all([obd.readPid(0x0c), obd.readPid(0x05)]);
+    expect(Array.from(rpm)).toEqual([0x0f, 0xa0]);
+    expect(Array.from(temp)).toEqual([0x7b]);
+  });
+});

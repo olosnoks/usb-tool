@@ -47,15 +47,11 @@ export default function CanBusWorkbench() {
   const [txData, setTxData] = useState('11 22 33 44 55 66 77 88');
   const [txIntervalMs, setTxIntervalMs] = useState(100);
 
-  // OBD-II Live Telemetry State
-  const [obdValues, setObdValues] = useState({
-    rpm: 0,
-    speed: 0,
-    temp: 0,
-    load: 0,
-    throttle: 0,
-    voltage: 0
-  });
+  // OBD-II Live Telemetry State. null = not read yet, 'n/a' = the car doesn't
+  // support that PID. Never a made-up 0 that looks like a reading.
+  const EMPTY_OBD = { rpm: null, speed: null, temp: null, load: null, throttle: null, voltage: null };
+  const [obdValues, setObdValues] = useState(EMPTY_OBD);
+  const [obdLive, setObdLive] = useState(false);
   const [activeDtcs, setActiveDtcs] = useState([]);
   const [isScanningDtcs, setIsScanningDtcs] = useState(false);
   const [dtcStatus, setDtcStatus] = useState(null);   // null = not scanned yet
@@ -191,6 +187,33 @@ export default function CanBusWorkbench() {
 
     return () => clearInterval(simIntervalRef.current);
   }, [isSimulated, isSniffing]);
+
+  // Live gauges: poll mode 01 PIDs one after another while enabled.
+  useEffect(() => {
+    if (!obdLive || isSimulated || !isConnected || mode !== 'obd2') return undefined;
+    let stopped = false;
+    const PIDS = [
+      ['rpm', 0x0c, (b) => Math.round(((b[0] * 256) + b[1]) / 4)],
+      ['speed', 0x0d, (b) => b[0]],
+      ['temp', 0x05, (b) => b[0] - 40],
+      ['load', 0x04, (b) => Number(((b[0] * 100) / 255).toFixed(1))],
+      ['throttle', 0x11, (b) => Number(((b[0] * 100) / 255).toFixed(1))],
+      ['voltage', 0x42, (b) => Number((((b[0] * 256) + b[1]) / 1000).toFixed(2))]
+    ];
+    (async () => {
+      if (!sniffingRef.current) await startSniffing();   // the channel must be open
+      while (!stopped) {
+        for (const [key, pid, parse] of PIDS) {
+          if (stopped) return;
+          let v;
+          try { const b = await obdRef.current.readPid(pid); v = b ? parse(b) : 'n/a'; } catch (e) { v = 'n/a'; }
+          if (!stopped) setObdValues((prev) => ({ ...prev, [key]: v }));
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    })();
+    return () => { stopped = true; };
+  }, [obdLive, isSimulated, isConnected, mode]);
 
   // SLCAN: close, set bitrate, open (listen + transmit). The adapter answers
   // each with "\r", or BELL (0x07) on error.
@@ -338,6 +361,8 @@ export default function CanBusWorkbench() {
                 setMessages({});
                 setActiveDtcs([]);
                 setDtcStatus(null);
+                setObdLive(false);
+                setObdValues(EMPTY_OBD);
               }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${
                 isSimulated 
@@ -514,15 +539,32 @@ export default function CanBusWorkbench() {
       {mode === 'obd2' && (
         <div className="space-y-4">
           {/* Virtual Instruments Cluster */}
+          {!isSimulated && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <button
+                onClick={() => {
+                  if (!isConnected) { alert('Connect the SLCAN adapter over serial first.'); return; }
+                  setObdLive((v) => !v);
+                }}
+                className={`px-3 py-1 rounded-lg border font-bold ${obdLive ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-slate-900 text-slate-300 border-slate-800 hover:text-cyan-300'}`}
+              >
+                {obdLive ? 'LIVE GAUGES ●' : 'START LIVE GAUGES (MODE 01)'}
+              </button>
+              <span className="text-slate-500">Polls RPM, speed, coolant, load, throttle and module voltage from the vehicle.</span>
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {[
-              { name: 'ENGINE RPM', val: Math.round(obdValues.rpm), unit: 'RPM', color: 'text-amber-300' },
-              { name: 'SPEED', val: obdValues.speed, unit: 'km/h', color: 'text-cyan-300' },
-              { name: 'COOLANT', val: obdValues.temp, unit: '°C', color: 'text-emerald-400' },
-              { name: 'ENGINE LOAD', val: `${obdValues.load}%`, unit: 'Load', color: 'text-purple-400' },
-              { name: 'THROTTLE', val: `${obdValues.throttle}%`, unit: 'TPS', color: 'text-amber-400' },
-              { name: 'VOLTAGE', val: `${obdValues.voltage}V`, unit: 'Battery', color: 'text-cyan-400' }
-            ].map(gauge => (
+            {(() => {
+              const fmt = (v, suffix = '') => (v === null || v === undefined ? '--' : v === 'n/a' ? 'n/a' : `${typeof v === 'number' && suffix === '' && v > 100 ? Math.round(v) : v}${suffix}`);
+              return [
+                { name: 'ENGINE RPM', val: fmt(obdValues.rpm), unit: 'RPM', color: 'text-amber-300' },
+                { name: 'SPEED', val: fmt(obdValues.speed), unit: 'km/h', color: 'text-cyan-300' },
+                { name: 'COOLANT', val: fmt(obdValues.temp), unit: '°C', color: 'text-emerald-400' },
+                { name: 'ENGINE LOAD', val: fmt(obdValues.load, '%'), unit: 'Load', color: 'text-purple-400' },
+                { name: 'THROTTLE', val: fmt(obdValues.throttle, '%'), unit: 'TPS', color: 'text-amber-400' },
+                { name: 'VOLTAGE', val: fmt(obdValues.voltage, 'V'), unit: 'Module', color: 'text-cyan-400' }
+              ];
+            })().map(gauge => (
               <div key={gauge.name} className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center flex flex-col justify-between">
                 <span className="text-[10px] text-slate-500 font-bold">{gauge.name}</span>
                 <div className={`text-xl font-extrabold my-1 ${gauge.color}`}>{gauge.val}</div>

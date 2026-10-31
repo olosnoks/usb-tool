@@ -30,8 +30,8 @@ Beyond serial it covers 802.11 monitor-mode capture for Alfa / RTL8812AU and Pan
 
 | Status | Tools |
 |---|---|
-| Real hardware | Terminal, ESP flasher, Hardware Controls, U-Boot deck, Plotter, Serial Bridge, Modbus RTU, Wi-Fi Monitor, Flipper Zero, Proxmark3, PortaPack (serial console and HackRF WebUSB), GPS & Wardrive, Warhog & Piglet, CH341A, BLE Explorer, WebUSB DFU, MicroPython, Improv |
-| Real hardware, with limits | Silicon Memory Dump: chip ID and MAC on ESP32 / S3 / C3; flash reads only on ESP32 and ESP8266 (newer ROMs need the esptool stub). Kismet Studio: connects to a Kismet server, but live device listing isn't implemented yet. PortaPack sensor and digital-mode decoders: no decoder feed from the device yet. CAN / OBD-II: SLCAN sniffing, transmit and DTC read/clear work; live OBD gauges (PID polling) aren't implemented yet. |
+| Real hardware | Terminal, ESP flasher, Hardware Controls, U-Boot deck, Plotter, Serial Bridge, Modbus RTU, CAN / OBD-II (SLCAN adapters), Wi-Fi Monitor, Flipper Zero, Proxmark3, PortaPack (serial console and HackRF WebUSB), GPS & Wardrive, Warhog & Piglet, CH341A, BLE Explorer, WebUSB DFU, MicroPython, Improv |
+| Real hardware, with limits | Silicon Memory Dump: chip ID and MAC on ESP32 / S3 / C3; flash reads only on ESP32 and ESP8266 (newer ROMs need the esptool stub). Kismet Studio: connects to a Kismet server, but live device listing isn't implemented yet. PortaPack sensor and digital-mode decoders: no decoder feed from the device yet. |
 | Demo only (no hardware path yet) | Logic Analyzer, I²C / SPI Bus Explorer, JTAG, AVR ISP, CMSIS-DAP, USB-PD |
 
 Several real-hardware tools also offer an opt-in simulation for trying the interface; simulated data is always labeled in the app.
