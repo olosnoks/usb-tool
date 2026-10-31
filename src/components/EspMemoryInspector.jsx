@@ -14,6 +14,7 @@ import {
   FileText
 } from 'lucide-react';
 import { inspectEspSilicon, dumpFlashRange, parseFlashCapacity, FLASH_MANUFACTURERS } from '../utils/espMemoryTool';
+import { useSerial } from '../context/SerialContext';
 
 const DUMP_PRESETS = [
   {
@@ -48,6 +49,10 @@ export default function EspMemoryInspector({
   onLogMessage
 }) {
   const [siliconInfo, setSiliconInfo] = useState(null);
+  // The terminal's read loop holds the port's reader; borrow the port so the
+  // ROM client can read replies, then hand it back.
+  const { borrowPort } = useSerial();
+  const withPort = (fn) => (borrowPort ? borrowPort(fn) : fn(port));
   const [isInspecting, setIsInspecting] = useState(false);
   const [isDumping, setIsDumping] = useState(false);
   const [targetOffset, setTargetOffset] = useState('0x00009000');
@@ -61,7 +66,7 @@ export default function EspMemoryInspector({
     }
     try {
       setIsInspecting(true);
-      const info = await inspectEspSilicon(port, onLogMessage);
+      const info = await withPort((p) => inspectEspSilicon(p, onLogMessage));
       setSiliconInfo(info);
     } catch (err) {
       onLogMessage?.(`[ESP RE] Inspection failed: ${err.message}`, 'sys');
@@ -78,15 +83,15 @@ export default function EspMemoryInspector({
     try {
       setIsDumping(true);
       const offsetNum = parseInt(targetOffset, 16);
-      await dumpFlashRange(
-        port,
+      await withPort((p) => dumpFlashRange(
+        p,
         offsetNum,
         Number(dumpLength),
         (percent, bytesRead, totalBytes) => {
           setProgress({ percent, bytesRead, totalBytes });
         },
         onLogMessage
-      );
+      ));
     } catch (err) {
       onLogMessage?.(`[DUMP ERROR] Failed: ${err.message}`, 'sys');
       alert(`Dump Error: ${err.message}`);
@@ -124,14 +129,14 @@ export default function EspMemoryInspector({
         <div className="bg-[#030712] border border-slate-800 rounded-lg p-3">
           <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Target MAC Address</span>
           <div className="text-sm font-bold text-cyber-cyan">
-            {siliconInfo?.mac || 'Click "Read Chip eFuses"'}
+            {siliconInfo ? (siliconInfo.mac || 'not readable for this chip') : 'Click "Read Chip eFuses"'}
           </div>
         </div>
 
         <div className="bg-[#030712] border border-slate-800 rounded-lg p-3">
           <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Chip Architecture</span>
           <div className="text-sm font-bold text-slate-200">
-            {siliconInfo?.chipFamily || 'Xtensa / RISC-V'}
+            {siliconInfo?.chipFamily || '--'}
           </div>
         </div>
 

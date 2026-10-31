@@ -544,6 +544,25 @@ export function SerialProvider({ children }) {
     }
   };
 
+  // Lend the active board's open port to a tool that needs its own reader
+  // (ESP ROM flasher, memory inspector): pause this board's read loop, run
+  // fn(port), then resume the loop. Without this, getReader() on the port
+  // throws "locked" because the terminal's loop holds the only reader.
+  const borrowActivePort = async (fn) => {
+    const boardId = activeBoardIdRef.current;
+    const board = boardsStateRef.current.find(b => b.id === boardId);
+    if (!board || !board.port) throw new Error('No serial port is connected.');
+    await haltReading(boardId);
+    try {
+      return await fn(board.port);
+    } finally {
+      if (board.port.readable && !board.port.readable.locked) {
+        boardKeepReadingRef.current[boardId] = true;
+        boardReadLoopsRef.current[boardId] = startReading(boardId, board.port);
+      }
+    }
+  };
+
   // Reopen the active board's port with new line settings (baud/parity/etc) without
   // tearing down the session — used by protocol decks that need a specific framing
   // (e.g. Modbus RTU 8-N-1). Keeps the continuous read loop running afterward.
@@ -634,6 +653,7 @@ export function SerialProvider({ children }) {
     runBaudScan: handleRunBaudScan,
     transceive,
     reconfigureActivePort,
+    borrowPort: borrowActivePort,
     addLog,
     clearLogs: () => updateBoard(activeBoardId, { entries: [] }),
     clearHexStream: () => {

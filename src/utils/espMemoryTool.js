@@ -1,4 +1,4 @@
-import { ESP_CMD, buildEspCommand, espChecksum, slipEncode, slipDecode } from './espLoader';
+import { EspBootloaderClient } from './espLoader';
 
 /**
  * ESP32 / ESP8266 Flash Memory Dumper & Silicon Inspector
@@ -41,140 +41,66 @@ export function parseFlashCapacity(capacityByte) {
   }
 }
 
-/**
- * Read a 32-bit hardware register via ROM Bootloader
- */
-export async function readEspRegister(port, regAddress) {
-  if (!port || !port.writable || !port.readable) {
-    throw new Error('Port is not open');
-  }
+// eFuse MAC registers for the families whose addresses are known here.
+const MAC_REGS = {
+  'ESP32': [EFUSE_REGS.ESP32_MAC_LOW, EFUSE_REGS.ESP32_MAC_HIGH],
+  'ESP32-S3': [EFUSE_REGS.ESP32S3_MAC_LOW, EFUSE_REGS.ESP32S3_MAC_HIGH],
+  'ESP32-C3': [EFUSE_REGS.ESP32C3_MAC_LOW, EFUSE_REGS.ESP32C3_MAC_HIGH]
+};
 
-  const payload = new Uint8Array(4);
-  const view = new DataView(payload.buffer);
-  view.setUint32(0, regAddress, true);
-
-  const packet = buildEspCommand(ESP_CMD.READ_REG, payload, 0);
-
-  const writer = port.writable.getWriter();
+async function withRomSession(port, onLog, fn) {
+  const client = new EspBootloaderClient(port, (m, t) => onLog?.(m, t));
   try {
-    await writer.write(packet);
+    await client.connect();
+    return await fn(client);
   } finally {
-    writer.releaseLock();
+    try { await client.hardwareResetToApp(); } catch (e) { /* ignore */ }
+    await client.release();
   }
-
-  // Await response
-  const reader = port.readable.getReader();
-  const deadline = Date.now() + 1500;
-  const chunks = [];
-
-  try {
-    while (Date.now() < deadline) {
-      const { value, done } = await Promise.race([
-        reader.read(),
-        new Promise(r => setTimeout(() => r({ done: true }), 250))
-      ]);
-      if (value) {
-        chunks.push(value);
-        const combined = new Uint8Array(chunks.flatMap(c => Array.from(c)));
-        const decoded = slipDecode(combined);
-        if (decoded.length >= 8) {
-          // Response format: resp_type (1B), cmd (1B), size (2B), value (4B)
-          const respView = new DataView(decoded.buffer, decoded.byteOffset, decoded.byteLength);
-          return respView.getUint32(4, true);
-        }
-      }
-      if (done) break;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  return null;
 }
 
 /**
- * Reads MAC Address and Silicon ID from eFuses
+ * Identify the chip through its ROM bootloader and read its MAC from eFuses
+ * (ESP32, ESP32-S3, ESP32-C3). Throws if the chip doesn't answer; never
+ * returns a placeholder identity.
  */
 export async function inspectEspSilicon(port, onLog) {
-  onLog?.('[ESP RE] Probing eFuse registers for silicon identity...', 'sys');
-
-  try {
-    // Try reading ESP32 MAC low and high
-    const macLow = await readEspRegister(port, EFUSE_REGS.ESP32_MAC_LOW);
-    const macHigh = await readEspRegister(port, EFUSE_REGS.ESP32_MAC_HIGH);
-
-    if (macLow !== null && macHigh !== null) {
-      const b0 = (macHigh >> 8) & 0xFF;
-      const b1 = macHigh & 0xFF;
-      const b2 = (macLow >> 24) & 0xFF;
-      const b3 = (macLow >> 16) & 0xFF;
-      const b4 = (macLow >> 8) & 0xFF;
-      const b5 = macLow & 0xFF;
-
-      const macStr = [b0, b1, b2, b3, b4, b5].map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(':');
-      onLog?.(`[ESP RE] Target MAC Address: ${macStr}`, 'sys');
-
-      return {
-        mac: macStr,
-        chipFamily: 'ESP32 (Xtensa Dual-Core)',
-        rawMacLow: macLow.toString(16),
-        rawMacHigh: macHigh.toString(16)
-      };
+  onLog?.('[ESP RE] Resetting into the ROM bootloader to identify the chip...', 'sys');
+  return withRomSession(port, onLog, async (client) => {
+    const result = { chipFamily: client.chip, mac: null };
+    const regs = MAC_REGS[client.chip];
+    if (regs) {
+      const macLow = await client.readReg(regs[0]);
+      const macHigh = await client.readReg(regs[1]);
+      const bytes = [(macHigh >> 8) & 0xFF, macHigh & 0xFF, (macLow >>> 24) & 0xFF, (macLow >> 16) & 0xFF, (macLow >> 8) & 0xFF, macLow & 0xFF];
+      result.mac = bytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':');
+      result.rawMacLow = (macLow >>> 0).toString(16);
+      result.rawMacHigh = (macHigh >>> 0).toString(16);
+      onLog?.(`[ESP RE] ${client.chip} MAC: ${result.mac}`, 'sys');
+    } else {
+      onLog?.(`[ESP RE] ${client.chip}: MAC eFuse layout not known here, so no MAC is shown.`, 'sys');
     }
-  } catch (err) {
-    onLog?.(`[ESP RE Error] Failed reading eFuse registers: ${err.message}`, 'sys');
-  }
-
-  return {
-    mac: '00:00:00:00:00:00',
-    chipFamily: 'ESP32 Series (ROM Active)'
-  };
+    return result;
+  });
 }
 
 /**
- * Flash Memory Dumper: Reads flash range and triggers .bin download
+ * Read a flash range through the ROM and download it as a .bin.
+ * Supported on the ESP8266 and original ESP32 (ROM READ_FLASH_SLOW); other
+ * chips throw a clear error instead of returning invented data.
  */
 export async function dumpFlashRange(port, startOffset, lengthBytes, onProgress, onLog) {
-  onLog?.(`[DUMP] Initializing memory dump from 0x${startOffset.toString(16).toUpperCase()} (${lengthBytes} bytes)...`, 'sys');
-
-  const blockSize = 1024;
-  const blockCount = Math.ceil(lengthBytes / blockSize);
-  const dumpBuffer = new Uint8Array(lengthBytes);
-
-  let bytesRead = 0;
-  for (let b = 0; b < blockCount; b++) {
-    const currentAddr = startOffset + (b * blockSize);
-    const chunkSize = Math.min(blockSize, lengthBytes - (b * blockSize));
-
-    // Simulated/ROM read memory loop
-    for (let i = 0; i < chunkSize; i += 4) {
-      // In real ESP32 bootloader, memory is read or mapped
-      const val = (currentAddr + i) ^ 0xAA;
-      dumpBuffer[b * blockSize + i] = val & 0xFF;
-      if (i + 1 < chunkSize) dumpBuffer[b * blockSize + i + 1] = (val >> 8) & 0xFF;
-      if (i + 2 < chunkSize) dumpBuffer[b * blockSize + i + 2] = (val >> 16) & 0xFF;
-      if (i + 3 < chunkSize) dumpBuffer[b * blockSize + i + 3] = (val >> 24) & 0xFF;
-    }
-
-    bytesRead += chunkSize;
-    const percent = Math.min(100, Number(((bytesRead / lengthBytes) * 100).toFixed(1)));
-    if (onProgress) {
-      onProgress(percent, bytesRead, lengthBytes, b + 1, blockCount);
-    }
-
-    await new Promise(r => setTimeout(r, 10));
+  onLog?.(`[DUMP] Reading ${lengthBytes} bytes from 0x${startOffset.toString(16).toUpperCase()} through the ROM bootloader...`, 'sys');
+  const data = await withRomSession(port, onLog, (client) =>
+    client.readFlashSlow(startOffset, lengthBytes, (percent, bytesRead, total) => onProgress?.(percent, bytesRead, total)));
+  onLog?.(`[DUMP] Read ${data.length} bytes from flash.`, 'sys');
+  if (typeof document !== 'undefined') {
+    const url = URL.createObjectURL(new Blob([data], { type: 'application/octet-stream' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `esp_flash_dump_0x${startOffset.toString(16).toUpperCase()}_${data.length}B.bin`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-
-  onLog?.(`[DUMP] Flash dump complete! Captured ${lengthBytes} bytes.`, 'sys');
-
-  // Trigger file download
-  const blob = new Blob([dumpBuffer], { type: 'application/octet-stream' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `esp32_flash_dump_0x${startOffset.toString(16).toUpperCase()}_${Date.now()}.bin`;
-  link.click();
-  URL.revokeObjectURL(url);
-
-  return dumpBuffer;
+  return data;
 }

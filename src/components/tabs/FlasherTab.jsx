@@ -32,7 +32,8 @@ export default function FlasherTab() {
     isConnected,
     port,
     addLog,
-    sendRawBytes
+    sendRawBytes,
+    borrowPort
   } = useSerial();
 
   // Sub-view: 'catalog' (ESP Terminator 400+ presets) | 'slots' (Custom Multi-Slot Flasher)
@@ -238,45 +239,52 @@ export default function FlasherTab() {
     // Mode 1: Native ESP ROM Bootloader
     if (flasherMode === 'esp-rom') {
       addLog(`[ESP FLASHER] Initializing ROM Bootloader client for ${partitionsToFlash.length} partition(s)...`, 'sys');
-      const client = new EspBootloaderClient(port, addLog);
+      // The terminal's read loop holds the port's reader: borrow the port so the
+      // ROM client can read the chip's replies, and hand it back afterwards.
+      const run = borrowPort || ((fn) => fn(port));
+      let client = null;
 
       try {
-        // Assert hardware bootloader pulse with user-configured timing
-        await client.hardwareResetToBootloader(resetHoldMs, bootPinHoldMs);
-        await client.sync(6);
+        await run(async (p) => {
+          client = new EspBootloaderClient(p, addLog);
+          try {
+            // Reset into the ROM, sync (fails if the chip never answers), detect the chip, attach SPI flash
+            await client.connect(resetHoldMs, bootPinHoldMs, 8);
 
-        // Flash multi-partitions sequentially
-        await client.flashMultiplePartitions(
-          partitionsToFlash,
-          blockSize,
-          ({ partitionIndex, totalPartitions, label, partitionPercent, aggregatePercent, writtenBytes, totalBytes }) => {
-            const elapsed = (Date.now() - startTime) / 1000;
-            const speed = elapsed > 0 ? (writtenBytes / 1024) / elapsed : 0;
-            const rem = totalBytes - writtenBytes;
-            const eta = speed > 0 ? Math.ceil((rem / 1024) / speed) : 0;
+            // Flash the partitions in order; each image is MD5-verified (not on ESP8266)
+            await client.flashMultiplePartitions(
+              partitionsToFlash,
+              blockSize,
+              ({ partitionIndex, totalPartitions, label, partitionPercent, aggregatePercent, writtenBytes, totalBytes }) => {
+                const elapsed = (Date.now() - startTime) / 1000;
+                const speed = elapsed > 0 ? (writtenBytes / 1024) / elapsed : 0;
+                const rem = totalBytes - writtenBytes;
+                const eta = speed > 0 ? Math.ceil((rem / 1024) / speed) : 0;
 
-            setProgress({
-              activePartitionIndex: partitionIndex,
-              totalPartitions,
-              currentPartitionLabel: label,
-              partitionPercent,
-              aggregatePercent,
-              writtenBytes,
-              totalBytes,
-              speedKBps: Number(speed.toFixed(1)),
-              elapsedSeconds: Math.floor(elapsed),
-              etaSeconds: eta
-            });
+                setProgress({
+                  activePartitionIndex: partitionIndex,
+                  totalPartitions,
+                  currentPartitionLabel: label,
+                  partitionPercent,
+                  aggregatePercent,
+                  writtenBytes,
+                  totalBytes,
+                  speedKBps: Number(speed.toFixed(1)),
+                  elapsedSeconds: Math.floor(elapsed),
+                  etaSeconds: eta
+                });
+              }
+            );
+          } finally {
+            await client.release();
           }
-        );
-
-        addLog(`[ESP FLASHER] SUCCESS! Programmed ${totalPayloadSize} bytes across ${partitionsToFlash.length} partition(s) in ${Math.floor((Date.now() - startTime) / 1000)}s! Target running.`, 'sys');
+        });
+        addLog(`[ESP FLASHER] Done: ${totalPayloadSize} bytes in ${partitionsToFlash.length} partition(s) written to the ${client.chip}${client.isEsp8266 ? '' : ' and MD5-verified'} in ${Math.floor((Date.now() - startTime) / 1000)}s. Chip reset into the application.`, 'sys');
       } catch (err) {
         console.error('Flashing error:', err);
         addLog(`[ESP FLASHER ERROR] ${err.message}`, 'sys');
         alert(`Flashing error: ${err.message}`);
       } finally {
-        client.release();
         setIsFlashing(false);
         isFlashingRef.current = false;
       }
