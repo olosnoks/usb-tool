@@ -13,7 +13,10 @@ import {
   parseManufacturerData,
   characteristicCapabilities,
   buildGattTree,
-  readCharacteristic
+  readCharacteristic,
+  numericViews,
+  parseDescriptorValue,
+  readAllValues
 } from '../src/utils/bleDriver';
 
 const dv = (arr) => new DataView(new Uint8Array(arr).buffer);
@@ -159,5 +162,42 @@ describe('buildGattTree', () => {
     const server = makeFakeServer();
     const r = await readCharacteristic(server._batteryChar);
     expect(r.decoded.text).toBe('90%'); // 0x5a = 90
+  });
+});
+
+describe('Show-everything reads', () => {
+  it('adds ASCII and little-endian numeric views to every value', () => {
+    const r = parseCharacteristicValue('12345678-1234-5678-1234-56789abcdef0', dv([0x48, 0x69, 0x00, 0x01]));
+    expect(r.ascii).toBe('Hi..');
+    expect(r.numbers).toEqual([['uint32', 0x01006948], ['int32', 0x01006948]]);
+    expect(numericViews(dv([0x00, 0x00, 0x80, 0x3f]))).toContainEqual(['float32', 1]);
+    expect(numericViews(dv([0x10, 0x27, 0, 0])).map(([k]) => k)).toEqual(['uint32', 'int32']);   // no 1.4e-41 float
+    expect(numericViews(dv([0xff]))).toEqual([['uint8', 255], ['int8', -1]]);
+    expect(numericViews(dv([0x34, 0x12]))).toEqual([['uint16', 0x1234], ['int16', 0x1234]]);
+    expect(numericViews(dv([1, 2, 3]))).toEqual([]);
+  });
+
+  it('decodes user-description and CCCD descriptors', () => {
+    expect(parseDescriptorValue(0x2901, dv([0x54, 0x65, 0x6d, 0x70])).text).toBe('Temp');
+    expect(parseDescriptorValue(0x2902, dv([0x01, 0x00])).text).toBe('notifications enabled');
+    expect(parseDescriptorValue(0x2902, dv([0x00, 0x00])).text).toBe('notifications/indications off');
+  });
+
+  it('lists descriptors and reads every readable characteristic and descriptor, recording errors', async () => {
+    const desc = { uuid: 0x2901, readValue: () => Promise.resolve(dv([0x4c, 0x76, 0x6c])) };
+    const ok = { uuid: 0x2a19, properties: { read: true }, readValue: () => Promise.resolve(dv([0x32])), getDescriptors: () => Promise.resolve([desc]) };
+    const locked = { uuid: 0x2a00, properties: { read: true }, readValue: () => Promise.reject(new Error('GATT Error: Not paired.')) };
+    const writeOnly = { uuid: 0x2a39, properties: { write: true }, readValue: () => { throw new Error('should not be read'); } };
+    const server = { getPrimaryServices: () => Promise.resolve([{ uuid: 0x180f, getCharacteristics: () => Promise.resolve([ok, locked, writeOnly]) }]) };
+    const tree = await buildGattTree(server);
+    expect(tree[0].characteristics[0].descriptors.map((d) => d.name)).toEqual(['Characteristic User Description']);
+    const seen = [];
+    const all = await readAllValues(tree, (k) => seen.push(k));
+    const [c0, c1, c2] = tree[0].characteristics;
+    expect(all[c0.uuid].decoded.text).toBe('50%');
+    expect(all[`${c0.uuid}/${c0.descriptors[0].uuid}`].text).toBe('Lvl');
+    expect(all[c1.uuid].error).toMatch(/Not paired/);
+    expect(c2.uuid in all).toBe(false);
+    expect(seen).toHaveLength(3);
   });
 });

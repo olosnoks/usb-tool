@@ -104,6 +104,19 @@ export const GATT_CHARACTERISTIC_NAMES = {
   0x2a6f: 'Humidity'
 };
 
+// GATT descriptor names (assigned numbers 0x29xx).
+export const GATT_DESCRIPTOR_NAMES = {
+  0x2900: 'Characteristic Extended Properties',
+  0x2901: 'Characteristic User Description',
+  0x2902: 'Client Characteristic Configuration',
+  0x2903: 'Server Characteristic Configuration',
+  0x2904: 'Characteristic Presentation Format',
+  0x2905: 'Characteristic Aggregate Format',
+  0x2906: 'Valid Range',
+  0x2907: 'External Report Reference',
+  0x2908: 'Report Reference'
+};
+
 // A handful of the most common company identifiers (BLE manufacturer data).
 export const COMPANY_IDENTIFIERS = {
   0x004c: 'Apple, Inc.',
@@ -226,7 +239,56 @@ export function parseCharacteristicValue(uuid, value) {
       decoded = null;
     }
   }
-  return { hex, byteLength: dv.byteLength, decoded };
+  return { hex, byteLength: dv.byteLength, decoded, ascii: asciiPreview(dv), numbers: numericViews(dv) };
+}
+
+/** Bytes as text: printable ASCII kept, everything else shown as '.'. */
+export function asciiPreview(value) {
+  const dv = toDataView(value);
+  let out = '';
+  for (let i = 0; i < dv.byteLength; i++) {
+    const b = dv.getUint8(i);
+    out += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '.';
+  }
+  return out;
+}
+
+/**
+ * The value read as little-endian integers / floats, for values of 1, 2, 4 or
+ * 8 bytes (BLE characteristics are little-endian). Empty for other sizes.
+ */
+export function numericViews(value) {
+  const dv = toDataView(value);
+  const n = dv.byteLength;
+  const out = [];
+  if (n === 1) out.push(['uint8', dv.getUint8(0)], ['int8', dv.getInt8(0)]);
+  if (n === 2) out.push(['uint16', dv.getUint16(0, true)], ['int16', dv.getInt16(0, true)]);
+  if (n === 4) {
+    out.push(['uint32', dv.getUint32(0, true)], ['int32', dv.getInt32(0, true)]);
+    const f = dv.getFloat32(0, true);
+    // Skip denormal noise (small integers read as floats come out ~1e-41).
+    if (Number.isFinite(f) && (f === 0 || Math.abs(f) >= 1e-6)) out.push(['float32', Number(f.toPrecision(7))]);
+  }
+  if (n === 8) {
+    out.push(['uint64', dv.getBigUint64(0, true).toString()], ['int64', dv.getBigInt64(0, true).toString()]);
+    const f = dv.getFloat64(0, true);
+    if (Number.isFinite(f) && (f === 0 || Math.abs(f) >= 1e-6)) out.push(['float64', f]);
+  }
+  return out;
+}
+
+/** Decode a descriptor value we understand (user description, CCCD). */
+export function parseDescriptorValue(uuid, value) {
+  const dv = toDataView(value);
+  const short = shortUuid(uuid);
+  const base = { hex: bytesToHex(dv), byteLength: dv.byteLength, ascii: asciiPreview(dv) };
+  if (short === 0x2901) return { ...base, text: parseUtf8String(dv).text };
+  if (short === 0x2902 && dv.byteLength >= 2) {
+    const v = dv.getUint16(0, true);
+    const on = [v & 1 ? 'notifications' : null, v & 2 ? 'indications' : null].filter(Boolean);
+    return { ...base, text: on.length ? `${on.join(' + ')} enabled` : 'notifications/indications off' };
+  }
+  return { ...base, text: null };
 }
 
 /**
@@ -272,17 +334,37 @@ export async function buildGattTree(server) {
   for (const service of services) {
     const info = describeUuid(service.uuid, 'service');
     const characteristics = await service.getCharacteristics();
-    const chars = characteristics.map((ch) => {
+    const chars = [];
+    for (const ch of characteristics) {
       const cinfo = describeUuid(ch.uuid, 'characteristic');
-      return {
+      // Descriptors (user description, CCCD, ...). Not every device / browser
+      // exposes them; a failure just means none are listed.
+      let descriptors = [];
+      if (typeof ch.getDescriptors === 'function') {
+        try {
+          descriptors = (await ch.getDescriptors()).map((d) => {
+            const short = shortUuid(d.uuid);
+            return {
+              uuid: canonicalUuid(d.uuid),
+              short,
+              name: (short != null && GATT_DESCRIPTOR_NAMES[short]) || (short != null ? `Descriptor 0x${short.toString(16)}` : 'Vendor descriptor'),
+              _ref: d
+            };
+          });
+        } catch {
+          descriptors = [];
+        }
+      }
+      chars.push({
         uuid: canonicalUuid(ch.uuid),
         name: cinfo.name,
         short: cinfo.short,
         assigned: cinfo.assigned,
         properties: characteristicCapabilities(ch.properties),
+        descriptors,
         _ref: ch // live handle, not serialized into UI state
-      };
-    });
+      });
+    }
     tree.push({
       uuid: canonicalUuid(service.uuid),
       name: info.name,
@@ -302,4 +384,30 @@ export async function buildGattTree(server) {
 export async function readCharacteristic(characteristic) {
   const value = await characteristic.readValue();
   return parseCharacteristicValue(characteristic.uuid, value);
+}
+
+/**
+ * Read every readable characteristic and every descriptor in a tree, one GATT
+ * operation at a time (Web Bluetooth rejects overlapping operations).
+ * Resolves { [key]: result | { error } } where key is the characteristic uuid
+ * (or `${characteristicUuid}/${descriptorUuid}` for descriptors).
+ * `onEach(key, result)` is called as each value arrives.
+ */
+export async function readAllValues(tree, onEach) {
+  const out = {};
+  const put = (k, v) => { out[k] = v; if (onEach) onEach(k, v); };
+  for (const service of tree) {
+    for (const ch of service.characteristics) {
+      if (ch.properties.read) {
+        try { put(ch.uuid, { ...(await readCharacteristic(ch._ref)), ts: Date.now() }); }
+        catch (e) { put(ch.uuid, { error: e.message || String(e), ts: Date.now() }); }
+      }
+      for (const d of ch.descriptors || []) {
+        const key = `${ch.uuid}/${d.uuid}`;
+        try { put(key, { ...parseDescriptorValue(d.uuid, await d._ref.readValue()), ts: Date.now() }); }
+        catch (e) { put(key, { error: e.message || String(e), ts: Date.now() }); }
+      }
+    }
+  }
+  return out;
 }
