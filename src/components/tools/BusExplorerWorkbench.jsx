@@ -1,21 +1,23 @@
 import React, { useState } from 'react';
-import { 
-  Search, 
-  Cpu, 
-  Layers, 
-  Sparkles, 
-  Play, 
-  RotateCcw, 
-  CheckCircle2, 
-  AlertTriangle, 
-  Edit3, 
-  RefreshCw, 
+import {
+  Search,
+  Cpu,
+  Layers,
+  Sparkles,
+  Play,
+  RotateCcw,
+  CheckCircle2,
+  AlertTriangle,
+  Edit3,
+  RefreshCw,
   Sliders,
-  Power
+  Power,
+  Usb
 } from 'lucide-react';
-import { 
-  BusExplorerClient, 
-  I2C_CHIP_DATABASE 
+import {
+  BusExplorerClient,
+  I2C_CHIP_DATABASE,
+  I2C_SPEEDS
 } from '../../utils/busExplorerDriver';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
@@ -39,66 +41,109 @@ export default function BusExplorerWorkbench() {
 
   const [writeReg, setWriteReg] = useState('0x6B');
   const [writeVal, setWriteVal] = useState('0x00');
+  const [regStart, setRegStart] = useState('0x00');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [scanAt, setScanAt] = useState(null);
+  const [settings, setSettings] = useState(client.settings);
+  const [spiOut, setSpiOut] = useState('9F 00 00 00');
+  const [spiIn, setSpiIn] = useState('');
+
+  const guard = async (label, fn) => {
+    setBusy(label);
+    setError('');
+    try {
+      return await fn();
+    } catch (err) {
+      setError(err.message);
+      return undefined;
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const handleConnectHardware = () => guard('connect', async () => {
+    await client.connectHardware();
+    setIsConnected(true);
+    setIsSimulated(false);
+    setDetectedDevices([]);
+    setSettings({ ...client.settings });
+  });
 
   const handleConnectSimulation = () => {
     client.connectSimulation();
     setIsConnected(true);
     setIsSimulated(true);
     setDetectedDevices(client.detectedDevices);
-    handleSelectAddress(0x68);
+    handleSelectAddress(0x68, true);
   };
 
-  const handleDisconnect = () => {
-    client.disconnect();
+  const handleDisconnect = async () => {
+    await client.disconnect();
     setIsConnected(false);
     setIsSimulated(false);
     setDetectedDevices([]);
   };
 
-  const handleScanBus = async () => {
+  const handleScanBus = () => guard('scan', async () => {
     if (!isConnected) return;
     setIsScanning(true);
-    const found = await client.scanI2cBus();
-    setDetectedDevices(found);
-    setIsScanning(false);
-    if (found.length > 0 && !found.includes(selectedAddr)) {
-      handleSelectAddress(found[0]);
+    try {
+      const found = await client.scanI2cBus((addr) => setScanAt(addr));
+      setDetectedDevices([...found]);
+      if (found.length > 0 && !found.includes(selectedAddr)) handleSelectAddress(found[0]);
+    } finally {
+      setIsScanning(false);
+      setScanAt(null);
     }
-  };
+  });
 
-  const handleSelectAddress = (addr) => {
+  const refreshRegisters = (startText = regStart) => guard('read', async () => {
+    const start = parseInt(String(startText).replace(/^0x/i, ''), 16);
+    if (Number.isNaN(start) || start < 0 || start > 0xff) throw new Error('Start register must be a hex byte.');
+    const count = Math.min(32, 256 - start);
+    const vals = await client.readRegisters(start, count);
+    setInspectRegs(vals.map((val, i) => ({ reg: start + i, val })));
+  });
+
+  const handleSelectAddress = (addr, fresh = false) => {
     setSelectedAddr(addr);
     client.initSimulatedRegisters(addr);
-    refreshRegisters();
+    if (fresh || client.isSimulated) refreshRegisters();
+    else setInspectRegs([]);
   };
 
-  const refreshRegisters = () => {
-    const updated = [];
-    for (let r = 0; r < 32; r++) {
-      updated.push({
-        reg: r,
-        val: client.readRegister(r)
-      });
-    }
-    setInspectRegs(updated);
-  };
+  const handleWriteRegister = () => guard('write', async () => {
+    const regNum = parseInt(writeReg.replace(/^0x/i, ''), 16);
+    const valNum = parseInt(writeVal.replace(/^0x/i, ''), 16);
+    if (isNaN(regNum) || isNaN(valNum) || regNum > 0xff || valNum > 0xff) throw new Error('Register and value must be hex bytes (0x00 - 0xFF).');
+    await client.writeRegister(regNum, valNum);
+    await refreshRegisters();
+  });
 
-  const handleWriteRegister = () => {
-    const regNum = parseInt(writeReg, 16);
-    const valNum = parseInt(writeVal, 16);
-    if (isNaN(regNum) || isNaN(valNum)) {
-      alert('Invalid Hex format (use 0x00 - 0xFF)');
-      return;
-    }
-    client.writeRegister(regNum, valNum);
-    refreshRegisters();
-  };
+  const handleSetting = (changes) => guard('settings', async () => {
+    const next = await client.configure(changes);
+    setSettings({ ...next });
+  });
+
+  const handleSpi = () => guard('spi', async () => {
+    const clean = spiOut.replace(/0x/gi, '').replace(/[^0-9a-f]/gi, '');
+    if (!clean.length || clean.length % 2) throw new Error('SPI bytes must be whole hex bytes, e.g. 9F 00 00 00.');
+    const bytes = clean.match(/.{2}/g).map((h) => parseInt(h, 16));
+    const back = await client.spiTransfer(bytes);
+    setSpiIn(back.map((x) => x.toString(16).padStart(2, '0').toUpperCase()).join(' '));
+  });
 
   const selectedChipInfo = I2C_CHIP_DATABASE[selectedAddr];
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      <DemoBanner demoOnly>No I2C / SPI adapter is driven. The scan results and register values below come from simulated sensors.</DemoBanner>
+      {isSimulated && <DemoBanner>Simulated I2C bus: the devices and register values below are invented.</DemoBanner>}
+      {error && (
+        <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
+          <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
+        </div>
+      )}
       {/* Top Controller Bar */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -108,19 +153,29 @@ export default function BusExplorerWorkbench() {
               <span>I2C & SPI MULTI-PROTOCOL BUS EXPLORER & SENSOR IDENTIFIER</span>
             </h2>
             <p className="text-[11px] text-slate-400">
-              1-click I2C bus scanner (0x08 - 0x77), automatic chip identification, and interactive live register read/write.
+              I2C address scan (0x08 - 0x77), chip identification, register read/write and SPI transfers through a Bus Pirate v3/v4 (binary mode, 115200 baud).
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             {!isConnected ? (
-              <button
-                onClick={handleConnectSimulation}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 hover:bg-emerald-500/30 text-xs font-bold transition-all shadow-emerald-glow"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>CONNECT BUS EXPLORER (DEMO)</span>
-              </button>
+              <>
+                <button
+                  onClick={handleConnectHardware}
+                  disabled={!!busy}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 text-xs font-bold disabled:opacity-40"
+                >
+                  <Usb className="w-3.5 h-3.5" />
+                  <span>{busy === 'connect' ? 'CONNECTING...' : 'CONNECT BUS PIRATE (SERIAL)'}</span>
+                </button>
+                <button
+                  onClick={handleConnectSimulation}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 hover:bg-emerald-500/30 text-xs font-bold transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>DEMO</span>
+                </button>
+              </>
             ) : (
               <button
                 onClick={handleDisconnect}
@@ -144,8 +199,17 @@ export default function BusExplorerWorkbench() {
               <span>{isScanning ? 'SCANNING BUS (0x08 - 0x77)...' : 'SCAN I2C BUS (7-BIT SWEEP)'}</span>
             </button>
             <span className="text-[11px] text-slate-400">
-              Found <strong className="text-emerald-400">{detectedDevices.length}</strong> responding device(s)
+              {scanAt != null ? `Probing 0x${scanAt.toString(16).toUpperCase()}...` : <>Found <strong className="text-emerald-400">{detectedDevices.length}</strong> responding device(s)</>}
             </span>
+            {isConnected && !isSimulated && (
+              <div className="flex items-center gap-2 text-[11px] text-slate-300">
+                <label className="flex items-center gap-1"><input type="checkbox" checked={settings.power} disabled={!!busy} onChange={(e) => handleSetting({ power: e.target.checked })} /> 3.3V/5V power</label>
+                <label className="flex items-center gap-1"><input type="checkbox" checked={settings.pullups} disabled={!!busy} onChange={(e) => handleSetting({ pullups: e.target.checked })} /> pull-ups</label>
+                <select value={settings.i2cSpeed} disabled={!!busy} onChange={(e) => handleSetting({ i2cSpeed: Number(e.target.value) })} className="bg-slate-950 border border-slate-800 rounded px-1 py-0.5">
+                  {I2C_SPEEDS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            )}
           </div>
 
           {selectedChipInfo && (
@@ -281,7 +345,7 @@ export default function BusExplorerWorkbench() {
               />
               <button
                 onClick={handleWriteRegister}
-                disabled={!isConnected}
+                disabled={!isConnected || !!busy}
                 className="flex-1 px-3 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 rounded font-bold text-xs disabled:opacity-40"
               >
                 WRITE
@@ -296,15 +360,21 @@ export default function BusExplorerWorkbench() {
         <div className="flex items-center justify-between pb-2 border-b border-slate-800">
           <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
             <Sliders className="w-4 h-4 text-purple-400" />
-            <span>LIVE REGISTER DUMP (REGISTERS 0x00 - 0x1F)</span>
+            <span>REGISTER DUMP (32 FROM START)</span>
           </span>
+          <input
+            value={regStart}
+            onChange={(e) => setRegStart(e.target.value)}
+            className="w-16 bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[11px] text-slate-200"
+            title="First register to read"
+          />
           <button
-            onClick={refreshRegisters}
-            disabled={!isConnected}
+            onClick={() => refreshRegisters()}
+            disabled={!isConnected || !!busy || !detectedDevices.includes(selectedAddr)}
             className="flex items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300 font-bold"
           >
             <RefreshCw className="w-3 h-3" />
-            <span>REFRESH REGISTERS</span>
+            <span>{busy === 'read' ? 'READING...' : 'READ REGISTERS'}</span>
           </button>
         </div>
 
@@ -319,6 +389,28 @@ export default function BusExplorerWorkbench() {
             </div>
           ))}
         </div>
+      </div>
+      {/* SPI transfer */}
+      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+          <span className="font-bold text-slate-200 text-xs">SPI TRANSFER (CS LOW FOR THE WHOLE EXCHANGE, MODE 0)</span>
+          <span className="text-[10px] text-slate-500">9F 00 00 00 reads a SPI flash JEDEC ID</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={spiOut}
+            onChange={(e) => setSpiOut(e.target.value)}
+            className="flex-1 min-w-[12rem] bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs"
+          />
+          <button
+            onClick={handleSpi}
+            disabled={!isConnected || !!busy}
+            className="px-3 py-1 bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded font-bold text-xs disabled:opacity-40"
+          >
+            {busy === 'spi' ? 'SENDING...' : 'TRANSFER'}
+          </button>
+        </div>
+        {spiIn && <div className="text-xs text-emerald-300">MISO: {spiIn}</div>}
       </div>
     </div>
   );

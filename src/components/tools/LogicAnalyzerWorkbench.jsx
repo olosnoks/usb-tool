@@ -1,26 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Activity, 
-  Play, 
-  Square, 
-  ZoomIn, 
-  ZoomOut, 
-  Sliders, 
-  Layers, 
-  Sparkles, 
-  RefreshCw, 
-  Download, 
-  CheckCircle2, 
+import {
+  Activity,
+  Play,
+  Square,
+  ZoomIn,
+  ZoomOut,
+  Sliders,
+  Layers,
+  Sparkles,
+  RefreshCw,
+  Download,
+  CheckCircle2,
   AlertTriangle,
   Move,
-  CornerDownRight
+  CornerDownRight,
+  Usb,
+  Upload,
+  Unplug
 } from 'lucide-react';
-import { 
-  SAMPLE_RATES, 
-  generateSyntheticSignalBuffer, 
-  decodeUart, 
-  decodeI2C 
+import {
+  SAMPLE_RATES,
+  generateSyntheticSignalBuffer,
+  decodeUart,
+  decodeI2C,
+  SumpAnalyzer,
+  Fx2LogicAnalyzer
 } from '../../utils/logicAnalyzerDriver';
+import { SerialLink } from '../../utils/serialLink';
+import { parseIntelHex } from '../../utils/firmwareParser';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
@@ -39,10 +46,22 @@ export default function LogicAnalyzerWorkbench() {
   const [sampleRate, setSampleRate] = useState(4000000); // 4 MHz
   const [sampleDepth, setSampleDepth] = useState(25000);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [isSimulated, setIsSimulated] = useState(true);
+  // Where captures come from: null (nothing connected), 'sump', 'fx2' or 'demo'.
+  const [source, setSource] = useState(null);
+  const [deviceLabel, setDeviceLabel] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [progress, setProgress] = useState(0);
+  const [triggerMask, setTriggerMask] = useState('00');
+  const [triggerValue, setTriggerValue] = useState('00');
+  const [captureRate, setCaptureRate] = useState(null); // rate the device actually used
+  const sumpRef = useRef(null);
+  const fx2Ref = useRef(null);
+  const fwInputRef = useRef(null);
+  const isSimulated = source === 'demo';
 
-  // Digital Sample Buffer (Uint8Array: each byte is 8 channels)
-  const [samples, setSamples] = useState(() => generateSyntheticSignalBuffer(25000, 4000000));
+  // Digital Sample Buffer (Uint8Array: each byte is 8 channels). Empty until a capture.
+  const [samples, setSamples] = useState(() => new Uint8Array(0));
   const [channels, setChannels] = useState(CHANNEL_DEFAULTS);
 
   // Decoded protocol packets
@@ -61,12 +80,12 @@ export default function LogicAnalyzerWorkbench() {
 
   // Run protocol decoders on sample change
   useEffect(() => {
-    if (!samples || samples.length === 0) return;
+    if (!samples || samples.length === 0) { setDecodedI2C([]); setDecodedUart([]); return; }
     const i2cPackets = decodeI2C(samples, 0, 1);
-    const uartPackets = decodeUart(samples, 2, 115200, sampleRate);
+    const uartPackets = decodeUart(samples, 2, 115200, captureRate || sampleRate);
     setDecodedI2C(i2cPackets);
     setDecodedUart(uartPackets);
-  }, [samples, sampleRate]);
+  }, [samples, sampleRate, captureRate]);
 
   // Canvas Drawing Routine
   useEffect(() => {
@@ -162,23 +181,145 @@ export default function LogicAnalyzerWorkbench() {
 
   // Delta Time & Frequency Calculation
   const deltaSamples = Math.abs(cursorB - cursorA);
-  const deltaSeconds = deltaSamples / sampleRate;
+  const deltaSeconds = deltaSamples / (captureRate || sampleRate);
   const deltaMicroseconds = deltaSeconds * 1000000;
   const frequencyHz = deltaSeconds > 0 ? 1 / deltaSeconds : 0;
 
-  // New synthetic capture
-  const handleCaptureSimulation = () => {
-    setIsCapturing(true);
-    setTimeout(() => {
-      const newBuf = generateSyntheticSignalBuffer(sampleDepth, sampleRate);
-      setSamples(newBuf);
-      setIsCapturing(false);
-    }, 400);
+  const closeSources = async () => {
+    if (sumpRef.current) {
+      const { la, link } = sumpRef.current;
+      sumpRef.current = null;
+      await la.reset();
+      await link.close();
+    }
+    if (fx2Ref.current) {
+      const la = fx2Ref.current;
+      fx2Ref.current = null;
+      await la.close();
+    }
   };
+
+  const handleDisconnect = async () => {
+    await closeSources();
+    setSource(null);
+    setDeviceLabel('');
+    setSamples(new Uint8Array(0));
+    setCaptureRate(null);
+  };
+
+  const handleConnectSump = async () => {
+    setError(''); setNotice('');
+    try {
+      await closeSources();
+      const owner = { name: 'Logic Analyzer', release: () => handleDisconnect() };
+      const link = await SerialLink.request(owner, { baudRate: 115200 });
+      const la = new SumpAnalyzer(link);
+      try {
+        const id = await la.identify();
+        sumpRef.current = { la, link };
+        setSource('sump');
+        setDeviceLabel(`SUMP: ${id.name || 'device'}${id.probes ? ` · ${id.probes} ch` : ''}${id.maxSampleRate ? ` · max ${id.maxSampleRate / 1e6} MS/s` : ''}`);
+        setSamples(new Uint8Array(0));
+      } catch (e) {
+        await link.close();
+        throw e;
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleConnectFx2 = async () => {
+    setError(''); setNotice('');
+    try {
+      await closeSources();
+      const la = await Fx2LogicAnalyzer.request();
+      await la.open();
+      if (la.needsFirmware) {
+        fx2Ref.current = la;
+        setSource(null);
+        setNotice('This board has no fx2lafw firmware loaded yet. Load the fx2lafw .fw file for it (sigrok-firmware-fx2lafw, e.g. fx2lafw-saleae-logic.fw).');
+        return;
+      }
+      const fw = await la.start();
+      fx2Ref.current = la;
+      setSource('fx2');
+      setDeviceLabel(`fx2lafw ${fw} · ${la.device.productName || 'FX2 analyzer'}`);
+      setSamples(new Uint8Array(0));
+    } catch (err) {
+      setError(`${err.message}${/Access denied|claim/i.test(err.message) ? ' On Windows the board needs the WinUSB driver (install it with Zadig).' : ''}`);
+    }
+  };
+
+  const handleFirmwareFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !fx2Ref.current) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const bytes = new Uint8Array(ev.target.result);
+        const isHex = /\.(hex|ihx)$/i.test(file.name);
+        const image = isHex ? parseIntelHex(new TextDecoder().decode(bytes)) : bytes;
+        await fx2Ref.current.uploadFirmware(image);
+        fx2Ref.current = null;
+        setNotice('Firmware loaded. The board restarts as "fx2lafw": click CONNECT FX2 (USB) again and choose it.');
+      } catch (err) {
+        setError(`Firmware upload failed: ${err.message}`);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleCapture = async () => {
+    setError('');
+    setIsCapturing(true);
+    setProgress(0);
+    try {
+      if (source === 'demo') {
+        await new Promise((r) => setTimeout(r, 300));
+        setSamples(generateSyntheticSignalBuffer(sampleDepth, sampleRate));
+        setCaptureRate(sampleRate);
+      } else if (source === 'sump') {
+        const mask = parseInt(triggerMask, 16) || 0;
+        const value = parseInt(triggerValue, 16) || 0;
+        const r = await sumpRef.current.la.capture({ sampleRate, samples: sampleDepth, triggerMask: mask, triggerValue: value });
+        setSamples(r.samples);
+        setCaptureRate(r.sampleRate);
+      } else if (source === 'fx2') {
+        const r = await fx2Ref.current.capture({ sampleRate, samples: sampleDepth, onProgress: (p) => setProgress(Math.round(p * 100)) });
+        setSamples(r.samples);
+        setCaptureRate(r.sampleRate);
+      }
+      setViewOffset(0);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  useEffect(() => () => { closeSources(); }, []);
 
   return (
     <div className="flex flex-col gap-4 font-mono">
-      <DemoBanner demoOnly>No capture hardware is supported yet. Waveforms and protocol decodes below are generated, not sampled.</DemoBanner>
+      {isSimulated && <DemoBanner>Demo capture: the waveforms and decodes below are generated, not sampled.</DemoBanner>}
+      {error && (
+        <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
+          <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
+        </div>
+      )}
+      {notice && (
+        <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 text-xs">
+          <span>{notice}</span>
+          {fx2Ref.current && (
+            <button onClick={() => fwInputRef.current?.click()} className="flex items-center gap-1 px-2 py-1 rounded border border-cyan-500/50 font-bold">
+              <Upload className="w-3.5 h-3.5" /> LOAD FIRMWARE FILE
+            </button>
+          )}
+        </div>
+      )}
+      <input ref={fwInputRef} type="file" accept=".fw,.bin,.hex,.ihx" className="hidden" onChange={handleFirmwareFile} />
       {/* Logic Analyzer Header Card */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -188,18 +329,38 @@ export default function LogicAnalyzerWorkbench() {
               <span>24MHz 8-CHANNEL LOGIC ANALYZER & PROTOCOL DECODER</span>
             </h2>
             <p className="text-[11px] text-slate-400">
-              Capture 8 digital channels (D0–D7) up to 24MS/s over WebUSB (Saleae / FX2LP clone) with live timeline measurements and I2C/UART/SPI decoders.
+              Capture 8 channels (D0–D7) from a SUMP device over serial (Arduino / Pico sketches, Open Bench Logic Sniffer) or an FX2 "24MHz 8CH" board running fx2lafw over WebUSB, with I2C and UART decoders.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {!source ? (
+              <>
+                <button onClick={handleConnectSump} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
+                  <Usb className="w-3.5 h-3.5" /> CONNECT SUMP (SERIAL)
+                </button>
+                <button onClick={handleConnectFx2} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
+                  <Usb className="w-3.5 h-3.5" /> CONNECT FX2 (USB)
+                </button>
+                <button onClick={() => { setSource('demo'); setDeviceLabel('Demo signal generator'); setError(''); setNotice(''); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-amber-300 border border-amber-500/40 text-xs font-bold">
+                  <Sparkles className="w-3.5 h-3.5" /> DEMO
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="text-[11px] text-emerald-300 font-bold">{deviceLabel}</span>
+                <button onClick={handleDisconnect} className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
+                  <Unplug className="w-3.5 h-3.5" /> DISCONNECT
+                </button>
+              </>
+            )}
             <button
-              onClick={handleCaptureSimulation}
-              disabled={isCapturing}
+              onClick={handleCapture}
+              disabled={isCapturing || !source}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-xs shadow-cyan-glow transition-all active:scale-95 disabled:opacity-50"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
-              <span>{isCapturing ? 'CAPTURING...' : 'CAPTURE SIGNAL'}</span>
+              <span>{isCapturing ? (progress ? `CAPTURING ${progress}%` : 'CAPTURING...') : 'CAPTURE SIGNAL'}</span>
             </button>
           </div>
         </div>
@@ -229,11 +390,24 @@ export default function LogicAnalyzerWorkbench() {
                 onChange={(e) => setSampleDepth(Number(e.target.value))}
                 className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 font-bold outline-none"
               >
-                {[10000, 25000, 50000, 100000].map(s => (
-                  <option key={s} value={s}>{(s / 1000).toFixed(0)}k Samples</option>
+                {[1024, 4096, 10000, 25000, 50000, 100000].map(s => (
+                  <option key={s} value={s}>{s < 10000 ? `${s}` : `${(s / 1000).toFixed(0)}k`} Samples</option>
                 ))}
               </select>
             </div>
+            {source === 'sump' && (
+              <div className="flex items-center gap-1.5" title="Trigger: channels in the mask must match the value (hex). Mask 00 starts at once.">
+                <span className="text-slate-500 font-bold text-[11px]">TRIGGER MASK:</span>
+                <input value={triggerMask} onChange={(e) => setTriggerMask(e.target.value)} className="w-10 bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300" />
+                <span className="text-slate-500 font-bold text-[11px]">VALUE:</span>
+                <input value={triggerValue} onChange={(e) => setTriggerValue(e.target.value)} className="w-10 bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300" />
+              </div>
+            )}
+            {captureRate && captureRate !== sampleRate && (
+              <span className="text-[10px] text-amber-300">device used {(captureRate / 1e6).toFixed(3)} MS/s</span>
+            )}
+            {source === 'sump' && <span className="text-[10px] text-slate-500">Small SUMP sketches hold only a few KB of samples; pick a depth the device supports.</span>}
+            {source === 'fx2' && sampleRate >= 12000000 && <span className="text-[10px] text-amber-300">At 12 MS/s and above the browser may not keep up with USB, which leaves gaps.</span>}
           </div>
 
           {/* Zoom and Cursor Telemetry */}
@@ -328,10 +502,10 @@ export default function LogicAnalyzerWorkbench() {
               <span
                 key={idx}
                 className={`px-2 py-1 rounded font-bold text-[11px] ${
-                  pkt.type === 'START' 
-                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40' 
-                    : pkt.type === 'STOP' 
-                    ? 'bg-rose-950 text-rose-400 border border-rose-500/40' 
+                  pkt.type === 'START'
+                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40'
+                    : pkt.type === 'STOP'
+                    ? 'bg-rose-950 text-rose-400 border border-rose-500/40'
                     : 'bg-slate-900 text-cyan-300 border border-slate-800'
                 }`}
               >

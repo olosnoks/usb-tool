@@ -32,7 +32,8 @@ Beyond serial it covers 802.11 monitor-mode capture for Alfa / RTL8812AU and Pan
 |---|---|
 | Real hardware | Terminal, ESP flasher, Hardware Controls, U-Boot deck, Plotter, Serial Bridge, Modbus RTU, CAN / OBD-II (SLCAN adapters), Wi-Fi Monitor, Flipper Zero, Proxmark3, PortaPack (serial console and HackRF WebUSB), GPS & Wardrive, Warhog & Piglet, CH341A, BLE Explorer, WebUSB DFU, MicroPython, Improv |
 | Real hardware, with limits | Silicon Memory Dump: chip ID and MAC on ESP32 / S3 / C3; flash reads only on ESP32 and ESP8266 (newer ROMs need the esptool stub). Kismet Studio: live devices and alerts from a Kismet server's REST API; the server must allow requests from this page (CORS), and from the hosted https page it must be on localhost. PortaPack sensor and digital-mode decoders: no decoder feed from the device yet. |
-| Demo only (no hardware path yet) | Logic Analyzer, I²C / SPI Bus Explorer, JTAG, AVR ISP, CMSIS-DAP, USB-PD |
+| Real hardware, untested on devices | AVR ISP (Arduino running the ArduinoISP sketch, STK500v1 at 19200 baud), I²C / SPI Bus Explorer (Bus Pirate v3/v4 binary mode), Logic Analyzer (SUMP devices over serial; FX2 boards over WebUSB with user-supplied fx2lafw firmware, WinUSB driver needed on Windows). These have been tested only against simulated devices. |
+| Demo only (no hardware path yet) | JTAG, CMSIS-DAP, USB-PD (common PD meters use closed vendor protocols) |
 
 Several real-hardware tools also offer an opt-in simulation for trying the interface; simulated data is always labeled in the app.
 
@@ -133,6 +134,10 @@ deploys as static files to GitHub Pages.
 every serial connection so all tools behave consistently:
 - Opens ports via the **Web Serial API**, with a **WebUSB OTG fallback** for
   Android/Chrome where Web Serial is unavailable.
+- Also opens **Bluetooth LE serial devices** (Nordic UART, HM-10/JDY, Microchip
+  Transparent UART, Flipper Zero) through `src/utils/bleSerial.js`, from the
+  header's BLE button or the BLE Explorer's "Use as serial port". Writes go out
+  in 20-byte packets; baud rate and signal lines don't apply over BLE.
 - Runs a continuous RX read loop, tracks byte/packet stats, and exposes
   `sendString` / `sendRawBytes`, DTR/RTS signal control, UART BREAK, and an
   automated baud-scan.
