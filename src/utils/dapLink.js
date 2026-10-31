@@ -13,6 +13,7 @@ export const DAP = {
   TRANSFER_CONFIGURE: 0x04, TRANSFER: 0x05, TRANSFER_BLOCK: 0x06,
   RESET_TARGET: 0x0a, SWJ_PINS: 0x10, SWJ_CLOCK: 0x11, SWJ_SEQUENCE: 0x12,
   SWD_CONFIGURE: 0x13, JTAG_SEQUENCE: 0x14,
+  SWO_TRANSPORT: 0x17, SWO_MODE: 0x18, SWO_BAUDRATE: 0x19, SWO_CONTROL: 0x1a, SWO_STATUS: 0x1b, SWO_DATA: 0x1c,
   OK: 0x00, ERROR: 0xff,
   PORT_SWD: 1, PORT_JTAG: 2,
   INFO_VENDOR: 0x01, INFO_PRODUCT: 0x02, INFO_SERIAL: 0x03, INFO_FW_VERSION: 0x04,
@@ -189,7 +190,7 @@ export class DapProbe {
       : (reported || 64);
     this.transport.readSize = this.packetSize;
     const caps = await this.info(DAP.INFO_CAPABILITIES);
-    this.capabilities = { swd: !!(caps?.[0] & 1), jtag: !!(caps?.[0] & 2) };
+    this.capabilities = { swd: !!(caps?.[0] & 1), jtag: !!(caps?.[0] & 2), swoUart: !!(caps?.[0] & 4), swoManchester: !!(caps?.[0] & 8) };
     const str = async (id) => {
       const b = await this.info(id);
       return b ? new TextDecoder().decode(b).replace(/\0+$/, '') : '';
@@ -304,6 +305,36 @@ export class DapProbe {
       off += Math.ceil(n / 8);
     }
     return tdo;
+  }
+
+  // --- SWO capture (UART / NRZ mode, read through DAP_SWO_Data) ---------
+
+  /** Start SWO capture at `baud`; returns the baud rate the probe actually uses. */
+  async swoStart(baud) {
+    if (this.capabilities && !this.capabilities.swoUart) throw new DapError(`${this.product || 'This probe'} does not capture SWO in UART mode.`);
+    await this.cmd([DAP.SWO_CONTROL, 0]).catch(() => {});
+    await this._status([DAP.SWO_TRANSPORT, 1], 'SWO_Transport');
+    await this._status([DAP.SWO_MODE, 1], 'SWO_Mode');
+    const r = await this.cmd([DAP.SWO_BAUDRATE, ...u32le(baud)]);
+    const actual = rd32(r, 1);
+    if (!actual) throw new DapError(`The probe cannot capture SWO at ${baud} baud.`);
+    await this._status([DAP.SWO_CONTROL, 1], 'SWO_Control');
+    return actual;
+  }
+
+  async swoStop() {
+    await this._status([DAP.SWO_CONTROL, 0], 'SWO_Control');
+  }
+
+  /** Read buffered SWO bytes. Throws on a trace error or overrun. */
+  async swoRead() {
+    const max = Math.max(1, this.packetSize - 4);
+    const r = await this.cmd([DAP.SWO_DATA, max & 0xff, max >> 8]);
+    const status = r[1];
+    const n = r[2] | (r[3] << 8);
+    if (status & 0x80) throw new DapError('SWO stream error (wrong baud rate or noise on the SWO line).');
+    if (status & 0x40) throw new DapError('SWO buffer overrun: the target sends faster than the probe is read.');
+    return r.slice(4, 4 + n);
   }
 
   close() { return this.transport.close(); }

@@ -47,6 +47,8 @@ import BadUsbPayloadSuite from '../src/components/tools/BadUsbPayloadSuite';
 import ProtocolPacketLab from '../src/components/tools/ProtocolPacketLab';
 import GpsNavigationSuite from '../src/components/tools/GpsNavigationSuite';
 import HardwareProgrammersSuite from '../src/components/tools/HardwareProgrammersSuite';
+import DebugFeaturesPanel from '../src/components/tools/cmsis/DebugFeaturesPanel';
+import { CmsisDapClient } from '../src/utils/cmsisDapDriver';
 
 // Layout & Core Tabs
 import TerminalDeck from '../src/components/tabs/TerminalTab';
@@ -115,7 +117,11 @@ describe('UI Workbench Render Sanity Check', () => {
     { name: 'HelpTroubleshootingTab', comp: <HelpTroubleshootingTab /> },
     { name: 'SerialPlotter', comp: <SerialPlotter isConnected={false} /> },
     { name: 'SignalMapView', comp: <SignalMapView /> },
-    { name: 'GeospatialMap', comp: <GeospatialMap /> }
+    { name: 'GeospatialMap', comp: <GeospatialMap /> },
+    {
+      name: 'DebugFeaturesPanel',
+      comp: <DebugFeaturesPanel client={new CmsisDapClient(() => {})} guard={() => {}} busyRef={{ current: false }} isSimulated targetState="halted" setTargetState={() => {}} setError={() => {}} />
+    }
   ];
 
   for (const { name, comp } of components) {

@@ -76,7 +76,7 @@ export const SIDEBAR_SECTIONS = [
     title: 'HARDWARE & PAYLOADS',
     items: [
       { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript compiler, simulator & CyberChef obfuscator' },
-      { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash, CMSIS-DAP SWD debugger, JTAG / SVF and AVR ISP' },
+      { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash, CMSIS-DAP debugger (RTT, SWO, flash), JTAG / SVF and AVR ISP' },
       { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'Fixed-voltage requests and contract readout through an STUSB4500 sink' },
       { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more' },
       { id: 'fastboot', name: 'Android Fastboot', icon: Smartphone, accent: 'emerald', desc: 'Bootloader unlock, flash/erase partitions and reboot over WebUSB' },

@@ -20,6 +20,7 @@ import {
   CORTEX_REG_NAMES
 } from '../../utils/cmsisDapDriver';
 import StatusBadge from '../common/StatusBadge';
+import DebugFeaturesPanel from './cmsis/DebugFeaturesPanel';
 import { DemoBanner } from '../common/DemoNotice';
 
 export default function CmsisDapDebugger() {
@@ -136,6 +137,19 @@ export default function CmsisDapDebugger() {
     await readMemoryNow();
   });
 
+  const handleEditRegister = (idx, name) => {
+    if (targetState !== 'halted') { setError('Halt the CPU to change registers.'); return; }
+    const cur = `0x${((registers[idx] ?? 0) >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
+    const entered = window.prompt(`New value for ${name} (hex):`, cur);
+    if (entered === null) return;
+    guard('write-reg', async () => {
+      const v = parseInt(entered.trim().replace(/^0x/i, ''), 16);
+      if (Number.isNaN(v)) throw new Error('Enter a hex value.');
+      await client.writeRegister(idx, v);
+      showRegs(await client.readRegisters());
+    });
+  };
+
   // While a real core runs, notice when it halts by itself (breakpoint, fault).
   useEffect(() => {
     if (!isConnected || isSimulated || targetState !== 'running') return undefined;
@@ -173,7 +187,7 @@ export default function CmsisDapDebugger() {
               <span>CMSIS-DAP / ARM CORTEX-M SWD IN-SYSTEM DEBUGGER</span>
             </h2>
             <p className="text-[11px] text-slate-400">
-              Debug Cortex-M microcontrollers over SWD through a CMSIS-DAP probe (Raspberry Pi Debug Probe, DAPLink / micro:bit, LPC-Link2, EDBG). Halt, step, reset, read registers and memory. ST-Link and J-Link are not CMSIS-DAP.
+              Debug Cortex-M microcontrollers over SWD through a CMSIS-DAP probe (Raspberry Pi Debug Probe, DAPLink / micro:bit, LPC-Link2, EDBG). Halt, step, reset, edit registers and memory, RTT console, SWO trace, hardware breakpoints, memory dumps and flash programming with CMSIS-Pack algorithms. ST-Link and J-Link are not CMSIS-DAP.
             </p>
           </div>
 
@@ -296,7 +310,7 @@ export default function CmsisDapDebugger() {
                 <Sliders className="w-3.5 h-3.5 text-cyan-400" />
                 <span>ARM CORE REGISTERS</span>
               </span>
-              <span className="text-[10px] text-slate-500 font-bold">{targetState === 'halted' ? 'read while halted' : 'halt to read'}</span>
+              <span className="text-[10px] text-slate-500 font-bold">{targetState === 'halted' ? 'click a register to change it' : 'halt to read'}</span>
             </div>
 
             <div className="grid grid-cols-2 gap-1.5 text-xs">
@@ -308,7 +322,8 @@ export default function CmsisDapDebugger() {
                 return (
                   <div
                     key={name}
-                    className={`p-2 rounded-lg border flex items-center justify-between font-mono ${
+                    onClick={() => handleEditRegister(idx, name)}
+                    className={`p-2 rounded-lg border flex items-center justify-between font-mono ${targetState === 'halted' ? 'cursor-pointer hover:border-cyan-500/60' : ''} ${
                       changed
                         ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
                         : 'bg-slate-950 border-slate-850 text-slate-300'
@@ -426,6 +441,18 @@ export default function CmsisDapDebugger() {
             </div>
           </div>
         </div>
+      )}
+
+      {isConnected && (
+        <DebugFeaturesPanel
+          client={client}
+          guard={guard}
+          busyRef={busyRef}
+          isSimulated={isSimulated}
+          targetState={targetState}
+          setTargetState={setTargetState}
+          setError={setError}
+        />
       )}
     </div>
   );

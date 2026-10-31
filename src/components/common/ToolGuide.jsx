@@ -296,18 +296,19 @@ export const TOOL_GUIDES = {
   },
   'cmsis-dap': {
     title: 'CMSIS-DAP / ARM Cortex-M SWD Debugger',
-    shortDesc: 'Low-level in-system debugger for ARM Cortex-M microcontrollers (STM32, RP2040, nRF52, micro:bit).',
+    shortDesc: 'Debug and program ARM Cortex-M microcontrollers (STM32, RP2040, nRF52, micro:bit) through a CMSIS-DAP probe.',
     steps: [
-      'Connect your CMSIS-DAP probe (Raspberry Pi Pico Probe, DAPLink, or ST-Link) to the target SWDIO/SWCLK pins.',
-      'Click "CONNECT DAP PROBE (WEBHID)" or choose "VIRTUAL TARGET DEMO".',
-      'Click "HALT CPU" to freeze target execution into debug mode.',
-      'Inspect core registers (R0-R15, SP, PC, xPSR) with live change diff highlighting.',
-      'Use "STEP" to single-step instructions, or edit 32-bit SRAM values directly in the memory table.'
+      'Wire the probe (Raspberry Pi Debug Probe, DAPLink, LPC-Link2, EDBG) to SWDIO, SWCLK and GND of the target, then click "CONNECT PROBE".',
+      'HALT, STEP and RESET the core; click a register to change it, or write words in the memory table.',
+      'RTT CONSOLE: start it while the firmware runs to see its SEGGER RTT output and type into its input channel.',
+      'FLASH: open the chip's CMSIS-Pack (.pack) or a .FLM, pick the device, choose a .bin/.hex/.elf and PROGRAM FLASH.',
+      'BREAK / WATCH: set hardware breakpoints and data watchpoints; DUMP saves any memory range to a file.'
     ],
     tips: [
-      'Address 0x20000000 is the standard base address for SRAM on almost all Cortex-M devices.',
-      'Flash memory begins at 0x08000000 on STM32 or 0x10000000 on RP2040.',
-      'The DHCSR register allows non-intrusive memory inspection while the core is running.'
+      'RTT needs no extra pins and works on every Cortex-M; SWO needs the SWO pin and an M3/M4/M7/M33 core.',
+      'For SWO, enter the real core clock: the baud rate divider is computed from it.',
+      'Flash algorithms run from target RAM: the pack supplies the RAM address, or use the start of SRAM (often 0x20000000).',
+      'Flash begins at 0x08000000 on STM32, 0x10000000 on RP2040 and 0x00000000 on nRF52.'
     ],
     shortcuts: 'ARM CoreSight SWD debugging'
   },

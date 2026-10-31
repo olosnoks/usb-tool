@@ -5,7 +5,10 @@
  * core, and reads registers and memory over SWD. ST-Link is not CMSIS-DAP.
  */
 
-import { DapProbe, SwdTarget, requestDapTransport, describeCpuid, CORTEX } from './dapLink';
+import { DapProbe, SwdTarget, requestDapTransport, describeCpuid, CORTEX, CORE_REG_SELECT } from './dapLink';
+import {
+  RttClient, findRttControlBlock, configureSwoTarget, ItmParser, Breakpoints, Watchpoints, dumpMemory, programFlash
+} from './cortexDebug';
 
 export const DAP_CMD = {
   DAP_INFO: 0x00,
@@ -95,6 +98,10 @@ export class CmsisDapClient {
       const status = await target.coreStatus();
       this.probe = p;
       this.target = target;
+      this.rtt = null;
+      this.breakpoints = null;
+      this.watchpoints = null;
+      this.swo = null;
       this.connected = true;
       this.simulated = false;
       this.targetState = status.halted ? 'halted' : 'running';
@@ -135,6 +142,10 @@ export class CmsisDapClient {
       try { await p.close(); } catch (e) { /* ignore */ }
     }
     this.info = null;
+    this.rtt = null;
+    this.breakpoints = null;
+    this.watchpoints = null;
+    this.swo = null;
     this.connected = false;
     this.simulated = false;
     this.targetState = 'disconnected';
@@ -179,6 +190,14 @@ export class CmsisDapClient {
       return true;
     }
 
+    // Resuming on an active breakpoint would stop again at once: step past it first.
+    if (this.breakpoints?.active.length) {
+      const pc = (await this.target.readCoreRegister(15)) & ~1;
+      if (this.breakpoints.active.includes(pc)) {
+        await this.breakpoints.clear(pc);
+        try { await this.target.step(); } finally { await this.breakpoints.set(pc); }
+      }
+    }
     await this.target.resume();
     this.targetState = 'running';
     return true;
@@ -290,5 +309,108 @@ export class CmsisDapClient {
     const st = await this.target.coreStatus();
     this.targetState = st.halted ? 'halted' : 'running';
     return this.targetState;
+  }
+
+  // --- Features that need a real probe ------------------------------------
+
+  _hw(what) {
+    if (!this.connected) throw new Error('Probe not connected.');
+    if (this.simulated) throw new Error(`${what} needs a real probe and target; the demo has no memory to scan.`);
+  }
+
+  /** Write one core register (index into CORTEX_REG_NAMES) while halted. */
+  async writeRegister(index, value) {
+    if (!this.connected) throw new Error('Probe not connected.');
+    if (this.simulated) { this.virtualRegisters[index] = value >>> 0; return; }
+    if (this.targetState !== 'halted') throw new Error('Halt the CPU first.');
+    await this.target.writeCoreRegister(CORE_REG_SELECT[index], value >>> 0);
+  }
+
+  get isArmv8() {
+    const part = ((this.info?.cpuid ?? 0) >>> 4) & 0xfff;
+    return part >= 0xd20 && part <= 0xd2f;
+  }
+
+  // RTT
+  async findRtt({ address, start = 0x20000000, size = 0x10000, onProgress } = {}) {
+    this._hw('RTT');
+    const at = address ?? await findRttControlBlock(this.target, { start, size, onProgress });
+    if (at === null) throw new Error(`No "SEGGER RTT" control block in ${size / 1024} KB from 0x${start.toString(16).toUpperCase()}. Is the firmware running and built with RTT?`);
+    const rtt = new RttClient(this.target, at);
+    const channels = await rtt.init();
+    this.rtt = rtt;
+    this.log(`RTT control block at 0x${at.toString(16).toUpperCase()}: ${channels.up.length} up, ${channels.down.length} down channel(s).`);
+    return { address: at, ...channels };
+  }
+
+  rttPoll() { return this.rtt ? this.rtt.poll() : Promise.resolve([]); }
+
+  rttWrite(channel, bytes) {
+    if (!this.rtt) throw new Error('Start RTT first.');
+    return this.rtt.write(channel, bytes);
+  }
+
+  // SWO
+  async startSwo({ cpuHz, baud = 2_000_000, stm32 = false }) {
+    this._hw('SWO');
+    const actual = await this.probe.swoStart(baud);
+    const cfg = await configureSwoTarget(this.target, { cpuHz, baud: actual, stm32 });
+    this.swo = { parser: new ItmParser(), baud: actual, ...cfg };
+    this.log(`SWO at ${actual} baud (TPIU prescaler ${cfg.prescaler}).`);
+    return this.swo;
+  }
+
+  async readSwo() {
+    if (!this.swo) return [];
+    const bytes = await this.probe.swoRead();
+    return bytes.length ? this.swo.parser.push(bytes) : [];
+  }
+
+  async stopSwo() {
+    if (!this.swo) return;
+    this.swo = null;
+    try { await this.probe.swoStop(); } catch (e) { /* probe gone */ }
+  }
+
+  // Breakpoints / watchpoints
+  async ensureDebugUnits() {
+    this._hw('Breakpoints');
+    if (!this.breakpoints) {
+      this.breakpoints = new Breakpoints(this.target);
+      await this.breakpoints.init();
+    }
+    if (!this.watchpoints) {
+      this.watchpoints = new Watchpoints(this.target, { armv8: this.isArmv8 });
+      await this.watchpoints.init();
+    }
+    return { breakpoints: this.breakpoints.slots.length, watchpoints: this.watchpoints.slots.length };
+  }
+
+  async setBreakpoint(addr) { await this.ensureDebugUnits(); await this.breakpoints.set(addr); }
+  async clearBreakpoint(addr) { await this.breakpoints?.clear(addr); }
+  async setWatchpoint(addr, opts) { await this.ensureDebugUnits(); await this.watchpoints.set(addr, opts); }
+  async clearWatchpoint(addr) { await this.watchpoints?.clear(addr); }
+
+  // Memory dump and flash
+  async dump(addr, length, onProgress) {
+    this._hw('Memory dump');
+    return dumpMemory(this.target, addr >>> 0, length, onProgress);
+  }
+
+  /** Reset-halt, erase, program and verify with a flash algorithm, then optionally run. */
+  async flash(flm, segments, { ramBase, ramSize, chipErase = false, verify = true, run = true, onProgress } = {}) {
+    this._hw('Flash programming');
+    await this.stopSwo();
+    this.rtt = null;
+    if (this.breakpoints) await this.breakpoints.clearAll();
+    await this.target.reset({ halt: true });
+    this.targetState = 'halted';
+    const result = await programFlash(this.target, flm, segments, { ramBase, ramSize, chipErase, verify, onProgress, log: (m) => this.log(m) });
+    if (run) {
+      await this.target.reset({ halt: false });
+      await this.target.resume();
+      this.targetState = 'running';
+    }
+    return result;
   }
 }
