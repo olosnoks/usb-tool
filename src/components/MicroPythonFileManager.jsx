@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useSerial } from '../context/SerialContext';
+import { runInRawRepl } from '../utils/micropythonRawRepl';
 import { 
   FileCode, 
   Folder, 
@@ -55,40 +57,21 @@ export default function MicroPythonFileManager({
   // Quick One-liner runner
   const [quickCode, setQuickCode] = useState('import sys; print("MicroPython on:", sys.platform)');
 
-  const rxBufferRef = useRef('');
   const fileInputRef = useRef(null);
-
-  // Accumulate RX text
-  useEffect(() => {
-    if (latestRxText) {
-      rxBufferRef.current += latestRxText;
-    }
-  }, [latestRxText]);
+  // Raw REPL I/O goes through the shared connection directly: every received
+  // chunk (subscribeRx) and unmodified bytes (no line ending added).
+  const { sendRawBytes, subscribeRx } = useSerial();
 
   // Helper to execute Python code via MicroPython Raw REPL
-  const executeInRawRepl = async (codeStr, timeoutMs = 4000) => {
-    rxBufferRef.current = '';
-    
-    // Step 1: Interrupt currently running code with Ctrl-C twice
-    onSendString?.('\x03\x03');
-    await new Promise(r => setTimeout(r, 200));
-
-    // Step 2: Enter raw REPL with Ctrl-A
-    rxBufferRef.current = '';
-    onSendString?.('\x01');
-    await new Promise(r => setTimeout(r, 200));
-
-    // Step 3: Send code and execute with Ctrl-D
-    rxBufferRef.current = '';
-    onSendString?.(codeStr + '\x04');
-    
-    // Wait for output or return after timeout
-    await new Promise(r => setTimeout(r, Math.min(timeoutMs, 2500)));
-
-    // Step 4: Return to normal friendly REPL with Ctrl-B
-    onSendString?.('\x02');
-
-    return rxBufferRef.current;
+  // Run code in the raw REPL and return its output (stdout, then any traceback).
+  // Waits for the REPL's own terminators instead of fixed delays.
+  const executeInRawRepl = async (codeStr, timeoutMs = 15000) => {
+    try {
+      return await runInRawRepl(sendRawBytes, subscribeRx, codeStr, timeoutMs);
+    } catch (err) {
+      onLogMessage?.(`[MICROPYTHON] ${err.message}`, 'sys');
+      return '';
+    }
   };
 
   // Scan Flash Filesystem in currentPath
