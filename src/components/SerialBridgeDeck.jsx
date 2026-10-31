@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSerial } from '../context/SerialContext';
 import { 
   ArrowLeftRight, 
   Play, 
@@ -52,6 +53,37 @@ export default function SerialBridgeDeck({
   };
 
   const logContainerRef = useRef(null);
+
+  // The relay: while active, every chunk received on one board is written to
+  // the other and logged with its direction. (Used when no parent drives the
+  // bridge; nothing else in the app forwards bytes between ports.)
+  const { subscribeRx, sendRawToBoard } = useSerial();
+  const sendToRef = useRef(sendRawToBoard);
+  sendToRef.current = sendRawToBoard;
+  const lastTsRef = useRef(0);
+  useEffect(() => {
+    if (parentBridgeConfig || !internalBridgeActive || !subscribeRx || !boardAId || !boardBId) return undefined;
+    const dec = new TextDecoder();
+    return subscribeRx((bytes, fromId) => {
+      let dir, toId;
+      if (fromId === boardAId) { dir = 'A->B'; toId = boardBId; }
+      else if (fromId === boardBId) { dir = 'B->A'; toId = boardAId; }
+      else return;
+      sendToRef.current(toId, bytes).catch((e) => onLogMessage?.(`[BRIDGE] write to ${toId} failed: ${e.message}`, 'sys'));
+      const now = Date.now();
+      const deltaMs = lastTsRef.current ? now - lastTsRef.current : 0;
+      lastTsRef.current = now;
+      const entry = {
+        id: `${now}-${Math.round(performance.now() * 1000)}`,
+        time: new Date(now).toTimeString().split(' ')[0] + '.' + String(now % 1000).padStart(3, '0'),
+        dir,
+        deltaMs,
+        hex: Array.from(bytes).map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' '),
+        text: dec.decode(bytes).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '.')
+      };
+      setInternalBridgeLog((prev) => [...prev.slice(-1999), entry]);
+    });
+  }, [parentBridgeConfig, internalBridgeActive, subscribeRx, boardAId, boardBId]);
 
   // Auto-scroll
   useEffect(() => {

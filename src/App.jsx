@@ -240,10 +240,6 @@ function AppContent() {
               <div className="w-full">
                 <SerialBridgeDeck
                   boards={boards}
-                  bridgeConfig={{ active: false, boardAId: activeBoardId, boardBId: '' }}
-                  onToggleBridge={() => {}}
-                  bridgeLog={[]}
-                  onClearBridgeLog={() => {}}
                   onSendRawBytes={sendRawBytes}
                   onLogMessage={addLog}
                 />
