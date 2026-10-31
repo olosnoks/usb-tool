@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { DemoBanner } from '../common/DemoNotice';
+import { fetchKismetDevices, fetchKismetAlerts, fetchKismetStatus } from '../../utils/kismetClient';
 import {
   Radio,
   Wifi,
@@ -274,10 +275,12 @@ export default function KismetStudioWorkbench() {
   const [copiedCmd, setCopiedCmd] = useState(false);
 
   // Data states
-  // Empty until connected. Only the demo fills these (with MOCK_*); the real
-  // server path does not fetch devices or alerts yet.
+  // Empty until connected. The demo fills these with MOCK_*; a real server
+  // connection polls Kismet's REST API (src/utils/kismetClient.js).
   const [devices, setDevices] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [kismetError, setKismetError] = useState('');
+  const [lastUpdate, setLastUpdate] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('ALL'); // ALL, AP, STA, 5G, 2.4G, WPA3, OPEN
   const [selectedDevice, setSelectedDevice] = useState(null);
@@ -349,25 +352,48 @@ kismet -c ${monIface} --no-ncurses`;
         setIsConnecting(false);
       }, 600);
     } else {
-      // Real REST query to Kismet API
+      // Real Kismet server: check status (and the login), then poll below.
       try {
-        const res = await fetch(`${serverUrl}/system/status.json`, {
-          headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}
-        });
-        if (res.ok) {
-          setDevices([]);
-          setAlerts([]);
-          setIsConnected(true);
-        } else {
-          alert(`Kismet server returned status ${res.status}. Check API credentials.`);
-        }
+        const st = await fetchKismetStatus(serverUrl, apiKey);
+        setDevices([]);
+        setAlerts([]);
+        setServerUptime(st.uptime || '--:--:--');
+        setKismetError('');
+        setLastUpdate(null);
+        setIsConnected(true);
       } catch (err) {
-        alert(`Cannot reach Kismet daemon at ${serverUrl}. Ensure Kismet is running with: kismet -c wlan1mon\n\nError: ${err.message}`);
+        alert(`${err.message}\n\nStart Kismet with a source, e.g.: kismet -c wlan1mon`);
       } finally {
         setIsConnecting(false);
       }
     }
   };
+
+  // Live data from a real Kismet server, every 3 s while connected.
+  useEffect(() => {
+    if (!isConnected || useDemoMode) return undefined;
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const [devs, alts, st] = await Promise.all([
+          fetchKismetDevices(serverUrl, apiKey),
+          fetchKismetAlerts(serverUrl, apiKey),
+          fetchKismetStatus(serverUrl, apiKey)
+        ]);
+        if (stopped) return;
+        setDevices(devs);
+        setAlerts(alts);
+        if (st.uptime) setServerUptime(st.uptime);
+        setKismetError('');
+        setLastUpdate(new Date());
+      } catch (err) {
+        if (!stopped) setKismetError(err.message);
+      }
+    };
+    poll();
+    const iv = setInterval(poll, 3000);
+    return () => { stopped = true; clearInterval(iv); };
+  }, [isConnected, useDemoMode, serverUrl, apiKey]);
 
   // Filtered devices
   const filteredDevices = useMemo(() => {
@@ -425,8 +451,12 @@ kismet -c ${monIface} --no-ncurses`;
   const handleExportWigleCsv = () => {
     let csv = "WigleWifi-1.4,appRelease=SkonsKismetStudio-1.0,model=AlfaAdapter,osVersion=Web,device=WebUSB\n";
     csv += "MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n";
-    devices.forEach(d => {
-      csv += `${d.bssid},${d.ssid},[${d.crypto}],2026-10-24 02:00:00,${d.channel},${d.signal},0.0,0.0,0,10,WIFI\n`;
+    // WiGLE takes access points; FirstSeen is the device's real first-seen time
+    // (Kismet first_time, else now); 0.0,0.0 means "no location" to WiGLE.
+    const q = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+    const stamp = (sec) => new Date((sec || Date.now() / 1000) * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    devices.filter(d => d.type === 'AP').forEach(d => {
+      csv += [d.bssid, q(d.ssid), `[${d.crypto}]`, stamp(d.firstSeenTs), d.channel, d.signal ?? '', '0.0', '0.0', 0, 10, 'WIFI'].join(',') + '\n';
     });
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -442,8 +472,10 @@ kismet -c ${monIface} --no-ncurses`;
         <DemoBanner>The devices, alerts and rates below are a canned Alfa + Kismet capture, not your server.</DemoBanner>
       )}
       {isConnected && !useDemoMode && (
-        <div role="note" className="p-2.5 rounded-lg border border-sky-500/40 bg-sky-500/10 text-xs text-sky-200">
-          Connected to the Kismet server at {serverUrl}. Live device and alert listing from Kismet isn&apos;t implemented yet, so the tables below stay empty.
+        <div role="note" className={`p-2.5 rounded-lg border text-xs ${kismetError ? 'border-rose-500/40 bg-rose-500/10 text-rose-200' : 'border-sky-500/40 bg-sky-500/10 text-sky-200'}`}>
+          {kismetError
+            ? `Kismet at ${serverUrl}: ${kismetError}`
+            : `Live from Kismet at ${serverUrl}: ${devices.length} device${devices.length === 1 ? '' : 's'} seen in the last 10 minutes, ${alerts.length} alert${alerts.length === 1 ? '' : 's'}${lastUpdate ? ` · updated ${lastUpdate.toLocaleTimeString()}` : ' · loading…'}.`}
         </div>
       )}
       {/* Top Banner Card */}
@@ -541,7 +573,7 @@ kismet -c ${monIface} --no-ncurses`;
             <div className="text-sm font-bold text-purple-400 mt-0.5">
               {isConnected && useDemoMode ? `${packetRate.toLocaleString()} pkts/s` : '-- pkts/s'}
             </div>
-            <div className="text-[10px] text-slate-500">Uptime: {isConnected && useDemoMode ? serverUptime : '--:--:--'}</div>
+            <div className="text-[10px] text-slate-500">Uptime: {isConnected ? serverUptime : '--:--:--'}</div>
           </div>
           <Activity className="w-5 h-5 text-purple-400/40" />
         </div>
@@ -736,7 +768,7 @@ kismet -c ${monIface} --no-ncurses`;
                           <span className={`font-bold ${
                             dev.signal >= -60 ? 'text-emerald-400' : dev.signal >= -75 ? 'text-amber-400' : 'text-rose-400'
                           }`}>
-                            {dev.signal} dBm
+                            {dev.signal ?? '--'} dBm
                           </span>
                           <div className="w-12 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                             <div
@@ -807,7 +839,7 @@ kismet -c ${monIface} --no-ncurses`;
                 </div>
                 <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
                   <span className="text-slate-500 text-[10px] block">Signal Strength</span>
-                  <span className="text-emerald-400 font-semibold">{selectedDevice.signal} dBm ({selectedDevice.signalQuality}%)</span>
+                  <span className="text-emerald-400 font-semibold">{selectedDevice.signal ?? '--'} dBm ({selectedDevice.signalQuality}%)</span>
                 </div>
               </div>
               {selectedDevice.clientList && selectedDevice.clientList.length > 0 && (
