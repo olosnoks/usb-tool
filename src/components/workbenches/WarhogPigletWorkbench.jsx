@@ -1,46 +1,23 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
-  Compass,
   Wifi,
-  Radio,
   Usb,
-  Upload,
-  Download,
   Trash2,
   Cpu,
   HardDrive,
   Terminal,
-  MapPin,
-  ShieldCheck,
-  Activity,
-  Layers,
   Search,
-  Check,
-  Copy,
-  Navigation,
-  Zap,
   Sliders,
-  FileText,
-  Folder,
-  FolderOpen,
-  FileCode,
-  Save,
   RefreshCw,
-  Plus,
   ExternalLink,
   Flame,
-  Globe,
-  Battery,
-  Play,
-  Square,
-  RotateCcw,
-  Info,
-  Code2,
-  CheckCircle2,
-  AlertTriangle,
-  Cable
+  Cable,
+  Activity
 } from 'lucide-react';
-import { parseNmeaSentence, parseWardriveLine, parseWigleCsvFile } from '../../utils/nmeaParser';
+import { PigletToolkitClient } from '../../utils/pigletToolkit';
+import PigletFileBrowser from './piglet/PigletFileBrowser';
+import PigletConfigEditor from './piglet/PigletConfigEditor';
+import PigletDeviceControl from './piglet/PigletDeviceControl';
 
 export const DEFAULT_WARDRIVER_CFG = {
   // WiGLE & Upload Services
@@ -240,41 +217,6 @@ export const HARDWARE_PRESETS = {
   }
 };
 
-// ============================================================================
-//  WarHog "WT" Protocol Helpers (Mirrors SerialTool.cpp & toolkit.js)
-// ============================================================================
-function crc32(bytes) {
-  let c = 0xFFFFFFFF;
-  for (let i = 0; i < bytes.length; i++) {
-    c ^= bytes[i];
-    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1));
-  }
-  return (c ^ 0xFFFFFFFF) >>> 0;
-}
-
-const hex8 = (n) => (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
-
-function b64encode(bytes) {
-  let s = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(s);
-}
-
-function b64decode(str) {
-  const bin = atob(str);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-function fmtSize(n) {
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-  return (n / (1024 * 1024)).toFixed(2) + ' MB';
-}
-
 export function serializeWardriverConfig(cfg) {
   const c = { ...DEFAULT_WARDRIVER_CFG, ...cfg };
   const lines = [
@@ -428,677 +370,98 @@ const HARDWARE_PINOUTS = [
   }
 ];
 
+const FLASHER_URL = 'https://olosnoks.github.io/warhog/';
+
 export default function WarhogPigletWorkbench() {
-  const [activeTab, setActiveTab] = useState('sd'); // 'sd' | 'config' | 'web' | 'serial' | 'flasher' | 'pinouts'
-  const [sdSourceMode, setSdSourceMode] = useState('usb'); // 'usb' | 'picker' | 'web'
-  const [selectedFolder, setSelectedFolder] = useState('/logs'); // '/logs' | '/uploaded' | '/archived' | '/'
-  const [selectedPresetKey, setSelectedPresetKey] = useState('freenove-s3-cyd');
-  const [config, setConfig] = useState(DEFAULT_WARDRIVER_CFG);
-  const [rawConfigText, setRawConfigText] = useState(() => serializeWardriverConfig(DEFAULT_WARDRIVER_CFG));
-  const [cfgViewMode, setCfgViewMode] = useState('visual'); // 'visual' | 'code'
+  const [activeTab, setActiveTab] = useState('sd'); // 'sd' | 'config' | 'device' | 'serial' | 'flasher' | 'pinouts'
 
-  // Physical SD Card / USB SD State
-  const [sdFiles, setSdFiles] = useState([]);
-  const [selectedSdFile, setSelectedSdFile] = useState(null);
-  const [fileContent, setFileContent] = useState('');
-  const [sdStatusMsg, setSdStatusMsg] = useState('');
+  // Piglet Toolkit (WT protocol over USB): same client as the web flasher
+  const [tkConnected, setTkConnected] = useState(false);
+  const [tkConnecting, setTkConnecting] = useState(false);
+  const [tkBusy, setTkBusyState] = useState(false);
+  const [tkInfo, setTkInfo] = useState('');
+  const [tkStatus, setTkStatus] = useState({ text: 'disconnected', tone: '' });
+  const [tkLog, setTkLog] = useState('');
+  const tkLogRef = useRef(null);
+  const setTkBusy = useCallback((b) => setTkBusyState(b), []);
+  const setStatus = useCallback((text, tone = '') => setTkStatus({ text, tone }), []);
+  const log = useCallback((msg) => setTkLog((prev) => (prev + msg + '\n').slice(-20000)), []);
 
-  // WT Protocol Serial State
-  const [wtPort, setWtPort] = useState(null);
-  const [wtConnected, setWtConnected] = useState(false);
-  const [wtBusy, setWtBusy] = useState(false);
-  const [wtDeviceInfo, setWtDeviceInfo] = useState('');
-  const [wtTransferProgress, setWtTransferProgress] = useState('');
-
-  // Browser File System Access API
-  const [sdHandle, setSdHandle] = useState(null);
-  const [sdMounted, setSdMounted] = useState(false);
-
-  // Web UI / REST Bridge (HTTP to 192.168.4.1 or device IP)
-  const [deviceIp, setDeviceIp] = useState('192.168.4.1');
-  const [webConnected, setWebConnected] = useState(false);
-  const [webConnecting, setWebConnecting] = useState(false);
-  const [webTelemetry, setWebTelemetry] = useState(null);
-  const [webFiles, setWebFiles] = useState([]);
-  const [webActionStatus, setWebActionStatus] = useState('');
-
-  // WebSerial UART Console
-  const [serialBaud, setSerialBaud] = useState(115200);
+  // Serial console (shares the toolkit's USB session)
   const [serialLogs, setSerialLogs] = useState([]);
   const [serialInput, setSerialInput] = useState('');
+  const logContainerRef = useRef(null);
 
   // Targets Captured
   const [capturedTargets, setCapturedTargets] = useState([]);
   const [bandFilter, setBandFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const wtReaderRef = useRef(null);
-  const wtWriterRef = useRef(null);
-  const wtLineHandlerRef = useRef(null);
-  const logContainerRef = useRef(null);
-
-  // Apply Hardware Preset
-  const handleApplyPreset = (presetKey) => {
-    setSelectedPresetKey(presetKey);
-    const preset = HARDWARE_PRESETS[presetKey];
-    if (!preset) return;
-    const updated = { ...config, ...preset.patch };
-    setConfig(updated);
-    setRawConfigText(serializeWardriverConfig(updated));
-    setSdStatusMsg(`Applied preset: ${preset.label}`);
-  };
-
-  const handleConfigChange = (key, val) => {
-    const updated = { ...config, [key]: val };
-    setConfig(updated);
-    setRawConfigText(serializeWardriverConfig(updated));
-  };
-
-  const handleRawTextChange = (text) => {
-    setRawConfigText(text);
-    const parsed = parseWardriverConfigText(text, config);
-    setConfig(parsed);
-  };
-
-  // -------------------------------------------------------------
-  //  OFFICIAL WARHOG "WT" SERIAL PROTOCOL IMPLEMENTATION
-  // -------------------------------------------------------------
-  const writeWtLine = async (line) => {
-    if (!wtWriterRef.current) throw new Error('Not connected to WarHog via USB.');
-    const encoder = new TextEncoder();
-    await wtWriterRef.current.write(encoder.encode(line + '\n'));
-  };
-
-  const runWtOp = (sendFn, handlerFactory, timeoutMs = 15000) => {
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const t = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          wtLineHandlerRef.current = null;
-          reject(new Error('Operation timed out'));
-        }
-      }, timeoutMs);
-
-      const finish = (fn) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(t);
-        wtLineHandlerRef.current = null;
-        fn();
-      };
-
-      wtLineHandlerRef.current = handlerFactory(
-        (val) => finish(() => resolve(val)),
-        (err) => finish(() => reject(err instanceof Error ? err : new Error(String(err))))
-      );
-
-      Promise.resolve(sendFn()).catch((e) => finish(() => reject(e)));
+  const clientRef = useRef(null);
+  if (!clientRef.current) {
+    clientRef.current = new PigletToolkitClient({
+      onLog: (m) => log(m),
+      onDebugLine: (line) => setSerialLogs((prev) => [...prev.slice(-500), line]),
+      onDisconnect: () => {
+        setTkConnected(false);
+        setTkInfo('');
+        setTkBusyState(false);
+        setTkStatus((s) => (s.tone === 'bad' ? s : { text: 'disconnected', tone: '' }));
+      }
     });
-  };
+  }
+  const client = clientRef.current;
+  const serialSupported = PigletToolkitClient.isSupported();
 
-  const wtHello = async () => {
-    return runWtOp(
-      () => writeWtLine('WT HELLO'),
-      (done) => (line) => {
-        if (line.startsWith('WT HELLO')) {
-          done(line.slice(8).trim());
-        }
-      },
-      6000
-    );
-  };
+  // Close the session (WT BYE, so the Piglet resumes scanning) when leaving the page.
+  useEffect(() => () => { client.disconnect(); }, [client]);
 
-  const wtLs = async (dir) => {
-    const files = [];
-    const dirs = [];
-    return runWtOp(
-      () => writeWtLine('WT LS ' + dir),
-      (done, fail) => (line) => {
-        if (line.startsWith('WT F ')) {
-          const m = line.match(/^WT F (\d+) (.+)$/);
-          if (m) files.push({ size: +m[1], path: m[2] });
-        } else if (line.startsWith('WT DIR ')) {
-          dirs.push(line.slice(7).trim());
-        } else if (line === 'WT END') {
-          done({ files, dirs });
-        } else if (line.startsWith('WT ERR')) {
-          fail(line.slice(6).trim());
-        }
-      },
-      25000
-    );
-  };
+  useEffect(() => {
+    if (tkLogRef.current) tkLogRef.current.scrollTop = tkLogRef.current.scrollHeight;
+  }, [tkLog]);
 
-  const wtGet = async (path, onProgress) => {
-    let size = 0;
-    let received = 0;
-    const chunks = [];
-    return runWtOp(
-      () => writeWtLine('WT GET ' + path),
-      (done, fail) => (line) => {
-        if (line.startsWith('WT BEGIN ')) {
-          size = +line.slice(9).trim();
-        } else if (line.startsWith('WT DATA ')) {
-          const bytes = b64decode(line.slice(8));
-          chunks.push(bytes);
-          received += bytes.length;
-          if (onProgress && size) onProgress(received, size);
-        } else if (line.startsWith('WT END ')) {
-          const expectedCrc = parseInt(line.slice(7).trim(), 16) >>> 0;
-          const out = new Uint8Array(received);
-          let offset = 0;
-          for (const c of chunks) {
-            out.set(c, offset);
-            offset += c.length;
-          }
-          if ((crc32(out) >>> 0) !== expectedCrc) {
-            fail(new Error('CRC32 checksum mismatch in transfer'));
-            return;
-          }
-          done(out);
-        } else if (line.startsWith('WT ERR')) {
-          fail(line.slice(6).trim());
-        }
-      },
-      120000
-    );
-  };
-
-  const wtPutBytes = async (cmd, bytes, onProgress) => {
-    const fileCrc = crc32(bytes);
-    const CHUNK = 384;
-    return runWtOp(
-      () => writeWtLine(`${cmd} ${bytes.length} ${hex8(fileCrc)}`),
-      (done, fail) => (line) => {
-        if (line === 'WT READY') {
-          (async () => {
-            try {
-              for (let i = 0; i < bytes.length; i += CHUNK) {
-                const slice = bytes.subarray(i, i + CHUNK);
-                await writeWtLine('WT DATA ' + b64encode(slice));
-                if (onProgress) onProgress(Math.min(i + CHUNK, bytes.length), bytes.length);
-              }
-              if (bytes.length === 0) await writeWtLine('WT DATA ');
-            } catch (e) {
-              fail(e);
-            }
-          })();
-        } else if (line.startsWith('WT OK')) {
-          done(line.slice(5).trim());
-        } else if (line.startsWith('WT ERR')) {
-          fail(line.slice(6).trim());
-        }
-      },
-      120000
-    );
-  };
-
-  const wtPut = (path, bytes, p) => wtPutBytes('WT PUT ' + path, bytes, p);
-  const wtCfgPut = (bytes, p) => wtPutBytes('WT CFG PUT', bytes, p);
-
-  const wtRm = async (path) => {
-    return runWtOp(
-      () => writeWtLine('WT RM ' + path),
-      (done, fail) => (line) => {
-        if (line.startsWith('WT OK')) done();
-        else if (line.startsWith('WT ERR')) fail(line.slice(6).trim());
-      },
-      15000
-    );
-  };
-
-  const wtBye = async () => {
+  const handleConnect = async () => {
+    if (tkConnecting) return;
+    if (tkConnected) { await client.disconnect(); return; }
+    setTkConnecting(true);
     try {
-      await writeWtLine('WT BYE');
-    } catch {
-      // ignore
-    }
-  };
-
-  // Connect over WebSerial and establish WT session
-  const handleConnectUsbSerial = async () => {
-    if (!navigator.serial) {
-      alert('WebSerial is not supported in this browser. Please use Google Chrome, Microsoft Edge, or Brave.');
-      return;
-    }
-    try {
-      setSdStatusMsg('Connecting to WarHog via USB...');
-      const port = await navigator.serial.requestPort();
-      await port.open({ baudRate: 115200 });
-      setWtPort(port);
-
-      const writer = port.writable.getWriter();
-      const reader = port.readable.getReader();
-      wtWriterRef.current = writer;
-      wtReaderRef.current = reader;
-
-      startWtReaderLoop(reader);
-
-      setSdStatusMsg('Sending WT HELLO to WarHog...');
-      const info = await wtHello();
-      setWtDeviceInfo(info);
-      setWtConnected(true);
-      setSdStatusMsg(`Connected to WarHog! (${info})`);
-
-      // Refresh directory list
-      await refreshWtFiles(selectedFolder);
-    } catch (err) {
-      setSdStatusMsg(`USB connection failed: ${err.message}`);
-      await handleDisconnectUsbSerial();
-    }
-  };
-
-  const handleDisconnectUsbSerial = async () => {
-    try {
-      if (wtConnected) await wtBye();
-    } catch {}
-    setWtConnected(false);
-    setWtDeviceInfo('');
-    try {
-      if (wtReaderRef.current) {
-        await wtReaderRef.current.cancel();
-        wtReaderRef.current = null;
-      }
-    } catch {}
-    try {
-      if (wtWriterRef.current) {
-        wtWriterRef.current.releaseLock();
-        wtWriterRef.current = null;
-      }
-    } catch {}
-    try {
-      if (wtPort) {
-        await wtPort.close();
-        setWtPort(null);
-      }
-    } catch {}
-    setSdStatusMsg('Disconnected from WarHog USB.');
-  };
-
-  const startWtReaderLoop = async (reader) => {
-    const decoder = new TextDecoder();
-    let lineBuffer = '';
-
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        lineBuffer += decoder.decode(value, { stream: true });
-        let nl;
-        while ((nl = lineBuffer.indexOf('\n')) >= 0) {
-          let line = lineBuffer.slice(0, nl).replace(/\r$/, '');
-          lineBuffer = lineBuffer.slice(nl + 1);
-
-          // Route WT protocol lines to active operation handler
-          if (line.startsWith('WT ') || line === 'WT') {
-            if (wtLineHandlerRef.current) {
-              wtLineHandlerRef.current(line);
-            }
-          } else {
-            // Debug output from firmware -> serial log
-            setSerialLogs(prev => [...prev.slice(-300), line]);
-          }
-        }
-      }
-    } catch (err) {
-      if (err.name !== 'NetworkError') {
-        console.warn('WT reader loop terminated:', err);
-      }
+      setStatus('waiting for the Piglet to answer…');
+      const info = await client.connect();
+      setTkInfo(info);
+      setTkConnected(true);
+      setStatus('connected · ' + info, 'ok');
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      const noPort = /No port/i.test(msg);
+      setStatus(noPort ? 'no port selected' : 'error: ' + msg, noPort ? '' : 'bad');
     } finally {
-      try {
-        reader.releaseLock();
-      } catch {}
+      setTkConnecting(false);
     }
   };
 
-  const refreshWtFiles = async (folder = selectedFolder) => {
-    if (!wtWriterRef.current) return;
-    setWtBusy(true);
-    setSdStatusMsg(`Listing ${folder} over USB...`);
-    try {
-      const { files } = await wtLs(folder);
-      const mapped = files.map(f => {
-        const name = f.path.split('/').pop() || f.path;
-        return {
-          name,
-          path: f.path,
-          size: f.size,
-          source: 'usb',
-          type: name.endsWith('.cfg') || name.endsWith('.conf') ? 'config' : name.endsWith('.csv') ? 'log' : 'file'
-        };
-      });
-      mapped.sort((a, b) => a.path.localeCompare(b.path));
-      setSdFiles(mapped);
-      setSdStatusMsg(`Loaded ${mapped.length} files from ${folder} via WT protocol.`);
-
-      // If in root, check if wardriver.cfg is present and load it
-      if (folder === '/') {
-        const cfgFile = mapped.find(f => f.name.toLowerCase() === 'wardriver.cfg');
-        if (cfgFile) {
-          handleSelectUsbFile(cfgFile);
-        }
-      }
-    } catch (err) {
-      setSdStatusMsg(`Failed to list ${folder}: ${err.message}`);
-    } finally {
-      setWtBusy(false);
-    }
-  };
-
-  const handleSelectUsbFile = async (item) => {
-    setSelectedSdFile(item);
-    if (item.source === 'usb') {
-      setWtBusy(true);
-      setWtTransferProgress(`Downloading ${item.path}...`);
-      try {
-        const bytes = await wtGet(item.path, (recv, total) => {
-          setWtTransferProgress(`Downloading ${item.path}: ${fmtSize(recv)} / ${fmtSize(total)}`);
+  // Rows from a WiGLE CSV opened in the SD explorer feed the Captured Targets table.
+  const handleCsvRows = useCallback((rows) => {
+    if (!rows?.length) return;
+    setCapturedTargets((prev) => {
+      const map = new Map(prev.map((n) => [n.bssid, n]));
+      for (const r of rows) {
+        const sec = r.auth.replace(/\[ESS\]/ig, '').replace(/^\[|\]$/g, '').trim();
+        map.set(r.mac, {
+          bssid: r.mac,
+          ssid: r.ssid,
+          rssi: r.rssi,
+          channel: r.ch,
+          type: r.type,
+          band: r.type === 'BLE' ? 'BLE' : (r.freq || 0) >= 4900 || (r.ch || 0) > 14 ? '5GHz' : '2.4GHz',
+          auth: r.type === 'BLE' ? 'BLE' : (!sec || /^open$/i.test(sec) ? 'OPEN' : sec.replace(/\]\[/g, ' ')),
+          lat: r.lat,
+          lon: r.lon,
+          time: r.seen
         });
-        const decoder = new TextDecoder();
-        const text = decoder.decode(bytes);
-        setFileContent(text);
-        setWtTransferProgress('');
-        setSdStatusMsg(`Downloaded ${item.path} (${fmtSize(bytes.length)}) with verified CRC32!`);
-
-        if (item.name.endsWith('.cfg') || item.name.endsWith('.conf')) {
-          setRawConfigText(text);
-          setConfig(parseWardriverConfigText(text));
-        } else if (item.name.endsWith('.csv')) {
-          const parsed = parseWigleCsvFile(text);
-          if (parsed.networks?.length > 0) {
-            setCapturedTargets(prev => {
-              const map = new Map(prev.map(n => [n.bssid, n]));
-              parsed.networks.forEach(n => map.set(n.bssid, n));
-              return Array.from(map.values());
-            });
-            setSdStatusMsg(`Parsed ${parsed.networks.length} targets from ${item.name}!`);
-          }
-        }
-      } catch (err) {
-        setSdStatusMsg(`Failed to download ${item.path}: ${err.message}`);
-      } finally {
-        setWtBusy(false);
-        setWtTransferProgress('');
       }
-    } else if (item.handle) {
-      // Local File System Access API
-      handleSelectSdFile(item);
-    }
-  };
-
-  const handleDownloadFileToComputer = async (item) => {
-    if (item.source === 'usb') {
-      try {
-        setWtBusy(true);
-        setWtTransferProgress(`Downloading ${item.path} to PC...`);
-        const bytes = await wtGet(item.path, (recv, total) => {
-          setWtTransferProgress(`Downloading: ${fmtSize(recv)} / ${fmtSize(total)}`);
-        });
-        const blob = new Blob([bytes], { type: 'application/octet-stream' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = item.name;
-        a.click();
-        URL.revokeObjectURL(a.href);
-        setSdStatusMsg(`Saved ${item.name} (${fmtSize(bytes.length)}) to PC.`);
-      } catch (err) {
-        alert(`Download error: ${err.message}`);
-      } finally {
-        setWtBusy(false);
-        setWtTransferProgress('');
-      }
-    }
-  };
-
-  const handleDeleteUsbFile = async (item) => {
-    if (!confirm(`Delete ${item.path} from WarHog SD card? This cannot be undone.`)) return;
-    if (item.source === 'usb') {
-      try {
-        setWtBusy(true);
-        await wtRm(item.path);
-        setSdStatusMsg(`Deleted ${item.path} from SD card.`);
-        await refreshWtFiles(selectedFolder);
-      } catch (err) {
-        alert(`Delete failed: ${err.message}`);
-      } finally {
-        setWtBusy(false);
-      }
-    }
-  };
-
-  // Mount Physical MicroSD Card via Directory Picker (Card Reader / PC slot)
-  const handleMountDirectory = async () => {
-    try {
-      if (!window.showDirectoryPicker) {
-        alert('File System Access API is not supported in this browser. Please use Chrome, Edge, or Brave to mount physical SD cards directly.');
-        return;
-      }
-      setSdStatusMsg('Requesting SD Card root directory...');
-      const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-      setSdHandle(dirHandle);
-      setSdMounted(true);
-      await scanSdDirectory(dirHandle);
-      setSdStatusMsg(`Mounted directory: "${dirHandle.name}". Ready.`);
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        setSdStatusMsg(`SD mount failed: ${err.message}`);
-      }
-    }
-  };
-
-  const scanSdDirectory = async (dirHandle) => {
-    const files = [];
-    try {
-      for await (const entry of dirHandle.values()) {
-        if (entry.kind === 'file') {
-          const file = await entry.getFile();
-          files.push({
-            name: entry.name,
-            path: `/${entry.name}`,
-            size: file.size,
-            handle: entry,
-            source: 'picker',
-            type: entry.name.endsWith('.cfg') ? 'config' : entry.name.endsWith('.csv') ? 'log' : 'file'
-          });
-        } else if (entry.kind === 'directory') {
-          const subDirHandle = entry;
-          for await (const subEntry of subDirHandle.values()) {
-            if (subEntry.kind === 'file') {
-              const file = await subEntry.getFile();
-              files.push({
-                name: subEntry.name,
-                path: `/${entry.name}/${subEntry.name}`,
-                size: file.size,
-                handle: subEntry,
-                source: 'picker',
-                type: subEntry.name.endsWith('.csv') ? 'log' : subEntry.name.endsWith('.pcap') ? 'pcap' : 'file'
-              });
-            }
-          }
-        }
-      }
-      setSdFiles(files);
-
-      const cfgEntry = files.find(f => f.name.toLowerCase() === 'wardriver.cfg');
-      if (cfgEntry) {
-        const file = await cfgEntry.handle.getFile();
-        const text = await file.text();
-        setFileContent(text);
-        setSelectedSdFile(cfgEntry);
-        setRawConfigText(text);
-        setConfig(parseWardriverConfigText(text));
-        setSdStatusMsg(`Found and loaded /wardriver.cfg from SD card.`);
-      }
-    } catch (err) {
-      setSdStatusMsg(`Failed to list SD card files: ${err.message}`);
-    }
-  };
-
-  const handleSelectSdFile = async (item) => {
-    setSelectedSdFile(item);
-    try {
-      const file = await item.handle.getFile();
-      const text = await file.text();
-      setFileContent(text);
-
-      if (item.name.endsWith('.cfg') || item.name.endsWith('.conf')) {
-        setRawConfigText(text);
-        setConfig(parseWardriverConfigText(text));
-        setSdStatusMsg(`Loaded config file: ${item.path}`);
-      } else if (item.name.endsWith('.csv')) {
-        const parsed = parseWigleCsvFile(text);
-        if (parsed.networks && parsed.networks.length > 0) {
-          setCapturedTargets(prev => {
-            const map = new Map(prev.map(n => [n.bssid, n]));
-            parsed.networks.forEach(n => map.set(n.bssid, n));
-            return Array.from(map.values());
-          });
-          setSdStatusMsg(`Loaded ${parsed.networks.length} Wi-Fi/BLE targets from ${item.name}`);
-        }
-      }
-    } catch (err) {
-      setSdStatusMsg(`Failed to read file ${item.name}: ${err.message}`);
-    }
-  };
-
-  const handleSaveToSd = async () => {
-    const textToSave = cfgViewMode === 'code' ? rawConfigText : serializeWardriverConfig(config);
-    const encoder = new TextEncoder();
-    const bytes = encoder.encode(textToSave);
-
-    if (wtConnected && wtWriterRef.current) {
-      // Use official WT CFG PUT over USB serial cable
-      setWtBusy(true);
-      setWtTransferProgress('Uploading /wardriver.cfg to WarHog over USB...');
-      try {
-        await wtCfgPut(bytes, (sent, total) => {
-          setWtTransferProgress(`Uploading config: ${fmtSize(sent)} / ${fmtSize(total)}`);
-        });
-        setSdStatusMsg('Successfully uploaded /wardriver.cfg! Firmware automatically reloaded configuration.');
-      } catch (err) {
-        alert(`Config upload failed: ${err.message}`);
-      } finally {
-        setWtBusy(false);
-        setWtTransferProgress('');
-      }
-      return;
-    }
-
-    if (sdHandle) {
-      try {
-        const fileHandle = await sdHandle.getFileHandle('wardriver.cfg', { create: true });
-        const writable = await fileHandle.createWritable();
-        await writable.write(textToSave);
-        await writable.close();
-        setSdStatusMsg('Successfully saved /wardriver.cfg directly to MicroSD root!');
-        await scanSdDirectory(sdHandle);
-      } catch (err) {
-        setSdStatusMsg(`Failed to save to SD card: ${err.message}`);
-      }
-      return;
-    }
-
-    alert('Please connect to the Hog via USB (WT Protocol) or mount your MicroSD card root directory.');
-  };
-
-  const handleDownloadConfigFile = () => {
-    const textToSave = cfgViewMode === 'code' ? rawConfigText : serializeWardriverConfig(config);
-    const blob = new Blob([textToSave], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'wardriver.cfg';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    setSdStatusMsg('Downloaded wardriver.cfg to your computer.');
-  };
-
-  // HTTP Web REST Client
-  const fetchWebStatus = async () => {
-    try {
-      setWebConnecting(true);
-      const res = await fetch(`http://${deviceIp}/status.json`, { mode: 'cors' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setWebTelemetry(data);
-      setWebConnected(true);
-      if (data.config) {
-        setConfig(prev => ({ ...prev, ...data.config }));
-      }
-      setWebActionStatus(`Connected to WarHog Web UI at ${deviceIp}`);
-      fetchWebFiles();
-    } catch (err) {
-      setWebConnected(false);
-      setWebActionStatus(`Cannot connect to http://${deviceIp}/status.json (${err.message}). Are you connected to "WarHog-WARDRIVE"?`);
-    } finally {
-      setWebConnecting(false);
-    }
-  };
-
-  const fetchWebFiles = async () => {
-    try {
-      const res = await fetch(`http://${deviceIp}/files.json`, { mode: 'cors' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.files) {
-          setWebFiles(data.files);
-          if (sdSourceMode === 'web') {
-            setSdFiles(data.files.map(f => ({
-              name: f.name.split('/').pop(),
-              path: f.name,
-              size: f.size,
-              source: 'web',
-              type: f.name.endsWith('.cfg') ? 'config' : f.name.endsWith('.csv') ? 'log' : 'file'
-            })));
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('files.json fetch failed:', err);
-    }
-  };
-
-  const triggerWebAction = async (endpoint, label) => {
-    try {
-      setWebActionStatus(`Sending ${label}...`);
-      const res = await fetch(`http://${deviceIp}${endpoint}`, { method: 'POST', mode: 'cors' });
-      if (res.ok) {
-        setWebActionStatus(`${label} succeeded!`);
-        fetchWebStatus();
-      } else {
-        setWebActionStatus(`${label} failed: HTTP ${res.status}`);
-      }
-    } catch (err) {
-      setWebActionStatus(`${label} failed: ${err.message}`);
-    }
-  };
-
-  const handlePushConfigOverWeb = async () => {
-    try {
-      setWebActionStatus('Pushing /wardriver.cfg to device over HTTP...');
-      const params = new URLSearchParams();
-      Object.entries(config).forEach(([k, v]) => {
-        params.append(k, String(v));
-      });
-      const res = await fetch(`http://${deviceIp}/saveConfig`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
-        mode: 'cors'
-      });
-      if (res.ok) {
-        setWebActionStatus('Configuration saved to /wardriver.cfg on device SD!');
-        fetchWebStatus();
-      } else {
-        setWebActionStatus(`Save failed: HTTP ${res.status}`);
-      }
-    } catch (err) {
-      setWebActionStatus(`Save failed: ${err.message}`);
-    }
-  };
+      return Array.from(map.values());
+    });
+  }, []);
 
   useEffect(() => {
     if (logContainerRef.current) {
@@ -1124,6 +487,8 @@ export default function WarhogPigletWorkbench() {
     });
   }, [capturedTargets, bandFilter, searchQuery]);
 
+  const statusTone = tkStatus.tone === 'ok' ? 'text-emerald-300' : tkStatus.tone === 'bad' ? 'text-rose-300' : 'text-slate-400';
+
   return (
     <div className="space-y-4 max-w-7xl mx-auto p-2 sm:p-4 text-slate-200">
       {/* Header Banner */}
@@ -1141,7 +506,7 @@ export default function WarhogPigletWorkbench() {
               </span>
             </div>
             <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
-              Connect to your <strong className="text-amber-400">WarHog</strong> over USB to read the SD card directly using your firmware's native <code className="text-amber-300">SerialTool</code> WT protocol. View WiGLE logs, edit <code className="text-cyan-300">wardriver.cfg</code> in-place, and monitor live scans.
+              The Piglet Toolkit from the WarHog web flasher: connect your <strong className="text-amber-400">Piglet</strong> over USB to browse its SD card, view WiGLE logs, and edit <code className="text-cyan-300">wardriver.cfg</code> through the firmware&apos;s <code className="text-amber-300">SerialTool</code> WT protocol.
             </p>
           </div>
 
@@ -1170,7 +535,7 @@ export default function WarhogPigletWorkbench() {
             }`}
           >
             <Cable className="w-3.5 h-3.5" />
-            <span>SD Card File Explorer (Over USB / Disk)</span>
+            <span>SD Card File Explorer (USB)</span>
           </button>
 
           <button
@@ -1188,15 +553,15 @@ export default function WarhogPigletWorkbench() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('web')}
+            onClick={() => setActiveTab('device')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              activeTab === 'web'
+              activeTab === 'device'
                 ? 'bg-amber-500 text-slate-950 shadow-md'
                 : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
             }`}
           >
-            <Globe className="w-3.5 h-3.5" />
-            <span>Web UI Bridge ({webConnected ? 'Connected' : 'Offline'})</span>
+            <Activity className="w-3.5 h-3.5" />
+            <span>Device Control (USB)</span>
           </button>
 
           <button
@@ -1209,7 +574,7 @@ export default function WarhogPigletWorkbench() {
             }`}
           >
             <Terminal className="w-3.5 h-3.5" />
-            <span>Serial UART Console ({wtConnected ? 'Live' : 'Closed'})</span>
+            <span>Serial Console ({tkConnected ? 'Live' : 'Closed'})</span>
           </button>
 
           <button
@@ -1240,989 +605,126 @@ export default function WarhogPigletWorkbench() {
         </div>
       </div>
 
-      {/* TAB 1: READ SD CARD OVER USB & EXPLORER */}
-      {activeTab === 'sd' && (
-        <div className="space-y-4">
-          {/* Method Selection Bar */}
-          <div className="bg-[#12151c] border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Connection Mode:
-              </span>
-              <div className="flex items-center gap-1 bg-slate-950 p-1 border border-slate-800 rounded-lg">
-                <button
-                  type="button"
-                  onClick={() => setSdSourceMode('usb')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition ${
-                    sdSourceMode === 'usb'
-                      ? 'bg-amber-500 text-slate-950'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Cable className="w-3.5 h-3.5" />
-                  <span>USB WT Protocol</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSdSourceMode('picker')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition ${
-                    sdSourceMode === 'picker'
-                      ? 'bg-amber-500 text-slate-950'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <HardDrive className="w-3.5 h-3.5" />
-                  <span>PC Card Reader / Slot</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSdSourceMode('web');
-                    fetchWebStatus();
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition ${
-                    sdSourceMode === 'web'
-                      ? 'bg-amber-500 text-slate-950'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Globe className="w-3.5 h-3.5" />
-                  <span>Over Wi-Fi (SoftAP)</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Folder selection for WT protocol */}
-            {sdSourceMode === 'usb' && wtConnected && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-slate-400 font-semibold">Folder:</span>
-                <select
-                  value={selectedFolder}
-                  onChange={(e) => {
-                    const nextFolder = e.target.value;
-                    setSelectedFolder(nextFolder);
-                    refreshWtFiles(nextFolder);
-                  }}
-                  disabled={wtBusy}
-                  className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs font-mono text-amber-300 outline-none"
-                >
-                  <option value="/logs">/logs (Wardriving CSVs &amp; PCAPs)</option>
-                  <option value="/uploaded">/uploaded (Completed Uploads)</option>
-                  <option value="/archived">/archived (Archived Logs)</option>
-                  <option value="/">/ (Root &amp; wardriver.cfg)</option>
-                </select>
-              </div>
-            )}
-
-            {/* Mode-specific connect triggers */}
-            <div className="flex items-center gap-2">
-              {sdSourceMode === 'usb' && (
-                wtConnected ? (
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                      <span>{wtDeviceInfo || 'WT Protocol Live'}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => refreshWtFiles(selectedFolder)}
-                      disabled={wtBusy}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition"
-                    >
-                      <RefreshCw className={`w-3 h-3 ${wtBusy ? 'animate-spin' : ''}`} />
-                      <span>Refresh</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDisconnectUsbSerial}
-                      className="px-2.5 py-1 rounded bg-rose-600/80 hover:bg-rose-600 text-white text-xs font-bold transition"
-                    >
-                      Disconnect
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleConnectUsbSerial}
-                    className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition shadow-md"
-                  >
-                    <Usb className="w-4 h-4" />
-                    <span>Connect Hog over USB</span>
-                  </button>
-                )
-              )}
-
-              {sdSourceMode === 'picker' && (
-                <button
-                  type="button"
-                  onClick={handleMountDirectory}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
-                >
-                  <FolderOpen className="w-4 h-4" />
-                  <span>{sdMounted ? 'Change Directory' : 'Mount SD Card Folder'}</span>
-                </button>
-              )}
-
-              {sdSourceMode === 'web' && (
-                <button
-                  type="button"
-                  onClick={fetchWebStatus}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Fetch Files from 192.168.4.1</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Progress / Status banner */}
-          {(wtTransferProgress || sdStatusMsg) && (
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-amber-300 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {wtBusy && <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />}
-                <span>{wtTransferProgress || sdStatusMsg}</span>
-              </div>
-            </div>
+      {/* Piglet Toolkit connection bar (shared by the SD, config and console tabs) */}
+      {(activeTab === 'sd' || activeTab === 'config' || activeTab === 'device' || activeTab === 'serial') && (
+        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleConnect}
+            disabled={!serialSupported || tkConnecting}
+            className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg font-bold text-xs transition shadow-md disabled:opacity-50 ${
+              tkConnected ? 'bg-rose-600/80 hover:bg-rose-600 text-white' : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+            }`}
+          >
+            <Usb className="w-4 h-4" />
+            <span>{!serialSupported ? 'USB not supported' : tkConnected ? 'Disconnect' : tkConnecting ? 'Connecting…' : 'Connect over USB'}</span>
+          </button>
+          <span className={`text-xs font-mono flex items-center gap-2 ${statusTone}`}>
+            {(tkBusy || tkConnecting) && <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />}
+            {tkStatus.text}
+          </span>
+          {!serialSupported && (
+            <span className="text-xs text-rose-300">WebSerial needs Chrome or Edge on desktop.</span>
           )}
-
-          {/* Main Layout: Left Browser, Right File Content */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* File Tree */}
-            <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <HardDrive className="w-4 h-4 text-amber-400" />
-                  <h3 className="font-bold text-slate-100 text-xs uppercase tracking-wider">
-                    SD Card Files ({sdFiles.length})
-                  </h3>
-                </div>
-              </div>
-
-              <div className="space-y-1 max-h-96 overflow-y-auto border border-slate-800/80 rounded-lg p-2 bg-slate-950/60">
-                {sdFiles.length === 0 ? (
-                  <div className="py-12 text-center text-xs text-slate-500 space-y-2">
-                    {sdSourceMode === 'usb' ? (
-                      wtConnected ? (
-                        <p>No files found in {selectedFolder}.</p>
-                      ) : (
-                        <div>
-                          <p>Plug your Hog in via USB and click <strong>"Connect Hog over USB"</strong> above to read the SD card directly.</p>
-                          <p className="text-[11px] text-slate-600 mt-1">Talks to your firmware's <code>SerialTool.cpp</code> WT protocol.</p>
-                        </div>
-                      )
-                    ) : (
-                      <p>No SD files loaded. Use the connection bar above.</p>
-                    )}
-                  </div>
-                ) : (
-                  sdFiles.map(file => (
-                    <div
-                      key={file.path}
-                      className={`flex items-center justify-between p-2 rounded text-xs font-mono transition ${
-                        selectedSdFile?.path === file.path
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                          : 'hover:bg-slate-900 text-slate-300'
-                      }`}
-                    >
-                      <div
-                        onClick={() => handleSelectUsbFile(file)}
-                        className="flex items-center gap-2 truncate cursor-pointer flex-1"
-                      >
-                        {file.type === 'config' ? (
-                          <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        ) : file.type === 'log' ? (
-                          <FileText className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                        ) : (
-                          <FileCode className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        )}
-                        <span className="truncate">{file.path}</span>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0 ml-2">
-                        <span className="text-[10px] text-slate-500">
-                          {fmtSize(file.size)}
-                        </span>
-                        {file.source === 'usb' && (
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadFileToComputer(file)}
-                              className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-amber-300"
-                              title="Download to PC"
-                            >
-                              <Download className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteUsbFile(file)}
-                              className="p-1 rounded bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-400"
-                              title="Delete from SD"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Upload file to SD over USB */}
-              {wtConnected && (
-                <div className="pt-2 flex flex-col gap-1.5 border-t border-slate-800">
-                  <label className="text-[11px] text-slate-400 font-semibold">Upload file to Hog SD ({selectedFolder}):</label>
-                  <input
-                    type="file"
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0];
-                      if (!f) return;
-                      const path = (selectedFolder === '/' ? '' : selectedFolder) + '/' + f.name;
-                      const bytes = new Uint8Array(await f.arrayBuffer());
-                      try {
-                        setWtBusy(true);
-                        setWtTransferProgress(`Uploading ${path} over USB...`);
-                        await wtPut(path, bytes, (sent, total) => {
-                          setWtTransferProgress(`Uploading ${f.name}: ${fmtSize(sent)} / ${fmtSize(total)}`);
-                        });
-                        setSdStatusMsg(`Uploaded ${path} successfully!`);
-                        await refreshWtFiles(selectedFolder);
-                      } catch (err) {
-                        alert(`Upload failed: ${err.message}`);
-                      } finally {
-                        setWtBusy(false);
-                        setWtTransferProgress('');
-                      }
-                    }}
-                    className="text-xs text-slate-400 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-bold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Viewer / Editor */}
-            <div className="lg:col-span-2 bg-[#12151c] border border-slate-800 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <FileCode className="w-4 h-4 text-cyan-400" />
-                  <h3 className="font-bold text-slate-100 text-xs uppercase tracking-wider">
-                    {selectedSdFile ? selectedSdFile.path : 'File Content'}
-                  </h3>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {selectedSdFile?.path?.endsWith('.cfg') && (
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('config')}
-                      className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-amber-300 font-bold transition"
-                    >
-                      Open in Form Editor
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleSaveToSd}
-                    disabled={wtBusy}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs transition"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Save to SD over USB</span>
-                  </button>
-                </div>
-              </div>
-
-              <textarea
-                value={fileContent}
-                onChange={(e) => {
-                  setFileContent(e.target.value);
-                  if (selectedSdFile?.path?.endsWith('.cfg')) {
-                    setRawConfigText(e.target.value);
-                    setConfig(parseWardriverConfigText(e.target.value));
-                  }
-                }}
-                placeholder="Click on a file from the MicroSD browser on the left to read its contents over USB..."
-                className="w-full h-96 bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-200 outline-none resize-none focus:border-amber-500/50"
-              />
-            </div>
-          </div>
+          {!tkConnected && serialSupported && (
+            <span className="text-[11px] text-slate-500 ml-auto">
+              Plug the Piglet in with the same USB cable you flash with. Scanning pauses while the toolkit is connected.
+            </span>
+          )}
         </div>
       )}
+
+      {/* TAB 1: SD CARD FILE EXPLORER (Piglet Toolkit over USB) */}
+      <div className={activeTab === 'sd' ? 'space-y-4' : 'hidden'}>
+        {tkConnected ? (
+          <PigletFileBrowser
+            client={client}
+            connected={tkConnected}
+            busy={tkBusy}
+            setBusy={setTkBusy}
+            setStatus={setStatus}
+            log={log}
+            onCsvRows={handleCsvRows}
+          />
+        ) : (
+          <div className="bg-[#12151c] border border-slate-800 rounded-xl py-14 px-4 text-center text-xs text-slate-500 space-y-2">
+            <HardDrive className="w-8 h-8 mx-auto text-slate-600" />
+            <p>Connect the Piglet over USB to browse its SD card.</p>
+            <p className="text-[11px] text-slate-600">
+              Talks to the firmware&apos;s <code>SerialTool.cpp</code> WT protocol, exactly like the Piglet Toolkit in the web flasher.
+              Flash the latest firmware if the Piglet doesn&apos;t answer.
+            </p>
+          </div>
+        )}
+        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-3 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Toolkit log</span>
+            <button type="button" onClick={() => setTkLog('')} className="text-[11px] text-slate-500 hover:text-slate-300">Clear</button>
+          </div>
+          <pre ref={tkLogRef} className="h-28 overflow-y-auto bg-slate-950 border border-slate-800 rounded p-2 text-[11px] font-mono text-slate-400 whitespace-pre-wrap">{tkLog}</pre>
+        </div>
+      </div>
 
       {/* TAB 2: WARDRIVER.CFG EDITOR */}
-      {activeTab === 'config' && (
-        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-5">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 pb-4 border-b border-slate-800">
-            <div className="space-y-1">
-              <h2 className="font-bold text-slate-100 text-sm flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-amber-400" />
-                <span>WarHog /wardriver.cfg Configuration</span>
-              </h2>
-              <p className="text-xs text-slate-400">
-                Official key=value configuration file placed at the root of your MicroSD card.
-              </p>
-            </div>
+      <div className={activeTab === 'config' ? '' : 'hidden'}>
+        <PigletConfigEditor
+          client={client}
+          connected={tkConnected}
+          busy={tkBusy}
+          setBusy={setTkBusy}
+          setStatus={setStatus}
+          log={log}
+        />
+      </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1 bg-slate-950 p-1 border border-slate-800 rounded-lg">
-                <button
-                  type="button"
-                  onClick={() => setCfgViewMode('visual')}
-                  className={`px-3 py-1 rounded text-xs font-bold transition ${
-                    cfgViewMode === 'visual' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Visual Form
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCfgViewMode('code')}
-                  className={`px-3 py-1 rounded text-xs font-bold transition ${
-                    cfgViewMode === 'code' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Code View
-                </button>
-              </div>
+      {/* TAB 3: DEVICE CONTROL over USB (replaces the SoftAP Web UI bridge) */}
+      <div className={activeTab === 'device' ? '' : 'hidden'}>
+        <PigletDeviceControl
+          client={client}
+          connected={tkConnected}
+          active={activeTab === 'device'}
+          busy={tkBusy}
+          setBusy={setTkBusy}
+          setStatus={setStatus}
+          log={log}
+          onEditConfig={() => setActiveTab('config')}
+        />
+      </div>
 
-              <button
-                type="button"
-                onClick={handleSaveToSd}
-                disabled={wtBusy}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs transition"
-                title="Save configuration to Hog SD card via WT protocol"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>Save to Hog over USB</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDownloadConfigFile}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download .cfg</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Hardware Presets Strip */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              1-Click Hardware Target Presets:
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-              {Object.entries(HARDWARE_PRESETS).map(([key, item]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => handleApplyPreset(key)}
-                  className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between ${
-                    selectedPresetKey === key
-                      ? 'bg-amber-500/15 border-amber-500/60 text-slate-100'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
-                  }`}
-                >
-                  <div className="font-bold text-xs">{item.label}</div>
-                  <div className="text-[10px] text-slate-500 mt-1 line-clamp-2">{item.description}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* View Mode: Visual Form */}
-          {cfgViewMode === 'visual' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
-              {/* Cloud & Upload APIs */}
-              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-                <div className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Cloud Upload APIs</span>
-                </div>
-                <div className="space-y-2 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">WiGLE Encoded Token (wigleBasicToken)</label>
-                    <input
-                      type="text"
-                      value={config.wigleBasicToken}
-                      onChange={(e) => handleConfigChange('wigleBasicToken', e.target.value)}
-                      placeholder="e.g. QUlEMTIzNDU..."
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">WDGoWars API Key (wdgwarsApiKey)</label>
-                    <input
-                      type="text"
-                      value={config.wdgwarsApiKey}
-                      onChange={(e) => handleConfigChange('wdgwarsApiKey', e.target.value)}
-                      placeholder="From https://wdgwars.pl/profile"
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Wardrift API Key (wardriftApiKey)</label>
-                    <input
-                      type="text"
-                      value={config.wardriftApiKey}
-                      onChange={(e) => handleConfigChange('wardriftApiKey', e.target.value)}
-                      placeholder="wdk_..."
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Max Boot Uploads (-1 = All, 0 = Off)</label>
-                    <input
-                      type="number"
-                      value={config.maxBootUploads}
-                      onChange={(e) => handleConfigChange('maxBootUploads', parseInt(e.target.value) || 0)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Wi-Fi & SoftAP */}
-              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-                <div className="text-xs font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Wifi className="w-3.5 h-3.5" />
-                  <span>Wi-Fi &amp; Access Point</span>
-                </div>
-                <div className="space-y-2 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Home Wi-Fi SSID (homeSsid)</label>
-                    <input
-                      type="text"
-                      value={config.homeSsid}
-                      onChange={(e) => handleConfigChange('homeSsid', e.target.value)}
-                      placeholder="MyHomeWifi"
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Home Wi-Fi Password (homePsk)</label>
-                    <input
-                      type="password"
-                      value={config.homePsk}
-                      onChange={(e) => handleConfigChange('homePsk', e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Device SoftAP SSID (wardriverSsid)</label>
-                    <input
-                      type="text"
-                      value={config.wardriverSsid}
-                      onChange={(e) => handleConfigChange('wardriverSsid', e.target.value)}
-                      placeholder="WarHog-WARDRIVE"
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Device SoftAP Password (wardriverPsk)</label>
-                    <input
-                      type="text"
-                      value={config.wardriverPsk}
-                      onChange={(e) => handleConfigChange('wardriverPsk', e.target.value)}
-                      placeholder="wardrive1234"
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  <div className="pt-1 flex items-center justify-between">
-                    <label className="text-slate-400">Upload on Home Network Seen</label>
-                    <input
-                      type="checkbox"
-                      checked={config.uploadOnNetworkSeen}
-                      onChange={(e) => handleConfigChange('uploadOnNetworkSeen', e.target.checked)}
-                      className="accent-amber-500"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-slate-400">Auto-Start After Boot Upload</label>
-                    <input
-                      type="checkbox"
-                      checked={config.autoStartAfterUpload}
-                      onChange={(e) => handleConfigChange('autoStartAfterUpload', e.target.checked)}
-                      className="accent-amber-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Radio & Scanning */}
-              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-                <div className="text-xs font-bold text-pink-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Radio className="w-3.5 h-3.5" />
-                  <span>Radio &amp; GPS</span>
-                </div>
-                <div className="space-y-2 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">GPS Baud Rate (gpsBaud)</label>
-                    <select
-                      value={config.gpsBaud}
-                      onChange={(e) => handleConfigChange('gpsBaud', parseInt(e.target.value))}
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    >
-                      <option value="9600">9600 (Standard ATGM336H / NEO-6M)</option>
-                      <option value="38400">38400</option>
-                      <option value="115200">115200 (High-Speed GNSS)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Scan Mode (scanMode)</label>
-                    <select
-                      value={config.scanMode}
-                      onChange={(e) => handleConfigChange('scanMode', e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    >
-                      <option value="aggressive">Aggressive (100ms dwell, 1.5s gap)</option>
-                      <option value="powersaving">Power Saving (200ms dwell, 10s gap)</option>
-                    </select>
-                  </div>
-                  <div className="pt-1 flex items-center justify-between">
-                    <label className="text-slate-400">Scan 2.4 GHz Band (scan24)</label>
-                    <input
-                      type="checkbox"
-                      checked={config.scan24}
-                      onChange={(e) => handleConfigChange('scan24', e.target.checked)}
-                      className="accent-amber-500"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-slate-400">Scan 5 GHz Band (scan5 - C5 only)</label>
-                    <input
-                      type="checkbox"
-                      checked={config.scan5}
-                      onChange={(e) => handleConfigChange('scan5', e.target.checked)}
-                      className="accent-amber-500"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-slate-400">BLE Sniffer &amp; Wardrive (bluetoothScan)</label>
-                    <input
-                      type="checkbox"
-                      checked={config.bluetoothScan}
-                      onChange={(e) => handleConfigChange('bluetoothScan', e.target.checked)}
-                      className="accent-amber-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Mesh & Companion App Bridge */}
-              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-                <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5" />
-                  <span>Mesh &amp; Companion App</span>
-                </div>
-                <div className="space-y-2 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Mesh Mode on Boot (meshModeOnBoot)</label>
-                    <select
-                      value={config.meshModeOnBoot}
-                      onChange={(e) => handleConfigChange('meshModeOnBoot', e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    >
-                      <option value="none">None (Solo Wardriving)</option>
-                      <option value="core">Core (ESP-NOW Coordinator)</option>
-                      <option value="node">Node (Worker Node)</option>
-                      <option value="off">Off (Radio Idle)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">BLE Companion App (blePersonality)</label>
-                    <select
-                      value={config.blePersonality}
-                      onChange={(e) => handleConfigChange('blePersonality', e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    >
-                      <option value="wardrivego">Wardrive Go / WarBLE Go (RocketGod)</option>
-                      <option value="biscuit">Biscuit Manager (Hedge / Biscuit Shop)</option>
-                    </select>
-                  </div>
-                  <div className="pt-1 flex items-center justify-between">
-                    <label className="text-slate-400">Enable BLE Bridge in Solo Mode</label>
-                    <input
-                      type="checkbox"
-                      checked={config.blePhoneSolo}
-                      onChange={(e) => handleConfigChange('blePhoneSolo', e.target.checked)}
-                      className="accent-amber-500"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-slate-400">Biscuit Report over ESP-NOW</label>
-                    <input
-                      type="checkbox"
-                      checked={config.biscuitReport}
-                      onChange={(e) => handleConfigChange('biscuitReport', e.target.checked)}
-                      className="accent-amber-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Hardware, Theme & UI */}
-              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-                <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Cpu className="w-3.5 h-3.5" />
-                  <span>Hardware &amp; Theme</span>
-                </div>
-                <div className="space-y-2 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Board Architecture (board)</label>
-                    <select
-                      value={config.board}
-                      onChange={(e) => handleConfigChange('board', e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    >
-                      <option value="auto">auto (Detect by Chip)</option>
-                      <option value="s3">s3 (ESP32-S3 / CYD)</option>
-                      <option value="c5">c5 (XIAO ESP32-C5 Dual-Band)</option>
-                      <option value="c6">c6 (XIAO ESP32-C6 / Waveshare)</option>
-                      <option value="c3">c3 (ESP32-C3 Node)</option>
-                      <option value="exp">exp (S3 + Expansion Base)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">UI Color Theme (theme)</label>
-                    <select
-                      value={config.theme}
-                      onChange={(e) => handleConfigChange('theme', e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    >
-                      <option value="dracula">Dracula (Default)</option>
-                      <option value="midnight">Midnight</option>
-                      <option value="nord">Nord</option>
-                      <option value="gruvbox">Gruvbox</option>
-                      <option value="catppuccin">Catppuccin</option>
-                      <option value="tokyonight">Tokyo Night</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-slate-400">Speed Units</label>
-                    <select
-                      value={config.speedUnits}
-                      onChange={(e) => handleConfigChange('speedUnits', e.target.value)}
-                      className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-slate-200 text-xs"
-                    >
-                      <option value="mph">MPH</option>
-                      <option value="kmh">KM/H</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <label className="text-slate-400">Rotate Screen 180°</label>
-                    <input
-                      type="checkbox"
-                      checked={config.rotateScreen180}
-                      onChange={(e) => handleConfigChange('rotateScreen180', e.target.checked)}
-                      className="accent-amber-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Identification & Whitelist */}
-              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
-                <div className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Device Name &amp; Whitelist</span>
-                </div>
-                <div className="space-y-2 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Custom Device Name (deviceName)</label>
-                    <input
-                      type="text"
-                      value={config.deviceName}
-                      onChange={(e) => handleConfigChange('deviceName', e.target.value)}
-                      placeholder="e.g. rover1"
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">Marauder Beacon SSID (beaconSsid)</label>
-                    <input
-                      type="text"
-                      value={config.beaconSsid}
-                      onChange={(e) => handleConfigChange('beaconSsid', e.target.value)}
-                      placeholder="Custom SSID for beacon spam"
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">SSID Whitelist 1 (never logged)</label>
-                    <input
-                      type="text"
-                      value={config.ssidWhitelist1}
-                      onChange={(e) => handleConfigChange('ssidWhitelist1', e.target.value)}
-                      placeholder="e.g. HomeNet"
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-slate-400 block mb-0.5">SSID Whitelist 2</label>
-                    <input
-                      type="text"
-                      value={config.ssidWhitelist2}
-                      onChange={(e) => handleConfigChange('ssidWhitelist2', e.target.value)}
-                      placeholder="e.g. WorkGuest"
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none focus:border-amber-500/50"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* View Mode: Code View */
-            <div className="space-y-2">
-              <textarea
-                value={rawConfigText}
-                onChange={(e) => handleRawTextChange(e.target.value)}
-                className="w-full h-96 bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-200 outline-none resize-none focus:border-amber-500/50"
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 3: WEB UI REST BRIDGE */}
-      {activeTab === 'web' && (
-        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Globe className="w-4 h-4 text-cyan-400" />
-                <h2 className="font-bold text-slate-100 text-sm">WarHog Web UI REST Bridge</h2>
-              </div>
-              <p className="text-xs text-slate-400">
-                Connect your PC's Wi-Fi to the WarHog SoftAP (<code className="text-amber-300">WarHog-WARDRIVE</code> @ 192.168.4.1) or home Wi-Fi IP to pull live telemetry, download SD logs, and control scanning.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={deviceIp}
-                onChange={(e) => setDeviceIp(e.target.value)}
-                placeholder="192.168.4.1"
-                className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs font-mono text-slate-200 outline-none w-32"
-              />
-              <button
-                type="button"
-                onClick={fetchWebStatus}
-                disabled={webConnecting}
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
-              >
-                <RefreshCw className={`w-3 h-3 ${webConnecting ? 'animate-spin' : ''}`} />
-                <span>{webConnected ? 'Refresh' : 'Connect'}</span>
-              </button>
-            </div>
-          </div>
-
-          {webActionStatus && (
-            <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-amber-300">
-              {webActionStatus}
-            </div>
-          )}
-
-          {/* Telemetry Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5">
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-1">
-              <div className="text-[10px] uppercase font-bold text-slate-500">Scanning Status</div>
-              <div className={`text-sm font-bold ${webTelemetry?.allowScan ? 'text-emerald-400' : 'text-slate-400'}`}>
-                {webTelemetry ? (webTelemetry.allowScan ? 'ACTIVE' : 'IDLE / PAUSED') : '--'}
-              </div>
-            </div>
-
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-1">
-              <div className="text-[10px] uppercase font-bold text-slate-500">GPS Fix</div>
-              <div className={`text-sm font-bold ${webTelemetry?.gpsFix ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {webTelemetry ? (webTelemetry.gpsFix ? '3D FIX' : 'SEARCHING') : '--'}
-              </div>
-            </div>
-
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-1">
-              <div className="text-[10px] uppercase font-bold text-slate-500">Found 2.4 GHz</div>
-              <div className="text-sm font-bold text-amber-400">
-                {webTelemetry?.found2g ?? '--'}
-              </div>
-            </div>
-
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-1">
-              <div className="text-[10px] uppercase font-bold text-slate-500">Found 5 GHz</div>
-              <div className="text-sm font-bold text-pink-400">
-                {webTelemetry?.found5g ?? '--'}
-              </div>
-            </div>
-
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-1">
-              <div className="text-[10px] uppercase font-bold text-slate-500">Found BLE</div>
-              <div className="text-sm font-bold text-indigo-400">
-                {webTelemetry?.foundBle ?? '--'}
-              </div>
-            </div>
-
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-1">
-              <div className="text-[10px] uppercase font-bold text-slate-500">Battery</div>
-              <div className="text-sm font-bold text-emerald-400">
-                {webTelemetry?.batteryPresent
-                  ? `${webTelemetry.batteryVolts?.toFixed(2)}V (${webTelemetry.batteryPercent}%)`
-                  : 'USB Powered'}
-              </div>
-            </div>
-          </div>
-
-          {/* Device Controls */}
-          <div className="flex flex-wrap items-center gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => triggerWebAction('/start', 'Start Wardriving')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition"
-            >
-              <Play className="w-3.5 h-3.5" />
-              <span>Start Scan</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => triggerWebAction('/stop', 'Stop Wardriving')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition"
-            >
-              <Square className="w-3.5 h-3.5" />
-              <span>Stop Scan</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => triggerWebAction('/uploadViaHome', 'Trigger Home Upload')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Trigger Home Upload</span>
-            </button>
-            <button
-              type="button"
-              onClick={handlePushConfigOverWeb}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Push /wardriver.cfg to Device</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => triggerWebAction('/reboot', 'Reboot Device')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reboot</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 4: WEBSERIAL UART CONSOLE */}
+      {/* TAB 4: SERIAL CONSOLE (same USB session as the toolkit) */}
       {activeTab === 'serial' && (
         <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-emerald-400" />
-                <h2 className="font-bold text-slate-100 text-sm">WebSerial UART Console</h2>
-                {wtDeviceInfo && (
+                <h2 className="font-bold text-slate-100 text-sm">Serial Console</h2>
+                {tkInfo && (
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                    {wtDeviceInfo}
+                    {tkInfo}
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-400">
-                Direct hardware console at 115200 baud. Monitor live scans, debug messages, and send WT protocol commands.
+                Firmware debug output from the toolkit&apos;s USB session. Lines you send go straight to the Piglet; WT replies that no file operation is waiting for show up here.
               </p>
             </div>
-
-            <div className="flex items-center gap-2">
-              <select
-                value={serialBaud}
-                onChange={(e) => setSerialBaud(Number(e.target.value))}
-                disabled={wtConnected}
-                className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs font-mono text-slate-200 outline-none"
-              >
-                <option value="115200">115200 (WarHog Standard)</option>
-                <option value="9600">9600</option>
-              </select>
-
-              {wtConnected ? (
-                <button
-                  type="button"
-                  onClick={handleDisconnectUsbSerial}
-                  className="px-3 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition"
-                >
-                  Disconnect
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleConnectUsbSerial}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
-                >
-                  <Usb className="w-3 h-3" />
-                  <span>Connect Serial</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Quick Hardware Keys */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-400 font-semibold">Quick WT Commands:</span>
-            <button
-              type="button"
-              onClick={() => wtHello().then(i => setSdStatusMsg(`WT HELLO: ${i}`)).catch(e => setSdStatusMsg(`Err: ${e.message}`))}
-              disabled={!wtConnected || wtBusy}
-              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-mono font-bold text-amber-300 border border-slate-700 transition"
-            >
-              WT HELLO
-            </button>
-            <button
-              type="button"
-              onClick={() => refreshWtFiles('/logs')}
-              disabled={!wtConnected || wtBusy}
-              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-mono font-bold text-cyan-300 border border-slate-700 transition"
-            >
-              WT LS /logs
-            </button>
-            <button
-              type="button"
-              onClick={() => refreshWtFiles('/')}
-              disabled={!wtConnected || wtBusy}
-              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-mono font-bold text-pink-300 border border-slate-700 transition"
-            >
-              WT LS / (Root)
-            </button>
-            <button
-              type="button"
-              onClick={() => wtBye().then(() => setSdStatusMsg('WT BYE: scanning resumed')).catch(e => setSdStatusMsg(`Err: ${e.message}`))}
-              disabled={!wtConnected}
-              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-mono font-bold text-emerald-300 border border-slate-700 transition"
-            >
-              WT BYE (Resume Scanning)
-            </button>
             <button
               type="button"
               onClick={() => setSerialLogs([])}
-              className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-400 hover:text-slate-200 border border-slate-800 ml-auto"
+              className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-400 hover:text-slate-200 border border-slate-800"
             >
               Clear Logs
             </button>
           </div>
 
-          {/* Log Window */}
           <div
             ref={logContainerRef}
             className="w-full h-80 bg-slate-950 border border-slate-800 rounded-lg p-3 overflow-y-auto font-mono text-[11px] leading-relaxed text-slate-300 space-y-0.5"
           >
             {serialLogs.length === 0 ? (
               <div className="py-12 text-center text-slate-600">
-                UART log stream empty. Connect via WebSerial to monitor live scans and debug lines.
+                {tkConnected ? 'Waiting for firmware output…' : 'Connect over USB to see the Piglet’s serial output.'}
               </div>
             ) : (
               serialLogs.map((l, i) => (
@@ -2233,18 +735,17 @@ export default function WarhogPigletWorkbench() {
             )}
           </div>
 
-          {/* Command Input */}
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              if (serialInput.trim() && wtWriterRef.current) {
-                try {
-                  await writeWtLine(serialInput.trim());
-                  setSerialLogs(prev => [...prev, `> ${serialInput.trim()}`]);
-                  setSerialInput('');
-                } catch (err) {
-                  setSerialLogs(prev => [...prev, `[ERROR] ${err.message}`]);
-                }
+              const line = serialInput.trim();
+              if (!line || !tkConnected) return;
+              try {
+                await client.writeLine(line);
+                setSerialLogs((prev) => [...prev, `> ${line}`]);
+                setSerialInput('');
+              } catch (err) {
+                setSerialLogs((prev) => [...prev, `[ERROR] ${err.message}`]);
               }
             }}
             className="flex items-center gap-2"
@@ -2253,13 +754,13 @@ export default function WarhogPigletWorkbench() {
               type="text"
               value={serialInput}
               onChange={(e) => setSerialInput(e.target.value)}
-              placeholder="Send line to WarHog (e.g. WT HELLO, WT LS /logs)..."
-              disabled={!wtConnected}
+              placeholder={tkBusy ? 'Waiting for the current file operation…' : 'Send a line to the Piglet (e.g. WT HELLO)'}
+              disabled={!tkConnected || tkBusy}
               className="flex-1 bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs font-mono text-slate-200 outline-none focus:border-amber-500/50 disabled:opacity-50"
             />
             <button
               type="submit"
-              disabled={!wtConnected || !serialInput.trim()}
+              disabled={!tkConnected || tkBusy || !serialInput.trim()}
               className="px-4 py-1.5 rounded bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs transition"
             >
               Send
@@ -2271,14 +772,25 @@ export default function WarhogPigletWorkbench() {
       {/* TAB 5: WEB FLASHER */}
       {activeTab === 'flasher' && (
         <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-5">
-          <div className="space-y-1 pb-3 border-b border-slate-800">
-            <div className="flex items-center gap-2">
-              <Flame className="w-4 h-4 text-amber-400" />
-              <h2 className="font-bold text-slate-100 text-sm">WarHog Browser Web Flasher</h2>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Flame className="w-4 h-4 text-amber-400" />
+                <h2 className="font-bold text-slate-100 text-sm">WarHog Web Flasher</h2>
+              </div>
+              <p className="text-xs text-slate-400">
+                Firmware is flashed from the hosted WarHog web flasher (ESP Web Tools, plus a patched esptool-js for ESP32-C5 over native USB).
+              </p>
             </div>
-            <p className="text-xs text-slate-400">
-              Zero-install browser flashing for ESP32 boards directly from GitHub Releases using ESP Web Tools and WebSerial.
-            </p>
+            <a
+              href={FLASHER_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Open the web flasher</span>
+            </a>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -2298,19 +810,28 @@ export default function WarhogPigletWorkbench() {
                 </div>
 
                 <div className="space-y-1.5 pt-2 border-t border-slate-800/80">
-                  <a
-                    href="https://github.com/olosnoks/warhog/releases/latest"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs transition"
-                  >
-                    <Download className="w-3 h-3" />
-                    <span>Download Firmware Binary</span>
-                  </a>
-                  {p.manifest && (
-                    <div className="text-[10px] text-slate-500 text-center font-mono">
-                      Manifest: {p.manifest}
-                    </div>
+                  {p.manifest ? (
+                    <>
+                      <a
+                        href={FLASHER_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs transition"
+                      >
+                        <Flame className="w-3 h-3" />
+                        <span>Flash in browser</span>
+                      </a>
+                      <a
+                        href={`${FLASHER_URL}manifests/${p.manifest}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block text-[10px] text-slate-500 hover:text-slate-300 text-center font-mono"
+                      >
+                        manifest: {p.manifest}
+                      </a>
+                    </>
+                  ) : (
+                    <div className="text-[10px] text-slate-500 text-center">Not in the web flasher. Build it with PlatformIO.</div>
                   )}
                 </div>
               </div>
@@ -2442,7 +963,7 @@ export default function WarhogPigletWorkbench() {
               {filteredTargets.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-8 text-center text-slate-500">
-                    No targets loaded. Connect your Hog over USB, select a <code className="text-cyan-300">.csv</code> log file, or mount your SD card.
+                    No targets loaded. Connect the Piglet over USB and open a <code className="text-cyan-300">.csv</code> log in the SD Card File Explorer.
                   </td>
                 </tr>
               ) : (

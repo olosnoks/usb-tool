@@ -129,6 +129,10 @@ describe('UI Workbench Render Sanity Check', () => {
     expect(html).toContain('WARHOG &amp; PIGLET TOOLSUITE');
     expect(html).toContain('SD Card File Explorer');
     expect(html).toContain('wardriver.cfg Editor');
+    // No WebSerial in the test environment: the toolkit says so instead of failing on click.
+    expect(html).toContain('WebSerial needs Chrome or Edge on desktop.');
+    expect(html).toContain('Connect the Piglet over USB to browse its SD card.');
+    expect(html).toContain('Toolkit log');
 
     const cfgText = serializeWardriverConfig({
       deviceName: 'Piglet-TestRig',
