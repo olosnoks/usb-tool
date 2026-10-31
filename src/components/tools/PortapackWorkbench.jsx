@@ -608,7 +608,7 @@ export default function PortapackWorkbench() {
             <span className="text-[10px] px-2 py-0.5 bg-purple-950/80 border border-purple-500/40 text-purple-300 rounded font-mono font-semibold">
               {state.firmwareVersion || (state.isDemo ? 'Mayhem v2.0.0' : 'Mayhem (version unknown)')}
             </span>
-            <StatusBadge status={state.isDemo ? 'info' : 'success'} text={state.isDemo ? 'DEMO' : 'CONNECTED'} />
+            <StatusBadge status={state.isDemo ? 'warning' : 'success'} label={state.isDemo ? 'DEMO' : 'CONNECTED'} />
             <span className="text-slate-600 text-xs">•</span>
             <div className="flex items-center gap-1.5 text-xs text-slate-300">
               <span className="text-slate-400">By</span>
