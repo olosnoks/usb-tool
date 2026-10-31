@@ -4,11 +4,11 @@
 ![Web Serial API](https://img.shields.io/badge/Web%20Serial%20API-Native%20W3C-cyan?style=for-the-badge&logo=w3c)
 ![License](https://img.shields.io/badge/license-MIT-amber?style=for-the-badge)
 
-**Skon's USB Tool** is an elite client-side hardware hacker workbench and serial tool built with Vite, React, and Tailwind CSS, engineered specifically for static hosting on **GitHub Pages**.
+**Skon's USB Tool** is a client-side hardware workbench and serial tool built with Vite, React, and Tailwind CSS, designed for static hosting on **GitHub Pages**.
 
-It transforms your web browser into an industrial-grade serial station combining low-level Web Serial communication, true in-browser ESP32 ROM bootloader flashing, a 60 FPS real-time multi-channel oscilloscope, synchronized live hex memory inspection, automated U-Boot autoboot killing with root password bypass, and overnight zero-drop disk logging.
+It turns a Chromium browser into a serial bench: Web Serial terminal and logging, in-browser ESP32 / ESP8266 ROM bootloader flashing with MD5 verification, a multi-channel serial plotter, live hex inspection, U-Boot autoboot interruption and `md.b` memory dumps, and long-running disk logging.
 
-Beyond flashing and serial it has grown into a full hardware-hacking suite — raw 802.11 monitor-mode capture for Alfa / RTL8812AU adapters, protocol analyzers (logic analyzer, CAN / OBD-II, I²C / SPI, Modbus RTU), RF and badge companions (Flipper Zero, Proxmark3, PortaPack / HackRF, GPS wardriving), hardware programmers (CH341A, CMSIS-DAP, JTAG, AVR ISP, USB-PD), a BadUSB / DuckyScript studio, and an in-browser CyberChef workbench — all running client-side with no backend.
+Beyond serial it covers 802.11 monitor-mode capture for Alfa / RTL8812AU and Panda PAU09 adapters, protocol tools (CAN / OBD-II, Modbus RTU), companions for the Flipper Zero, Proxmark3, PortaPack / HackRF and WarHog / Piglet wardrivers, a CH341A SPI flash programmer, a DuckyScript studio, and an in-browser CyberChef workbench, all running client-side with no backend. Some tools are interface demos without hardware support yet; they are marked **DEMO** in the app and listed below.
 
 ---
 
@@ -16,38 +16,51 @@ Beyond flashing and serial it has grown into a full hardware-hacking suite — r
 
 **Core Operations** — Terminal & Console (serial monitor + baud hunter) · Firmware Flasher (ESP32 / ESP8266 ROM bootloader) · Hardware Controls (DTR/RTS strapping, U-Boot interrupter)
 
-**Analysis & Protocol Lab** — Packet & Protocol Lab (802.11 dissector, PCAP, hex stream) · 24 MHz Logic Analyzer · CAN Bus & OBD-II Scanner · I²C & SPI Bus Explorer · Modbus RTU & RS-485 · Oscilloscope Plotter · MitM Serial Bridge · CyberChef Workbench (Web Worker pipeline)
+**Analysis & Protocol Lab** — Packet & Protocol Lab (802.11 dissector, PCAP, hex stream) · CAN Bus & OBD-II Scanner · Modbus RTU & RS-485 · Oscilloscope Plotter · MitM Serial Bridge · CyberChef Workbench (Web Worker pipeline) · 24 MHz Logic Analyzer *(demo)* · I²C & SPI Bus Explorer *(demo)*
 
-**RF, Wireless & Badges** — Alfa Wi-Fi (RTL8812AU WebUSB monitor mode & 802.11 capture) · Flipper Zero Suite · Proxmark3 / PM5 · PortaPack Mayhem SDR (HackRF) · GPS & Wardrive Suite
+**RF, Wireless & Badges** — Wi-Fi Monitor (Alfa RTL8812AU / Panda PAU09 over WebUSB) · Flipper Zero Suite · Proxmark3 / PM5 · PortaPack Mayhem SDR (HackRF) · GPS & Wardrive Suite · Warhog & Piglet Suite
 
-**Hardware & Payloads** — BadUSB & Payload Studio (DuckyScript) · Hardware Programmers (CH341A, CMSIS-DAP, JTAG SVF, AVR ISP) · USB-PD Power Delivery
+**Hardware & Payloads** — BadUSB & Payload Studio (DuckyScript) · Hardware Programmers: CH341A SPI flash, plus CMSIS-DAP, JTAG SVF and AVR ISP *(demo)* · USB-PD Power Delivery *(demo)*
 
 **Device Utilities** — MicroPython Files · Improv Wi-Fi · Telemetry Gauges · Crash & Panic Alerts · Test Runner & Scripts · USB Recon & Autopsy · Silicon Memory Dump
 
-**Setup & Reference** — In-app Knowledge Base Wiki (28+ engineering manuals) · driver setup guides · pinout diagrams · VID/PID chip-intelligence database
+**Setup & Reference** — In-app Knowledge Base Wiki · driver setup guides · pinout diagrams · VID/PID chip-intelligence database
+
+### Hardware support status
+
+| Status | Tools |
+|---|---|
+| Real hardware | Terminal, ESP flasher, Hardware Controls, U-Boot deck, Plotter, Serial Bridge, Modbus RTU, Wi-Fi Monitor, Flipper Zero, Proxmark3, PortaPack (serial console and HackRF WebUSB), GPS & Wardrive, Warhog & Piglet, CH341A, BLE Explorer, WebUSB DFU, MicroPython, Improv |
+| Real hardware, with limits | Silicon Memory Dump: chip ID and MAC on ESP32 / S3 / C3; flash reads only on ESP32 and ESP8266 (newer ROMs need the esptool stub). Kismet Studio: connects to a Kismet server, but live device listing isn't implemented yet. PortaPack sensor and digital-mode decoders: no decoder feed from the device yet. CAN / OBD-II: SLCAN sniffing, transmit and DTC read/clear work; live OBD gauges (PID polling) aren't implemented yet. |
+| Demo only (no hardware path yet) | Logic Analyzer, I²C / SPI Bus Explorer, JTAG, AVR ISP, CMSIS-DAP, USB-PD |
+
+Several real-hardware tools also offer an opt-in simulation for trying the interface; simulated data is always labeled in the app.
 
 ---
 
 ## ⚡ Power Features & Tool Suite
 
-### 1. ⚡ Native ESP32 / ESP8266 ROM Bootloader Flashing Engine
-Unlike standard web serial terminals that only spray raw bytes, Skon's USB Tool implements the **full SLIP-framed ESP ROM bootloader protocol**:
-- **Automated Hardware Strapping**: Pulses DTR and RTS through the standard transistor auto-reset circuit (EN $\rightarrow$ GPIO0) to guarantee entry into ROM bootloader mode.
-- **ROM Sync Handshake**: Exchanges 36-byte synchronization frames with the chip ROM.
-- **SPI Flash Sector Erase & Write**: Programs target flash blocks with 32-bit sequence numbers and real-time XOR checksum verification.
-- **Automatic Target Reboot**: Automatically resets the MCU into the newly flashed user firmware upon completion.
+### 1. ⚡ ESP32 / ESP8266 ROM Bootloader Flashing
+The flasher speaks the SLIP-framed ESP ROM bootloader protocol directly (ROM mode, like `esptool.py --no-stub`) and checks every reply:
+- **Reset into the bootloader**: classic DTR/RTS auto-reset, or the USB-Serial/JTAG sequence on native-USB chips (303A:1001).
+- **Sync and chip detection**: retries SYNC until the ROM answers (and fails clearly if it never does), then identifies the chip from its magic register.
+- **Erase and write**: SPI attach, `FLASH_BEGIN` with an erase timeout scaled to the image, and status-checked 1 KB `FLASH_DATA` blocks with sequence numbers and checksums.
+- **Verify**: each image is checked with the ROM's `SPI_FLASH_MD5` (the ESP8266 ROM has no MD5 command, so its writes are reported as unverified).
+- **Reboot**: hard-resets the chip into the new firmware.
 
-### 2. 📈 60 FPS Real-Time Multi-Channel Oscilloscope & Serial Plotter
+ROM mode is uncompressed and runs at the console baud rate, so large images take a while. ESP32-C5 boards are best flashed with the WarHog web flasher, which carries the C5-specific fixes.
+
+### 2. 📈 Real-Time Multi-Channel Serial Plotter
 - **Auto-Telemetry Parser**: Detects comma, space, colon, or key-value delimited numbers (e.g. `12.4, 45.1, 88.0` or `temp:24.5 volt:3.31 pid:42.0`).
-- **Hardware Canvas Waveforms**: 60 FPS GPU-accelerated rolling waveform canvas with 50 to 500 sample window buffer.
+- **Rolling Canvas Waveforms**: `requestAnimationFrame`-driven 2D canvas with a 50 to 500 sample window.
 - **Telemetry Statistics**: Displays instantaneous, Min, Max, and Average values per channel.
 - **CSV Data Export**: One-click download of plotted session datasets for Excel, Python, or MATLAB.
 
-### 3. 🛡️ U-Boot Exploit & Memory Dump Deck
-- **Automated Autoboot Killer**: Transmits 40 Hz Spacebar bursts and **automatically halts** the millisecond a shell prompt (`=>`, `U-Boot>`, `# `) is detected.
-- **1-Click Root Password Bypass**: Injects `setenv bootargs "${bootargs} init=/bin/sh"; boot` to drop directly into an unauthenticated root shell on Linux IoT devices.
+### 3. 🛡️ U-Boot Console & Memory Dump Deck
+- **Autoboot Interrupter**: Sends Spacebar bursts and stops as soon as a shell prompt (`=>`, `U-Boot>`, `# `) appears.
+- **Single-user boot helper**: Injects `setenv bootargs "${bootargs} init=/bin/sh"; boot` to boot Linux straight to a shell on devices you own or are authorized to test.
 - **Environment Parser**: Executes `printenv` and parses flash offsets, boot scripts, and IP configs into a searchable table.
-- **Direct Flash / RAM Memory Dumper**: Streams `md.b` hex dump commands in automated chunks, parses output bytes, and compiles them into a downloadable `.bin` firmware file.
+- **Memory Dumper**: Sends `md.b` in 256-byte chunks, parses the returned bytes by address, and saves a `.bin` only when every byte was received.
 
 ### 4. 🔬 USB-UART Chip Identification & Bench Guide
 - Automatically queries USB Vendor ID (VID) and Product ID (PID) from `port.getInfo()`.
