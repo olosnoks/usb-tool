@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { parseHexInput } from '../utils/checksums';
 import { requestWebUsbSerialPort } from '../utils/webUsbSerial';
-import { identifyUsbChip } from '../utils/usbDatabase';
+import { identifyUsbChip, shortChipLabel } from '../utils/usbDatabase';
+import { claimForTool, releasePort, closeSerialPort, stopReader } from '../utils/portManager';
 
 const SerialContext = createContext(null);
 
@@ -56,6 +57,9 @@ export function SerialProvider({ children }) {
 
   // Board stream refs to prevent re-creation
   const boardReadersRef = useRef({});
+  const boardReadLoopsRef = useRef({});   // boardId -> promise of its read loop
+  const boardPortOwnersRef = useRef({});  // boardId -> port-manager owner
+  const disconnectRef = useRef(null);     // latest handleDisconnect, for takeovers
   const boardKeepReadingRef = useRef({});
   const boardPollIntervalsRef = useRef({});
   const boardOffsetsRef = useRef({});
@@ -155,8 +159,9 @@ export function SerialProvider({ children }) {
   // Continuous Serial Read Loop per Board
   const startReading = async (boardId, activePort) => {
     while (activePort && activePort.readable && boardKeepReadingRef.current[boardId]) {
+      let reader = null;
       try {
-        const reader = activePort.readable.getReader();
+        reader = activePort.readable.getReader();
         boardReadersRef.current[boardId] = reader;
 
         while (true) {
@@ -171,12 +176,31 @@ export function SerialProvider({ children }) {
         }
         break;
       } finally {
-        if (boardReadersRef.current[boardId]) {
-          try { boardReadersRef.current[boardId].releaseLock(); } catch (e) {}
-          boardReadersRef.current[boardId] = null;
-        }
+        if (reader) { try { reader.releaseLock(); } catch (e) {} }
+        if (boardReadersRef.current[boardId] === reader) boardReadersRef.current[boardId] = null;
       }
     }
+  };
+
+  // Stop a board's read loop and wait until its reader lock is released.
+  const haltReading = async (boardId) => {
+    boardKeepReadingRef.current[boardId] = false;
+    const reader = boardReadersRef.current[boardId];
+    const loop = boardReadLoopsRef.current[boardId];
+    await stopReader(reader, loop);
+    delete boardReadersRef.current[boardId];
+    delete boardReadLoopsRef.current[boardId];
+  };
+
+  const ownerForBoard = (boardId) => {
+    if (!boardPortOwnersRef.current[boardId]) {
+      const n = boardsStateRef.current.findIndex(b => b.id === boardId) + 1;
+      boardPortOwnersRef.current[boardId] = {
+        name: `Terminal (port ${n || 1})`,
+        release: () => (disconnectRef.current ? disconnectRef.current(boardId) : undefined)
+      };
+    }
+    return boardPortOwnersRef.current[boardId];
   };
 
   // Poll Hardware Signals per Board (CTS, DSR, DCD, RI)
@@ -209,21 +233,30 @@ export function SerialProvider({ children }) {
       if (hasWebSerialSupport) {
         addLogToBoard(targetBoardId, 'Requesting USB / Serial port...', 'sys');
         const selectedPort = await navigator.serial.requestPort();
+        // One owner per device: asks before taking the port from another tool.
+        await claimForTool(selectedPort, ownerForBoard(targetBoardId));
         
         const info = selectedPort.getInfo ? selectedPort.getInfo() : {};
         const chip = identifyUsbChip(info.usbVendorId, info.usbProductId);
         const boardIndex = boards.findIndex(b => b.id === targetBoardId) + 1;
-        const friendlyName = `PORT ${boardIndex}: ${chip.name !== 'Generic / Unknown UART Bridge' ? chip.name.split(' ')[0] : 'USB'}`;
+        // identifyUsbChip() has no `name` field: reading chip.name.split() threw for every
+        // device with a USB vendor ID, so the Terminal could not connect at all.
+        const friendlyName = `PORT ${boardIndex}: ${shortChipLabel(chip)}`;
 
         addLogToBoard(targetBoardId, `Opening port @ ${currentBoard.baudRate} bps...`, 'sys');
-        await selectedPort.open({
+        try {
+          await selectedPort.open({
           baudRate: Number(currentBoard.baudRate),
           dataBits: currentBoard.serialConfig.dataBits,
           stopBits: currentBoard.serialConfig.stopBits,
           parity: currentBoard.serialConfig.parity,
           flowControl: currentBoard.serialConfig.flowControl,
           bufferSize: 16384
-        });
+          });
+        } catch (openErr) {
+          releasePort(selectedPort, ownerForBoard(targetBoardId));
+          throw openErr;
+        }
 
         boardKeepReadingRef.current[targetBoardId] = true;
         updateBoard(targetBoardId, {
@@ -236,7 +269,7 @@ export function SerialProvider({ children }) {
         });
 
         addLogToBoard(targetBoardId, `Connected via Web Serial API!`, 'sys');
-        startReading(targetBoardId, selectedPort);
+        boardReadLoopsRef.current[targetBoardId] = startReading(targetBoardId, selectedPort);
         startSignalPolling(targetBoardId, selectedPort);
 
       } else if (hasWebUsbSupport) {
@@ -263,7 +296,7 @@ export function SerialProvider({ children }) {
         });
 
         addLogToBoard(targetBoardId, `Connected via Android WebUSB OTG!`, 'sys');
-        startReading(targetBoardId, webUsbPort);
+        boardReadLoopsRef.current[targetBoardId] = startReading(targetBoardId, webUsbPort);
         startSignalPolling(targetBoardId, webUsbPort);
 
       } else {
@@ -285,15 +318,13 @@ export function SerialProvider({ children }) {
       delete boardPollIntervalsRef.current[targetBoardId];
     }
 
-    boardKeepReadingRef.current[targetBoardId] = false;
-    if (boardReadersRef.current[targetBoardId]) {
-      try { await boardReadersRef.current[targetBoardId].cancel(); } catch (e) {}
-      delete boardReadersRef.current[targetBoardId];
-    }
+    await haltReading(targetBoardId);
 
-    const targetBoard = boards.find(b => b.id === targetBoardId);
+    // Latest state (this can run from a takeover, long after the click's render).
+    const targetBoard = boardsStateRef.current.find(b => b.id === targetBoardId) || boards.find(b => b.id === targetBoardId);
     if (targetBoard?.port) {
-      try { await targetBoard.port.close(); } catch (e) {}
+      await closeSerialPort(targetBoard.port);
+      releasePort(targetBoard.port, boardPortOwnersRef.current[targetBoardId]);
     }
 
     updateBoard(targetBoardId, {
@@ -304,6 +335,7 @@ export function SerialProvider({ children }) {
     });
     addLogToBoard(targetBoardId, 'Port disconnected.', 'sys');
   };
+  disconnectRef.current = handleDisconnect;
 
   // Transmit Raw Bytes
   const handleSendRawBytes = async (targetBoardId, uint8Array) => {
@@ -425,11 +457,8 @@ export function SerialProvider({ children }) {
     const currentBoard = activeBoard;
     if (!currentBoard.port) return new Uint8Array(0);
 
-    boardKeepReadingRef.current[currentBoard.id] = false;
-    if (boardReadersRef.current[currentBoard.id]) {
-      try { await boardReadersRef.current[currentBoard.id].cancel(); } catch (e) {}
-    }
-    try { await currentBoard.port.close(); } catch (e) {}
+    await haltReading(currentBoard.id);
+    await closeSerialPort(currentBoard.port);
 
     await currentBoard.port.open({
       baudRate: testBaud,
@@ -523,11 +552,8 @@ export function SerialProvider({ children }) {
     const board = boardsStateRef.current.find(b => b.id === boardId);
     if (!board || !board.port) throw new Error('reconfigureActivePort: no open port');
 
-    boardKeepReadingRef.current[boardId] = false;
-    if (boardReadersRef.current[boardId]) {
-      try { await boardReadersRef.current[boardId].cancel(); } catch (e) {}
-    }
-    try { await board.port.close(); } catch (e) {}
+    await haltReading(boardId);
+    await closeSerialPort(board.port);
 
     const nextBaud = Number(config.baudRate ?? board.baudRate);
     const nextDataBits = config.dataBits ?? board.serialConfig.dataBits;
@@ -549,7 +575,7 @@ export function SerialProvider({ children }) {
       serialConfig: { ...board.serialConfig, dataBits: nextDataBits, stopBits: nextStopBits, parity: nextParity }
     });
     addLogToBoard(boardId, `[PORT] Line reconfigured to ${nextBaud} bps ${nextDataBits}-${String(nextParity).charAt(0).toUpperCase()}-${nextStopBits}.`, 'sys');
-    startReading(boardId, board.port);
+    boardReadLoopsRef.current[boardId] = startReading(boardId, board.port);
     startSignalPolling(boardId, board.port);
   };
 

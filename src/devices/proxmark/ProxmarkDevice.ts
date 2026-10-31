@@ -1,3 +1,4 @@
+import { claimForTool, releasePort, closeSerialPort } from '../../utils/portManager';
 import {
   PM3_COMMANDS,
   UART_USB_CLIENT_RX_TIMEOUT_MS,
@@ -43,6 +44,8 @@ export class ProxmarkDevice {
   private port: SerialPortLike | null = null;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  private readLoop: Promise<void> | null = null;
+  private portOwner: { name: string; release: () => Promise<void> } | null = null;
   private ringBuffer: Pm3RingBuffer;
   private isReading: boolean = false;
 
@@ -187,6 +190,15 @@ export class ProxmarkDevice {
       }
     }
 
+    // One owner per device: asks before taking the port from another tool.
+    if (!this.portOwner) this.portOwner = { name: 'Proxmark3 Suite', release: () => this.disconnect('Taken over by another tool') };
+    try {
+      await claimForTool(portToOpen, this.portOwner);
+    } catch (err: any) {
+      this.setState('error', err.message);
+      throw err;
+    }
+
     this.port = portToOpen;
     this.ringBuffer.clear();
     this.setState('connecting');
@@ -210,8 +222,8 @@ export class ProxmarkDevice {
       this.reader = this.port.readable.getReader();
       this.writer = this.port.writable.getWriter();
 
-      // Start continuous stream reception
-      this.startReadLoop();
+      // Start continuous stream reception (kept so disconnect can wait for it)
+      this.readLoop = this.startReadLoop();
 
       // Perform Handshake Interrogation
       this.setState('interrogating');
@@ -219,14 +231,16 @@ export class ProxmarkDevice {
       try {
         identity = await this.interrogateDevice();
       } catch {
-        // If binary handshake timed out (e.g. firmware in CLI or generic mode),
-        // assign real Proxmark3 Easy hardware profile rather than failing
+        // No answer to the binary version request (CLI-only firmware, a
+        // different device, or a busy port). Report that honestly: an UNKNOWN
+        // target is rated 'unsupported', so nothing (e.g. the flasher) acts on
+        // a guessed hardware profile.
         identity = {
-          rawVersionString: 'Proxmark3 Easy / Generic AT91SAM7S512 (CDC ACM Active)',
-          gitHash: 'pm3-easy-hw',
-          isClean: true,
-          hardwareTarget: 'PM3GENERIC',
-          buildDate: new Date().toISOString().split('T')[0]
+          rawVersionString: 'No answer to the version request (not a Proxmark3, or firmware without the NG protocol)',
+          gitHash: 'unknown',
+          isClean: false,
+          hardwareTarget: 'UNKNOWN',
+          buildDate: ''
         };
       }
       this._identity = identity;
@@ -545,41 +559,13 @@ export class ProxmarkDevice {
     }
     this.pendingCommands = [];
 
-    if (this.reader) {
-      try {
-        await this.reader.cancel();
-      } catch {
-        // Ignore cancel errors on teardown
-      }
-      try {
-        this.reader.releaseLock();
-      } catch {
-        // Ignore unlock errors
-      }
-      this.reader = null;
-    }
-
-    if (this.writer) {
-      try {
-        await this.writer.close();
-      } catch {
-        // Ignore close errors
-      }
-      try {
-        this.writer.releaseLock();
-      } catch {
-        // Ignore unlock errors
-      }
-      this.writer = null;
-    }
-
-    if (this.port) {
-      try {
-        await this.port.close();
-      } catch {
-        // Ignore port close errors
-      }
-      this.port = null;
+    // Ordered teardown with timeouts (shared with every other serial tool):
+    // cancel reader -> wait for the read loop -> release locks -> close.
+    const port = this.port, reader = this.reader, writer = this.writer, readLoop = this.readLoop;
+    this.port = null; this.reader = null; this.writer = null; this.readLoop = null;
+    if (port) {
+      await closeSerialPort(port as any, { reader, readLoop, writer });
+      releasePort(port, this.portOwner);
     }
 
     this.ringBuffer.clear();

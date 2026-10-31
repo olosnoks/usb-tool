@@ -170,13 +170,15 @@ PM5 / PROXMARK5 v5.0.1 commit 99aabbcc clean
         }
       });
 
+      // Like a real SerialPort: no streams until open().
+      const port: any = {
+        readable: null,
+        writable: null,
+        open: async () => { port.readable = readable; port.writable = writable; },
+        close: async () => { port.readable = null; port.writable = null; }
+      };
       return {
-        port: {
-          readable,
-          writable,
-          open: async () => {},
-          close: async () => {}
-        },
+        port,
         getWritten: () => writtenData
       };
     }

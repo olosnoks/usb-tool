@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { requestPortFor, releasePort, closeSerialPort } from '../utils/portManager';
 import { 
   Compass, 
   MapPin, 
@@ -88,6 +89,10 @@ export default function GpsWardriverDeck({
   const isScanningRef = useRef(false);
   const usbDeviceRef = useRef(null);
   const serialPortRef = useRef(null);
+  const serialReadLoopRef = useRef(null);
+  // Port ownership: another tool asking for this device makes us disconnect cleanly.
+  const disconnectRigRef = useRef(null);
+  const gpsPortOwnerRef = useRef({ name: 'GPS & Wardrive Suite', release: () => (disconnectRigRef.current ? disconnectRigRef.current() : undefined) });
   const serialReaderRef = useRef(null);
 
   const processIncomingTextLines = useCallback((rawText) => {
@@ -190,8 +195,9 @@ export default function GpsWardriverDeck({
               { usbVendorId: 0x10c4, usbProductId: 0xea60 }, // CP2102
               { usbVendorId: 0x303a }
             ];
-      const port = await navigator.serial.requestPort({ filters });
-      await port.open({ baudRate: 115200 });
+      const port = await requestPortFor(gpsPortOwnerRef.current, { filters });
+      try { await port.open({ baudRate: 115200 }); }
+      catch (e) { releasePort(port, gpsPortOwnerRef.current); throw e; }
       serialPortRef.current = port;
       setIsSerialRigConnected(true);
       const rigName = wardriveSource === 'warhog-cyd' ? 'Warhog CYD (SGT WARHOG)' : 'Piglet (ESP32-C5)';
@@ -202,7 +208,7 @@ export default function GpsWardriverDeck({
       let lineBuffer = '';
       const reader = port.readable.getReader();
       serialReaderRef.current = reader;
-      (async () => {
+      serialReadLoopRef.current = (async () => {
         try {
           while (true) {
             const { value, done } = await reader.read();
@@ -219,6 +225,8 @@ export default function GpsWardriverDeck({
           }
         } catch {
           // Port closed or disconnected
+        } finally {
+          try { reader.releaseLock(); } catch { /* already released */ }
         }
       })();
     } catch (err) {
@@ -227,20 +235,21 @@ export default function GpsWardriverDeck({
   };
 
   const handleDisconnectSerialRig = async () => {
-    try {
-      if (serialReaderRef.current) {
-        await serialReaderRef.current.cancel();
-        serialReaderRef.current.releaseLock();
-      }
-      if (serialPortRef.current) {
-        await serialPortRef.current.close();
-      }
-    } catch {}
+    const port = serialPortRef.current;
+    const reader = serialReaderRef.current;
+    const readLoop = serialReadLoopRef.current;
     serialReaderRef.current = null;
     serialPortRef.current = null;
+    serialReadLoopRef.current = null;
+    if (port) {
+      await closeSerialPort(port, { reader, readLoop });
+      releasePort(port, gpsPortOwnerRef.current);
+    }
     setIsSerialRigConnected(false);
     setStatusNotice('Disconnected Serial Wardriver rig');
   };
+
+  disconnectRigRef.current = handleDisconnectSerialRig;
 
   const handleImportWigleCsv = async (e) => {
     const file = e.target.files?.[0];

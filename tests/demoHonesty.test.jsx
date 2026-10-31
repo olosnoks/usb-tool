@@ -8,6 +8,7 @@ import SensorHubDeck from '../src/components/tools/hackrf/SensorHubDeck';
 import HamRadioDeck from '../src/components/tools/hackrf/HamRadioDeck';
 import LookingGlassDeck from '../src/components/tools/hackrf/LookingGlassDeck';
 import KismetStudioWorkbench from '../src/components/tools/KismetStudioWorkbench';
+import { ProxmarkDevice, evaluateCompatibility } from '../src/devices/proxmark';
 
 // Tools must never report hardware results they did not get from hardware.
 describe('simulated data is never passed off as hardware', () => {
@@ -70,4 +71,20 @@ describe('simulated data is never passed off as hardware', () => {
     const html = renderToString(<KismetStudioWorkbench />);
     expect(html).not.toContain('Corporate_Corp_Sec5G');
   });
+
+  it('Proxmark: a device that never answers is UNKNOWN, not a made-up Proxmark3 Easy', async () => {
+    const readable = new ReadableStream({ pull() {} });           // silent device
+    const writable = new WritableStream({ write() {} });
+    const port = {
+      readable: null, writable: null,
+      open: async () => { port.readable = readable; port.writable = writable; },
+      close: async () => { port.readable = null; port.writable = null; }
+    };
+    const device = new ProxmarkDevice();
+    const identity = await device.connect(port);
+    expect(identity.hardwareTarget).toBe('UNKNOWN');
+    expect(identity.rawVersionString).toMatch(/No answer/);
+    expect(evaluateCompatibility(identity)).toBe('unsupported');
+    await device.disconnect('test done');
+  }, 10000);
 });

@@ -354,6 +354,16 @@ export const USB_CHIP_DATABASE = {
  * @param {number|string} productId
  * @returns {{ known: boolean, manufacturer: string, chip: string, voltage: string, autoReset: string, notes: string, key: string }}
  */
+/**
+ * Short label for a port tab, from identifyUsbChip()'s result:
+ * 'CP2102', 'CH340G', 'Espressif', … or 'USB' when the chip is unknown.
+ */
+export function shortChipLabel(chip) {
+  if (!chip || !chip.known) return 'USB';
+  const src = chip.chip && !/^USB Device|Device \(VID/.test(chip.chip) ? chip.chip : chip.manufacturer;
+  return (src || 'USB').split(/[\s/]+/)[0] || 'USB';
+}
+
 export function identifyUsbChip(vendorId, productId) {
   if (!vendorId) {
     return {

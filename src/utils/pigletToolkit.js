@@ -20,6 +20,8 @@
 //  Errors are "WT ERR <reason>". Non-"WT" lines are firmware debug output.
 // ============================================================================
 
+import { claimForTool, requestPortFor, releasePort } from './portManager';
+
 const enc = new TextEncoder();
 
 export function crc32(bytes) {
@@ -87,6 +89,8 @@ export class PigletToolkitClient {
     this.sessionActive = false; // firmware tool mode (scanning paused) is on
     this._queue = Promise.resolve();
     this._pending = 0;
+    // Port ownership: another tool taking this device makes us disconnect cleanly.
+    this._portOwner = { name: 'Warhog & Piglet Suite', release: () => this.disconnect() };
     this._onSerialDisconnect = (e) => { if (this.port && e.target === this.port) this.disconnect(); };
   }
 
@@ -347,7 +351,8 @@ export class PigletToolkitClient {
   async connect(port) {
     if (!this.serial && !port) throw new Error('WebSerial needs Chrome or Edge on desktop.');
     try {
-      this.port = port || await this.serial.requestPort();
+      if (port) await claimForTool(port, this._portOwner);
+      this.port = port || await requestPortFor(this._portOwner, undefined, { serial: this.serial });
       await this.port.open({ baudRate: 115200, bufferSize: 65536 });   // native USB-CDC ignores baud
       // On the ESP32 USB-Serial/JTAG, RTS-high + DTR-low resets the chip. Drive both
       // lines to the idle "run" state, dropping RTS FIRST so we never pass through
@@ -390,6 +395,7 @@ export class PigletToolkitClient {
     try { if (this.writer) this.writer.releaseLock(); } catch (e) { /* ignore */ }
     this.writer = null;
     try { if (this.port) await withTimeout(this.port.close(), 1500); } catch (e) { /* ignore */ }
+    if (this.port) releasePort(this.port, this._portOwner);
     this.port = null; this.readDone = null; this.buf = ''; this.info = '';
     this.closing = false;
     try { this.onDisconnect(wasConnected); } catch (e) { /* ignore */ }

@@ -1,4 +1,5 @@
 import { globalAdsbDecoder } from './adsbDecoder.js';
+import { requestPortFor, releasePort, closeSerialPort } from './portManager';
 import { powerSpectrumFromIQ } from './fft.js';
 
 export const MAYHEM_USB_IDS = {
@@ -137,17 +138,17 @@ export class MayhemPortaPackDriver {
       this.log(`Opening Web Serial selector (${forceNoFilter ? 'Showing All COM Ports' : 'Filtered for PortaPack VID 1D50'})...`, 'info');
       
       // If forceNoFilter is true, call requestPort() with NO arguments to guarantee all COM ports show
-      this.port = forceNoFilter 
-        ? await navigator.serial.requestPort()
-        : await navigator.serial.requestPort({
-            filters: [
-              { usbVendorId: 0x1d50, usbProductId: 0x6018 },
-              { usbVendorId: 0x1d50, usbProductId: 0x6089 },
-              { usbVendorId: 0x1d50 }
-            ]
-          });
-
-      await this.port.open({ baudRate });
+      if (!this._portOwner) this._portOwner = { name: 'PortaPack Mayhem SDR', release: () => this.disconnect() };
+      const port = await requestPortFor(this._portOwner, forceNoFilter ? undefined : {
+        filters: [
+          { usbVendorId: 0x1d50, usbProductId: 0x6018 },
+          { usbVendorId: 0x1d50, usbProductId: 0x6089 },
+          { usbVendorId: 0x1d50 }
+        ]
+      });
+      try { await port.open({ baudRate }); }
+      catch (e) { releasePort(port, this._portOwner); throw e; }
+      this.port = port;
       this.isConnected = true;
       this.isDemo = false;
       this.connectionType = 'serial';
@@ -159,7 +160,7 @@ export class MayhemPortaPackDriver {
       this.log(`PortaPack Hardware connected on serial port at ${baudRate} baud (${vidHex}:${pidHex}).`, 'success');
       this.sendCommand('version');
 
-      this.startReading();
+      this._readLoop = this.startReading();
       this.notifyState();
       return true;
     } catch (err) {
@@ -424,12 +425,14 @@ export class MayhemPortaPackDriver {
   async startReading() {
     if (!this.port || !this.port.readable) return;
     const textDecoder = new TextDecoderStream();
-    this.port.readable.pipeTo(textDecoder.writable).catch(() => {});
-    this.reader = textDecoder.readable.getReader();
+    // Kept so disconnect can wait for the pipe to let go of port.readable.
+    this._pipe = this.port.readable.pipeTo(textDecoder.writable).catch(() => {});
+    const reader = textDecoder.readable.getReader();
+    this.reader = reader;
 
     try {
       while (this.isConnected) {
-        const { value, done } = await this.reader.read();
+        const { value, done } = await reader.read();
         if (done) break;
         if (value) {
           const lines = value.split('\n');
@@ -446,6 +449,8 @@ export class MayhemPortaPackDriver {
       if (this.isConnected) {
         this.log(`Read loop terminated: ${err.message}`, 'error');
       }
+    } finally {
+      try { reader.releaseLock(); } catch (_) {}
     }
   }
 
@@ -628,13 +633,15 @@ export class MayhemPortaPackDriver {
       try { await this.usbDevice.close(); } catch (_) {}
       this.usbDevice = null;
     }
-    if (this.reader) {
-      try { await this.reader.cancel(); } catch (_) {}
+    const port = this.port, reader = this.reader, readLoop = this._readLoop, pipe = this._pipe;
+    this.port = null; this.reader = null; this._readLoop = null; this._pipe = null;
+    if (port) {
+      // Cancelling the decoder's reader cancels the pipe, which releases port.readable.
+      await closeSerialPort(port, { reader, readLoop, pipes: [pipe] });
+      releasePort(port, this._portOwner);
+    } else if (reader) {
+      try { await reader.cancel(); } catch (_) {}
     }
-    if (this.port) {
-      try { await this.port.close(); } catch (_) {}
-    }
-    this.port = null;
     this.log('Hardware disconnected. Returned to demo mode.', 'info');
     this.notifyState();
   }

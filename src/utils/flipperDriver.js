@@ -1,3 +1,4 @@
+import { claimForTool, releasePort, closeSerialPort } from './portManager';
 /**
  * FLIPPER ZERO REAL HARDWARE WEB SERIAL DRIVER (qFlipper Architecture)
  * 
@@ -308,11 +309,16 @@ export class FlipperZeroDriver {
    */
   async connectPort(port) {
     if (!port) throw new Error('No port provided.');
+    // One owner per device: asks before taking the port from another tool.
+    if (!this._portOwner) this._portOwner = { name: 'Flipper Zero Suite', release: () => this.disconnect() };
+    await claimForTool(port, this._portOwner);
     this.port = port;
 
     try {
       await this.port.open({ baudRate: 115200 });
     } catch (openErr) {
+      releasePort(port, this._portOwner);
+      this.port = null;
       if (openErr.name === 'NetworkError' || openErr.message?.includes('Failed to open')) {
         throw new Error('COM port is locked or in use! If the desktop qFlipper application or another serial monitor is open, close it first.');
       }
@@ -327,8 +333,8 @@ export class FlipperZeroDriver {
 
     this.log('Connected to Flipper Zero USB CDC-ACM port!', 'success');
 
-    // Start background binary stream reader
-    this.startSerialReader();
+    // Start background binary stream reader (kept so disconnect can wait for it)
+    this._readLoop = this.startSerialReader();
 
     // Establish RPC session (1:1 with qFlipper)
     await this.ensureRpcSession();
@@ -386,12 +392,13 @@ export class FlipperZeroDriver {
    * Reads raw binary stream from Web Serial port and routes to RPC decoder or CLI text parser
    */
   async startSerialReader() {
-    this.reader = this.port.readable.getReader();
+    const reader = this.port.readable.getReader();
+    this.reader = reader;
     const textDecoder = new TextDecoder();
 
     try {
       while (true) {
-        const { value, done } = await this.reader.read();
+        const { value, done } = await reader.read();
         if (done) break;
         if (value && value.length > 0) {
           if (this.isRpcMode) {
@@ -407,9 +414,7 @@ export class FlipperZeroDriver {
         this.log(`Serial connection error: ${err.message}`, 'error');
       }
     } finally {
-      if (this.reader) {
-        try { this.reader.releaseLock(); } catch(e){}
-      }
+      try { reader.releaseLock(); } catch(e){}
     }
   }
 
@@ -1396,24 +1401,20 @@ export class FlipperZeroDriver {
   }
 
   disconnect() {
+    // Grab what the session holds, mark disconnected now (UI updates at once),
+    // then tear the port down in order in the background. Returns that promise.
+    const port = this.port, reader = this.reader, writer = this.writer, readLoop = this._readLoop;
+    this.port = null; this.reader = null; this.writer = null; this._readLoop = null;
+    const teardown = port
+      ? closeSerialPort(port, { reader, readLoop, writer }).finally(() => releasePort(port, this._portOwner))
+      : Promise.resolve();
+
     if (this.isScreenStreaming || this.isRpcMode) {
       this.isRpcMode = false;
       this.isScreenStreaming = false;
       this.rpcAccumulator = new Uint8Array(0);
     }
 
-    if (this.writer) {
-      try { this.writer.releaseLock(); } catch(e){}
-      this.writer = null;
-    }
-    if (this.reader) {
-      try { this.reader.cancel(); } catch(e){}
-      this.reader = null;
-    }
-    if (this.port) {
-      try { this.port.close(); } catch(e){}
-      this.port = null;
-    }
 
     this.isConnected = false;
     this.isDemo = false;
@@ -1439,6 +1440,7 @@ export class FlipperZeroDriver {
 
     this.log('Disconnected from Flipper Zero.', 'info');
     this.notifyState();
+    return teardown;
   }
 }
 
