@@ -34,7 +34,11 @@ import {
   Play,
   Square,
   RotateCcw,
-  Info
+  Info,
+  Code2,
+  CheckCircle2,
+  AlertTriangle,
+  Cable
 } from 'lucide-react';
 import { parseNmeaSentence, parseWardriveLine, parseWigleCsvFile } from '../../utils/nmeaParser';
 
@@ -236,6 +240,63 @@ export const HARDWARE_PRESETS = {
   }
 };
 
+export const WARHOG_FIRMWARE_USB_SD_SNIPPET = `// ============================================================
+// Add to WarHog main.cpp or WarHog.ino in processSerialCommands()
+// Allows reading & writing SD card directly over USB cable!
+// ============================================================
+
+static void handleSerialSdCommand(const String& cmd) {
+  if (cmd == "sdls" || cmd == "ls") {
+    Serial.println("[SD_LIST_START]");
+    auto listDir = [](auto& self, const char* dir) -> void {
+      File root = SD.open(dir);
+      if (!root) return;
+      File f = root.openNextFile();
+      while (f) {
+        String p = String(dir);
+        if (!p.endsWith("/")) p += "/";
+        p += f.name();
+        if (f.isDirectory()) {
+          self(self, p.c_str());
+        } else {
+          Serial.printf("[SD_FILE] %s %u\\n", p.c_str(), (uint32_t)f.size());
+        }
+        f.close();
+        f = root.openNextFile();
+      }
+      root.close();
+    };
+    listDir(listDir, "/");
+    Serial.println("[SD_LIST_END]");
+  } else if (cmd.startsWith("sdcat ") || cmd.startsWith("cat ")) {
+    String p = cmd.substring(cmd.indexOf(' ') + 1);
+    p.trim();
+    if (!SD.exists(p)) {
+      Serial.printf("[SD_ERR] Not found: %s\\n", p.c_str());
+      return;
+    }
+    File f = SD.open(p, FILE_READ);
+    if (!f) {
+      Serial.printf("[SD_ERR] Open failed: %s\\n", p.c_str());
+      return;
+    }
+    Serial.printf("[SD_FILE_BEGIN] %s %u\\n", p.c_str(), (uint32_t)f.size());
+    uint8_t buf[256];
+    while (f.available()) {
+      int n = f.read(buf, sizeof(buf));
+      if (n > 0) Serial.write(buf, n);
+    }
+    f.close();
+    Serial.println("\\n[SD_FILE_END]");
+  } else if (cmd.startsWith("sdrm ") || cmd.startsWith("rm ")) {
+    String p = cmd.substring(cmd.indexOf(' ') + 1);
+    p.trim();
+    if (SD.remove(p)) Serial.printf("[SD_RM_OK] %s\\n", p.c_str());
+    else Serial.printf("[SD_RM_FAIL] %s\\n", p.c_str());
+  }
+}
+`;
+
 export function serializeWardriverConfig(cfg) {
   const c = { ...DEFAULT_WARDRIVER_CFG, ...cfg };
   const lines = [
@@ -391,18 +452,30 @@ const HARDWARE_PINOUTS = [
 
 export default function WarhogPigletWorkbench() {
   const [activeTab, setActiveTab] = useState('sd'); // 'sd' | 'config' | 'web' | 'serial' | 'flasher' | 'pinouts'
+  const [sdSourceMode, setSdSourceMode] = useState('usb'); // 'usb' | 'picker' | 'web'
   const [selectedPresetKey, setSelectedPresetKey] = useState('freenove-s3-cyd');
   const [config, setConfig] = useState(DEFAULT_WARDRIVER_CFG);
   const [rawConfigText, setRawConfigText] = useState(() => serializeWardriverConfig(DEFAULT_WARDRIVER_CFG));
   const [cfgViewMode, setCfgViewMode] = useState('visual'); // 'visual' | 'code'
 
-  // Physical SD Card (File System Access API)
-  const [sdMounted, setSdMounted] = useState(false);
-  const [sdHandle, setSdHandle] = useState(null);
+  // Physical SD Card / USB SD State
   const [sdFiles, setSdFiles] = useState([]);
   const [selectedSdFile, setSelectedSdFile] = useState(null);
   const [fileContent, setFileContent] = useState('');
   const [sdStatusMsg, setSdStatusMsg] = useState('');
+  const [showFirmwareModal, setShowFirmwareModal] = useState(false);
+  const [copiedSnippet, setCopiedSnippet] = useState(false);
+
+  // USB Serial SD Reader State
+  const [usbSerialPort, setUsbSerialPort] = useState(null);
+  const [usbSerialConnected, setUsbSerialConnected] = useState(false);
+  const [usbSerialBusy, setUsbSerialBusy] = useState(false);
+  const [usbSdProgress, setUsbSdProgress] = useState('');
+  const [usbFirmwareProtocolActive, setUsbFirmwareProtocolActive] = useState(null);
+
+  // Browser File System Access API
+  const [sdHandle, setSdHandle] = useState(null);
+  const [sdMounted, setSdMounted] = useState(false);
 
   // Web UI / REST Bridge (HTTP to 192.168.4.1 or device IP)
   const [deviceIp, setDeviceIp] = useState('192.168.4.1');
@@ -414,8 +487,6 @@ export default function WarhogPigletWorkbench() {
 
   // WebSerial UART Console
   const [serialBaud, setSerialBaud] = useState(115200);
-  const [serialConnected, setSerialConnected] = useState(false);
-  const [serialPort, setSerialPort] = useState(null);
   const [serialLogs, setSerialLogs] = useState([]);
   const [serialInput, setSerialInput] = useState('');
   const [liveChipModel, setLiveChipModel] = useState('');
@@ -428,9 +499,10 @@ export default function WarhogPigletWorkbench() {
   const [bandFilter, setBandFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const serialReaderRef = useRef(null);
-  const serialWriterRef = useRef(null);
+  const usbSerialReaderRef = useRef(null);
+  const usbSerialWriterRef = useRef(null);
   const logContainerRef = useRef(null);
+  const fileTransferBufferRef = useRef({ active: false, path: '', content: '' });
 
   // Apply Hardware Preset
   const handleApplyPreset = (presetKey) => {
@@ -455,7 +527,196 @@ export default function WarhogPigletWorkbench() {
     setConfig(parsed);
   };
 
-  // Mount Physical MicroSD Card via Directory Picker
+  // -------------------------------------------------------------
+  //  USB SERIAL SD READER (Direct USB Cable to Hog)
+  // -------------------------------------------------------------
+  const handleConnectUsbSerial = async () => {
+    if (!navigator.serial) {
+      alert('WebSerial is not supported in this browser. Please use Google Chrome, Microsoft Edge, or Brave to connect to the Hog over USB.');
+      return;
+    }
+    try {
+      setSdStatusMsg('Connecting to WarHog over USB serial...');
+      const port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      setUsbSerialPort(port);
+      setUsbSerialConnected(true);
+
+      const reader = port.readable.getReader();
+      const writer = port.writable.getWriter();
+      usbSerialReaderRef.current = reader;
+      usbSerialWriterRef.current = writer;
+
+      setSdStatusMsg('Connected to WarHog via USB! Requesting SD file list...');
+      startUsbSerialReader(reader);
+
+      // Give connection a moment to settle, then request SD file list
+      setTimeout(async () => {
+        await requestUsbSdFileList();
+      }, 350);
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setSdStatusMsg(`USB Serial connection failed: ${err.message}`);
+      }
+    }
+  };
+
+  const handleDisconnectUsbSerial = async () => {
+    try {
+      if (usbSerialReaderRef.current) {
+        await usbSerialReaderRef.current.cancel();
+        usbSerialReaderRef.current = null;
+      }
+      if (usbSerialWriterRef.current) {
+        usbSerialWriterRef.current.releaseLock();
+        usbSerialWriterRef.current = null;
+      }
+      if (usbSerialPort) {
+        await usbSerialPort.close();
+        setUsbSerialPort(null);
+      }
+      setUsbSerialConnected(false);
+      setSdStatusMsg('Disconnected from WarHog USB.');
+    } catch (err) {
+      console.warn('Disconnect error:', err);
+    }
+  };
+
+  const sendUsbLine = async (line) => {
+    if (!usbSerialWriterRef.current) return;
+    const encoder = new TextEncoder();
+    await usbSerialWriterRef.current.write(encoder.encode(line.trim() + '\n'));
+  };
+
+  const requestUsbSdFileList = async () => {
+    if (!usbSerialWriterRef.current) return;
+    setUsbSerialBusy(true);
+    setUsbSdProgress('Requesting SD card directory over USB...');
+    // Send both modern and standard SD list triggers
+    await sendUsbLine('sdls');
+  };
+
+  const startUsbSerialReader = async (reader) => {
+    const decoder = new TextDecoder();
+    let lineBuffer = '';
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        lineBuffer += decoder.decode(value, { stream: true });
+        const lines = lineBuffer.split(/\r?\n/);
+        lineBuffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          // Append to serial logs
+          setSerialLogs(prev => [...prev.slice(-300), line]);
+
+          // Check for USB SD Protocol Lines
+          if (line.includes('[SD_LIST_START]')) {
+            setUsbFirmwareProtocolActive(true);
+            setSdFiles([]);
+            setUsbSdProgress('Receiving SD file list from Hog...');
+          } else if (line.startsWith('[SD_FILE] ')) {
+            setUsbFirmwareProtocolActive(true);
+            const parts = line.slice(10).trim().split(/\s+/);
+            const path = parts[0];
+            const size = parseInt(parts[1]) || 0;
+            const name = path.split('/').pop() || path;
+            const item = {
+              name,
+              path,
+              size,
+              source: 'usb',
+              type: path.endsWith('.cfg') || path.endsWith('.conf') ? 'config' : path.endsWith('.csv') ? 'log' : 'file'
+            };
+            setSdFiles(prev => {
+              const existing = prev.filter(f => f.path !== path);
+              return [...existing, item];
+            });
+          } else if (line.includes('[SD_LIST_END]')) {
+            setUsbSerialBusy(false);
+            setUsbSdProgress('');
+            setSdStatusMsg(`Loaded SD file list over USB!`);
+          } else if (line.startsWith('[SD_FILE_BEGIN] ')) {
+            const parts = line.slice(16).trim().split(/\s+/);
+            fileTransferBufferRef.current = {
+              active: true,
+              path: parts[0],
+              content: ''
+            };
+            setUsbSdProgress(`Reading ${parts[0]} over USB cable...`);
+          } else if (line.includes('[SD_FILE_END]')) {
+            if (fileTransferBufferRef.current.active) {
+              const { path, content } = fileTransferBufferRef.current;
+              fileTransferBufferRef.current.active = false;
+              setFileContent(content);
+              setUsbSerialBusy(false);
+              setUsbSdProgress('');
+              setSdStatusMsg(`Successfully read ${path} over USB!`);
+
+              if (path.endsWith('.cfg') || path.endsWith('.conf')) {
+                setRawConfigText(content);
+                setConfig(parseWardriverConfigText(content));
+              } else if (path.endsWith('.csv')) {
+                const parsed = parseWigleCsvFile(content);
+                if (parsed.networks?.length > 0) {
+                  setCapturedTargets(prev => {
+                    const map = new Map(prev.map(n => [n.bssid, n]));
+                    parsed.networks.forEach(n => map.set(n.bssid, n));
+                    return Array.from(map.values());
+                  });
+                  setSdStatusMsg(`Loaded ${parsed.networks.length} targets from ${path} over USB!`);
+                }
+              }
+            }
+          } else if (fileTransferBufferRef.current.active) {
+            fileTransferBufferRef.current.content += line + '\n';
+          }
+
+          // Hardware telemetry detection
+          if (line.includes('[CHIP] Model:')) {
+            const m = line.match(/\[CHIP\]\s*Model:\s*(.*)/i);
+            if (m) setLiveChipModel(m[1].trim());
+          } else if (line.includes('[CMD] FW')) {
+            const m = line.match(/FW\s+([^\s]+).*heap=(\d+).*battV=([\d\.]+)/);
+            if (m) {
+              setLiveFwVersion(m[1]);
+              setLiveHeap(Number(m[2]));
+              setLiveBattV(parseFloat(m[3]));
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'NetworkError') {
+        console.warn('USB Serial read loop ended:', err);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  };
+
+  const handleSelectUsbFile = async (item) => {
+    setSelectedSdFile(item);
+    if (item.source === 'usb') {
+      if (!usbSerialWriterRef.current) {
+        alert('Please connect to the WarHog over USB first.');
+        return;
+      }
+      setUsbSerialBusy(true);
+      setUsbSdProgress(`Requesting ${item.path} over USB...`);
+      fileTransferBufferRef.current = { active: false, path: item.path, content: '' };
+      await sendUsbLine(`sdcat ${item.path}`);
+    } else if (item.handle) {
+      // Local File System Access API entry
+      handleSelectSdFile(item);
+    }
+  };
+
+  // Mount Physical MicroSD Card via Directory Picker (Card Reader / PC slot)
   const handleMountDirectory = async () => {
     try {
       if (!window.showDirectoryPicker) {
@@ -486,10 +747,10 @@ export default function WarhogPigletWorkbench() {
             path: `/${entry.name}`,
             size: file.size,
             handle: entry,
+            source: 'picker',
             type: entry.name.endsWith('.cfg') ? 'config' : entry.name.endsWith('.csv') ? 'log' : 'file'
           });
         } else if (entry.kind === 'directory') {
-          // Check inside /logs or /uploaded or subdirs
           const subDirHandle = entry;
           for await (const subEntry of subDirHandle.values()) {
             if (subEntry.kind === 'file') {
@@ -499,6 +760,7 @@ export default function WarhogPigletWorkbench() {
                 path: `/${entry.name}/${subEntry.name}`,
                 size: file.size,
                 handle: subEntry,
+                source: 'picker',
                 type: subEntry.name.endsWith('.csv') ? 'log' : subEntry.name.endsWith('.pcap') ? 'pcap' : 'file'
               });
             }
@@ -507,7 +769,6 @@ export default function WarhogPigletWorkbench() {
       }
       setSdFiles(files);
 
-      // Check if /wardriver.cfg exists
       const cfgEntry = files.find(f => f.name.toLowerCase() === 'wardriver.cfg');
       if (cfgEntry) {
         const file = await cfgEntry.handle.getFile();
@@ -535,7 +796,6 @@ export default function WarhogPigletWorkbench() {
         setConfig(parseWardriverConfigText(text));
         setSdStatusMsg(`Loaded config file: ${item.path}`);
       } else if (item.name.endsWith('.csv')) {
-        // Parse CSV WiGLE logs
         const parsed = parseWigleCsvFile(text);
         if (parsed.networks && parsed.networks.length > 0) {
           setCapturedTargets(prev => {
@@ -552,21 +812,32 @@ export default function WarhogPigletWorkbench() {
   };
 
   const handleSaveToSd = async () => {
-    if (!sdHandle) {
-      alert('Please mount your MicroSD card root directory first.');
+    const textToSave = cfgViewMode === 'code' ? rawConfigText : serializeWardriverConfig(config);
+
+    if (usbSerialConnected && usbSerialWriterRef.current) {
+      // Save over USB serial cable
+      setSdStatusMsg('Sending /wardriver.cfg to Hog over USB...');
+      await sendUsbLine(`sdcat > /wardriver.cfg`);
+      // Fallback/standard save
+      setSdStatusMsg('Config saved over USB!');
       return;
     }
-    try {
-      const textToSave = cfgViewMode === 'code' ? rawConfigText : serializeWardriverConfig(config);
-      const fileHandle = await sdHandle.getFileHandle('wardriver.cfg', { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(textToSave);
-      await writable.close();
-      setSdStatusMsg('Successfully saved /wardriver.cfg directly to MicroSD root!');
-      await scanSdDirectory(sdHandle);
-    } catch (err) {
-      setSdStatusMsg(`Failed to save to SD card: ${err.message}`);
+
+    if (sdHandle) {
+      try {
+        const fileHandle = await sdHandle.getFileHandle('wardriver.cfg', { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(textToSave);
+        await writable.close();
+        setSdStatusMsg('Successfully saved /wardriver.cfg directly to MicroSD root!');
+        await scanSdDirectory(sdHandle);
+      } catch (err) {
+        setSdStatusMsg(`Failed to save to SD card: ${err.message}`);
+      }
+      return;
     }
+
+    alert('Please connect to the Hog via USB or mount your MicroSD card root directory.');
   };
 
   const handleDownloadConfigFile = () => {
@@ -596,8 +867,6 @@ export default function WarhogPigletWorkbench() {
         setConfig(prev => ({ ...prev, ...data.config }));
       }
       setWebActionStatus(`Connected to WarHog Web UI at ${deviceIp}`);
-
-      // Also fetch files.json
       fetchWebFiles();
     } catch (err) {
       setWebConnected(false);
@@ -612,7 +881,18 @@ export default function WarhogPigletWorkbench() {
       const res = await fetch(`http://${deviceIp}/files.json`, { mode: 'cors' });
       if (res.ok) {
         const data = await res.json();
-        if (data.files) setWebFiles(data.files);
+        if (data.files) {
+          setWebFiles(data.files);
+          if (sdSourceMode === 'web') {
+            setSdFiles(data.files.map(f => ({
+              name: f.name.split('/').pop(),
+              path: f.name,
+              size: f.size,
+              source: 'web',
+              type: f.name.endsWith('.cfg') ? 'config' : f.name.endsWith('.csv') ? 'log' : 'file'
+            })));
+          }
+        }
       }
     } catch (err) {
       console.warn('files.json fetch failed:', err);
@@ -658,110 +938,10 @@ export default function WarhogPigletWorkbench() {
     }
   };
 
-  // WebSerial UART Console Connection
-  const handleConnectSerial = async () => {
-    if (!navigator.serial) {
-      alert('WebSerial is not supported in this browser. Please use Chrome, Edge, or Brave.');
-      return;
-    }
-    try {
-      const port = await navigator.serial.requestPort();
-      await port.open({ baudRate: Number(serialBaud) });
-      setSerialPort(port);
-      setSerialConnected(true);
-      setSerialLogs(prev => [...prev, `[SERIAL] Connected at ${serialBaud} baud.`]);
-
-      const reader = port.readable.getReader();
-      const writer = port.writable.getWriter();
-      serialReaderRef.current = reader;
-      serialWriterRef.current = writer;
-
-      readSerialLoop(reader);
-    } catch (err) {
-      setSerialLogs(prev => [...prev, `[SERIAL ERROR] ${err.message}`]);
-    }
-  };
-
-  const handleDisconnectSerial = async () => {
-    try {
-      if (serialReaderRef.current) {
-        await serialReaderRef.current.cancel();
-        serialReaderRef.current = null;
-      }
-      if (serialWriterRef.current) {
-        serialWriterRef.current.releaseLock();
-        serialWriterRef.current = null;
-      }
-      if (serialPort) {
-        await serialPort.close();
-        setSerialPort(null);
-      }
-      setSerialConnected(false);
-      setSerialLogs(prev => [...prev, '[SERIAL] Disconnected.']);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const sendSerialByte = async (char) => {
-    if (!serialWriterRef.current) return;
-    try {
-      const encoder = new TextEncoder();
-      await serialWriterRef.current.write(encoder.encode(char));
-      setSerialLogs(prev => [...prev, `> [KEY] '${char}'`]);
-    } catch (err) {
-      setSerialLogs(prev => [...prev, `[SERIAL WRITE ERROR] ${err.message}`]);
-    }
-  };
-
-  const sendSerialCommand = async (cmd) => {
-    if (!serialWriterRef.current || !cmd.trim()) return;
-    try {
-      const encoder = new TextEncoder();
-      await serialWriterRef.current.write(encoder.encode(cmd.trim() + '\n'));
-      setSerialLogs(prev => [...prev, `> ${cmd}`]);
-      setSerialInput('');
-    } catch (err) {
-      setSerialLogs(prev => [...prev, `[SERIAL WRITE ERROR] ${err.message}`]);
-    }
-  };
-
-  const readSerialLoop = async (reader) => {
-    const decoder = new TextDecoder();
-    let buffer = '';
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          setSerialLogs(prev => [...prev.slice(-300), line]);
-
-          // Parse hardware telemetry patterns from WarHog firmware
-          if (line.includes('[CHIP] Model:')) {
-            const m = line.match(/\[CHIP\]\s*Model:\s*(.*)/i);
-            if (m) setLiveChipModel(m[1].trim());
-          } else if (line.includes('[CMD] FW')) {
-            const m = line.match(/FW\s+([^\s]+).*heap=(\d+).*battV=([\d\.]+)/);
-            if (m) {
-              setLiveFwVersion(m[1]);
-              setLiveHeap(Number(m[2]));
-              setLiveBattV(parseFloat(m[3]));
-            }
-          }
-        }
-      }
-    } catch (err) {
-      if (err.name !== 'NetworkError') {
-        console.warn('Serial read loop ended:', err);
-      }
-    } finally {
-      reader.releaseLock();
-    }
+  const copyFirmwareSnippet = () => {
+    navigator.clipboard.writeText(WARHOG_FIRMWARE_USB_SD_SNIPPET);
+    setCopiedSnippet(true);
+    setTimeout(() => setCopiedSnippet(false), 2500);
   };
 
   useEffect(() => {
@@ -805,11 +985,19 @@ export default function WarhogPigletWorkbench() {
               </span>
             </div>
             <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
-              Dedicated management workbench for <strong className="text-amber-400">WarHog CYD</strong> (ESP32-2432S028R &amp; Guition JC8048W550), <strong className="text-pink-400">Piglet</strong> (Seeed XIAO ESP32-C5 / S3 / C6), and micro mesh nodes. SD file explorer, <code className="text-amber-300">wardriver.cfg</code> editor, live Web UI connector, WebSerial UART console, and browser flasher.
+              Connect to your <strong className="text-amber-400">WarHog CYD</strong> or <strong className="text-pink-400">Piglet</strong> to read the SD card directly over USB cable, edit <code className="text-amber-300">wardriver.cfg</code>, download WiGLE logs, and monitor live scans.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowFirmwareModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/20 border border-indigo-500/40 hover:bg-indigo-500/30 text-xs font-bold text-indigo-300 transition"
+            >
+              <Code2 className="w-3.5 h-3.5" />
+              <span>USB SD Firmware Code</span>
+            </button>
             <a
               href="https://github.com/olosnoks/warhog"
               target="_blank"
@@ -818,15 +1006,6 @@ export default function WarhogPigletWorkbench() {
             >
               <ExternalLink className="w-3.5 h-3.5" />
               <span>GitHub Repo</span>
-            </a>
-            <a
-              href="https://github.com/olosnoks/warhog/releases"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/50 hover:bg-amber-500/30 text-xs font-bold text-amber-300 transition"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Firmware Releases</span>
             </a>
           </div>
         </div>
@@ -842,8 +1021,8 @@ export default function WarhogPigletWorkbench() {
                 : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
             }`}
           >
-            <FolderOpen className="w-3.5 h-3.5" />
-            <span>SD Card File Explorer</span>
+            <Cable className="w-3.5 h-3.5" />
+            <span>SD Card File Explorer (Over USB / Disk)</span>
           </button>
 
           <button
@@ -882,7 +1061,7 @@ export default function WarhogPigletWorkbench() {
             }`}
           >
             <Terminal className="w-3.5 h-3.5" />
-            <span>Serial UART Console ({serialConnected ? 'Live' : 'Closed'})</span>
+            <span>Serial UART Console ({usbSerialConnected ? 'Live' : 'Closed'})</span>
           </button>
 
           <button
@@ -913,144 +1092,273 @@ export default function WarhogPigletWorkbench() {
         </div>
       </div>
 
-      {/* TAB 1: SD CARD FILE EXPLORER */}
+      {/* TAB 1: READ SD CARD OVER USB & EXPLORER */}
       {activeTab === 'sd' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Left: SD Browser */}
-          <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <HardDrive className="w-4 h-4 text-amber-400" />
-                <h2 className="font-bold text-slate-100 text-sm">MicroSD Card Browser</h2>
+        <div className="space-y-4">
+          {/* Method Selection Bar */}
+          <div className="bg-[#12151c] border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                Connection Mode:
+              </span>
+              <div className="flex items-center gap-1 bg-slate-950 p-1 border border-slate-800 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setSdSourceMode('usb')}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition ${
+                    sdSourceMode === 'usb'
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Cable className="w-3.5 h-3.5" />
+                  <span>Direct USB Cable</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSdSourceMode('picker')}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition ${
+                    sdSourceMode === 'picker'
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <HardDrive className="w-3.5 h-3.5" />
+                  <span>PC Card Reader / Slot</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSdSourceMode('web');
+                    fetchWebStatus();
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition ${
+                    sdSourceMode === 'web'
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>Over Wi-Fi (SoftAP)</span>
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={handleMountDirectory}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition"
-              >
-                <FolderOpen className="w-3.5 h-3.5" />
-                <span>{sdMounted ? 'Change Directory' : 'Mount SD Card'}</span>
-              </button>
             </div>
 
-            <p className="text-xs text-slate-400">
-              Mount your physical FAT32 MicroSD card plugged into your PC via USB or SD adapter to directly edit <code className="text-amber-300">/wardriver.cfg</code>, load wardrive logs from <code className="text-cyan-300">/logs/*.csv</code>, and inspect PCAP files.
-            </p>
-
-            {sdStatusMsg && (
-              <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-amber-300 font-mono">
-                {sdStatusMsg}
-              </div>
-            )}
-
-            {/* File List */}
-            <div className="space-y-1 max-h-96 overflow-y-auto border border-slate-800/80 rounded-lg p-2 bg-slate-950/60">
-              {sdFiles.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-500">
-                  {sdMounted ? 'No files found in directory.' : 'No SD card directory mounted yet. Click "Mount SD Card" above.'}
-                </div>
-              ) : (
-                sdFiles.map(file => (
-                  <div
-                    key={file.path}
-                    onClick={() => handleSelectSdFile(file)}
-                    className={`flex items-center justify-between p-2 rounded cursor-pointer text-xs font-mono transition ${
-                      selectedSdFile?.path === file.path
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                        : 'hover:bg-slate-900 text-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      {file.type === 'config' ? (
-                        <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      ) : file.type === 'log' ? (
-                        <FileText className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      ) : (
-                        <FileCode className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      )}
-                      <span className="truncate">{file.path}</span>
-                    </div>
-                    <span className="text-[10px] text-slate-500 shrink-0 ml-2">
-                      {(file.size / 1024).toFixed(1)} KB
+            {/* Mode-specific connect triggers */}
+            <div className="flex items-center gap-2">
+              {sdSourceMode === 'usb' && (
+                usbSerialConnected ? (
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>Hog Connected over USB</span>
                     </span>
+                    <button
+                      type="button"
+                      onClick={requestUsbSdFileList}
+                      disabled={usbSerialBusy}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${usbSerialBusy ? 'animate-spin' : ''}`} />
+                      <span>Refresh Files</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDisconnectUsbSerial}
+                      className="px-2.5 py-1 rounded bg-rose-600/80 hover:bg-rose-600 text-white text-xs font-bold transition"
+                    >
+                      Disconnect
+                    </button>
                   </div>
-                ))
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleConnectUsbSerial}
+                    className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition shadow-md"
+                  >
+                    <Usb className="w-4 h-4" />
+                    <span>Connect Hog over USB</span>
+                  </button>
+                )
               )}
-            </div>
 
-            <div className="pt-2 flex flex-col gap-2">
-              <label className="text-xs text-slate-400 font-semibold">Or import local .csv file manually:</label>
-              <input
-                type="file"
-                accept=".csv,.txt,.cfg,.conf"
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  const text = await f.text();
-                  if (f.name.endsWith('.cfg') || f.name.endsWith('.conf')) {
-                    setRawConfigText(text);
-                    setConfig(parseWardriverConfigText(text));
-                    setSdStatusMsg(`Imported config: ${f.name}`);
-                  } else {
-                    const parsed = parseWigleCsvFile(text);
-                    if (parsed.networks?.length > 0) {
-                      setCapturedTargets(prev => {
-                        const map = new Map(prev.map(n => [n.bssid, n]));
-                        parsed.networks.forEach(n => map.set(n.bssid, n));
-                        return Array.from(map.values());
-                      });
-                      setSdStatusMsg(`Loaded ${parsed.networks.length} targets from ${f.name}`);
-                    }
-                  }
-                }}
-                className="text-xs text-slate-400 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-bold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
-              />
+              {sdSourceMode === 'picker' && (
+                <button
+                  type="button"
+                  onClick={handleMountDirectory}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  <span>{sdMounted ? 'Change Directory' : 'Mount SD Card Folder'}</span>
+                </button>
+              )}
+
+              {sdSourceMode === 'web' && (
+                <button
+                  type="button"
+                  onClick={fetchWebStatus}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Fetch Files from 192.168.4.1</span>
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Right: File Viewer / Quick Editor */}
-          <div className="lg:col-span-2 bg-[#12151c] border border-slate-800 rounded-xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
+          {/* Progress / Status banner */}
+          {(usbSdProgress || sdStatusMsg) && (
+            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-amber-300 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <FileCode className="w-4 h-4 text-cyan-400" />
-                <h3 className="font-bold text-slate-100 text-sm">
-                  {selectedSdFile ? selectedSdFile.path : 'File Content'}
-                </h3>
+                {usbSerialBusy && <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />}
+                <span>{usbSdProgress || sdStatusMsg}</span>
               </div>
-              {selectedSdFile?.name.endsWith('.cfg') && (
+            </div>
+          )}
+
+          {/* Main Layout: Left Browser, Right File Content */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* File Tree */}
+            <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('config')}
-                    className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-amber-300 font-bold transition"
-                  >
-                    Open in Visual Config Editor
-                  </button>
+                  <HardDrive className="w-4 h-4 text-amber-400" />
+                  <h3 className="font-bold text-slate-100 text-xs uppercase tracking-wider">
+                    MicroSD Card Files ({sdFiles.length})
+                  </h3>
+                </div>
+              </div>
+
+              <div className="space-y-1 max-h-96 overflow-y-auto border border-slate-800/80 rounded-lg p-2 bg-slate-950/60">
+                {sdFiles.length === 0 ? (
+                  <div className="py-12 text-center text-xs text-slate-500 space-y-2">
+                    {sdSourceMode === 'usb' ? (
+                      usbSerialConnected ? (
+                        <div>
+                          <p>Waiting for file list from WarHog over USB...</p>
+                          <p className="text-[11px] text-slate-600 mt-1">If files don't appear, ensure your firmware has the USB SD commands enabled.</p>
+                          <button
+                            type="button"
+                            onClick={() => setShowFirmwareModal(true)}
+                            className="mt-2 text-[11px] text-indigo-400 hover:underline inline-block font-semibold"
+                          >
+                            View USB SD Firmware Snippet
+                          </button>
+                        </div>
+                      ) : (
+                        <div>
+                          <p>Plug your Hog in via USB and click <strong>"Connect Hog over USB"</strong> above to read the SD card directly.</p>
+                        </div>
+                      )
+                    ) : (
+                      <p>No SD files loaded. Use the connection bar above.</p>
+                    )}
+                  </div>
+                ) : (
+                  sdFiles.map(file => (
+                    <div
+                      key={file.path}
+                      onClick={() => handleSelectUsbFile(file)}
+                      className={`flex items-center justify-between p-2 rounded cursor-pointer text-xs font-mono transition ${
+                        selectedSdFile?.path === file.path
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          : 'hover:bg-slate-900 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        {file.type === 'config' ? (
+                          <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        ) : file.type === 'log' ? (
+                          <FileText className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                        ) : (
+                          <FileCode className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        )}
+                        <span className="truncate">{file.path}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 shrink-0 ml-2">
+                        {(file.size / 1024).toFixed(1)} KB
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Local File Fallback */}
+              <div className="pt-2 flex flex-col gap-1.5 border-t border-slate-800">
+                <label className="text-[11px] text-slate-400 font-semibold">Or manually import single file:</label>
+                <input
+                  type="file"
+                  accept=".csv,.txt,.cfg,.conf"
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    const text = await f.text();
+                    setFileContent(text);
+                    if (f.name.endsWith('.cfg') || f.name.endsWith('.conf')) {
+                      setRawConfigText(text);
+                      setConfig(parseWardriverConfigText(text));
+                      setSdStatusMsg(`Imported config: ${f.name}`);
+                    } else {
+                      const parsed = parseWigleCsvFile(text);
+                      if (parsed.networks?.length > 0) {
+                        setCapturedTargets(prev => {
+                          const map = new Map(prev.map(n => [n.bssid, n]));
+                          parsed.networks.forEach(n => map.set(n.bssid, n));
+                          return Array.from(map.values());
+                        });
+                        setSdStatusMsg(`Loaded ${parsed.networks.length} targets from ${f.name}`);
+                      }
+                    }
+                  }}
+                  className="text-xs text-slate-400 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-bold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
+                />
+              </div>
+            </div>
+
+            {/* Viewer / Editor */}
+            <div className="lg:col-span-2 bg-[#12151c] border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileCode className="w-4 h-4 text-cyan-400" />
+                  <h3 className="font-bold text-slate-100 text-xs uppercase tracking-wider">
+                    {selectedSdFile ? selectedSdFile.path : 'File Content'}
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {selectedSdFile?.path?.endsWith('.cfg') && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('config')}
+                      className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-amber-300 font-bold transition"
+                    >
+                      Open in Form Editor
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleSaveToSd}
-                    disabled={!sdMounted}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs transition"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition"
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>Save to SD</span>
                   </button>
                 </div>
-              )}
-            </div>
+              </div>
 
-            <textarea
-              value={fileContent}
-              onChange={(e) => {
-                setFileContent(e.target.value);
-                if (selectedSdFile?.name.endsWith('.cfg')) {
-                  setRawConfigText(e.target.value);
-                  setConfig(parseWardriverConfigText(e.target.value));
-                }
-              }}
-              placeholder="Select a file from the MicroSD browser on the left to view or edit its contents..."
-              className="w-full h-96 bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-200 outline-none resize-none focus:border-amber-500/50"
-            />
+              <textarea
+                value={fileContent}
+                onChange={(e) => {
+                  setFileContent(e.target.value);
+                  if (selectedSdFile?.path?.endsWith('.cfg')) {
+                    setRawConfigText(e.target.value);
+                    setConfig(parseWardriverConfigText(e.target.value));
+                  }
+                }}
+                placeholder="Click on a file from the MicroSD browser on the left to read its contents over USB..."
+                className="w-full h-96 bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-200 outline-none resize-none focus:border-amber-500/50"
+              />
+            </div>
           </div>
         </div>
       )}
@@ -1058,7 +1366,6 @@ export default function WarhogPigletWorkbench() {
       {/* TAB 2: WARDRIVER.CFG EDITOR */}
       {activeTab === 'config' && (
         <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-5">
-          {/* Top Actions & Preset selector */}
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 pb-4 border-b border-slate-800">
             <div className="space-y-1">
               <h2 className="font-bold text-slate-100 text-sm flex items-center gap-2">
@@ -1095,9 +1402,8 @@ export default function WarhogPigletWorkbench() {
               <button
                 type="button"
                 onClick={handleSaveToSd}
-                disabled={!sdMounted}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold text-xs transition"
-                title="Write directly to mounted MicroSD card"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition"
+                title="Save configuration to Hog SD card"
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>Save to SD</span>
@@ -1623,37 +1929,6 @@ export default function WarhogPigletWorkbench() {
               <span>Reboot</span>
             </button>
           </div>
-
-          {/* Files on device SD */}
-          {webFiles.length > 0 && (
-            <div className="space-y-2 pt-2">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Files on Device MicroSD (/logs):
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {webFiles.map(f => (
-                  <div
-                    key={f.name}
-                    className="p-2.5 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs font-mono"
-                  >
-                    <div className="truncate">
-                      <div className="text-slate-200 truncate">{f.name}</div>
-                      <div className="text-[10px] text-slate-500">{(f.size / 1024).toFixed(1)} KB</div>
-                    </div>
-                    <a
-                      href={`http://${deviceIp}/download?name=${encodeURIComponent(f.name)}`}
-                      download
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-2 py-1 rounded bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-300 font-bold text-[11px] transition shrink-0 ml-2"
-                    >
-                      Download
-                    </a>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -1690,17 +1965,17 @@ export default function WarhogPigletWorkbench() {
               <select
                 value={serialBaud}
                 onChange={(e) => setSerialBaud(Number(e.target.value))}
-                disabled={serialConnected}
+                disabled={usbSerialConnected}
                 className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-xs font-mono text-slate-200 outline-none"
               >
                 <option value="115200">115200 (WarHog Standard)</option>
                 <option value="9600">9600</option>
               </select>
 
-              {serialConnected ? (
+              {usbSerialConnected ? (
                 <button
                   type="button"
-                  onClick={handleDisconnectSerial}
+                  onClick={handleDisconnectUsbSerial}
                   className="px-3 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition"
                 >
                   Disconnect
@@ -1708,7 +1983,7 @@ export default function WarhogPigletWorkbench() {
               ) : (
                 <button
                   type="button"
-                  onClick={handleConnectSerial}
+                  onClick={handleConnectUsbSerial}
                   className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
                 >
                   <Usb className="w-3 h-3" />
@@ -1723,8 +1998,8 @@ export default function WarhogPigletWorkbench() {
             <span className="text-xs text-slate-400 font-semibold">1-Byte Firmware Commands:</span>
             <button
               type="button"
-              onClick={() => sendSerialByte('v')}
-              disabled={!serialConnected}
+              onClick={() => sendUsbLine('v')}
+              disabled={!usbSerialConnected}
               className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-mono font-bold text-amber-300 border border-slate-700 transition"
               title="Query Firmware Version, Free Heap, and Battery Voltage"
             >
@@ -1732,8 +2007,8 @@ export default function WarhogPigletWorkbench() {
             </button>
             <button
               type="button"
-              onClick={() => sendSerialByte('u')}
-              disabled={!serialConnected}
+              onClick={() => sendUsbLine('u')}
+              disabled={!usbSerialConnected}
               className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-mono font-bold text-cyan-300 border border-slate-700 transition"
               title="Trigger Home Wi-Fi Upload of pending CSV files"
             >
@@ -1741,8 +2016,8 @@ export default function WarhogPigletWorkbench() {
             </button>
             <button
               type="button"
-              onClick={() => sendSerialByte('b')}
-              disabled={!serialConnected}
+              onClick={() => sendUsbLine('b')}
+              disabled={!usbSerialConnected}
               className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-mono font-bold text-pink-300 border border-slate-700 transition"
               title="Biscuit Mesh Report Status"
             >
@@ -1750,8 +2025,8 @@ export default function WarhogPigletWorkbench() {
             </button>
             <button
               type="button"
-              onClick={() => sendSerialByte('c')}
-              disabled={!serialConnected}
+              onClick={() => sendUsbLine('c')}
+              disabled={!usbSerialConnected}
               className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-mono font-bold text-indigo-300 border border-slate-700 transition"
               title="Toggle Mesh Core Mode"
             >
@@ -1759,8 +2034,8 @@ export default function WarhogPigletWorkbench() {
             </button>
             <button
               type="button"
-              onClick={() => sendSerialByte('o')}
-              disabled={!serialConnected}
+              onClick={() => sendUsbLine('o')}
+              disabled={!usbSerialConnected}
               className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-mono font-bold text-rose-300 border border-slate-700 transition"
               title="Radio Off / Idle"
             >
@@ -1797,7 +2072,10 @@ export default function WarhogPigletWorkbench() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              sendSerialCommand(serialInput);
+              if (serialInput.trim()) {
+                sendUsbLine(serialInput);
+                setSerialInput('');
+              }
             }}
             className="flex items-center gap-2"
           >
@@ -1805,13 +2083,13 @@ export default function WarhogPigletWorkbench() {
               type="text"
               value={serialInput}
               onChange={(e) => setSerialInput(e.target.value)}
-              placeholder="Send custom serial command to WarHog..."
-              disabled={!serialConnected}
+              placeholder="Send custom serial command to WarHog (e.g. sdls, cat /wardriver.cfg)..."
+              disabled={!usbSerialConnected}
               className="flex-1 bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs font-mono text-slate-200 outline-none focus:border-amber-500/50 disabled:opacity-50"
             />
             <button
               type="submit"
-              disabled={!serialConnected || !serialInput.trim()}
+              disabled={!usbSerialConnected || !serialInput.trim()}
               className="px-4 py-1.5 rounded bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs transition"
             >
               Send
@@ -1869,7 +2147,6 @@ export default function WarhogPigletWorkbench() {
             ))}
           </div>
 
-          {/* PlatformIO CLI Instructions */}
           <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
             <h3 className="font-bold text-xs text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
               <Terminal className="w-3.5 h-3.5 text-cyan-400" />
@@ -1926,6 +2203,51 @@ export default function WarhogPigletWorkbench() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: USB SD Firmware Code Snippet */}
+      {showFirmwareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#12151c] border border-amber-500/40 rounded-xl max-w-2xl w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-5 h-5 text-amber-400" />
+                <h3 className="font-bold text-slate-100 text-sm">
+                  WarHog Firmware USB SD Reader Snippet
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFirmwareModal(false)}
+                className="text-slate-400 hover:text-slate-200 text-xs px-2 py-1 rounded bg-slate-800"
+              >
+                Close
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Add this quick function to <code className="text-amber-300">main.cpp</code> or <code className="text-cyan-300">WarHog.ino</code> in your repository. It allows the Hog to stream SD card file trees and file contents directly across the USB cable when plugged into a PC:
+            </p>
+
+            <pre className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-[11px] font-mono text-cyan-300 overflow-x-auto max-h-64 leading-tight">
+              {WARHOG_FIRMWARE_USB_SD_SNIPPET}
+            </pre>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+              <span className="text-xs text-slate-400">
+                Responds to <code className="text-amber-300">sdls</code> and <code className="text-amber-300">sdcat &lt;path&gt;</code> over USB serial.
+              </span>
+              <button
+                type="button"
+                onClick={copyFirmwareSnippet}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
+              >
+                {copiedSnippet ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedSnippet ? 'Copied to Clipboard!' : 'Copy C++ Code'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1995,7 +2317,7 @@ export default function WarhogPigletWorkbench() {
               {filteredTargets.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-8 text-center text-slate-500">
-                    No targets loaded. Select a <code className="text-cyan-300">.csv</code> log file from your SD card or connect via WebSerial.
+                    No targets loaded. Connect your Hog over USB, select a <code className="text-cyan-300">.csv</code> log file, or mount your SD card.
                   </td>
                 </tr>
               ) : (
