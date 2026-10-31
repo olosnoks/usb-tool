@@ -1,8 +1,11 @@
 /**
  * CMSIS-DAP / ARM Cortex-M SWD In-System Debugger Driver
- * Connects to DAPLink, Raspberry Pi Pico Probe, micro:bit, and ST-Link probes
- * via WebHID or WebUSB. Controls CPU halt, single-step, core registers, and SRAM inspection.
+ * Connects to CMSIS-DAP probes (DAPLink, Raspberry Pi Debug Probe, micro:bit,
+ * LPC-Link2, EDBG) over WebUSB (v2) or WebHID (v1). Halts, steps and resets the
+ * core, and reads registers and memory over SWD. ST-Link is not CMSIS-DAP.
  */
+
+import { DapProbe, SwdTarget, requestDapTransport, describeCpuid, CORTEX } from './dapLink';
 
 export const DAP_CMD = {
   DAP_INFO: 0x00,
@@ -45,13 +48,11 @@ export const CORTEX_REG_NAMES = [
   'xPSR', 'MSP', 'PSP', 'PRIMASK'
 ];
 
-export const CMSIS_DAP_HW_UNSUPPORTED =
-  'Real CMSIS-DAP probes are not supported yet: halt, step, register and memory access are not implemented over WebHID. Use the demo target to explore the interface.';
-
 export class CmsisDapClient {
   constructor(logger = console.log) {
-    this.hidDevice = null;
-    this.usbDevice = null;
+    this.probe = null;
+    this.target = null;
+    this.info = null;
     this.logger = logger;
     this.connected = false;
     this.simulated = false;
@@ -80,44 +81,36 @@ export class CmsisDapClient {
   }
 
   /**
-   * Connect via WebHID (CMSIS-DAP v1)
+   * Connect a real probe and attach to the target over SWD.
+   * kind: 'usb' (CMSIS-DAP v2, faster) or 'hid' (v1, older DAPLink firmware).
+   * `probe` (an opened DapProbe) is for tests.
    */
-  async connectHid() {
-    // The CMSIS-DAP command set (DAP_Transfer, DHCSR/DCRSR access, memory
-    // reads/writes) is not implemented yet. The old hardware path opened the
-    // probe and then reported success for halt/step/write without sending a
-    // single report, so it is refused rather than pretending.
-    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
-  }
-
-  // Kept for when the DAP protocol is implemented: opens the HID probe only.
-  async openHidProbe() {
-    if (typeof navigator === 'undefined' || !navigator.hid) {
-      throw new Error('WebHID API not available in this browser. Please use Chrome, Edge, or Opera.');
-    }
-
+  async connectHardware({ kind = 'usb', probe = null, clockHz = 1_000_000 } = {}) {
+    const p = probe || await new DapProbe(await requestDapTransport(kind)).open();
     try {
-      this.log('Requesting CMSIS-DAP debug probe (HID)...');
-      const devices = await navigator.hid.requestDevice({
-        filters: [
-          { vendorId: 0x0D28 }, // ARM / DAPLink (micro:bit, NXP, etc.)
-          { vendorId: 0x2E8A, productId: 0x000C }, // Raspberry Pi Pico Debug Probe
-          { vendorId: 0x0483 }  // STMicroelectronics (ST-Link V2/V3)
-        ]
-      });
-
-      if (!devices || devices.length === 0) throw new Error('No probe selected.');
-      this.hidDevice = devices[0];
-      await this.hidDevice.open();
-
+      if (p.capabilities && !p.capabilities.swd) throw new Error(`${p.product} does not support SWD.`);
+      const target = new SwdTarget(p);
+      const { dpidr } = await target.connect({ clockHz });
+      const cpuid = await target.readWord(CORTEX.CPUID);
+      const status = await target.coreStatus();
+      this.probe = p;
+      this.target = target;
       this.connected = true;
       this.simulated = false;
-      this.targetState = 'running';
-      this.log(`Connected to physical debug probe: ${this.hidDevice.productName}!`);
-      return true;
-    } catch (err) {
-      this.log(`Probe connection cancelled: ${err.message}`, 'sys');
-      throw err;
+      this.targetState = status.halted ? 'halted' : 'running';
+      this.info = {
+        probe: p.product,
+        firmware: p.firmware,
+        transport: p.transport.kind === 'hid' ? 'WebHID (CMSIS-DAP v1)' : 'WebUSB (CMSIS-DAP v2)',
+        dpidr,
+        cpuid,
+        core: describeCpuid(cpuid)
+      };
+      this.log(`Attached through ${p.product}: DPIDR 0x${dpidr.toString(16).toUpperCase()}, ${this.info.core}.`);
+      return this.info;
+    } catch (e) {
+      try { await p.close(); } catch (x) { /* ignore */ }
+      throw e;
     }
   }
 
@@ -133,11 +126,15 @@ export class CmsisDapClient {
     return true;
   }
 
-  disconnect() {
-    if (this.hidDevice && this.hidDevice.opened) {
-      try { this.hidDevice.close(); } catch (e) {}
+  async disconnect() {
+    const p = this.probe;
+    this.probe = null;
+    this.target = null;
+    if (p) {
+      try { await p.disconnect(); } catch (e) { /* ignore */ }
+      try { await p.close(); } catch (e) { /* ignore */ }
     }
-    this.hidDevice = null;
+    this.info = null;
     this.connected = false;
     this.simulated = false;
     this.targetState = 'disconnected';
@@ -161,7 +158,11 @@ export class CmsisDapClient {
       return this.virtualRegisters;
     }
 
-    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
+    await this.target.halt();
+    this.targetState = 'halted';
+    const regs = await this.target.readCoreRegisters();
+    this.log(`CPU halted at PC 0x${regs[15].toString(16).toUpperCase()}`);
+    return regs;
   }
 
   /**
@@ -178,7 +179,9 @@ export class CmsisDapClient {
       return true;
     }
 
-    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
+    await this.target.resume();
+    this.targetState = 'running';
+    return true;
   }
 
   /**
@@ -196,7 +199,9 @@ export class CmsisDapClient {
       return this.virtualRegisters;
     }
 
-    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
+    await this.target.step();
+    this.targetState = 'halted';
+    return this.target.readCoreRegisters();
   }
 
   /**
@@ -210,7 +215,8 @@ export class CmsisDapClient {
       return Array.from(this.virtualRegisters);
     }
 
-    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
+    if (this.targetState !== 'halted') throw new Error('Halt the CPU first: core registers are only readable while halted.');
+    return this.target.readCoreRegisters();
   }
 
   /**
@@ -236,7 +242,8 @@ export class CmsisDapClient {
       return words;
     }
 
-    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
+    const values = await this.target.readWords(address & ~3, wordCount);
+    return values.map((value, i) => ({ address: ((address & ~3) + i * 4) >>> 0, value }));
   }
 
   /**
@@ -256,6 +263,32 @@ export class CmsisDapClient {
       return true;
     }
 
-    throw new Error(CMSIS_DAP_HW_UNSUPPORTED);
+    await this.target.writeWord(address & ~3, value >>> 0);
+    const back = await this.target.readWord(address & ~3);
+    if (back !== (value >>> 0)) this.log(`Read back 0x${back.toString(16).toUpperCase()}: the location is read-only, a peripheral register, or flash.`);
+    else this.log('Write confirmed by read-back.');
+    return back;
+  }
+
+  /** Reset the target; with halt, stop at the first instruction. */
+  async reset({ halt = false } = {}) {
+    if (!this.connected) throw new Error('Probe not connected.');
+    if (this.simulated) {
+      this.initVirtualState();
+      this.targetState = halt ? 'halted' : 'running';
+      return halt ? Array.from(this.virtualRegisters) : null;
+    }
+    await this.target.reset({ halt });
+    this.targetState = halt ? 'halted' : 'running';
+    this.log(halt ? 'Reset and halted at the reset vector.' : 'Target reset.');
+    return halt ? this.target.readCoreRegisters() : null;
+  }
+
+  /** Poll whether the core is halted (e.g. hit a breakpoint) or running. */
+  async pollState() {
+    if (!this.connected || this.simulated) return this.targetState;
+    const st = await this.target.coreStatus();
+    this.targetState = st.halted ? 'halted' : 'running';
+    return this.targetState;
   }
 }

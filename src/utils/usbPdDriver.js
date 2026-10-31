@@ -6,8 +6,107 @@
  * - PPS (Programmable Power Supply) fine-grained voltage adjustments (3.3V - 21.0V in 20mV steps)
  * - E-Marker cable detection (3A vs 5A 100W/240W EPR, USB 2.0 / USB 3.2 / USB4)
  * - Real-time VBUS voltage, current, wattage, and energy (mAh, mWh) integration
- * - WebUSB/WebHID hardware interface + realistic simulated charger
+ * - Simulated charger for trying the interface
+ *
+ * Real hardware: an STUSB4500 USB-PD sink controller (e.g. the SparkFun Power
+ * Delivery Board) on I2C, through a Bus Pirate v3/v4. The STUSB4500 negotiates
+ * fixed PDOs only (no PPS) and does not measure VBUS; the tool reads the
+ * negotiated contract and rewrites the sink PDOs in RAM (not NVM) to request
+ * another voltage.
  */
+
+import { SerialLink } from './serialLink';
+import { BusPirate } from './busExplorerDriver';
+
+export const STUSB4500 = {
+  ADDR: 0x28,
+  PORT_STATUS_1: 0x0e,     // bit 0: a source is attached
+  PD_COMMAND_CTRL: 0x1a,
+  DEVICE_ID: 0x2f,         // 0x21 or 0x25
+  TX_HEADER_LOW: 0x51,
+  DPM_PDO_NUMB: 0x70,      // bits 2:0, number of sink PDOs (1-3)
+  DPM_SNK_PDO1: 0x85,      // three 32-bit little-endian PDOs
+  RDO_STATUS: 0x91         // 32-bit request data object of the current contract
+};
+
+/** Fixed-supply sink PDO -> { voltageV, currentA }. */
+export function decodeSinkPdo(pdo) {
+  return { voltageV: Math.round(((pdo >>> 10) & 0x3ff) * 5) / 100, currentA: (pdo & 0x3ff) / 100 };
+}
+
+/** Replace the voltage (50 mV units) and current (10 mA units) of a fixed PDO, keeping the flag bits. */
+export function encodeSinkPdo(pdo, voltageV, currentA) {
+  const v = Math.round(voltageV / 0.05) & 0x3ff;
+  const i = Math.round(currentA / 0.01) & 0x3ff;
+  return ((pdo & ~0xfffff) | (v << 10) | i) >>> 0;
+}
+
+/** Request Data Object -> which source PDO was taken and at what current. */
+export function decodeRdo(rdo) {
+  return {
+    position: (rdo >>> 28) & 0x7,
+    operatingCurrentA: ((rdo >>> 10) & 0x3ff) / 100,
+    maxCurrentA: (rdo & 0x3ff) / 100,
+    capabilityMismatch: !!(rdo & (1 << 26))
+  };
+}
+
+const le32 = (b, o = 0) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
+const bytes32 = (v) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
+
+export class Stusb4500 {
+  constructor(bus, addr = STUSB4500.ADDR) {
+    this.bus = bus; // anything with i2cReadRegisters(addr, reg, n) / i2cWriteRegister(addr, reg, bytes)
+    this.addr = addr;
+  }
+
+  read(reg, n) { return this.bus.i2cReadRegisters(this.addr, reg, n); }
+  write(reg, values) { return this.bus.i2cWriteRegister(this.addr, reg, values); }
+
+  async identify() {
+    const [id] = await this.read(STUSB4500.DEVICE_ID, 1);
+    if (id !== 0x21 && id !== 0x25) throw new Error(`Device at 0x${this.addr.toString(16)} has ID 0x${id.toString(16)}, not an STUSB4500 (0x21 / 0x25).`);
+    return id;
+  }
+
+  async readSinkPdos() {
+    const [n] = await this.read(STUSB4500.DPM_PDO_NUMB, 1);
+    const raw = await this.read(STUSB4500.DPM_SNK_PDO1, 12);
+    const pdos = [0, 1, 2].map((i) => le32(raw, i * 4));
+    return { count: n & 0x07, raw: pdos, pdos: pdos.map(decodeSinkPdo) };
+  }
+
+  async status() {
+    const [port] = await this.read(STUSB4500.PORT_STATUS_1, 1);
+    const rdoRaw = le32(await this.read(STUSB4500.RDO_STATUS, 4));
+    const sink = await this.readSinkPdos();
+    return { attached: !!(port & 1), rdo: rdoRaw ? decodeRdo(rdoRaw) : null, rdoRaw, sink };
+  }
+
+  /**
+   * Request a fixed voltage: PDO1 stays 5 V (USB-PD requires it), PDO2 becomes
+   * the request and the chip renegotiates. 5 V alone drops back to one PDO.
+   */
+  async requestVoltage(voltageV, currentA) {
+    if (!(voltageV >= 5 && voltageV <= 20)) throw new Error('The STUSB4500 can request 5 V to 20 V.');
+    if (!(currentA > 0 && currentA <= 5)) throw new Error('Current must be between 0 and 5 A.');
+    const { raw } = await this.readSinkPdos();
+    if (voltageV === 5) {
+      await this.write(STUSB4500.DPM_SNK_PDO1, bytes32(encodeSinkPdo(raw[0], 5, currentA)));
+      await this.write(STUSB4500.DPM_PDO_NUMB, [1]);
+    } else {
+      await this.write(STUSB4500.DPM_SNK_PDO1 + 4, bytes32(encodeSinkPdo(raw[1], voltageV, currentA)));
+      await this.write(STUSB4500.DPM_PDO_NUMB, [2]);
+    }
+    await this.softReset();
+  }
+
+  /** Send a PD soft reset so the new sink PDOs are negotiated. */
+  async softReset() {
+    await this.write(STUSB4500.TX_HEADER_LOW, [0x0d]);
+    await this.write(STUSB4500.PD_COMMAND_CTRL, [0x26]);
+  }
+}
 
 export const FIXED_PDO_PROFILES = [
   { id: 1, voltageV: 5.0, maxCurrentA: 3.0, maxPowerW: 15.0, label: '5V @ 3.0A (15W Fixed)' },
@@ -59,7 +158,10 @@ export const SAMPLE_CABLE_EMARKERS = [
 export class UsbPdClient {
   constructor(logger = console.log) {
     this.logger = logger;
-    this.device = null;
+    this.link = null;
+    this.bp = null;
+    this.pd = null;
+    this._owner = { name: 'USB-PD', release: () => this.disconnect() };
     this.isConnected = false;
     this.isSimulated = false;
     this.activeVoltageV = 5.0;
@@ -76,41 +178,50 @@ export class UsbPdClient {
     this.lastTimestamp = Date.now();
   }
 
-  // Connect physical WebUSB / WebHID PD device (Power-Z, ZY12PDN, CH224K, RP2040)
-  async connectHardware() {
-    // No PD sink protocol (CH224K / RP2040 trigger / probe firmware) is
-    // implemented: a "connected" device would only have shown the simulation's
-    // made-up VBUS readings. Refuse instead of pretending.
-    throw new Error('USB-PD hardware is not supported yet: no PD trigger or VBUS meter protocol is implemented, so readings and voltage requests would not reach a real device. Use the simulated charger to explore the interface.');
+  /**
+   * Connect an STUSB4500 through a Bus Pirate (binary I2C mode). `link` is for
+   * tests. The Bus Pirate's supplies stay off: the PD board is powered by VBUS.
+   */
+  async connectHardware({ link = null, addr = STUSB4500.ADDR } = {}) {
+    this.link = link || await SerialLink.request(this._owner, { baudRate: 115200 });
+    try {
+      this.bp = new BusPirate(this.link);
+      await this.bp.enterBinary();
+      await this.bp.enterI2c();
+      await this.bp.setSpeed(2); // 100 kHz
+      await this.bp.configurePeripherals({ power: false, pullups: true });
+      this.pd = new Stusb4500(this.bp, addr);
+      this.chipId = await this.pd.identify();
+      this.isConnected = true;
+      this.isSimulated = false;
+      this.logger(`[USB-PD] STUSB4500 (ID 0x${this.chipId.toString(16)}) found at 0x${addr.toString(16)} through the Bus Pirate.`);
+      return true;
+    } catch (e) {
+      await this._closeHardware();
+      throw e;
+    }
   }
 
-  // Kept for when a PD protocol is implemented: opens the USB device only.
-  async openUsbDevice() {
-    if (!navigator.usb && !navigator.hid) {
-      throw new Error('WebUSB / WebHID APIs are not supported in this browser.');
-    }
+  async _closeHardware() {
+    const link = this.link;
+    this.link = null;
+    if (this.bp) { try { await this.bp.reset(); } catch (e) { /* ignore */ } }
+    this.bp = null;
+    this.pd = null;
+    if (link) { try { await link.close(); } catch (e) { /* ignore */ } }
+  }
 
-    try {
-      if (navigator.usb) {
-        this.device = await navigator.usb.requestDevice({
-          filters: [
-            { vendorId: 0x534B }, // Skon's Custom PD probe
-            { vendorId: 0x1A86 }, // WCH CH224K / CH340
-            { vendorId: 0x2E8A }  // RP2040 USB-PD trigger
-          ]
-        });
-        await this.device.open();
-        await this.device.selectConfiguration(1);
-        await this.device.claimInterface(0);
-        this.isConnected = true;
-        this.isSimulated = false;
-        this.logger('[USB-PD] Physical Hardware connected over WebUSB.');
-        return true;
-      }
-    } catch (err) {
-      this.logger(`[USB-PD] WebUSB request skipped: ${err.message}.`);
-      throw err;
-    }
+  /** Contract and sink settings read from the STUSB4500. */
+  async readHardwareStatus() {
+    if (!this.pd) throw new Error('No STUSB4500 connected.');
+    return this.pd.status();
+  }
+
+  /** Ask the charger for a fixed voltage (rewrites PDO2 in RAM, then renegotiates). */
+  async requestHardwareVoltage(voltageV, currentA = 1.5) {
+    if (!this.pd) throw new Error('No STUSB4500 connected.');
+    await this.pd.requestVoltage(voltageV, currentA);
+    this.logger(`[USB-PD] Requested ${voltageV} V at up to ${currentA} A; renegotiating.`);
   }
 
   connectSimulation() {
@@ -127,17 +238,12 @@ export class UsbPdClient {
     return true;
   }
 
-  disconnect() {
+  async disconnect() {
+    await this._closeHardware();
     this.isConnected = false;
     this.isSimulated = false;
     this.activeVoltageV = 0.0;
     this.currentA = 0.0;
-    if (this.device && this.device.opened) {
-      try {
-        this.device.close();
-      } catch (e) {}
-    }
-    this.device = null;
     this.logger('[USB-PD] Disconnected.');
   }
 

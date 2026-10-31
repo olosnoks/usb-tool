@@ -15,11 +15,13 @@ import {
   Tag,
   Plus,
   X,
-  TerminalSquare
+  TerminalSquare,
+  KeyRound
 } from 'lucide-react';
 import {
   buildGattTree,
   readAllValues,
+  isPairingError,
   parseCharacteristicValue,
   bytesToHex,
   canonicalUuid,
@@ -87,6 +89,11 @@ export default function BleExplorer() {
   const [log, setLog] = useState([]);
   const [customServices, setCustomServices] = useState(loadCustomServices);
   const [customInput, setCustomInput] = useState('');
+  // Set when the device asked for pairing (or dropped the link mid-read, which
+  // is how many devices react to an unencrypted read of a protected value).
+  const [pairingHint, setPairingHint] = useState(null);
+  const lastDeviceRef = useRef(null);
+  const readingRef = useRef(false);
   const { connectBle, isConnected: serialConnected, transportType: serialTransport } = useSerial();
 
   // Live notify subscriptions: uuid -> { characteristic, handler }
@@ -114,15 +121,22 @@ export default function BleExplorer() {
   // value as it arrives.
   const readEverything = async (gattTree) => {
     setReading(true);
+    readingRef.current = true;
     try {
       const all = await readAllValues(gattTree, (key, v) => {
         setValues((prev) => ({ ...prev, [key]: { ...v, notifying: prev[key]?.notifying } }));
       });
-      const failed = Object.values(all).filter((v) => v.error).length;
+      const errors = Object.values(all).filter((v) => v.error);
+      const locked = errors.filter((v) => isPairingError(v.error)).length;
       setLastRead(new Date());
-      addLog(`Read ${Object.keys(all).length} value(s)${failed ? `, ${failed} refused by the device` : ''}.`, failed ? 'info' : 'ok');
+      addLog(`Read ${Object.keys(all).length - errors.length} value(s)${errors.length ? `, ${errors.length} refused by the device` : ''}.`, errors.length ? 'info' : 'ok');
+      if (locked) {
+        setPairingHint('protected');
+        addLog(`${locked} value(s) need the device to be paired first.`, 'err');
+      }
     } finally {
       setReading(false);
+      readingRef.current = false;
     }
   };
 
@@ -143,31 +157,22 @@ export default function BleExplorer() {
         acceptAllDevices: true,
         optionalServices: buildOptionalServices(customServices)
       });
-
+      lastDeviceRef.current = dev;
+      setPairingHint(null);
+      setValues({});
       dev.addEventListener('gattserverdisconnected', () => {
-        addLog('Device disconnected.', 'err');
-        resetState();
+        if (lastDeviceRef.current !== dev) return; // user disconnected or picked another device
+        // Dropping the link while values are being read is the usual sign the
+        // device wants an encrypted (paired) connection.
+        const midRead = readingRef.current;
+        addLog(midRead ? 'Device disconnected while reading values: it probably needs pairing.' : 'Device disconnected.', 'err');
+        if (midRead) setPairingHint('dropped');
+        // Keep what was already read on screen; Reconnect picks up from here.
+        setServer(null);
+        setStatus('offline');
+        setStatusMsg(`${dev.name || 'Device'} disconnected. Values below are from the last read.`);
       });
-
-      setStatusMsg('Connecting GATT…');
-      const gatt = await dev.gatt.connect();
-
-      setBusy(true);
-      const gattTree = await buildGattTree(gatt);
-      setBusy(false);
-
-      setDevice(dev);
-      setServer(gatt);
-      setTree(gattTree);
-
-      setStatus('online');
-      setStatusMsg(`${dev.name || 'Unnamed device'} • ${gattTree.length} service(s)`);
-      const totalChars = gattTree.reduce((a, s) => a + s.characteristics.length, 0);
-      addLog(
-        `Connected to ${dev.name || dev.id} — ${gattTree.length} services, ${totalChars} characteristics.`,
-        'ok'
-      );
-      await readEverything(gattTree);
+      await connectTo(dev);
     } catch (err) {
       setBusy(false);
       setStatus(device ? 'online' : 'warning');
@@ -176,8 +181,50 @@ export default function BleExplorer() {
     }
   };
 
-  const handleDisconnect = () => {
+  // Connect GATT to a device already picked in the chooser.
+  const connectTo = async (dev) => {
+    setStatus('connecting');
+    setStatusMsg('Connecting GATT…');
+    const gatt = await dev.gatt.connect();
+
+    setBusy(true);
+    const gattTree = await buildGattTree(gatt);
+    setBusy(false);
+
+    setDevice(dev);
+    setServer(gatt);
+    setTree(gattTree);
+
+    setStatus('online');
+    setStatusMsg(`${dev.name || 'Unnamed device'} • ${gattTree.length} service(s)`);
+    const totalChars = gattTree.reduce((a, s) => a + s.characteristics.length, 0);
+    addLog(
+      `Connected to ${dev.name || dev.id} — ${gattTree.length} services, ${totalChars} characteristics.`,
+      'ok'
+    );
+    await readEverything(gattTree);
+  };
+
+  const handleReconnect = async () => {
+    const dev = lastDeviceRef.current;
+    if (!dev) return handleConnect();
     try {
+      addLog(`Reconnecting to ${dev.name || dev.id}…`, 'info');
+      await connectTo(dev);
+    } catch (err) {
+      setBusy(false);
+      setStatus('warning');
+      setStatusMsg(err.message || 'Reconnect failed');
+      addLog(`Reconnect failed: ${err.message}`, 'err');
+    }
+  };
+
+  const handleDisconnect = () => {
+    const dev = lastDeviceRef.current;
+    lastDeviceRef.current = null; // so the disconnect event is not reported as a drop
+    setPairingHint(null);
+    try {
+      if (!server?.connected && dev?.gatt?.connected) dev.gatt.disconnect();
       if (server?.connected) server.disconnect();
     } catch {
       /* ignore */
@@ -317,7 +364,17 @@ export default function BleExplorer() {
       {/* Connection + device summary */}
       <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-3">
         <p className="text-xs text-slate-400">{statusMsg}</p>
+        {pairingHint && <PairingHelp reason={pairingHint} deviceName={lastDeviceRef.current?.name} onDismiss={() => setPairingHint(null)} />}
         <div className="flex flex-wrap items-center gap-2">
+          {status !== 'online' && lastDeviceRef.current && status !== 'connecting' && (
+            <button
+              onClick={handleReconnect}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-slate-200 text-sm font-semibold transition"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Reconnect {lastDeviceRef.current.name || 'device'}
+            </button>
+          )}
           {status !== 'online' ? (
             <button
               onClick={handleConnect}
@@ -594,5 +651,47 @@ function IconBtn({ children, title, onClick, active }) {
     >
       {children}
     </button>
+  );
+}
+
+// Web Bluetooth has no API for a page to send a passkey: the code is entered in
+// the browser's or the operating system's pairing prompt. This explains how.
+function PairingHelp({ reason, deviceName, onDismiss }) {
+  const name = deviceName || 'the device';
+  const isWindows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
+  const isMac = typeof navigator !== 'undefined' && /Mac OS X/i.test(navigator.userAgent);
+  return (
+    <div className="p-3 rounded-lg border border-amber-500/40 bg-amber-950/30 text-xs text-amber-100 space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 font-semibold text-amber-300">
+          <KeyRound className="w-4 h-4" />
+          {reason === 'dropped' ? `${name} dropped the connection while values were being read` : `Some values on ${name} need pairing`}
+        </div>
+        <button onClick={onDismiss} title="Dismiss" className="text-amber-400/70 hover:text-amber-200"><X className="w-3.5 h-3.5" /></button>
+      </div>
+      <p className="text-amber-100/80">
+        The device wants an encrypted, paired link, often with a PIN or passkey. Browsers don&apos;t let a web page enter
+        that code, so pair it once with the computer, then reconnect here:
+      </p>
+      <ol className="list-decimal ml-5 space-y-1 text-amber-100/90">
+        <li>
+          Some browser versions show their own pairing prompt when you reconnect. If one appears, type the code there.
+        </li>
+        <li>
+          {isWindows ? (
+            <>Otherwise open <a href="ms-settings:bluetooth" className="underline text-amber-300">Windows Bluetooth settings</a> → <b>Add device</b> → <b>Bluetooth</b>, pick {name} and enter its code.</>
+          ) : isMac ? (
+            <>Otherwise open <b>System Settings → Bluetooth</b>, click <b>Connect</b> next to {name} and enter its code.</>
+          ) : (
+            <>Otherwise pair {name} in your system&apos;s Bluetooth settings (or <code>bluetoothctl pair</code>) and enter its code.</>
+          )}
+        </li>
+        <li>Click <b>Reconnect</b> above. Reads now go over the encrypted link.</li>
+      </ol>
+      <p className="text-amber-100/60">
+        Common default codes are 000000, 123456 or 1234; devices with a screen show the code to type.
+        If {name} is already paired and still refuses, remove it from the system&apos;s Bluetooth list and pair again.
+      </p>
+    </div>
   );
 }

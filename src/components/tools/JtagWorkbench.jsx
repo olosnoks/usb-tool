@@ -1,22 +1,20 @@
 import React, { useState, useRef } from 'react';
-import { 
-  Cpu, 
-  Play, 
-  Upload, 
-  RotateCcw, 
-  CheckCircle2, 
-  AlertTriangle, 
-  Layers, 
-  Sparkles, 
-  FileCode, 
-  Check, 
+import {
+  Cpu,
+  Play,
+  Upload,
+  RotateCcw,
+  CheckCircle2,
+  AlertTriangle,
+  Layers,
+  Sparkles,
+  FileCode,
+  Check,
   ShieldCheck,
-  Search
+  Search,
+  Usb
 } from 'lucide-react';
-import { 
-  JtagClient, 
-  JTAG_DEVICE_DATABASE 
-} from '../../utils/jtagDriver';
+import { JtagClient } from '../../utils/jtagDriver';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
@@ -47,28 +45,83 @@ export default function JtagWorkbench() {
 
   const fileInputRef = useRef(null);
 
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [probeInfo, setProbeInfo] = useState(null);
+  const [probePins, setProbePins] = useState(null);
+  const [bsTarget, setBsTarget] = useState(0);
+  const [bsIrLens, setBsIrLens] = useState('');
+  const [bsOpcode, setBsOpcode] = useState('0x01');
+  const [bsLength, setBsLength] = useState('');
+  const [bsCells, setBsCells] = useState(null);
+
+  const guard = async (label, fn) => {
+    setBusy(label);
+    setError('');
+    try {
+      return await fn();
+    } catch (err) {
+      setError(err.message);
+      return undefined;
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const handleConnectHardware = (kind) => guard('connect', async () => {
+    const i = await client.connectHardware({ kind });
+    setProbeInfo(i);
+    setIsConnected(true);
+    setIsSimulated(false);
+    setTapDevices([]);
+    setPlayResult(null);
+    setBsCells(null);
+  });
+
   const handleConnectSimulation = () => {
     client.connectSimulation();
     setIsConnected(true);
     setIsSimulated(true);
+    setProbeInfo(null);
     setTapDevices(client.detectedDevices);
   };
 
-  const handleDisconnect = () => {
-    client.disconnect();
+  const handleDisconnect = async () => {
+    await client.disconnect();
     setIsConnected(false);
     setIsSimulated(false);
     setTapDevices([]);
     setPlayResult(null);
+    setProbeInfo(null);
+    setProbePins(null);
+    setBsCells(null);
   };
 
-  const handleScanChain = async () => {
+  const handleScanChain = () => guard('scan', async () => {
     if (!isConnected) return;
     setIsScanning(true);
-    const devices = await client.scanChain();
-    setTapDevices(devices);
-    setIsScanning(false);
-  };
+    try {
+      const devices = await client.scanChain();
+      setTapDevices([...devices]);
+      setBsIrLens(devices.map((d) => d.irlen ?? '?').join(', '));
+    } finally {
+      setIsScanning(false);
+    }
+  });
+
+  const handleReadPins = () => guard('pins', async () => setProbePins(await client.readProbePins()));
+
+  const handleSample = () => guard('sample', async () => {
+    const irLengths = bsIrLens.split(/[\s,]+/).filter(Boolean).map(Number);
+    if (irLengths.length !== tapDevices.length || irLengths.some((n) => !Number.isInteger(n) || n < 2)) {
+      throw new Error(`Enter one IR length per device in the chain (${tapDevices.length}), from the device's BSDL file.`);
+    }
+    const opcode = parseInt(bsOpcode.replace(/^0x/i, ''), 16);
+    const bsrLength = Number(bsLength);
+    if (Number.isNaN(opcode)) throw new Error('SAMPLE opcode must be hex.');
+    if (!Number.isInteger(bsrLength) || bsrLength < 1 || bsrLength > 4096) throw new Error('Boundary register length must be 1-4096 (BOUNDARY_LENGTH in the BSDL file).');
+    setBsCells(await client.sampleBoundary({ target: Number(bsTarget), irLengths, opcode, bsrLength }));
+  });
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -86,8 +139,10 @@ export default function JtagWorkbench() {
     try {
       setIsPlayingSvf(true);
       setPlayResult(null);
-      await client.playSvf(svfContent, (p) => setPlayProgress(p));
-      setPlayResult('SUCCESS: All TDO responses matched mask. CPLD / FPGA programmed.');
+      const r = await client.playSvf(svfContent, (p) => setPlayProgress(p));
+      setPlayResult(r.simulated
+        ? `SUCCESS (SIMULATED): ${r.statements} statements parsed; nothing was sent to a device.`
+        : `SUCCESS: ${r.statements} statements played, ${r.checks} TDO check(s) matched.`);
     } catch (err) {
       setPlayResult(`ERROR: ${err.message}`);
     } finally {
@@ -97,7 +152,12 @@ export default function JtagWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      <DemoBanner demoOnly>No JTAG adapter is driven. The chain scan, pin states and SVF playback below are simulated; TDO is never checked.</DemoBanner>
+      {isSimulated && <DemoBanner>Simulated JTAG chain: the devices, pin states and SVF results below are not from hardware.</DemoBanner>}
+      {error && (
+        <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
+          <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
+        </div>
+      )}
       {/* Top Controller Bar */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -107,19 +167,37 @@ export default function JtagWorkbench() {
               <span>JTAG BOUNDARY SCANNER & SVF / CPLD BITSTREAM PLAYER</span>
             </h2>
             <p className="text-[11px] text-slate-400">
-              Scan JTAG TAP chains, identify FPGA/CPLD IDCODEs, sample pin boundary states, and execute .svf bitstreams.
+              Scan JTAG chains and identify IDCODEs, play .svf files with TDO checking, and sample boundary-scan cells, through a CMSIS-DAP probe with JTAG (DAPLink, Raspberry Pi Debug Probe, LPC-Link2).
+              {probeInfo && <span className="block text-emerald-400">Probe: {probeInfo.product}{probeInfo.firmware ? ` (fw ${probeInfo.firmware})` : ''}</span>}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             {!isConnected ? (
-              <button
-                onClick={handleConnectSimulation}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-500/30 text-xs font-bold transition-all shadow-cyan-glow"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>CONNECT JTAG (FT2232H DEMO)</span>
-              </button>
+              <>
+                <button
+                  onClick={() => handleConnectHardware('usb')}
+                  disabled={!!busy}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 text-xs font-bold disabled:opacity-40"
+                >
+                  <Usb className="w-3.5 h-3.5" />
+                  <span>{busy === 'connect' ? 'CONNECTING...' : 'CONNECT PROBE (WEBUSB)'}</span>
+                </button>
+                <button
+                  onClick={() => handleConnectHardware('hid')}
+                  disabled={!!busy}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold disabled:opacity-40"
+                >
+                  HID PROBE
+                </button>
+                <button
+                  onClick={handleConnectSimulation}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-500/30 text-xs font-bold transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>DEMO</span>
+                </button>
+              </>
             ) : (
               <button
                 onClick={handleDisconnect}
@@ -136,7 +214,7 @@ export default function JtagWorkbench() {
           <div className="flex items-center gap-2">
             <button
               onClick={handleScanChain}
-              disabled={!isConnected || isScanning}
+              disabled={!isConnected || isScanning || !!busy}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-cyan-glow transition-all disabled:opacity-40"
             >
               <Search className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
@@ -160,10 +238,10 @@ export default function JtagWorkbench() {
             <div key={dev.index} className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 shadow-md">
               <div className="flex items-center justify-between pb-2 border-b border-slate-850">
                 <span className="font-bold text-amber-300 text-xs">
-                  DEVICE #{dev.index}: {dev.mfr} {dev.part}
+                  #{dev.index}{dev.index === 0 ? ' (TDO end)' : ''}: {dev.mfr} {dev.part}
                 </span>
                 <span className="text-[10px] text-cyan-400 font-mono font-bold">
-                  IDCODE: 0x{(dev.idcode ?? 0).toString(16).padStart(8, '0').toUpperCase()}
+                  {dev.idcode == null ? 'NO IDCODE' : <>IDCODE: 0x{dev.idcode.toString(16).padStart(8, '0').toUpperCase()}</>}
                 </span>
               </div>
 
@@ -178,11 +256,11 @@ export default function JtagWorkbench() {
                 </div>
                 <div>
                   <span className="text-[9px] text-slate-500 uppercase font-bold block">Pin Count</span>
-                  <span className="text-emerald-400 font-semibold">{dev.pins} Pins</span>
+                  <span className="text-emerald-400 font-semibold">{dev.pins ? `${dev.pins} Pins` : '-'}</span>
                 </div>
                 <div>
                   <span className="text-[9px] text-slate-500 uppercase font-bold block">IR Length</span>
-                  <span className="text-purple-400 font-semibold">{dev.irlen} Bits</span>
+                  <span className="text-purple-400 font-semibold">{dev.irlen ? `${dev.irlen} Bits` : 'see BSDL'}</span>
                 </div>
               </div>
             </div>
@@ -200,12 +278,12 @@ export default function JtagWorkbench() {
               <span>SVF BITSTREAM SCRIPT PLAYER</span>
             </span>
             <div className="flex items-center gap-2">
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileUpload} 
-                accept=".svf,.xsvf" 
-                className="hidden" 
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".svf"
+                className="hidden"
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -228,7 +306,7 @@ export default function JtagWorkbench() {
           {isPlayingSvf && (
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-cyan-400 font-bold">
-                <span>Programming FPGA... {playProgress.lastCmd}</span>
+                <span>Playing SVF... {playProgress.lastCmd}</span>
                 <span>{playProgress.percent}%</span>
               </div>
               <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
@@ -242,8 +320,8 @@ export default function JtagWorkbench() {
 
           {playResult && (
             <div className={`p-2.5 rounded-lg border text-xs font-bold flex items-center gap-2 ${
-              playResult.startsWith('SUCCESS') 
-                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40' 
+              playResult.startsWith('SUCCESS')
+                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40'
                 : 'bg-rose-500/10 text-rose-300 border-rose-500/40'
             }`}>
               <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -260,7 +338,7 @@ export default function JtagWorkbench() {
           </button>
         </div>
 
-        {/* Right: Boundary Scan Pin State Matrix */}
+        {isSimulated || !isConnected ? (
         <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
@@ -295,6 +373,62 @@ export default function JtagWorkbench() {
             <span className="text-emerald-400 font-bold">● Green = Logic High</span>
           </div>
         </div>
+        ) : (
+          <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-emerald-400" />
+                <span>PROBE PINS & BOUNDARY SCAN (SAMPLE)</span>
+              </span>
+              <button onClick={handleReadPins} disabled={!!busy} className="px-2 py-1 rounded bg-slate-900 text-cyan-300 border border-slate-800 text-[10px] font-bold disabled:opacity-40">READ PROBE PINS</button>
+            </div>
+            {probePins && (
+              <div className="grid grid-cols-6 gap-1.5">
+                {Object.entries(probePins).map(([k, v]) => (
+                  <div key={k} className={`p-1 rounded text-center border text-[10px] font-bold ${v ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+                    {k}<span className="block">{v ? '1' : '0'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-slate-400">
+              SAMPLE/PRELOAD captures every boundary cell of one device without disturbing it. The IR lengths, SAMPLE opcode and
+              boundary length come from the device's BSDL file; cell-to-pin names are in that file too.
+            </p>
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <label className="space-y-0.5">
+                <span className="text-slate-500 block">Device</span>
+                <select value={bsTarget} onChange={(e) => setBsTarget(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-1 py-1 text-slate-200">
+                  {tapDevices.map((d) => <option key={d.index} value={d.index}>#{d.index} {d.part}</option>)}
+                </select>
+              </label>
+              <label className="space-y-0.5">
+                <span className="text-slate-500 block">IR lengths (TDO end first)</span>
+                <input value={bsIrLens} onChange={(e) => setBsIrLens(e.target.value)} placeholder="6, 4" className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
+              </label>
+              <label className="space-y-0.5">
+                <span className="text-slate-500 block">SAMPLE opcode (hex)</span>
+                <input value={bsOpcode} onChange={(e) => setBsOpcode(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
+              </label>
+              <label className="space-y-0.5">
+                <span className="text-slate-500 block">Boundary length (cells)</span>
+                <input value={bsLength} onChange={(e) => setBsLength(e.target.value)} placeholder="e.g. 361" className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
+              </label>
+            </div>
+            <button onClick={handleSample} disabled={!!busy || !tapDevices.length} className="w-full py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold text-xs disabled:opacity-40">
+              {busy === 'sample' ? 'SAMPLING...' : tapDevices.length ? 'SAMPLE BOUNDARY CELLS' : 'SCAN THE CHAIN FIRST'}
+            </button>
+            {bsCells && (
+              <div className="grid grid-cols-8 sm:grid-cols-12 gap-1 max-h-56 overflow-y-auto">
+                {bsCells.map((v, i) => (
+                  <div key={i} className={`p-0.5 rounded text-center border text-[9px] font-mono ${v ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
+                    <span className="block font-bold">{i}</span>{v}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -233,7 +233,7 @@ Kismet functions as a headless multi-threaded C++ RF capture engine serving real
     content: `
 # 24MHz Logic Analyzer — Digital Signal Workbench
 
-The **Logic Analyzer** workbench transforms your browser into an 8-channel digital storage oscilloscope and protocol analyzer. Interfacing with low-cost USB logic hardware (such as Cypress FX2LP CY7C68013A boards or RP2040 PIO-based analyzers), it captures high-speed logic state transitions and decodes UART, SPI, and I2C packets directly over the waveform.
+The **Logic Analyzer** workbench transforms your browser into an 8-channel digital storage oscilloscope and protocol analyzer. Interfacing with low-cost logic hardware (SUMP-protocol devices over Web Serial, such as Arduino / Raspberry Pi Pico sketches and the Open Bench Logic Sniffer, or Cypress FX2LP boards running sigrok's fx2lafw firmware over WebUSB), it captures high-speed logic state transitions and decodes UART, SPI, and I2C packets directly over the waveform.
 
 ---
 
@@ -314,7 +314,9 @@ Every transition records the nanosecond timestamp (\`#41\`) followed by the logi
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Connect Analyzer** | Button | Connects WebUSB device matching Cypress FX2LP VID \`0x04B4\` / PID \`0x8613\` or Sigrok VID \`0x0925\`. |
+| **Connect SUMP (Serial)** | Button | Opens a SUMP device over Web Serial (115200 baud), checks its \`1ALS\` ID and reads its metadata. |
+| **Connect FX2 (USB)** | Button | Opens an FX2 board over WebUSB (fx2lafw \`1D50:608C\`, or a blank FX2 / Saleae-clone ID). A board without fx2lafw asks for the firmware file, uploads it to RAM, and re-enumerates; on Windows it needs the WinUSB driver (Zadig). |
+| **Demo** | Button | Fills the buffer with synthetic traffic, labeled as simulated. |
 | **Sample Rate** | Dropdown | Selects acquisition sampling frequency from 20 kHz up to 24 MHz. |
 | **Sample Depth** | Dropdown | Configures acquisition buffer size from 10k samples up to 10M samples. |
 | **Trigger Channel** | Dropdown | Designates which channel initiates capture (None, CH0 through CH7). |
@@ -351,14 +353,15 @@ Every transition records the nanosecond timestamp (\`#41\`) followed by the logi
 
 ### Implementation & Architecture
 
-> **Current build — capture simulation.** The workbench generates and decodes
-> synthetic 8-channel waveforms so you can learn protocol decoding and VCD export
-> without an FX2LP device. The **decoders themselves are real**; a live WebUSB
-> capture path (fx2lafw-style streaming) is a future addition.
+> **Capture hardware.** SUMP devices over Web Serial: the tool programs the
+> divider, sample count and trigger (mask/value on D0-D7), then reads the buffer
+> (newest sample first, reversed for display). FX2 boards over WebUSB with
+> fx2lafw: samples stream from bulk endpoint 2 at up to 24 MS/s (USB gaps are
+> possible above ~12 MS/s). The decoders are the same for real and demo data.
 
 - **Component:** [\`src/components/tools/LogicAnalyzerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/LogicAnalyzerWorkbench.jsx) holds the sample rate (up to 24 MHz), eight named channels (D0–D7, pre-labeled UART/SPI/I2C), and a **packed digital sample buffer** — a \`Uint8Array\` where each byte encodes all 8 channels as individual bits.
 - **Decoders:** [\`src/utils/logicAnalyzerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/logicAnalyzerDriver.js) provides edge-walking protocol decoders (e.g. \`decodeI2C\`) that scan the sample buffer for START/STOP/clock edges and reconstruct bus transactions, rendered as annotations over the canvas waveforms.
-- **Rendering:** \`handleCaptureSimulation()\` seeds the buffer with representative traffic for the selected protocol, then the waveform canvas and decoder tables redraw from the same packed buffer.
+- **Capture:** \`SumpAnalyzer\` (serial) and \`Fx2LogicAnalyzer\` (WebUSB, including firmware upload through the FX2's 0xA0 vendor request) fill the packed buffer; the demo fills it with synthetic traffic instead. The waveform canvas and decoder tables redraw from that buffer either way.
 
 ---
 
@@ -557,13 +560,12 @@ The **I2C & SPI Bus Explorer** is an interactive workbench for learning and
 reverse-engineering I2C/SPI peripherals — sensors, EEPROMs, displays — through
 address scanning, chip identification, and register read/write.
 
-> **Current build — interactive simulation.** This workbench ships as a hands-on
-> *simulation*. It models a set of virtual chips at well-known I2C addresses
-> (e.g. an MPU-6050 at \`0x68\`, a BME280 at \`0x76\`) so you can practice bus
-> sweeps and register pokes with no hardware attached. The protocol theory and
-> address/register dictionaries below are real and accurate; driving a physical
-> Bus Pirate / CH341A / ESP32 bridge is not yet wired, so **"Connect" starts the
-> demo**, not a live bus. (See *Implementation & Architecture* below.)
+> **Hardware: Bus Pirate v3/v4.** "Connect Bus Pirate" opens it over Web
+> Serial (115200 baud), switches it to binary (BBIO) mode and raw I2C, and every
+> scan, read and write goes to the real bus. Power, pull-ups and bus speed are
+> set from the toolbar; SPI transfers use the Bus Pirate's raw SPI mode. The
+> **Demo** button instead models virtual chips (an MPU-6050 at \`0x68\`, a
+> BME280 at \`0x76\`, ...) for practice without hardware, labeled as simulated.
 
 ---
 
@@ -627,26 +629,23 @@ Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Commu
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Connect Bus Explorer (Demo)** | Button | Starts the simulated bus session with its virtual chip set (no hardware). |
-| **Scan I2C Bus (7-bit Sweep)** | Button | Sweeps addresses \`0x08\`–\`0x77\` and marks the virtual devices that "respond". |
-| **Address Grid** | Hex Matrix | Visual matrix highlighting responding addresses with chip-identification badges from the built-in dictionary. |
-| **Register Address** | Input | Hexadecimal byte offset of the target register to read or write. |
-| **Read Register** | Button | Reads the value of the target register from the simulated device model. |
-| **Write Register** | Button | Writes a new byte value into the simulated device's register store. |
-| **Disconnect** | Button | Tears down the simulated session. |
-
-> Because the session is simulated, the scan always returns the same deterministic
-> virtual devices — ideal for demos, screenshots, and learning the workflow. A
-> future hardware mode would route these same actions over the shared serial
-> transport to a Bus Pirate / CH341A / ESP32 bridge.
+| **Connect Bus Pirate (Serial)** | Button | Opens a Bus Pirate v3/v4, enters binary mode and raw I2C. |
+| **Demo** | Button | Starts a simulated bus with virtual chips (labeled as simulated). |
+| **Scan I2C Bus (7-bit Sweep)** | Button | Sends START + address for every address \`0x08\`–\`0x77\` and lists those that ACK. |
+| **Power / pull-ups / speed** | Toolbar | Switch the Bus Pirate's 3.3 V / 5 V supplies and pull-ups, and set 5 / 50 / 100 / 400 kHz. |
+| **Address Grid** | Hex Matrix | Responding addresses with chip-identification badges from the built-in dictionary. |
+| **Register Dump** | Panel | Reads 32 registers from the start register you enter (write pointer, repeated START, read). |
+| **Write Register** | Button | Writes one byte to a register, then reads the dump again. |
+| **SPI Transfer** | Panel | Sends hex bytes with CS held low and shows the bytes clocked back (\`9F 00 00 00\` reads a flash JEDEC ID). |
+| **Disconnect** | Button | Turns the supplies off and returns the Bus Pirate to its text console. |
 
 ---
 
 ### 2b. Implementation & Architecture
 
 - **Component:** [\`src/components/tools/BusExplorerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/BusExplorerWorkbench.jsx) renders the header, scan bar, address grid, and register panel, and holds \`isConnected\`, \`isSimulated\`, \`detectedDevices\`, and scan state.
-- **Driver:** [\`src/utils/busExplorerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/busExplorerDriver.js) implements the virtual bus. \`connectSimulation()\` seeds a model of known chips keyed by 7-bit address; \`scanBus()\` walks \`0x08\`–\`0x77\` and reports which virtual addresses ACK; \`initSimulatedRegisters(addr)\` populates a per-device register map (including identity registers such as the MPU-6050 \`WHO_AM_I\` = \`0x68\`) that the read/write controls operate on.
-- **Why simulated:** WebSerial/WebUSB can reach a *bridge* (Bus Pirate, CH341A, ESP32), but each bridge speaks its own command dialect. The simulation lets the UI, dictionary, and teaching flow ship and be tested now, with a real bridge adapter as a clean future addition that reuses the same grid and register UI.
+- **Driver:** [\`src/utils/busExplorerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/busExplorerDriver.js) drives a Bus Pirate through its binary protocol (\`BusPirate\` class: BBIO entry, I2C START/STOP/bulk write/read with ACK checking, SPI transfers) and also holds the demo bus. \`connectSimulation()\` seeds a model of known chips keyed by 7-bit address; \`scanBus()\` walks \`0x08\`–\`0x77\` and reports which virtual addresses ACK; \`initSimulatedRegisters(addr)\` populates a per-device register map (including identity registers such as the MPU-6050 \`WHO_AM_I\` = \`0x68\`) that the read/write controls operate on.
+- **Errors:** a missing ACK is reported as an error ("No ACK from 0x50") rather than read as zeros.
 
 ---
 
@@ -655,7 +654,7 @@ Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Commu
 #### Walkthrough A: Interrogating an Unknown I2C Sensor
 1. Connect SDA, SCL, 3.3V, and GND from your bridge adapter to the sensor breakout.
 2. Ensure pull-up resistors are installed (or enabled via software on the bridge).
-3. In Skon's USB Tool, click **Connect Bridge** and set Mode to **I2C**.
+3. In Skon's USB Tool, click **Connect Bus Pirate (Serial)** and pick its port; enable pull-ups if the breakout has none.
 4. Click **Scan I2C Bus**.
 5. Address \`0x68\` responds with an ACK! The tool matches it against the built-in dictionary: *MPU-6050 6-Axis IMU or DS3231 RTC*.
 6. In **Register Address**, enter \`0x75\` and click **Read Register**.

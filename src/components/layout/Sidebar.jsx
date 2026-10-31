@@ -46,9 +46,9 @@ export const SIDEBAR_SECTIONS = [
     title: 'ANALYSIS & PROTOCOL LAB',
     items: [
       { id: 'packet-analyzer', name: 'Packet & Protocol Lab', icon: Activity, accent: 'purple', desc: 'Wi-Fi 802.11, PCAP, Hex Stream & Packet Framer' },
-      { id: 'logic-analyzer', name: '24MHz Logic Analyzer', icon: Activity, accent: 'cyan', demoOnly: true, desc: '8-channel digital waveforms & protocol decoders (demo only, no capture hardware support yet)' },
+      { id: 'logic-analyzer', name: '24MHz Logic Analyzer', icon: Activity, accent: 'cyan', desc: '8-channel capture from SUMP devices or fx2lafw boards, with protocol decoders' },
       { id: 'can-bus', name: 'CAN Bus & OBD-II Scanner', icon: Gauge, accent: 'emerald', desc: 'Live packet sniffer & automotive diagnostics' },
-      { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', demoOnly: true, desc: '1-click chip identification & register watch (demo only, no bus adapter support yet)' },
+      { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', desc: 'I2C scan, chip ID, register read/write and SPI through a Bus Pirate' },
       { id: 'modbus-rtu', name: 'Modbus RTU & RS-485', icon: Activity, accent: 'amber', desc: 'Industrial holding registers & inverter telemetry' },
       { id: 'plotter', name: 'Oscilloscope Plotter', icon: Activity, accent: 'rose', desc: 'Multi-channel live waveforms' },
       { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer' }
@@ -72,8 +72,8 @@ export const SIDEBAR_SECTIONS = [
     title: 'HARDWARE & PAYLOADS',
     items: [
       { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript compiler, simulator & CyberChef obfuscator' },
-      { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash (hardware); CMSIS-DAP, JTAG SVF & AVR ISP (demo only)' },
-      { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', demoOnly: true, desc: 'PPS variable voltage trigger & VBUS analyzer (demo only, no PD hardware support yet)' },
+      { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash, CMSIS-DAP SWD debugger, JTAG / SVF and AVR ISP' },
+      { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'Fixed-voltage requests and contract readout through an STUSB4500 sink' },
       { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more' }
     ]
   },

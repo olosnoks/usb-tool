@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
-import { CmsisDapClient, CMSIS_DAP_HW_UNSUPPORTED } from '../src/utils/cmsisDapDriver';
+import { CmsisDapClient } from '../src/utils/cmsisDapDriver';
+import { SerialLink, FakeSerialPort } from '../src/utils/serialLink';
 import { UsbPdClient } from '../src/utils/usbPdDriver';
 import { JtagClient } from '../src/utils/jtagDriver';
 import SensorHubDeck from '../src/components/tools/hackrf/SensorHubDeck';
@@ -12,17 +13,11 @@ import { ProxmarkDevice, evaluateCompatibility } from '../src/devices/proxmark';
 
 // Tools must never report hardware results they did not get from hardware.
 describe('simulated data is never passed off as hardware', () => {
-  it('CMSIS-DAP refuses real probes instead of faking halt / step / writes', async () => {
+  it('CMSIS-DAP never reports success without a probe or the simulator', async () => {
     const c = new CmsisDapClient(() => {});
-    await expect(c.connectHid()).rejects.toThrow(CMSIS_DAP_HW_UNSUPPORTED);
-    // Even if something marks it connected without the simulator, nothing fakes success.
-    c.connected = true; c.simulated = false;
-    await expect(c.halt()).rejects.toThrow(/not supported/);
-    await expect(c.resume()).rejects.toThrow(/not supported/);
-    await expect(c.step()).rejects.toThrow(/not supported/);
-    await expect(c.readRegisters()).rejects.toThrow(/not supported/);
-    await expect(c.readMemory()).rejects.toThrow(/not supported/);
-    await expect(c.writeMemoryWord(0x20000000, 1)).rejects.toThrow(/not supported/);
+    await expect(c.halt()).rejects.toThrow(/not connected/);
+    await expect(c.readMemory()).rejects.toThrow(/not connected/);
+    await expect(c.writeMemoryWord(0x20000000, 1)).rejects.toThrow(/not connected/);
   });
 
   it('CMSIS-DAP demo still works', async () => {
@@ -32,10 +27,13 @@ describe('simulated data is never passed off as hardware', () => {
     expect(regs.length).toBeGreaterThan(0);
   });
 
-  it('USB-PD refuses hardware instead of showing simulated VBUS readings', async () => {
+  it('USB-PD shows no readings when the STUSB4500 path finds no Bus Pirate', async () => {
+    const link = new SerialLink(new FakeSerialPort(() => {}));
+    await link.open({ baudRate: 115200 });
     const c = new UsbPdClient(() => {});
-    await expect(c.connectHardware()).rejects.toThrow(/not supported yet/);
-  });
+    await expect(c.connectHardware({ link })).rejects.toThrow(/BBIO1/);
+    expect(c.isConnected).toBe(false);
+  }, 10000);
 
   it('JTAG SVF playback says it was simulated, not that TDO passed', async () => {
     const logs = [];

@@ -16,11 +16,11 @@ Beyond serial it covers 802.11 monitor-mode capture for Alfa / RTL8812AU and Pan
 
 **Core Operations** — Terminal & Console (serial monitor + baud hunter) · Firmware Flasher (ESP32 / ESP8266 ROM bootloader) · Hardware Controls (DTR/RTS strapping, U-Boot interrupter)
 
-**Analysis & Protocol Lab** — Packet & Protocol Lab (802.11 dissector, PCAP, hex stream) · CAN Bus & OBD-II Scanner · Modbus RTU & RS-485 · Oscilloscope Plotter · MitM Serial Bridge · CyberChef Workbench (Web Worker pipeline) · 24 MHz Logic Analyzer *(demo)* · I²C & SPI Bus Explorer *(demo)*
+**Analysis & Protocol Lab** — Packet & Protocol Lab (802.11 dissector, PCAP, hex stream) · CAN Bus & OBD-II Scanner · Modbus RTU & RS-485 · Oscilloscope Plotter · MitM Serial Bridge · CyberChef Workbench (Web Worker pipeline) · 24 MHz Logic Analyzer (SUMP / fx2lafw) · I²C & SPI Bus Explorer (Bus Pirate)
 
 **RF, Wireless & Badges** — Wi-Fi Monitor (Alfa RTL8812AU / Panda PAU09 over WebUSB) · Flipper Zero Suite · Proxmark3 / PM5 · PortaPack Mayhem SDR (HackRF) · GPS & Wardrive Suite · Warhog & Piglet Suite
 
-**Hardware & Payloads** — BadUSB & Payload Studio (DuckyScript) · Hardware Programmers: CH341A SPI flash, plus CMSIS-DAP, JTAG SVF and AVR ISP *(demo)* · USB-PD Power Delivery *(demo)*
+**Hardware & Payloads** — BadUSB & Payload Studio (DuckyScript) · Hardware Programmers: CH341A SPI flash, plus CMSIS-DAP SWD debugger, JTAG / SVF and AVR ISP · USB-PD (STUSB4500)
 
 **Device Utilities** — MicroPython Files · Improv Wi-Fi · Telemetry Gauges · Crash & Panic Alerts · Test Runner & Scripts · USB Recon & Autopsy · Silicon Memory Dump
 
@@ -32,8 +32,7 @@ Beyond serial it covers 802.11 monitor-mode capture for Alfa / RTL8812AU and Pan
 |---|---|
 | Real hardware | Terminal, ESP flasher, Hardware Controls, U-Boot deck, Plotter, Serial Bridge, Modbus RTU, CAN / OBD-II (SLCAN adapters), Wi-Fi Monitor, Flipper Zero, Proxmark3, PortaPack (serial console and HackRF WebUSB), GPS & Wardrive, Warhog & Piglet, CH341A, BLE Explorer, WebUSB DFU, MicroPython, Improv |
 | Real hardware, with limits | Silicon Memory Dump: chip ID and MAC on ESP32 / S3 / C3; flash reads only on ESP32 and ESP8266 (newer ROMs need the esptool stub). Kismet Studio: live devices and alerts from a Kismet server's REST API; the server must allow requests from this page (CORS), and from the hosted https page it must be on localhost. PortaPack sensor and digital-mode decoders: no decoder feed from the device yet. |
-| Real hardware, untested on devices | AVR ISP (Arduino running the ArduinoISP sketch, STK500v1 at 19200 baud), I²C / SPI Bus Explorer (Bus Pirate v3/v4 binary mode), Logic Analyzer (SUMP devices over serial; FX2 boards over WebUSB with user-supplied fx2lafw firmware, WinUSB driver needed on Windows). These have been tested only against simulated devices. |
-| Demo only (no hardware path yet) | JTAG, CMSIS-DAP, USB-PD (common PD meters use closed vendor protocols) |
+| Real hardware, new and not yet tried on devices | AVR ISP (Arduino running the ArduinoISP sketch, STK500v1 at 19200 baud) · I²C / SPI Bus Explorer (Bus Pirate v3/v4 binary mode) · Logic Analyzer (SUMP devices over serial; FX2 boards over WebUSB with user-supplied fx2lafw firmware, WinUSB driver needed on Windows) · CMSIS-DAP debugger (SWD halt/step/reset, registers and memory through a CMSIS-DAP v2 WebUSB or v1 WebHID probe) · JTAG (chain scan, SVF with TDO checking and boundary-scan SAMPLE through a CMSIS-DAP probe with JTAG) · USB-PD (STUSB4500 sink controller over a Bus Pirate: fixed 5-20 V requests and contract readout; no PPS or VBUS metering). These are tested against simulated devices that speak each protocol. |
 
 Several real-hardware tools also offer an opt-in simulation for trying the interface; simulated data is always labeled in the app.
 

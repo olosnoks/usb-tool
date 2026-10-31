@@ -1,22 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Cpu, 
-  Play, 
-  Pause, 
-  RotateCcw, 
-  CornerDownRight, 
-  Layers, 
-  Search, 
-  Sparkles, 
-  CheckCircle2, 
-  AlertTriangle, 
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Cpu,
+  Play,
+  Pause,
+  RotateCcw,
+  CornerDownRight,
+  Layers,
+  Search,
+  Sparkles,
+  CheckCircle2,
+  AlertTriangle,
   Edit3,
   RefreshCw,
-  Sliders
+  Sliders,
+  Usb
 } from 'lucide-react';
-import { 
-  CmsisDapClient, 
-  CORTEX_REG_NAMES 
+import {
+  CmsisDapClient,
+  CORTEX_REG_NAMES
 } from '../../utils/cmsisDapDriver';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
@@ -35,81 +36,134 @@ export default function CmsisDapDebugger() {
   const [writeAddr, setWriteAddr] = useState('0x20000000');
   const [writeVal, setWriteVal] = useState('0x12345678');
 
-  const handleConnectHardware = async () => {
+  const [info, setInfo] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const busyRef = useRef(false);
+
+  // Run one probe action at a time and show failures inline.
+  const guard = async (label, fn) => {
+    if (busyRef.current) return undefined;
+    busyRef.current = true;
+    setBusy(label);
+    setError('');
     try {
-      await client.connectHid();
-      setIsConnected(true);
-      setIsSimulated(false);
-      setTargetState('running');
-      handleReadMemory();
+      return await fn();
     } catch (err) {
-      alert(`Probe connection error: ${err.message}`);
+      setError(err.message);
+      return undefined;
+    } finally {
+      busyRef.current = false;
+      setBusy('');
     }
   };
 
-  const handleConnectSimulation = () => {
+  const readMemoryNow = async (addrStr = memAddress) => {
+    const addr = parseInt(String(addrStr).replace(/^0x/i, ''), 16);
+    if (Number.isNaN(addr)) throw new Error('Address must be hex, e.g. 0x20000000.');
+    setMemWords(await client.readMemory(addr, 16));
+  };
+
+  const handleConnectHardware = (kind) => guard('connect', async () => {
+    const i = await client.connectHardware({ kind });
+    setInfo(i);
+    setIsConnected(true);
+    setIsSimulated(false);
+    setTargetState(client.targetState);
+    setRegisters([]);
+    setPrevRegisters([]);
+    if (client.targetState === 'halted') setRegisters(await client.readRegisters());
+    try { await readMemoryNow(); } catch (e) { setError(`Connected, but reading ${memAddress} failed: ${e.message}`); }
+  });
+
+  const handleConnectSimulation = () => guard('connect', async () => {
     client.connectSimulation();
+    setInfo(null);
     setIsConnected(true);
     setIsSimulated(true);
     setTargetState('running');
-    handleReadMemory('0x20000000');
-  };
+    await readMemoryNow('0x20000000');
+  });
 
-  const handleDisconnect = () => {
-    client.disconnect();
+  const handleDisconnect = async () => {
+    await client.disconnect();
     setIsConnected(false);
     setIsSimulated(false);
     setTargetState('disconnected');
     setRegisters([]);
     setMemWords([]);
+    setInfo(null);
   };
 
-  const handleHalt = async () => {
-    if (!isConnected) return;
-    const regs = await client.halt();
+  const showRegs = (regs) => {
     setPrevRegisters(registers);
     setRegisters(regs);
-    setTargetState('halted');
-    handleReadMemory(memAddress);
   };
 
-  const handleResume = async () => {
-    if (!isConnected) return;
+  const handleHalt = () => guard('halt', async () => {
+    showRegs(await client.halt());
+    setTargetState('halted');
+    await readMemoryNow();
+  });
+
+  const handleResume = () => guard('resume', async () => {
     await client.resume();
     setTargetState('running');
-  };
+  });
 
-  const handleStep = async () => {
-    if (!isConnected) return;
-    const regs = await client.step();
-    setPrevRegisters(registers);
-    setRegisters(regs);
-    handleReadMemory(memAddress);
-  };
+  const handleStep = () => guard('step', async () => {
+    showRegs(await client.step());
+    setTargetState('halted');
+    await readMemoryNow();
+  });
 
-  const handleReadMemory = async (addrStr = memAddress) => {
-    if (!isConnected) return;
-    const cleanAddr = parseInt(addrStr, 16);
-    if (isNaN(cleanAddr)) return;
-    const words = await client.readMemory(cleanAddr, 16);
-    setMemWords(words);
-  };
+  const handleReset = (halt) => guard('reset', async () => {
+    const regs = await client.reset({ halt });
+    setTargetState(client.targetState);
+    if (regs) showRegs(regs);
+  });
 
-  const handleWriteMemory = async () => {
-    if (!isConnected) return;
-    const targetA = parseInt(writeAddr, 16);
-    const targetV = parseInt(writeVal, 16);
-    if (isNaN(targetA) || isNaN(targetV)) {
-      alert('Please enter valid hex address and value.');
-      return;
+  const handleReadMemory = (addrStr = memAddress) => guard('read', () => readMemoryNow(addrStr));
+
+  const handleWriteMemory = () => guard('write', async () => {
+    const targetA = parseInt(writeAddr.replace(/^0x/i, ''), 16);
+    const targetV = parseInt(writeVal.replace(/^0x/i, ''), 16);
+    if (Number.isNaN(targetA) || Number.isNaN(targetV)) throw new Error('Enter a hex address and value.');
+    const back = await client.writeMemoryWord(targetA, targetV);
+    if (!client.simulated && back !== (targetV >>> 0)) {
+      setError(`Wrote 0x${(targetV >>> 0).toString(16).toUpperCase()} but read back 0x${(back >>> 0).toString(16).toUpperCase()}: read-only memory, flash, or a peripheral register.`);
     }
-    await client.writeMemoryWord(targetA, targetV);
-    handleReadMemory(memAddress);
-  };
+    await readMemoryNow();
+  });
+
+  // While a real core runs, notice when it halts by itself (breakpoint, fault).
+  useEffect(() => {
+    if (!isConnected || isSimulated || targetState !== 'running') return undefined;
+    const t = setInterval(async () => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      try {
+        if ((await client.pollState()) === 'halted') {
+          setTargetState('halted');
+          showRegs(await client.readRegisters());
+        }
+      } catch (e) {
+        setError(`Lost the target: ${e.message}`);
+      } finally {
+        busyRef.current = false;
+      }
+    }, 750);
+    return () => clearInterval(t);
+  }, [isConnected, isSimulated, targetState]);
 
   return (
     <div className="flex flex-col gap-4 font-mono">
-      <DemoBanner demoOnly>Real CMSIS-DAP probes are not supported yet. The demo below runs a virtual Cortex-M target; halting, stepping and memory edits never touch a device.</DemoBanner>
+      {isSimulated && <DemoBanner>Virtual Cortex-M target: halting, stepping and memory edits never touch a device.</DemoBanner>}
+      {error && (
+        <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
+          <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
+        </div>
+      )}
       {/* Probe Header Card */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -119,7 +173,7 @@ export default function CmsisDapDebugger() {
               <span>CMSIS-DAP / ARM CORTEX-M SWD IN-SYSTEM DEBUGGER</span>
             </h2>
             <p className="text-[11px] text-slate-400">
-              Debug running microcontrollers (Pico Probe, micro:bit, ST-Link, STM32, RP2040) over WebHID. Halt the CPU, single-step, inspect registers, and edit SRAM.
+              Debug Cortex-M microcontrollers over SWD through a CMSIS-DAP probe (Raspberry Pi Debug Probe, DAPLink / micro:bit, LPC-Link2, EDBG). Halt, step, reset, read registers and memory. ST-Link and J-Link are not CMSIS-DAP.
             </p>
           </div>
 
@@ -127,20 +181,29 @@ export default function CmsisDapDebugger() {
             {!isConnected ? (
               <>
                 <button
-                  onClick={handleConnectHardware}
-                  disabled
-                  title="Halt, step, register and memory access are not implemented for real probes yet."
-                  className="disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-xs shadow-cyan-glow transition-all active:scale-95"
+                  onClick={() => handleConnectHardware('usb')}
+                  disabled={!!busy}
+                  title="CMSIS-DAP v2 (bulk endpoints): Raspberry Pi Debug Probe, recent DAPLink"
+                  className="disabled:opacity-40 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-xs shadow-cyan-glow transition-all active:scale-95"
+                >
+                  <Usb className="w-3.5 h-3.5" />
+                  <span>{busy === 'connect' ? 'ATTACHING...' : 'CONNECT PROBE (WEBUSB)'}</span>
+                </button>
+                <button
+                  onClick={() => handleConnectHardware('hid')}
+                  disabled={!!busy}
+                  title="CMSIS-DAP v1 (HID): older DAPLink firmware, micro:bit v1"
+                  className="disabled:opacity-40 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all"
                 >
                   <Cpu className="w-3.5 h-3.5" />
-                  <span>CONNECT DAP PROBE (WEBHID) (NOT SUPPORTED YET)</span>
+                  <span>HID PROBE</span>
                 </button>
                 <button
                   onClick={handleConnectSimulation}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>VIRTUAL TARGET DEMO</span>
+                  <span>DEMO</span>
                 </button>
               </>
             ) : (
@@ -166,15 +229,32 @@ export default function CmsisDapDebugger() {
                 pulse={targetState === 'running'}
               />
               <span className="text-[10px] text-slate-400 hidden sm:inline">
-                {isSimulated ? 'ARM Cortex-M4 (STM32F401)' : 'Physical Hardware Probe Active'}
+                {isSimulated ? 'ARM Cortex-M4 (virtual)' : info ? `${info.core} via ${info.probe} (${info.transport})` : ''}
               </span>
             </div>
 
             {/* Execution Controls */}
             <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => handleReset(true)}
+                disabled={!!busy}
+                title="System reset (AIRCR.SYSRESETREQ), halted at the first instruction"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-bold disabled:opacity-40"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>RESET + HALT</span>
+              </button>
+              <button
+                onClick={() => handleReset(false)}
+                disabled={!!busy}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-bold disabled:opacity-40"
+              >
+                RESET + RUN
+              </button>
               {targetState === 'running' ? (
                 <button
                   onClick={handleHalt}
+                  disabled={!!busy}
                   className="flex items-center gap-1 px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 text-xs font-bold transition-all shadow-amber-glow"
                 >
                   <Pause className="w-3.5 h-3.5 fill-current" />
@@ -184,6 +264,7 @@ export default function CmsisDapDebugger() {
                 <>
                   <button
                     onClick={handleResume}
+                  disabled={!!busy}
                     className="flex items-center gap-1 px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/50 text-xs font-bold transition-all shadow-emerald-glow"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
@@ -192,6 +273,7 @@ export default function CmsisDapDebugger() {
 
                   <button
                     onClick={handleStep}
+                  disabled={!!busy}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all"
                   >
                     <CornerDownRight className="w-3.5 h-3.5" />
@@ -214,7 +296,7 @@ export default function CmsisDapDebugger() {
                 <Sliders className="w-3.5 h-3.5 text-cyan-400" />
                 <span>ARM CORE REGISTERS</span>
               </span>
-              <span className="text-[10px] text-slate-500 font-bold">ARMv7-M Thumb</span>
+              <span className="text-[10px] text-slate-500 font-bold">{targetState === 'halted' ? 'read while halted' : 'halt to read'}</span>
             </div>
 
             <div className="grid grid-cols-2 gap-1.5 text-xs">
@@ -227,8 +309,8 @@ export default function CmsisDapDebugger() {
                   <div
                     key={name}
                     className={`p-2 rounded-lg border flex items-center justify-between font-mono ${
-                      changed 
-                        ? 'bg-amber-500/20 border-amber-500/60 text-amber-300' 
+                      changed
+                        ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
                         : 'bg-slate-950 border-slate-850 text-slate-300'
                     }`}
                   >
@@ -335,6 +417,7 @@ export default function CmsisDapDebugger() {
                 />
                 <button
                   onClick={handleWriteMemory}
+                  disabled={!!busy}
                   className="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 text-xs font-bold transition-all"
                 >
                   WRITE

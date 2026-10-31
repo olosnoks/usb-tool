@@ -1,24 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Zap, 
-  BatteryCharging, 
-  Sliders, 
-  RotateCcw, 
-  AlertTriangle, 
-  CheckCircle2, 
-  Sparkles, 
-  ShieldAlert, 
-  Flame, 
-  Info, 
-  Activity, 
+import {
+  Zap,
+  BatteryCharging,
+  Sliders,
+  RotateCcw,
+  AlertTriangle,
+  CheckCircle2,
+  Sparkles,
+  ShieldAlert,
+  Flame,
+  Info,
+  Activity,
   Cpu,
-  Power
+  Power,
+  Usb,
+  RefreshCw
 } from 'lucide-react';
-import { 
-  UsbPdClient, 
-  FIXED_PDO_PROFILES, 
-  PPS_PROFILE, 
-  SAMPLE_CABLE_EMARKERS 
+import {
+  UsbPdClient,
+  FIXED_PDO_PROFILES,
+  PPS_PROFILE,
+  SAMPLE_CABLE_EMARKERS
 } from '../../utils/usbPdDriver';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
@@ -48,7 +50,7 @@ export default function UsbPdWorkbench() {
   // Telemetry loop
   useEffect(() => {
     let interval = null;
-    if (isConnected) {
+    if (isConnected && isSimulated) {
       interval = setInterval(() => {
         const data = client.readTelemetry();
         setTelemetry(data);
@@ -57,7 +59,7 @@ export default function UsbPdWorkbench() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isConnected, client]);
+  }, [isConnected, isSimulated, client]);
 
   const handleConnectSimulation = () => {
     client.connectSimulation();
@@ -69,18 +71,25 @@ export default function UsbPdWorkbench() {
     setCable(SAMPLE_CABLE_EMARKERS[0]);
   };
 
+  const [error, setError] = useState('');
+  const [connecting, setConnecting] = useState(false);
+
   const handleConnectHardware = async () => {
+    setError('');
+    setConnecting(true);
     try {
       await client.connectHardware();
       setIsConnected(true);
       setIsSimulated(false);
     } catch (err) {
-      alert(`Hardware connection failed: ${err.message}`);
+      setError(`Connection failed: ${err.message}`);
+    } finally {
+      setConnecting(false);
     }
   };
 
-  const handleDisconnect = () => {
-    client.disconnect();
+  const handleDisconnect = async () => {
+    await client.disconnect();
     setIsConnected(false);
     setIsSimulated(false);
     setTelemetry({
@@ -111,7 +120,12 @@ export default function UsbPdWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      <DemoBanner demoOnly>No USB-PD trigger or VBUS meter protocol is implemented. Voltages, currents and PDO requests below come from a simulated 100 W charger.</DemoBanner>
+      {isSimulated && <DemoBanner>Simulated 100 W charger: the voltages, currents and cable data below are invented.</DemoBanner>}
+      {error && (
+        <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
+          <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
+        </div>
+      )}
       {/* Top Controller Bar */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -121,7 +135,7 @@ export default function UsbPdWorkbench() {
               <span>USB-PD POWER DELIVERY ANALYZER & VARIABLE VOLTAGE TRIGGER</span>
             </h2>
             <p className="text-[11px] text-slate-400">
-              Negotiate Power Delivery 3.0 / PPS contracts (5V, 9V, 12V, 15V, 20V) and measure real-time VBUS power & energy.
+              Request fixed USB-PD voltages (5-20 V) and read the negotiated contract from an STUSB4500 sink controller (e.g. SparkFun Power Delivery Board) wired to a Bus Pirate's I2C pins. The demo adds PPS, VBUS metering and e-marker views.
             </p>
           </div>
 
@@ -130,19 +144,19 @@ export default function UsbPdWorkbench() {
               <>
                 <button
                   onClick={handleConnectHardware}
-                  disabled
-                  title="No PD trigger or VBUS meter protocol is implemented yet."
-                  className="disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-amber-glow transition-all active:scale-95"
+                  disabled={connecting}
+                  title="STUSB4500 at I2C 0x28 through a Bus Pirate v3/v4 (binary mode)"
+                  className="disabled:opacity-40 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-amber-glow transition-all active:scale-95"
                 >
                   <Power className="w-3.5 h-3.5" />
-                  <span>CONNECT USB-PD DONGLE (NOT SUPPORTED YET)</span>
+                  <span>{connecting ? 'CONNECTING...' : 'CONNECT STUSB4500 (BUS PIRATE)'}</span>
                 </button>
                 <button
                   onClick={handleConnectSimulation}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>DEMO SIMULATION</span>
+                  <span>DEMO</span>
                 </button>
               </>
             ) : (
@@ -150,13 +164,14 @@ export default function UsbPdWorkbench() {
                 onClick={handleDisconnect}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold hover:bg-rose-500/30 transition-all"
               >
-                <span>EMERGENCY DISCONNECT</span>
+                <span>DISCONNECT</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Live VBUS Multimeter Dials */}
+        {/* Live VBUS Multimeter Dials (simulation only: the STUSB4500 has no VBUS meter) */}
+        {(isSimulated || !isConnected) && (
         <div className="pt-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
           {/* Voltage */}
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
@@ -198,9 +213,9 @@ export default function UsbPdWorkbench() {
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">CAPACITY</span>
-              <button 
+              <button
                 onClick={() => client.resetEnergyCounter()}
-                title="Reset capacity counters" 
+                title="Reset capacity counters"
                 className="text-[10px] text-slate-500 hover:text-cyan-400"
               >
                 <RotateCcw className="w-3 h-3" />
@@ -221,9 +236,13 @@ export default function UsbPdWorkbench() {
             <span className="text-[10px] text-slate-400">Watt-Hours</span>
           </div>
         </div>
+        )}
       </div>
 
+      {isConnected && !isSimulated && <Stusb4500Panel client={client} onError={setError} />}
+
       {/* Contract Negotiator & PPS Slider */}
+      {(isSimulated || !isConnected) && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Left: Fixed PDO Contract Buttons */}
         <div className="lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
@@ -342,6 +361,128 @@ export default function UsbPdWorkbench() {
           </div>
         </div>
       </div>
+      )}
+    </div>
+  );
+}
+
+const PD_PRESETS = [5, 9, 12, 15, 20];
+
+// Live view of an STUSB4500: contract, sink PDOs, and voltage requests.
+function Stusb4500Panel({ client, onError }) {
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [voltage, setVoltage] = useState('9');
+  const [current, setCurrent] = useState('1.5');
+  const busyRef = useRef(false);
+
+  const refresh = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    try {
+      setStatus(await client.readHardwareStatus());
+    } catch (e) {
+      onError(`Reading the STUSB4500 failed: ${e.message}`);
+    } finally {
+      busyRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 1500);
+    return () => clearInterval(t);
+  }, []);
+
+  const request = async (v) => {
+    const volts = Number(v);
+    const amps = Number(current);
+    if (!window.confirm(`Ask the charger for ${volts} V at up to ${amps} A? Whatever is connected to the board's output will get that voltage.`)) return;
+    setBusy(true);
+    busyRef.current = true;
+    onError('');
+    try {
+      await client.requestHardwareVoltage(volts, amps);
+      await new Promise((r) => setTimeout(r, 600)); // let the new contract settle
+    } catch (e) {
+      onError(e.message);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+      refresh();
+    }
+  };
+
+  const rdo = status?.rdo;
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+          <span className="font-bold text-slate-200 text-xs flex items-center gap-2">
+            <Usb className="w-4 h-4 text-amber-400" />
+            STUSB4500 CONTRACT {client.chipId ? `(ID 0x${client.chipId.toString(16)})` : ''}
+          </span>
+          <button onClick={refresh} className="p-1 rounded bg-slate-900 text-cyan-400 border border-slate-800" title="Read again">
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        {!status ? (
+          <p className="text-slate-500">Reading...</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Stat label="SOURCE" value={status.attached ? 'ATTACHED' : 'NONE'} tone={status.attached ? 'text-emerald-400' : 'text-slate-500'} />
+            <Stat label="CONTRACT" value={rdo ? `source PDO #${rdo.position}` : 'none'} tone="text-amber-400" />
+            <Stat label="OPERATING CURRENT" value={rdo ? `${rdo.operatingCurrentA.toFixed(2)} A` : '-'} tone="text-cyan-400" />
+            <Stat label="MAX CURRENT" value={rdo ? `${rdo.maxCurrentA.toFixed(2)} A` : '-'} tone="text-cyan-400" />
+          </div>
+        )}
+        {rdo?.capabilityMismatch && (
+          <p className="text-amber-300">Capability mismatch: the charger couldn't meet any requested voltage above 5 V, so the board took 5 V.</p>
+        )}
+        <div>
+          <span className="text-[10px] text-slate-500 font-bold uppercase">Sink PDOs (what the board asks for, highest number preferred)</span>
+          <div className="mt-1 grid grid-cols-3 gap-2">
+            {status?.sink.pdos.map((p, i) => (
+              <div key={i} className={`p-2 rounded-lg border ${i < status.sink.count ? 'border-amber-500/40 bg-amber-500/10 text-amber-200' : 'border-slate-800 bg-slate-950 text-slate-600'}`}>
+                PDO{i + 1}: {p.voltageV.toFixed(2)} V / {p.currentA.toFixed(2)} A{i < status.sink.count ? '' : ' (off)'}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+        <span className="font-bold text-slate-200 text-xs flex items-center gap-2 pb-2 border-b border-slate-800">
+          <Zap className="w-4 h-4 text-amber-400" /> REQUEST A VOLTAGE
+        </span>
+        <div className="grid grid-cols-5 gap-1.5">
+          {PD_PRESETS.map((v) => (
+            <button key={v} disabled={busy} onClick={() => request(v)} className="py-1.5 rounded bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-300 font-bold disabled:opacity-40">
+              {v}V
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <input value={voltage} onChange={(e) => setVoltage(e.target.value)} className="w-16 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
+          <span className="text-slate-500">V at</span>
+          <input value={current} onChange={(e) => setCurrent(e.target.value)} className="w-14 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
+          <span className="text-slate-500">A</span>
+          <button disabled={busy} onClick={() => request(voltage)} className="px-2 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold disabled:opacity-40">SET</button>
+        </div>
+        <p className="text-[10px] text-slate-500 leading-relaxed">
+          Fixed voltages only (the STUSB4500 has no PPS). Changes go to RAM and are lost when the board loses power; NVM is never written.
+          The chip doesn't measure VBUS, so check the output with a meter. Wiring: Bus Pirate MOSI = SDA, CLK = SCL, GND to GND, and Vpu to the board's 3.3 V for the pull-ups.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, tone }) {
+  return (
+    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">{label}</span>
+      <span className={`text-sm font-extrabold ${tone}`}>{value}</span>
     </div>
   );
 }

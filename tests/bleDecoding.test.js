@@ -86,3 +86,27 @@ describe('Explorer service list', () => {
     expect(new Set(list).size).toBe(list.length);
   });
 });
+
+describe('pairing and dropped links', () => {
+  it('recognises the errors that mean "pair first"', async () => {
+    const { isPairingError } = await import('../src/utils/bleDriver');
+    expect(isPairingError('GATT Error: Not paired.')).toBe(true);
+    expect(isPairingError('GATT operation failed due to insufficient authentication.')).toBe(true);
+    expect(isPairingError('GATT Error: Not supported.')).toBe(false);
+  });
+
+  it('stops reading once the link drops instead of logging every value as refused', async () => {
+    const { readAllValues } = await import('../src/utils/bleDriver');
+    const gatt = { connected: true };
+    const mk = (uuid, fail) => ({
+      uuid, properties: { read: true }, descriptors: [],
+      _ref: {
+        service: { device: { gatt } },
+        readValue: async () => { if (fail) { gatt.connected = false; throw new Error('GATT Server is disconnected.'); } return new DataView(new Uint8Array([1]).buffer); }
+      }
+    });
+    const tree = [{ characteristics: [mk('a', false), mk('b', true), mk('c', false), mk('d', false)] }];
+    const out = await readAllValues(tree);
+    expect(Object.keys(out)).toEqual(['a', 'b']);
+  });
+});

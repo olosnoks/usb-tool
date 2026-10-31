@@ -363,6 +363,15 @@ export async function readCharacteristic(characteristic) {
 }
 
 /**
+ * True when a GATT error means the link must be paired/encrypted first.
+ * Chrome reports these as "not paired", "insufficient authentication" or
+ * "not authorized", depending on the OS.
+ */
+export function isPairingError(message) {
+  return /pair|authenticat|encrypt|authoriz|security|permitted/i.test(String(message || ''));
+}
+
+/**
  * Read every readable characteristic and every descriptor in a tree, one GATT
  * operation at a time (Web Bluetooth rejects overlapping operations).
  * Resolves { [key]: result | { error } } where key is the characteristic uuid
@@ -372,8 +381,12 @@ export async function readCharacteristic(characteristic) {
 export async function readAllValues(tree, onEach) {
   const out = {};
   const put = (k, v) => { out[k] = v; if (onEach) onEach(k, v); };
+  // Stop once the link drops: every later read would fail with a misleading
+  // "refused" error that is really "not connected".
+  const linkUp = (ch) => ch._ref?.service?.device?.gatt?.connected !== false;
   for (const service of tree) {
     for (const ch of service.characteristics) {
+      if (!linkUp(ch)) return out;
       let format = null; // raw 0x2904 Presentation Format, if the characteristic has one
       for (const d of ch.descriptors || []) {
         const key = `${ch.uuid}/${d.uuid}`;
