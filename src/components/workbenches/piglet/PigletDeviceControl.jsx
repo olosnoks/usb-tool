@@ -10,7 +10,8 @@ const POLL_MS = 3000;
 const UPLOAD_ERRORS = {
   nohome: 'No home Wi-Fi is set in wardriver.cfg (homeSsid), so the Piglet can’t get online to upload.',
   nowifi: 'The Piglet couldn’t join the home Wi-Fi. Check homeSsid / homePsk and that the network is in range.',
-  nosd: 'The SD card isn’t available.'
+  nosd: 'The SD card isn’t available.',
+  nosvc: 'This board uploads to WiGLE only. Choose “WDGoWars + WiGLE” to upload.'
 };
 
 function Card({ label, value, tone = 'text-slate-200', sub }) {
