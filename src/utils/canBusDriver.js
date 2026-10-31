@@ -190,6 +190,29 @@ export class ObdOverSlcan {
     return null;
   }
 
+  /** Mode 09 PID 02: the VIN, or null when no ECU reports it. */
+  async readVin() {
+    const replies = await this.request([0x09, 0x02]);
+    for (const p of Object.values(replies)) {
+      if (p[0] !== 0x49 || p[1] !== 0x02) continue;
+      const text = String.fromCharCode(...p.subarray(2)).replace(/[^A-HJ-NPR-Z0-9]/g, '');
+      if (text.length >= 17) return text.slice(-17);
+    }
+    return null;
+  }
+
+  /** Mode 01 PIDs the vehicle supports, from the 0x00 / 0x20 / 0x40 ... bitmaps. */
+  async supportedPids() {
+    const out = [];
+    for (let base = 0; base <= 0xe0; base += 0x20) {
+      const b = await this.readPid(base);
+      if (!b || b.length < 4) break;
+      for (let i = 0; i < 32; i++) if (b[i >> 3] & (0x80 >> (i & 7))) out.push(base + i + 1);
+      if (!out.includes(base + 0x20)) break;
+    }
+    return out.filter((pid) => pid % 0x20 !== 0);
+  }
+
   /** Mode 03: stored DTCs from every ECU that answers. */
   async readDtcs() {
     const replies = await this.request([0x03]);

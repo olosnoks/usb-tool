@@ -314,19 +314,21 @@ export const TOOL_GUIDES = {
   },
   'can-bus': {
     title: 'Automotive CAN Bus & OBD-II Diagnostic Deck',
-    shortDesc: 'Sniff CAN bus packets with live byte diffing, send custom arbitration frames, and read OBD-II PIDs.',
+    shortDesc: 'Sniff and decode CAN with DBC files, transmit and replay frames, read OBD-II data and run UDS diagnostics.',
     steps: [
-      'Connect your USB-CAN adapter (CANable / Candlelight / SLCAN) or ELM327 OBD-II interface.',
-      'Select your bus baud rate (standard automotive high-speed is 500 kbps, low-speed is 125 kbps).',
-      'Click "START SNIFFER" to monitor real-time arbitration IDs and 8-byte payloads.',
-      'Bytes that change value automatically flash in bright amber so you can easily identify signals.',
-      'Switch to "OBD-II Scanner" to read Engine RPM, vehicle speed, and check engine trouble codes.'
+      'Connect a USB-CAN adapter that speaks SLCAN (CANable, Candlelight with slcan firmware) over serial.',
+      'Select the bus bit rate (500 kbps for most car powertrain buses, 125 kbps for many body buses) and START SNIFFER.',
+      'LOAD DBC to see named messages and signal values under each row; filter with "1DC, 200-2FF, !7DF".',
+      'OBD-II: live gauges, VIN, a scan of every supported PID and trouble codes. UDS: sessions, identification DIDs, DTCs, raw requests.',
+      'Record & Replay: record traffic, export candump .log or CSV, open candump logs from Linux, and replay with the original timing.'
     ],
     tips: [
-      'CAN Bus requires a 120-ohm termination resistor at both physical ends of the twisted pair (CAN_H and CAN_L).',
-      'Use the filter input box to isolate specific ECU IDs (e.g. 0x1DC for engine or 0x205 for wheel speed).'
+      'CAN needs 120-ohm termination at both ends of CAN_H / CAN_L; the OBD-II port of a car is already terminated.',
+      'Bytes that change flash amber; tick "changing only" to hide static frames while you press a button in the car.',
+      'Open DBC files for many cars are in the opendbc project (github.com/commaai/opendbc).',
+      'TEST SIMULATION runs a simulated ECU, so OBD, UDS and DBC decoding can be tried without a car.'
     ],
-    shortcuts: 'CAN packet sniffer & OBD-II scanner'
+    shortcuts: 'CAN sniffer, DBC, OBD-II & UDS'
   },
   'logic-analyzer': {
     title: '24MHz 8-Channel USB Logic Analyzer',
