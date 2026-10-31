@@ -57,7 +57,7 @@ describe('MassStorageDevice against a simulated drive', () => {
     expect(cap.totalBytes).toBe(16384 * 512);
   });
 
-  it('reads sector 0 (boot signature) and a data sector', async () => {
+  it('reads sector 0 (boot signature) and the partition boot sector', async () => {
     const dev = new MassStorageDevice(createSimulatedMassStorage());
     await dev.open();
     await dev.readCapacity();
@@ -65,9 +65,9 @@ describe('MassStorageDevice against a simulated drive', () => {
     expect(s0.length).toBe(512);
     expect(s0[510]).toBe(0x55);
     expect(s0[511]).toBe(0xaa);
-    const s1 = await dev.read(1, 1);
-    expect(s1[0]).toBe(1 & 0xff); // (abs + j) with abs=1, j=0
-    expect(s1[5]).toBe((1 + 5) & 0xff);
+    expect(s0[446 + 4]).toBe(0x06); // one FAT16 partition
+    const vbr = await dev.read(2048, 1);
+    expect(new TextDecoder().decode(vbr.subarray(3, 11))).toBe('MSWIN4.1');
   });
 
   it('reads multiple consecutive blocks in one command', async () => {

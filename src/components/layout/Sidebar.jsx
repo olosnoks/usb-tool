@@ -95,7 +95,7 @@ export const SIDEBAR_SECTIONS = [
       { id: 'autopsy', name: 'USB Recon & Autopsy', icon: Usb, accent: 'amber', desc: 'Mystery chip descriptor analysis' },
       { id: 'usb-descriptors', name: 'USB Descriptor Explorer', icon: Usb, accent: 'cyan', desc: 'lsusb -v in the browser: configs, interfaces, endpoints' },
       { id: 'hid', name: 'HID Inspector', icon: Keyboard, accent: 'purple', desc: 'Decode keyboards, mice, gamepads and their live reports (WebHID)' },
-      { id: 'mass-storage', name: 'Mass Storage Inspector', icon: HardDrive, accent: 'amber', desc: 'Read-only SCSI: identity, capacity and raw sectors over WebUSB' },
+      { id: 'mass-storage', name: 'Mass Storage Inspector', icon: HardDrive, accent: 'amber', desc: 'Read-only: partitions, FAT/exFAT browsing, deleted-file recovery, imaging with SHA-256' },
       { id: 'ptp', name: 'PTP / MTP Camera', icon: Camera, accent: 'purple', desc: 'Pull photos and metadata off cameras and phones over WebUSB' },
       { id: 'fido2', name: 'FIDO2 Security Key', icon: KeyRound, accent: 'emerald', desc: 'Read a security key: versions, AAGUID, options (WebHID, read-only)' }
     ]
