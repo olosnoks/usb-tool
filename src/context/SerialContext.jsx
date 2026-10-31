@@ -60,6 +60,9 @@ export function SerialProvider({ children }) {
   const boardReadLoopsRef = useRef({});   // boardId -> promise of its read loop
   const boardPortOwnersRef = useRef({});  // boardId -> port-manager owner
   const disconnectRef = useRef(null);     // latest handleDisconnect, for takeovers
+  const rxListenersRef = useRef(new Set()); // subscribeRx(): every received chunk, unbatched
+  // Stable identity, so subscribers' effects don't re-run on every render.
+  const subscribeRx = useCallback((fn) => { rxListenersRef.current.add(fn); return () => { rxListenersRef.current.delete(fn); }; }, []);
   const boardKeepReadingRef = useRef({});
   const boardPollIntervalsRef = useRef({});
   const boardOffsetsRef = useRef({});
@@ -112,6 +115,12 @@ export function SerialProvider({ children }) {
   // Ingest incoming bytes for a specific board
   const ingestIncomingBytes = useCallback((boardId, bytes) => {
     if (!bytes || bytes.length === 0) return;
+
+    // Protocol tools (e.g. the CAN deck) get every chunk directly; the React
+    // entries log is capped and batched per render.
+    for (const fn of rxListenersRef.current) {
+      try { fn(bytes, boardId); } catch (e) { console.error('RX listener failed:', e); }
+    }
 
     // Feed any in-flight transceive() transaction waiting on this board
     const pending = pendingTransceiveRef.current[boardId];
@@ -654,6 +663,7 @@ export function SerialProvider({ children }) {
     transceive,
     reconfigureActivePort,
     borrowPort: borrowActivePort,
+    subscribeRx,
     addLog,
     clearLogs: () => updateBoard(activeBoardId, { entries: [] }),
     clearHexStream: () => {

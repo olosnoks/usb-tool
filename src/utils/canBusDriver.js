@@ -83,3 +83,115 @@ export function buildSlcanFrame(id, dataBytes, isExtended = false) {
     return `t${idStr}${dlc}${hexData}\r`;
   }
 }
+
+/**
+ * Splits an SLCAN byte/text stream into lines. Adapters end each frame with
+ * "\r" (some also send "\n"); a chunk can end mid-frame, so the remainder is
+ * carried over. "\x07" (BELL) is the adapter's error reply.
+ */
+export class SlcanLineReader {
+  constructor() { this.buf = ''; }
+  push(text) {
+    this.buf += text;
+    const parts = this.buf.split(/[\r\n]/);
+    this.buf = parts.pop();
+    if (this.buf.length > 4096) this.buf = '';
+    return parts.filter((p) => p.length > 0);
+  }
+}
+
+/** Two DTC bytes -> "P0300". */
+export function decodeDtc(b1, b2) {
+  const letter = 'PCBU'[(b1 >> 6) & 3];
+  return letter + ((b1 >> 4) & 3) + (b1 & 0x0f).toString(16).toUpperCase()
+    + ((b2 >> 4) & 0x0f).toString(16).toUpperCase() + (b2 & 0x0f).toString(16).toUpperCase();
+}
+
+/**
+ * OBD-II over a raw SLCAN adapter (ISO 15765-4, 11-bit, functional 0x7DF).
+ * Handles ISO-TP single frames and multi-frame replies (sends flow control
+ * to the ECU's physical request ID, response ID - 8).
+ *
+ *   const obd = new ObdOverSlcan((slcanLine) => sendString(slcanLine, ''));
+ *   onEachReceivedFrame(f => obd.onFrame(f));
+ *   const { dtcs } = await obd.readDtcs();
+ */
+export class ObdOverSlcan {
+  constructor(send, { timeoutMs = 1500, quietMs = 250 } = {}) {
+    this.send = send;
+    this.timeoutMs = timeoutMs;
+    this.quietMs = quietMs;
+    this.collector = null;
+  }
+
+  onFrame(f) {
+    if (this.collector && !f.isExtended && f.id >= 0x7e8 && f.id <= 0x7ef) this.collector(f);
+  }
+
+  /** Send a service request; resolves with { ecuId: payload } for every ECU that answered. */
+  request(serviceBytes) {
+    if (this.collector) return Promise.reject(new Error('an OBD request is already running'));
+    const sf = new Uint8Array(8);
+    sf[0] = serviceBytes.length;
+    sf.set(serviceBytes, 1);
+    return new Promise((resolve) => {
+      const ecus = new Map();   // id -> { total, data: [] }
+      let quiet = null;
+      const finish = () => {
+        clearTimeout(hard); clearTimeout(quiet);
+        this.collector = null;
+        const out = {};
+        for (const [id, e] of ecus) if (e.data.length >= e.total) out[id] = Uint8Array.from(e.data.slice(0, e.total));
+        resolve(out);
+      };
+      const hard = setTimeout(finish, this.timeoutMs);
+      this.collector = (f) => {
+        const pci = f.data[0] >> 4;
+        if (pci === 0) {                                    // single frame
+          const n = f.data[0] & 0x0f;
+          ecus.set(f.id, { total: n, data: Array.from(f.data.subarray(1, 1 + n)) });
+        } else if (pci === 1) {                             // first frame
+          const total = ((f.data[0] & 0x0f) << 8) | f.data[1];
+          ecus.set(f.id, { total, data: Array.from(f.data.subarray(2, 8)), next: 1 });
+          this.send(buildSlcanFrame(f.id - 8, new Uint8Array([0x30, 0, 0, 0, 0, 0, 0, 0])));
+        } else if (pci === 2) {                             // consecutive frame
+          const e = ecus.get(f.id);
+          if (!e || (f.data[0] & 0x0f) !== (e.next & 0x0f)) return;
+          e.next++;
+          e.data.push(...f.data.subarray(1, 8));
+        } else return;
+        clearTimeout(quiet);
+        quiet = setTimeout(finish, this.quietMs);
+      };
+      this.send(buildSlcanFrame(0x7df, sf));
+    });
+  }
+
+  /** Mode 03: stored DTCs from every ECU that answers. */
+  async readDtcs() {
+    const replies = await this.request([0x03]);
+    const dtcs = [];
+    const ecus = Object.keys(replies).map(Number);
+    for (const id of ecus) {
+      const p = replies[id];
+      if (p[0] !== 0x43) continue;
+      // CAN replies carry a count byte after 0x43; fall back to pairs if it doesn't fit.
+      let start = 1;
+      if (p.length >= 2 && p.length - 2 === p[1] * 2) start = 2;
+      for (let i = start; i + 1 < p.length; i += 2) {
+        if (p[i] === 0 && p[i + 1] === 0) continue;
+        const code = decodeDtc(p[i], p[i + 1]);
+        if (!dtcs.includes(code)) dtcs.push(code);
+      }
+    }
+    return { dtcs, ecus };
+  }
+
+  /** Mode 04: clear DTCs. Resolves with the ECUs that confirmed (0x44). */
+  async clearDtcs() {
+    const replies = await this.request([0x04]);
+    const confirmed = [], refused = [];
+    for (const [id, p] of Object.entries(replies)) (p[0] === 0x44 ? confirmed : refused).push(Number(id));
+    return { confirmed, refused };
+  }
+}

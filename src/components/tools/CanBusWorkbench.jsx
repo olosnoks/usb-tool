@@ -23,12 +23,15 @@ import {
   OBD_PIDS, 
   COMMON_DTCS, 
   parseSlcanFrame, 
-  buildSlcanFrame 
+  buildSlcanFrame,
+  SlcanLineReader,
+  ObdOverSlcan
 } from '../../utils/canBusDriver';
+import { DemoBanner } from '../common/DemoNotice';
 import StatusBadge from '../common/StatusBadge';
 
 export default function CanBusWorkbench() {
-  const { isConnected, sendString, addLog } = useSerial();
+  const { isConnected, sendString, addLog, subscribeRx } = useSerial();
 
   const [mode, setMode] = useState('sniffer'); // 'sniffer' | 'obd2'
   const [canBaud, setCanBaud] = useState('S6'); // 500 kbps (standard automotive)
@@ -55,8 +58,57 @@ export default function CanBusWorkbench() {
   });
   const [activeDtcs, setActiveDtcs] = useState([]);
   const [isScanningDtcs, setIsScanningDtcs] = useState(false);
+  const [dtcStatus, setDtcStatus] = useState(null);   // null = not scanned yet
+
+  // Real adapter: SLCAN frames from the serial stream, and OBD-II over them.
+  const sendRef = useRef(sendString);
+  sendRef.current = sendString;
+  const obdRef = useRef(null);
+  if (!obdRef.current) obdRef.current = new ObdOverSlcan((line) => sendRef.current(line, ''));
+  const sniffingRef = useRef(false);
+  sniffingRef.current = isSniffing;
+  const pendingFramesRef = useRef([]);
+  const slcanReaderRef = useRef(new SlcanLineReader());   // survives re-subscribes: keeps partial lines
 
   const simIntervalRef = useRef(null);
+
+  const applyFrames = (frames) => {
+    if (!frames.length) return;
+    const now = Date.now();
+    setMessages(prev => {
+      const next = { ...prev };
+      for (const f of frames) {
+        const key = (f.isExtended ? 'x' : '') + f.id;
+        const old = next[key];
+        const diffs = new Set();
+        if (old) for (let i = 0; i < f.dlc; i++) if (old.data[i] !== f.data[i]) diffs.add(i);
+        next[key] = { id: f.id, isExtended: f.isExtended, dlc: f.dlc, data: f.data, lastTime: now,
+                      deltaMs: old ? now - old.lastTime : 0, count: (old?.count || 0) + 1, diffs };
+      }
+      return next;
+    });
+  };
+
+  // Every received chunk -> SLCAN lines -> frames. OBD replies go to the OBD
+  // session; while sniffing, frames are batched into the table every 100 ms.
+  useEffect(() => {
+    if (isSimulated || !isConnected || !subscribeRx) return undefined;
+    const reader = slcanReaderRef.current;
+    const dec = new TextDecoder();
+    const unsub = subscribeRx((bytes) => {
+      for (const line of reader.push(dec.decode(bytes, { stream: true }))) {
+        const f = parseSlcanFrame(line);
+        if (!f) continue;
+        obdRef.current.onFrame(f);
+        if (sniffingRef.current) pendingFramesRef.current.push(f);
+      }
+    });
+    const flush = setInterval(() => {
+      const batch = pendingFramesRef.current;
+      if (batch.length) { pendingFramesRef.current = []; applyFrames(batch); }
+    }, 100);
+    return () => { unsub(); clearInterval(flush); pendingFramesRef.current = []; };
+  }, [isSimulated, isConnected, subscribeRx]);
 
   // Simulation Traffic Generator
   useEffect(() => {
@@ -140,14 +192,30 @@ export default function CanBusWorkbench() {
     return () => clearInterval(simIntervalRef.current);
   }, [isSimulated, isSniffing]);
 
-  const startSniffing = () => {
-    setIsSniffing(true);
-    addLog(`[CAN BUS] Opened channel at 500 kbps (SLCAN command: ${canBaud}). Sniffing active.`, 'sys');
+  // SLCAN: close, set bitrate, open (listen + transmit). The adapter answers
+  // each with "\r", or BELL (0x07) on error.
+  const openChannel = async () => {
+    await sendString('C', '\r');
+    await sendString(canBaud, '\r');
+    await sendString('O', '\r');
   };
 
-  const stopSniffing = () => {
+  const startSniffing = async () => {
+    if (!isSimulated) {
+      if (!isConnected) { alert('Connect the SLCAN adapter (CANable / Candlelight) over serial first.'); return; }
+      await openChannel();
+      const rate = (CAN_BAUD_RATES.find(r => r.code === canBaud) || {}).label || canBaud;
+      addLog(`[CAN BUS] SLCAN channel opened at ${rate} (${canBaud}, O).`, 'sys');
+    }
+    setIsSniffing(true);
+  };
+
+  const stopSniffing = async () => {
     setIsSniffing(false);
-    addLog('[CAN BUS] Sniffing paused.', 'sys');
+    if (!isSimulated && isConnected) {
+      await sendString('C', '\r');
+      addLog('[CAN BUS] SLCAN channel closed (C).', 'sys');
+    }
   };
 
   const handleClearMessages = () => {
@@ -170,17 +238,49 @@ export default function CanBusWorkbench() {
   };
 
   // Scan OBD-II DTCs
-  const handleScanDtcs = () => {
-    setIsScanningDtcs(true);
-    setTimeout(() => {
+  const handleScanDtcs = async () => {
+    if (isSimulated) {
       setActiveDtcs(['P0300', 'P0171']);
+      setDtcStatus('Demo codes (simulation): no vehicle was queried.');
+      return;
+    }
+    if (!isConnected) { alert('Connect the SLCAN adapter over serial first.'); return; }
+    setIsScanningDtcs(true);
+    try {
+      if (!isSniffing) await startSniffing();          // the channel must be open to talk OBD
+      const { dtcs, ecus } = await obdRef.current.readDtcs();
+      setActiveDtcs(dtcs);
+      setDtcStatus(ecus.length
+        ? `${ecus.length} ECU${ecus.length === 1 ? '' : 's'} answered (${ecus.map(e => '0x' + e.toString(16).toUpperCase()).join(', ')}).`
+        : 'No ECU answered. Check the ignition, the CAN bitrate and the OBD-II wiring.');
+      addLog(`[OBD-II] Mode 03: ${ecus.length} ECU(s), ${dtcs.length} code(s)${dtcs.length ? ': ' + dtcs.join(', ') : ''}`, 'sys');
+    } catch (e) {
+      setDtcStatus(`Read failed: ${e.message}`);
+    } finally {
       setIsScanningDtcs(false);
-    }, 800);
+    }
   };
 
-  const handleClearDtcs = () => {
-    setActiveDtcs([]);
-    alert('OBD-II Diagnostic Trouble Codes cleared! MIL check engine light reset.');
+  const handleClearDtcs = async () => {
+    if (isSimulated) {
+      setActiveDtcs([]);
+      setDtcStatus('Demo codes cleared (simulation): no vehicle was touched.');
+      return;
+    }
+    if (!window.confirm('Send OBD-II mode 04 to clear stored trouble codes and freeze-frame data on this vehicle?')) return;
+    setIsScanningDtcs(true);
+    try {
+      const { confirmed, refused } = await obdRef.current.clearDtcs();
+      const hex = (ids) => ids.map(e => '0x' + e.toString(16).toUpperCase()).join(', ');
+      if (confirmed.length) setActiveDtcs([]);
+      const msg = confirmed.length
+        ? `Cleared by ${hex(confirmed)}${refused.length ? `; refused by ${hex(refused)} (engine running or not supported)` : ''}.`
+        : refused.length ? `Refused by ${hex(refused)} (usually: turn the engine off, ignition on).` : 'No ECU answered the clear request.';
+      setDtcStatus(msg);
+      addLog(`[OBD-II] Mode 04: ${msg}`, 'sys');
+    } finally {
+      setIsScanningDtcs(false);
+    }
   };
 
   const filteredMessageList = Object.values(messages).filter(m => {
@@ -192,6 +292,9 @@ export default function CanBusWorkbench() {
 
   return (
     <div className="flex flex-col gap-4 font-mono">
+      {isSimulated && (
+        <DemoBanner>CAN frames, gauges and trouble codes are generated by the simulation; no adapter or vehicle is involved.</DemoBanner>
+      )}
       {/* CAN Header Card */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -228,8 +331,13 @@ export default function CanBusWorkbench() {
 
             <button
               onClick={() => {
-                setIsSimulated(!isSimulated);
-                if (!isSimulated) setIsSniffing(true);
+                // Switching modes never carries simulated frames or codes over to hardware (or back).
+                const next = !isSimulated;
+                setIsSimulated(next);
+                setIsSniffing(next);
+                setMessages({});
+                setActiveDtcs([]);
+                setDtcStatus(null);
               }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${
                 isSimulated 
@@ -451,10 +559,17 @@ export default function CanBusWorkbench() {
             </div>
 
             <div className="space-y-2">
+              {dtcStatus && <div className="text-[11px] text-slate-400">{dtcStatus}</div>}
               {activeDtcs.length === 0 ? (
                 <div className="py-6 text-center text-slate-500 flex flex-col items-center gap-1.5">
-                  <CheckCircle2 className="w-6 h-6 text-emerald-400" />
-                  <span>No active DTC trouble codes detected. ECU systems normal.</span>
+                  {dtcStatus === null ? (
+                    <span>Not scanned yet. Press READ CODES to query the vehicle.</span>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                      <span>No stored trouble codes reported.</span>
+                    </>
+                  )}
                 </div>
               ) : (
                 activeDtcs.map(code => (
@@ -463,7 +578,7 @@ export default function CanBusWorkbench() {
                       <div className="text-sm font-bold text-rose-300">{code}</div>
                       <div className="text-xs text-slate-300">{COMMON_DTCS[code] || 'Vehicle Manufacturer Specific Code'}</div>
                     </div>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-rose-900 text-rose-200 font-bold">FAULT CONFIRMED</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-rose-900 text-rose-200 font-bold">{isSimulated ? 'DEMO' : 'STORED'}</span>
                   </div>
                 ))
               )}
