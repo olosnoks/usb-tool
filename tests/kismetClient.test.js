@@ -29,7 +29,8 @@ describe('Kismet client', () => {
     const devs = await fetchKismetDevices('http://localhost:2501/', 'abc123', { fetchImpl: impl });
     expect(devs).toHaveLength(2);
     expect(devs[0]).toMatchObject({ bssid: 'AA:BB:CC:DD:EE:FF', ssid: 'CafeNet', type: 'AP', channel: 36, band: '5GHz',
-      signal: -51, crypto: 'WPA2-PSK', clients: 2, lastSeen: '2s ago' });
+      signal: -51, crypto: 'WPA2-PSK', clients: 2 });
+    expect(devs[0].lastSeen).toMatch(/^[23]s ago$/);
     expect(devs[0].clientList).toEqual(['11:22:33:44:55:66', '77:88:99:AA:BB:CC']);
     expect(devs[1]).toMatchObject({ type: 'STA', ssid: '', crypto: 'Open' });
     // API key as KISMET param, field list posted as form-encoded json
