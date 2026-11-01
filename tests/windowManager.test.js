@@ -3,7 +3,8 @@ import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize, moveWindow, resizeWindow,
   tileWindows, cascadeWindows, topWindowId, focusedWindow, serializeState, deserializeState, windowKeyFor, clampToViewport,
   MIN_W, MIN_H, TITLE_BAR_H, KEEP_VISIBLE_PX, setZoom, zoomStep, toggleFit, fitZoomFor, ZOOM_MIN, ZOOM_MAX, ZOOM_STEPS,
-  duplicateWindow, baseIdOf, instanceOf, instanceCount, displayTitle
+  duplicateWindow, baseIdOf, instanceOf, instanceCount, displayTitle,
+  snapZoneFor, snapGeometry, applySnap, SNAP_EDGE_PX, SNAP_CORNER_PX
 } from '../src/utils/windowManager';
 
 const VP = { width: 1400, height: 900 };
@@ -84,6 +85,53 @@ describe('workspace window manager', () => {
     const legacy = deserializeState('{"v":1,"windows":[{"id":"flipper#2","toolId":"flipper"}]}', VP);
     expect(legacy.windows[0].baseId).toBe('flipper');
     expect(legacy.windows[0].instance).toBe(2);
+  });
+
+  it('maps pointer position to a snap zone at the desktop edges and corners', () => {
+    const vp = { width: 1200, height: 800 };
+    const mid = SNAP_CORNER_PX + 50;                 // clear of the corner squares
+    expect(snapZoneFor(2, mid, vp)).toBe('left');
+    expect(snapZoneFor(1198, mid, vp)).toBe('right');
+    expect(snapZoneFor(600, 2, vp)).toBe('top');     // top edge, away from corners -> maximize
+    expect(snapZoneFor(5, 5, vp)).toBe('tl');
+    expect(snapZoneFor(1195, 5, vp)).toBe('tr');
+    expect(snapZoneFor(5, 795, vp)).toBe('bl');
+    expect(snapZoneFor(1195, 795, vp)).toBe('br');
+    expect(snapZoneFor(600, 400, vp)).toBe(null);    // centre: no snap
+    expect(snapZoneFor(600, 798, vp)).toBe(null);    // bottom edge mid: no snap (only corners)
+  });
+
+  it('produces non-overlapping half/quarter geometries that fill the desktop', () => {
+    const vp = { width: 1200, height: 800 };
+    const L = snapGeometry('left', vp), R = snapGeometry('right', vp);
+    expect(L).toEqual({ x: 0, y: 0, w: 600, h: 800 });
+    expect(R).toEqual({ x: 600, y: 0, w: 600, h: 800 });
+    expect(L.x + L.w).toBe(R.x);                      // meet with no gap/overlap
+    const tl = snapGeometry('tl', vp), br = snapGeometry('br', vp);
+    expect(tl).toEqual({ x: 0, y: 0, w: 600, h: 400 });
+    expect(br).toEqual({ x: 600, y: 400, w: 600, h: 400 });
+    // odd sizes: halves still tile with no 1px gap
+    const vpo = { width: 1201, height: 801 };
+    const Lo = snapGeometry('left', vpo), Ro = snapGeometry('right', vpo);
+    expect(Lo.x + Lo.w).toBe(Ro.x);
+    expect(Ro.x + Ro.w).toBe(1201);
+  });
+
+  it('applySnap tiles a window into a zone, remembers its size, and top maximizes', () => {
+    const vp = { width: 1200, height: 800 };
+    let s = openWindow(createInitialState(), 'a', { title: 'A' }, vp);
+    const before = { x: s.windows[0].x, y: s.windows[0].y, w: s.windows[0].w, h: s.windows[0].h };
+    s = applySnap(s, 'a', 'right', vp);
+    expect(s.windows[0]).toMatchObject({ x: 600, y: 0, w: 600, h: 800, maximized: false });
+    expect(s.windows[0].restore).toEqual(before);     // original geometry kept for restore
+    expect(s.focusedId).toBe('a');
+    // top maximizes (keeps the pre-snap geometry to restore to)
+    s = applySnap(s, 'a', 'top', vp);
+    expect(s.windows[0].maximized).toBe(true);
+    expect(s.windows[0].restore).toEqual({ x: 600, y: 0, w: 600, h: 800 });
+    // an unknown zone or missing window is a no-op
+    expect(applySnap(s, 'a', null, vp)).toBe(s);
+    expect(applySnap(s, 'nope', 'left', vp)).toBe(s);
   });
 
   it('re-opening a tool (or one of its workbench tabs) focuses the existing window instead of duplicating it', () => {

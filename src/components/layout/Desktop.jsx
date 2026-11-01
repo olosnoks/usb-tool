@@ -1,10 +1,10 @@
 // The workspace desktop: hosts every open tool window, measures its own size
 // so windows stay reachable, and shows a taskbar with one button per window
 // (click to focus or restore) plus tile / cascade / close-all.
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { LayoutGrid, Layers, X, AppWindow } from 'lucide-react';
 import ToolWindow from './ToolWindow';
-import { displayTitle } from '../../utils/windowManager';
+import { displayTitle, snapZoneFor, snapGeometry } from '../../utils/windowManager';
 
 // Below this width (phones, narrow split screens) every window fills the desktop.
 export const FORCE_MAXIMIZE_BELOW_PX = 768;
@@ -12,24 +12,40 @@ export const FORCE_MAXIMIZE_BELOW_PX = 768;
 export default function Desktop({
   state, viewport, onViewport, renderTool, metaFor,
   onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onTile, onCascade, onCloseAll,
-  onZoomStep, onToggleFit, onDuplicate
+  onZoomStep, onToggleFit, onDuplicate, onSnap
 }) {
   const ref = useRef(null);
+  const rectRef = useRef({ left: 0, top: 0 });
+  const [snapZone, setSnapZone] = useState(null);   // live snap preview while dragging
 
   // Measure the desktop (ResizeObserver where available, window resize otherwise).
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return undefined;
-    const measure = () => onViewport?.({ width: el.clientWidth, height: el.clientHeight });
+    const measure = () => {
+      onViewport?.({ width: el.clientWidth, height: el.clientHeight });
+      const r = el.getBoundingClientRect();
+      rectRef.current = { left: r.left, top: r.top };
+    };
     measure();
     if (typeof ResizeObserver !== 'undefined') {
       const ro = new ResizeObserver(measure);
       ro.observe(el);
-      return () => ro.disconnect();
+      window.addEventListener('scroll', measure, true);
+      return () => { ro.disconnect(); window.removeEventListener('scroll', measure, true); };
     }
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, [onViewport]);
+
+  // While a window's title bar is dragged, show where it would tile.
+  const onDragMove = useCallback((id, clientX, clientY) => {
+    const px = clientX - rectRef.current.left, py = clientY - rectRef.current.top;
+    setSnapZone(snapZoneFor(px, py, viewport));
+  }, [viewport]);
+  const onDragEnd = useCallback((id) => {
+    setSnapZone((z) => { if (z) onSnap?.(id, z); return null; });
+  }, [onSnap]);
 
   const forceMax = (viewport?.width || 0) > 0 && viewport.width < FORCE_MAXIMIZE_BELOW_PX;
   // Render in insertion order and stack with z-index. Re-sorting by z would move
@@ -52,12 +68,20 @@ export default function Desktop({
             </div>
           </div>
         )}
+        {/* Snap-tiling preview: where the dragged window would land */}
+        {snapZone && (() => {
+          const g = snapGeometry(snapZone, viewport);
+          if (!g) return null;
+          return <div data-testid="snap-preview" className="absolute z-[9999] pointer-events-none rounded-lg border-2 border-cyan-400/70 bg-cyan-400/10 transition-all duration-75"
+            style={{ left: g.x, top: g.y, width: g.w, height: g.h }} />;
+        })()}
         {windows.map((win) => (
           <ToolWindow
             key={win.id} win={win} focused={state.focusedId === win.id} forceMaximized={forceMax}
             icon={metaFor?.(win.toolId)?.icon} naturalWidth={metaFor?.(win.toolId)?.naturalWidth}
             onFocus={onFocus} onMove={onMove} onResize={onResize} onMinimize={onMinimize} onToggleMaximize={onToggleMaximize} onClose={onClose}
             onZoomStep={onZoomStep} onToggleFit={onToggleFit} onDuplicate={onDuplicate}
+            onDragMove={onDragMove} onDragEnd={onDragEnd}
           >
             <React.Suspense fallback={
               <div className="py-20 flex flex-col items-center justify-center text-slate-400 font-mono text-xs space-y-3">

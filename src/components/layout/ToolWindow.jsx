@@ -34,7 +34,7 @@ const iconBtn = 'p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800'
 
 export default function ToolWindow({
   win, focused, forceMaximized = false, icon: Icon = null, naturalWidth = 1100, children,
-  onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onZoomStep, onToggleFit, onDuplicate
+  onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onZoomStep, onToggleFit, onDuplicate, onDragMove, onDragEnd
 }) {
   const dragRef = useRef(null);
   const sectionRef = useRef(null);
@@ -91,7 +91,7 @@ export default function ToolWindow({
     const d = dragRef.current;
     if (!d) return;
     const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
-    if (d.kind === 'move') { onMove?.(win.id, d.x + dx, d.y + dy); return; }
+    if (d.kind === 'move') { onMove?.(win.id, d.x + dx, d.y + dy); onDragMove?.(win.id, e.clientX, e.clientY); return; }
     let { x, y, w, h } = d;
     if (d.kind.includes('e')) w = Math.max(MIN_W, d.w + dx);
     if (d.kind.includes('s')) h = Math.max(MIN_H, d.h + dy);
@@ -100,9 +100,11 @@ export default function ToolWindow({
     onResize?.(win.id, { x, y, w, h });
   };
   const endDrag = (e) => {
-    if (!dragRef.current) return;
+    const d = dragRef.current;
+    if (!d) return;
     dragRef.current = null;
     try { e.currentTarget.releasePointerCapture?.(e.pointerId); } catch (_) { /* not captured */ }
+    if (d.kind === 'move') onDragEnd?.(win.id);
   };
 
   const style = maximized

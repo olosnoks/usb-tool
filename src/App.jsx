@@ -10,7 +10,7 @@ import { renderTool, toolMeta } from './components/ToolRegistry';
 import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize,
   moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, loadState, saveState, zoomStep, toggleFit,
-  duplicateWindow, baseIdOf
+  duplicateWindow, baseIdOf, applySnap
 } from './utils/windowManager';
 
 // Modals
@@ -72,6 +72,7 @@ function AppContent() {
 
   const open = useCallback((toolId, opts) => setWm((s) => openWindow(s, toolId, toolMeta(toolId), viewportRef.current, opts)), []);
   const onDuplicate = useCallback((id) => setWm((s) => duplicateWindow(s, id, viewportRef.current)), []);
+  const onSnap = useCallback((id, zone) => setWm((s) => applySnap(s, id, zone, viewportRef.current)), []);
   const onFocus = useCallback((id) => setWm((s) => focusWindow(s, id)), []);
   const onClose = useCallback((id) => setWm((s) => closeWindow(s, id)), []);
   const onMinimize = useCallback((id) => setWm((s) => minimizeWindow(s, id)), []);
@@ -85,6 +86,8 @@ function AppContent() {
   const onToggleFit = useCallback((id) => setWm((s) => toggleFit(s, id)), []);
 
   const focused = focusedWindow(wm);
+  const focusedIdRef = useRef(null);
+  focusedIdRef.current = focused?.id || null;
   const activeTool = focused?.toolId || null;           // the tool whose window has focus
   const openTools = useMemo(() => wm.windows.map((w) => w.baseId || baseIdOf(w.id)), [wm.windows]);
   const metaFor = useCallback((toolId) => toolMeta(toolId), []);
@@ -148,6 +151,13 @@ function AppContent() {
         setIsDrawerOpen((prev) => !prev);
         return;
       }
+      // Tile the focused window with Ctrl+Alt+Arrow (left/right half, up = maximize)
+      if (e.ctrlKey && e.altKey && !e.metaKey && e.key.startsWith('Arrow')) {
+        const id = focusedIdRef.current;
+        const zone = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'top' }[e.key];
+        if (id && zone) { e.preventDefault(); onSnap(id, zone); return; }
+        if (id && e.key === 'ArrowDown') { e.preventDefault(); setWm((s) => { const w = s.windows.find((x) => x.id === id); return w && w.maximized ? toggleMaximize(s, id, viewportRef.current) : s; }); return; }
+      }
       // Quick Workspace Presets (Alt+1 .. Alt+6)
       if (e.altKey && !e.ctrlKey && !e.metaKey) {
         const num = parseInt(e.key, 10);
@@ -202,7 +212,7 @@ function AppContent() {
             onFocus={onFocus} onMove={onMove} onResize={onResize} onMinimize={onMinimize}
             onToggleMaximize={onToggleMaximize} onClose={onClose}
             onTile={onTile} onCascade={onCascade} onCloseAll={onCloseAll}
-            onZoomStep={onZoomStep} onToggleFit={onToggleFit} onDuplicate={onDuplicate}
+            onZoomStep={onZoomStep} onToggleFit={onToggleFit} onDuplicate={onDuplicate} onSnap={onSnap}
           />
 
           <TerminalDrawer

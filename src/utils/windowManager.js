@@ -174,6 +174,55 @@ export function resizeWindow(state, id, geo, viewport) {
   };
 }
 
+// ---- edge-snap tiling -------------------------------------------------------
+// Drag a window's title bar to a desktop edge or corner and drop it to tile it:
+// left/right edge -> that half, a corner -> that quarter, top edge -> maximize.
+export const SNAP_EDGE_PX = 22;       // how close to an edge counts as "at the edge"
+export const SNAP_CORNER_PX = 110;    // the corner square is this tall/wide along each edge
+
+/** The snap zone for a pointer at desktop-local (px, py), or null for none. */
+export function snapZoneFor(px, py, viewport) {
+  const vw = viewport?.width || DEFAULT_W, vh = viewport?.height || DEFAULT_H;
+  const nearL = px <= SNAP_EDGE_PX, nearR = px >= vw - SNAP_EDGE_PX, nearT = py <= SNAP_EDGE_PX, nearB = py >= vh - SNAP_EDGE_PX;
+  if (nearL) return py <= SNAP_CORNER_PX ? 'tl' : py >= vh - SNAP_CORNER_PX ? 'bl' : 'left';
+  if (nearR) return py <= SNAP_CORNER_PX ? 'tr' : py >= vh - SNAP_CORNER_PX ? 'br' : 'right';
+  if (nearT) return px <= SNAP_CORNER_PX ? 'tl' : px >= vw - SNAP_CORNER_PX ? 'tr' : 'top';
+  if (nearB) return px <= SNAP_CORNER_PX ? 'bl' : px >= vw - SNAP_CORNER_PX ? 'br' : null;
+  return null;
+}
+
+/** Target geometry for a snap zone. 'top' maximizes (no explicit box). */
+export function snapGeometry(zone, viewport) {
+  const vw = viewport?.width || DEFAULT_W, vh = viewport?.height || DEFAULT_H;
+  const hw = Math.floor(vw / 2), hh = Math.floor(vh / 2), rw = vw - hw, rh = vh - hh;
+  switch (zone) {
+    case 'left': return { x: 0, y: 0, w: hw, h: vh };
+    case 'right': return { x: hw, y: 0, w: rw, h: vh };
+    case 'tl': return { x: 0, y: 0, w: hw, h: hh };
+    case 'tr': return { x: hw, y: 0, w: rw, h: hh };
+    case 'bl': return { x: 0, y: hh, w: hw, h: rh };
+    case 'br': return { x: hw, y: hh, w: rw, h: rh };
+    case 'top': return { x: 0, y: 0, w: vw, h: vh };     // preview box; applySnap maximizes
+    default: return null;
+  }
+}
+
+/** Tile a window into a snap zone (or maximize for 'top'). */
+export function applySnap(state, id, zone, viewport) {
+  const win = state.windows.find((w) => w.id === id);
+  if (!win || !zone) return state;
+  const prev = { x: win.x, y: win.y, w: win.w, h: win.h };
+  let updated;
+  if (zone === 'top') {
+    updated = { ...win, restore: win.maximized ? win.restore : prev, maximized: true, fit: false };
+  } else {
+    const geo = snapGeometry(zone, viewport);
+    updated = { ...win, ...geo, maximized: false, restore: prev, fit: false };
+  }
+  const s = { ...state, windows: state.windows.map((w) => (w.id === id ? updated : w)) };
+  return focusWindow(s, id);
+}
+
 /** Set a window's content zoom (clamped, 2 decimals); leaves fit-to-width mode. */
 export function setZoom(state, id, zoom) {
   const z = clamp(Math.round((Number(zoom) || 1) * 100) / 100, ZOOM_MIN, ZOOM_MAX);
