@@ -45,24 +45,17 @@ describe('simulated data is never passed off as hardware', () => {
     expect(logs.join('\n')).not.toMatch(/verification PASSED/);
   });
 
-  it('HackRF decoder decks show no invented data on real hardware', () => {
-    const sensorsHw = renderToString(<SensorHubDeck centerFreq={433920000} onTuneFreq={() => {}} isDemo={false} />);
-    expect(sensorsHw).not.toContain('KeeLoq HCS301');
-    expect(sensorsHw).toContain('Demo only');
+  it('HackRF decoder decks show no invented data (demo removed)', () => {
+    const sensors = renderToString(<SensorHubDeck centerFreq={433920000} onTuneFreq={() => {}} />);
+    expect(sensors).not.toContain('KeeLoq HCS301');
+    expect(sensors).toContain('Demo only'); // honest "not implemented" banner
 
-    const sensorsDemo = renderToString(<SensorHubDeck centerFreq={433920000} onTuneFreq={() => {}} isDemo />);
-    expect(sensorsDemo).toContain('KeeLoq HCS301');
-    expect(sensorsDemo).toContain('Simulated data');
+    const ham = renderToString(<HamRadioDeck centerFreq={14074000} onTuneFreq={() => {}} />);
+    expect(ham).not.toContain('CQ K1HTV FM18');
+    expect(ham).toContain('Demo only');
 
-    const hamHw = renderToString(<HamRadioDeck centerFreq={14074000} onTuneFreq={() => {}} isDemo={false} />);
-    expect(hamHw).not.toContain('CQ K1HTV FM18');
-    const hamDemo = renderToString(<HamRadioDeck centerFreq={14074000} onTuneFreq={() => {}} isDemo />);
-    expect(hamDemo).toContain('CQ K1HTV FM18');
-
-    const sweepHw = renderToString(<LookingGlassDeck driver={null} centerFreq={100000000} sampleRate={2000000} onTuneFreq={() => {}} isDemo={false} />);
-    expect(sweepHw).not.toContain('Simulated data');
-    const sweepDemo = renderToString(<LookingGlassDeck driver={null} centerFreq={100000000} sampleRate={2000000} onTuneFreq={() => {}} isDemo />);
-    expect(sweepDemo).toContain('Simulated data');
+    const sweep = renderToString(<LookingGlassDeck driver={null} centerFreq={100000000} sampleRate={2000000} onTuneFreq={() => {}} />);
+    expect(sweep).not.toContain('Simulated data');
   });
 
   it('Kismet Studio starts with demo mode off and no mock devices', () => {

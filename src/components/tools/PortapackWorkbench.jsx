@@ -40,7 +40,7 @@ export default function PortapackWorkbench() {
   const [driver] = useState(() => new MayhemPortaPackDriver());
   const [state, setState] = useState(() => ({
     isConnected: false,
-    isDemo: true,
+    connectionType: null,
     frequency: 433920000,
     amp: 0,
     lnaGain: 24,
@@ -48,13 +48,13 @@ export default function PortapackWorkbench() {
     sampleRate: 2000000,
     activeApp: 'menu',
     selectedMenuIndex: 0,
-    firmwareVersion: 'Mayhem v2.0.0 (Nightly)',
-    boardId: 'HackRF One (rev. r9)',
-    cpldVersion: 'CPLD v1.0.0',
-    batteryMv: 4050,
-    sdCardMounted: true,
-    sdCardFreeGb: '14.2 GB / 16 GB',
-    rssi: -85
+    firmwareVersion: null,
+    boardId: null,
+    cpldVersion: null,
+    batteryMv: null,
+    sdCardMounted: null,
+    sdCardFreeGb: null,
+    rssi: -120
   }));
 
   const [activeTab, setActiveTab] = useState('map'); // map, audio, display, tx, freqman, capture, cli
@@ -71,7 +71,7 @@ export default function PortapackWorkbench() {
   const [mirrorTick, setMirrorTick] = useState(0);
   const [mirrorLive, setMirrorLive] = useState(false);
   const mirrorBusyRef = useRef(false);
-  const isSerialHw = !state.isDemo && state.connectionType === 'serial';
+  const isSerialHw = state.connectionType === 'serial';
   const captureMirror = async () => {
     if (mirrorBusyRef.current) return;
     mirrorBusyRef.current = true;
@@ -118,8 +118,6 @@ export default function PortapackWorkbench() {
       spectrumRef.current = { spec, peakDb, ts: performance.now() };
     };
 
-    driver.connectDemo();
-
     return () => {
       driver.onSpectrumCallback = null;
       driver.disconnect();
@@ -150,8 +148,7 @@ export default function PortapackWorkbench() {
     const height = canvas.height || 360;
     const spectrumHeight = 110;
     const waterfallHeight = height - spectrumHeight;
-    const isLiveRf = !state.isDemo && state.connectionType === 'webusb';
-    const isDemo = state.isDemo;
+    const isLiveRf = state.connectionType === 'webusb';
 
     // dBFS display window for the live FFT (HackRF 8-bit IQ sits well under 0 dBFS).
     const DB_TOP = 0;
@@ -180,14 +177,6 @@ export default function PortapackWorkbench() {
           const db = spec[Math.min(bins - 1, Math.floor((x / width) * bins))];
           return frac(db);
         }
-        if (isDemo) {
-          const dist = Math.abs(x - width / 2);
-          const noise = (Math.sin(x * 0.02 + tick * 0.1) * 0.06) + Math.random() * 0.08;
-          const carrier = dist < 40 ? (1 - dist / 40) * 0.7 : 0;
-          const ampBoost = state.amp > 0 ? 0.08 : 0;
-          const lnaBoost = (state.lnaGain / 40) * 0.1;
-          return Math.min(1, 0.15 + noise + carrier + ampBoost + lnaBoost);
-        }
         return 0;
       };
 
@@ -205,7 +194,7 @@ export default function PortapackWorkbench() {
       });
 
       // Serial-but-no-IQ note.
-      if (!live && !isDemo) {
+      if (!live) {
         ctx.fillStyle = '#94a3b8';
         ctx.font = '12px monospace';
         ctx.fillText('Live spectrum needs a WebUSB connection (PortaPack in HackRF mode).', 16, spectrumHeight + 30);
@@ -249,9 +238,6 @@ export default function PortapackWorkbench() {
       if (live && frame) {
         ctx.fillStyle = '#64748b';
         ctx.fillText(`peak ${frame.peakDb.toFixed(0)} dBFS`, 4, spectrumHeight - 4);
-      } else if (isDemo) {
-        ctx.fillStyle = '#f59e0b';
-        ctx.fillText('DEMO — synthetic signal', 4, spectrumHeight - 4);
       }
 
       // 3. Scroll the waterfall down one row and draw the new row on top.
@@ -267,7 +253,7 @@ export default function PortapackWorkbench() {
 
     render();
     return () => cancelAnimationFrame(animId);
-  }, [activeTab, state.isDemo, state.connectionType, state.frequency, state.lnaGain, state.amp, squelchDb]);
+  }, [activeTab, state.connectionType, state.frequency, state.lnaGain, state.amp, squelchDb]);
 
   // Live volume/squelch read by the audio callback without re-subscribing.
   const volumeRef = useRef(volume);
@@ -322,328 +308,28 @@ export default function PortapackWorkbench() {
     return teardown;
   }, [audioOn, state.connectionType, driver]);
 
-  // Live Canvas Renderer (320x240 PortaPack LCD Display)
+  // Virtual LCD: mirrors the real PortaPack screen pulled over the serial console.
   useEffect(() => {
-    let animId;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return undefined;
     const ctx = canvas.getContext('2d');
-
-    if (!state.isDemo) {
-      ctx.fillStyle = '#020617';
-      ctx.fillRect(0, 0, 320, 240);
-      const f = driver.lastFrame;
-      if (state.connectionType === 'serial' && f) {
-        const off = document.createElement('canvas');
-        off.width = f.width; off.height = f.height;
-        off.getContext('2d').putImageData(new ImageData(f.rgba, f.width, f.height), 0, 0);
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(off, 0, 0, 320, 240);
-      } else {
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '11px monospace';
-        const msg = state.connectionType === 'serial'
-          ? ['Press Refresh or Live to pull', 'the real screen from the PortaPack.']
-          : ['Screen mirroring needs the serial console:', 'put the PortaPack in normal mode', 'and connect over serial.'];
-        msg.forEach((m, i) => ctx.fillText(m, 16, 100 + i * 16));
-      }
-      return undefined;
+    ctx.fillStyle = '#020617';
+    ctx.fillRect(0, 0, 320, 240);
+    const f = driver.lastFrame;
+    if (state.connectionType === 'serial' && f) {
+      const off = document.createElement('canvas');
+      off.width = f.width; off.height = f.height;
+      off.getContext('2d').putImageData(new ImageData(f.rgba, f.width, f.height), 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(off, 0, 0, 320, 240);
+    } else {
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '11px monospace';
+      const msg = state.connectionType === 'serial'
+        ? ['Press Refresh or Live to pull', 'the real screen from the PortaPack.']
+        : ['Screen mirroring needs the serial console:', 'put the PortaPack in normal mode', 'and connect over serial.'];
+      msg.forEach((m, idx) => ctx.fillText(m, 16, 100 + idx * 16));
     }
-
-    let tick = 0;
-    const waterfallHistory = [];
-
-    const render = () => {
-      tick++;
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(0, 0, 320, 240);
-
-      // 1. TOP STATUS BAR (Height: 20px)
-      ctx.fillStyle = '#020617';
-      ctx.fillRect(0, 0, 320, 20);
-      ctx.fillStyle = '#06b6d4';
-      ctx.font = 'bold 10px monospace';
-      ctx.fillText(`${(state.frequency / 1000000).toFixed(4)} MHz`, 6, 14);
-
-      // Amp status
-      ctx.fillStyle = state.amp > 0 ? '#ef4444' : '#64748b';
-      ctx.fillText(state.amp > 0 ? 'AMP:14dB' : 'AMP:OFF', 110, 14);
-
-      // LNA / VGA
-      ctx.fillStyle = '#10b981';
-      ctx.fillText(`L:${state.lnaGain} V:${state.vgaGain}`, 180, 14);
-
-      // SD Card & Battery
-      ctx.fillStyle = '#f59e0b';
-      ctx.fillText('SD', 245, 14);
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillText('92%', 270, 14);
-
-      // Battery Icon
-      ctx.strokeStyle = '#38bdf8';
-      ctx.strokeRect(295, 6, 18, 9);
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillRect(297, 8, 14, 5);
-
-      // 2. MAIN APP VIEW
-      if (state.activeApp === 'menu') {
-        // App Grid (3 cols x 4 rows)
-        ctx.fillStyle = '#e2e8f0';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText('MAYHEM APP LAUNCHER', 10, 36);
-
-        MAYHEM_APPS.forEach((app, idx) => {
-          const col = idx % 3;
-          const row = Math.floor(idx / 3);
-          const x = 10 + col * 102;
-          const y = 46 + row * 45;
-          const isSelected = idx === state.selectedMenuIndex;
-
-          ctx.fillStyle = isSelected ? '#1e293b' : '#020617';
-          ctx.strokeStyle = isSelected ? '#38bdf8' : '#334155';
-          ctx.lineWidth = isSelected ? 2 : 1;
-          ctx.beginPath();
-          ctx.roundRect(x, y, 96, 38, 4);
-          ctx.fill();
-          ctx.stroke();
-
-          // Text & Category
-          ctx.fillStyle = isSelected ? '#38bdf8' : '#94a3b8';
-          ctx.font = 'bold 9px monospace';
-          ctx.fillText(app.name.substring(0, 14), x + 6, y + 16);
-
-          ctx.fillStyle = '#64748b';
-          ctx.font = '8px monospace';
-          ctx.fillText(app.category.toUpperCase(), x + 6, y + 30);
-        });
-      } else if (state.activeApp === 'audio_rx') {
-        // Audio RX Spectrum & Waterfall
-        ctx.fillStyle = '#e2e8f0';
-        ctx.font = 'bold 12px monospace';
-        ctx.fillText('AUDIO RECEIVER (NFM / AM)', 10, 36);
-
-        // Huge Frequency display
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 18px monospace';
-        ctx.fillText(`${(state.frequency / 1000000).toFixed(4)} MHz`, 10, 60);
-
-        // RSSI S-Meter Bar
-        const rssiVal = -95 + Math.sin(tick * 0.05) * 15;
-        const rssiPct = Math.min(1, Math.max(0, (rssiVal + 120) / 90));
-        ctx.fillStyle = '#1e293b';
-        ctx.fillRect(10, 70, 300, 10);
-        ctx.fillStyle = rssiPct > 0.7 ? '#ef4444' : rssiPct > 0.4 ? '#f59e0b' : '#10b981';
-        ctx.fillRect(10, 70, 300 * rssiPct, 10);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '9px monospace';
-        ctx.fillText(`RSSI: ${rssiVal.toFixed(1)} dBm (S9+10)`, 10, 92);
-
-        // Live FFT Spectrum Graph
-        ctx.fillStyle = '#020617';
-        ctx.fillRect(10, 98, 300, 65);
-        ctx.strokeStyle = '#06b6d4';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        for (let i = 0; i < 300; i++) {
-          const noise = Math.sin((i + tick * 2) * 0.08) * 8 + Math.random() * 4;
-          const peak = Math.exp(-Math.pow((i - 150) / 12, 2)) * 45;
-          const y = 160 - Math.min(60, Math.max(5, noise + peak));
-          if (i === 0) ctx.moveTo(10 + i, y);
-          else ctx.lineTo(10 + i, y);
-        }
-        ctx.stroke();
-
-        // Waterfall
-        ctx.fillStyle = '#020617';
-        ctx.fillRect(10, 168, 300, 65);
-        for (let row = 0; row < 12; row++) {
-          const rowY = 168 + row * 5;
-          const hue = (tick * 2 + row * 20) % 360;
-          ctx.fillStyle = `hsla(${hue}, 80%, 50%, 0.6)`;
-          ctx.fillRect(140 - Math.sin(tick * 0.1) * 10, rowY, 20 + Math.random() * 5, 4);
-        }
-      } else if (state.activeApp === 'adsb') {
-        // Real Geographic ADS-B Map on 320x240 LCD
-        // Ocean background
-        ctx.fillStyle = '#020617';
-        ctx.fillRect(0, 20, 320, 220);
-
-        // Header Title
-        ctx.fillStyle = '#e2e8f0';
-        ctx.font = 'bold 11px monospace';
-        ctx.fillText('ADS-B 1090 MHz // REAL WORLD MAP', 10, 34);
-
-        // Map mode indicator pill
-        ctx.fillStyle = '#065f46';
-        ctx.fillRect(230, 24, 82, 13);
-        ctx.fillStyle = '#34d399';
-        ctx.font = 'bold 8px monospace';
-        ctx.fillText('GEO MAP ACTIVE', 234, 33);
-
-        // Draw Real Geographic Coastline & Landmass (California Coast, SF Bay, Monterey Bay)
-        ctx.fillStyle = '#06281c';
-        ctx.strokeStyle = '#10b981';
-        ctx.lineWidth = 1.2;
-
-        ctx.beginPath();
-        // Landmass polygon for coastline
-        ctx.moveTo(110, 36);   // North coast
-        ctx.lineTo(135, 65);   // Point Reyes
-        ctx.lineTo(155, 95);   // Marin headlands
-        ctx.lineTo(170, 95);   // San Pablo bay north
-        ctx.lineTo(195, 80);   // Carquinez strait
-        ctx.lineTo(240, 75);   // Sacramento delta
-        ctx.lineTo(315, 75);   // Sierra foothills
-        ctx.lineTo(315, 222);  // Central valley
-        ctx.lineTo(210, 222);  // South bay
-        ctx.lineTo(170, 190);  // Santa Cruz / Monterey bay
-        ctx.lineTo(150, 180);
-        ctx.lineTo(162, 140);  // San Mateo coast
-        ctx.lineTo(150, 120);  // SF peninsula west
-        ctx.lineTo(156, 105);  // Golden gate south
-        ctx.lineTo(175, 115);  // SF Bay inner
-        ctx.lineTo(170, 135);  // SFO airport shoreline
-        ctx.lineTo(185, 150);  // Dumbarton
-        ctx.lineTo(205, 140);  // East bay shoreline
-        ctx.lineTo(188, 105);  // Berkeley / Richmond
-        ctx.lineTo(170, 95);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-
-        // Real Airports on the map
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 8px monospace';
-        // SFO Airport
-        ctx.fillRect(168, 132, 4, 4);
-        ctx.fillText('SFO', 174, 136);
-        // OAK Airport
-        ctx.fillRect(190, 120, 4, 4);
-        ctx.fillText('OAK', 196, 124);
-        // SJC Airport
-        ctx.fillRect(205, 165, 4, 4);
-        ctx.fillText('SJC', 211, 169);
-
-        // Concentric Tactical Distance Rings (50 nm, 100 nm)
-        ctx.strokeStyle = 'rgba(6, 182, 212, 0.25)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(170, 132, 45, 0, Math.PI * 2);
-        ctx.arc(170, 132, 90, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.fillStyle = '#06b6d4';
-        ctx.font = '7px monospace';
-        ctx.fillText('50 NM', 218, 132);
-        ctx.fillText('100 NM', 263, 132);
-
-        // Moving Aircraft with Dynamic Heading Vectors and Flight Trails
-        const livePlanes = [
-          { call: 'UAL421', x: 195 + Math.sin(tick * 0.04) * 20, y: 95 - Math.cos(tick * 0.04) * 15, alt: 'FL340', spd: '485kt', hdg: 68 },
-          { call: 'DLH789', x: 130 + Math.sin(tick * 0.03) * 12, y: 155 + Math.cos(tick * 0.03) * 10, alt: 'FL185', spd: '360kt', hdg: 145 },
-          { call: 'AAL102', x: 235 - Math.sin(tick * 0.05) * 15, y: 175 - Math.cos(tick * 0.05) * 12, alt: 'FL370', spd: '512kt', hdg: 52 },
-          { call: 'REACH412', x: 145 + Math.cos(tick * 0.02) * 8, y: 80 + Math.sin(tick * 0.02) * 8, alt: 'FL290', spd: '440kt', hdg: 240, squawk: '7700' }
-        ];
-
-        livePlanes.forEach(p => {
-          const isEmg = p.squawk === '7700';
-          const pColor = isEmg ? '#ef4444' : '#38bdf8';
-
-          // Dotted flight trail behind aircraft
-          ctx.strokeStyle = isEmg ? 'rgba(239, 68, 68, 0.5)' : 'rgba(56, 189, 248, 0.4)';
-          ctx.setLineDash([2, 2]);
-          ctx.beginPath();
-          ctx.moveTo(p.x - 18, p.y + 12);
-          ctx.lineTo(p.x, p.y);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          // Vector Airplane Glyph
-          ctx.save();
-          ctx.translate(p.x, p.y);
-          ctx.rotate((p.hdg * Math.PI) / 180);
-          ctx.fillStyle = pColor;
-          ctx.beginPath();
-          ctx.moveTo(0, -6);
-          ctx.lineTo(1.5, -2);
-          ctx.lineTo(6, 1);
-          ctx.lineTo(1.5, 1);
-          ctx.lineTo(1.5, 4);
-          ctx.lineTo(4, 6);
-          ctx.lineTo(0, 5);
-          ctx.lineTo(-4, 6);
-          ctx.lineTo(-1.5, 4);
-          ctx.lineTo(-1.5, 1);
-          ctx.lineTo(-6, 1);
-          ctx.lineTo(-1.5, -2);
-          ctx.closePath();
-          ctx.fill();
-          ctx.restore();
-
-          // Flight Tag Pill
-          ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
-          ctx.strokeStyle = pColor;
-          ctx.lineWidth = 1;
-          ctx.fillRect(p.x + 8, p.y - 8, 66, 18);
-          ctx.strokeRect(p.x + 8, p.y - 8, 66, 18);
-
-          ctx.fillStyle = isEmg ? '#ef4444' : '#ffffff';
-          ctx.font = 'bold 8px monospace';
-          ctx.fillText(p.call, p.x + 11, p.y - 1);
-
-          ctx.fillStyle = isEmg ? '#fca5a5' : '#34d399';
-          ctx.font = '7px monospace';
-          ctx.fillText(`${p.alt} ${p.spd}`, p.x + 11, p.y + 7);
-        });
-
-        // Bottom Telemetry Footer
-        ctx.fillStyle = '#020617';
-        ctx.fillRect(0, 222, 320, 18);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '9px monospace';
-        ctx.fillText('TARGETS: 7 | HOME: 37.77°N 122.42°W | RANGE: 100 NM', 8, 234);
-      } else if (state.activeApp === 'capture') {
-        // Raw C16 IQ Capture Screen
-        ctx.fillStyle = '#ef4444';
-        ctx.font = 'bold 14px monospace';
-        const pulse = Math.sin(tick * 0.1) > 0;
-        if (pulse) {
-          ctx.beginPath();
-          ctx.arc(20, 45, 6, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.fillText('REC // RAW C16 IQ CAPTURE', 35, 50);
-
-        ctx.fillStyle = '#e2e8f0';
-        ctx.font = '10px monospace';
-        ctx.fillText('Target File: /CAPTURES/20261022_433M92.C16', 20, 80);
-        ctx.fillText(`Center Freq: ${(state.frequency / 1000000).toFixed(4)} MHz`, 20, 100);
-        ctx.fillText(`Sample Rate: ${(state.sampleRate / 1000000).toFixed(1)} MSPS (Complex Signed 16-bit)`, 20, 120);
-        ctx.fillText('Buffer Fill: 18% [========                  ]', 20, 140);
-        ctx.fillText('Data Rate: 8.0 MB/s to SD Card (FAT32)', 20, 160);
-        ctx.fillText('Free Space: 14.2 GB (~29 minutes capacity)', 20, 180);
-
-        ctx.fillStyle = '#06b6d4';
-        ctx.fillText('Press SELECT or BACK to stop and flush to SD card.', 20, 220);
-      } else {
-        // Generic App View
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 14px monospace';
-        ctx.fillText(`APP: ${state.activeApp.toUpperCase()}`, 20, 50);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '11px monospace';
-        ctx.fillText('PortaPack active. Listening for sub-GHz RF frames.', 20, 80);
-        ctx.fillText(`Frequency: ${(state.frequency / 1000000).toFixed(4)} MHz`, 20, 105);
-        ctx.fillText('Press [BACK] button to return to App Launcher.', 20, 140);
-      }
-
-      animId = requestAnimationFrame(render);
-    };
-
-    render();
-
-    return () => {
-      cancelAnimationFrame(animId);
-    };
   }, [state, showVirtualLcd, mirrorTick]);
 
   const handleTunePreset = (preset) => {
@@ -700,9 +386,9 @@ export default function PortapackWorkbench() {
               PORTAPACK MAYHEM & HACKRF
             </span>
             <span className="text-[10px] px-2 py-0.5 bg-purple-950/80 border border-purple-500/40 text-purple-300 rounded font-mono font-semibold">
-              {state.firmwareVersion || (state.isDemo ? 'Mayhem v2.0.0' : 'Mayhem (version unknown)')}
+              {state.firmwareVersion || 'Mayhem (not connected)'}
             </span>
-            <StatusBadge status={state.isDemo ? 'warning' : 'success'} label={state.isDemo ? 'DEMO' : 'CONNECTED'} />
+            <StatusBadge status={state.isConnected ? 'success' : 'warning'} label={state.isConnected ? 'CONNECTED' : 'OFFLINE'} />
             <span className="text-slate-600 text-xs">•</span>
             <div className="flex items-center gap-1.5 text-xs text-slate-300">
               <span className="text-slate-400">By</span>
@@ -723,16 +409,15 @@ export default function PortapackWorkbench() {
         {/* Center/Right: Hardware Chip & Connect Actions */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-cyan-950/60 border border-cyan-500/30 rounded text-[11px] font-mono text-cyan-300">
-            <CheckCircle2 className={`w-3.5 h-3.5 flex-shrink-0 ${state.isConnected && !state.isDemo ? 'text-emerald-400' : 'text-slate-500'}`} />
+            <CheckCircle2 className={`w-3.5 h-3.5 flex-shrink-0 ${state.isConnected ? 'text-emerald-400' : 'text-slate-500'}`} />
             <span>
-              {state.isDemo ? 'Demo (no device)'
-                : !state.isConnected ? 'Not connected'
+              {!state.isConnected ? 'Not connected'
                 : state.connectionType === 'serial' ? 'Mayhem serial console (1D50:6018)'
                 : 'HackRF One (1D50:6089 WinUSB)'}
             </span>
           </div>
 
-          {!state.isDemo ? (
+          {state.isConnected ? (
             <button
               onClick={() => driver.disconnect()}
               className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 rounded text-xs font-mono transition flex items-center gap-1"
@@ -772,16 +457,6 @@ export default function PortapackWorkbench() {
               </button>
             </>
           )}
-
-          <button
-            onClick={() => {
-              setConnectError(null);
-              driver.connectDemo();
-            }}
-            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 rounded text-xs font-mono transition flex items-center gap-1"
-          >
-            <RefreshCw className="w-3 h-3" /> Demo
-          </button>
 
           <button
             onClick={() => setShowVirtualLcd(prev => !prev)}
@@ -832,12 +507,6 @@ export default function PortapackWorkbench() {
                 <>
                   <button onClick={captureMirror} className="px-2 py-0.5 rounded bg-slate-800 text-[10px] border border-slate-700 text-cyan-300 hover:text-white">Refresh</button>
                   <button onClick={() => setMirrorLive((v) => !v)} className={`px-2 py-0.5 rounded text-[10px] border ${mirrorLive ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>{mirrorLive ? 'Live ●' : 'Live'}</button>
-                </>
-              ) : state.isDemo ? (
-                <>
-                  <span>BAT: {state.batteryMv}mV (demo)</span>
-                  <span>•</span>
-                  <span>SD: FAT32 (demo)</span>
                 </>
               ) : null}
               <button
@@ -1027,7 +696,7 @@ export default function PortapackWorkbench() {
               volume={volume}
               audioOn={audioOn}
               setAudioOn={setAudioOn}
-              canListen={!state.isDemo && state.connectionType === 'webusb'}
+              canListen={state.connectionType === 'webusb'}
               waterfallCanvasRef={waterfallCanvasRef}
             />
           )}
@@ -1037,7 +706,6 @@ export default function PortapackWorkbench() {
             <div className="flex-1">
               <HamRadioDeck
                 driver={driver}
-                isDemo={state.isDemo}
                 centerFreq={state.frequency}
                 onTuneFreq={(hz) => driver.sendCommand(`freq ${hz}`)}
               />
@@ -1049,7 +717,6 @@ export default function PortapackWorkbench() {
             <div className="flex-1">
               <SensorHubDeck
                 driver={driver}
-                isDemo={state.isDemo}
                 centerFreq={state.frequency}
                 onTuneFreq={(hz) => driver.sendCommand(`freq ${hz}`)}
               />
@@ -1061,7 +728,6 @@ export default function PortapackWorkbench() {
             <div className="flex-1">
               <LookingGlassDeck
                 driver={driver}
-                isDemo={state.isDemo}
                 centerFreq={state.frequency}
                 sampleRate={state.sampleRate}
                 onTuneFreq={(hz) => driver.sendCommand(`freq ${hz}`)}

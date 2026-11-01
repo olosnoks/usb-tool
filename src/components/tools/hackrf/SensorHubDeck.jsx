@@ -18,154 +18,16 @@ import {
   Radio
 } from 'lucide-react';
 
-export default function SensorHubDeck({ centerFreq, onTuneFreq, isDemo = true }) {
+export default function SensorHubDeck({ centerFreq, onTuneFreq }) {
   const [activeCategory, setActiveCategory] = useState('subghz'); // 'subghz' | 'weather' | 'tpms' | 'pagers' | 'acars' | 'ble'
   const [searchQuery, setSearchQuery] = useState('');
   
   // Decoded sensor packets. Only the demo has any: the PortaPack doesn't stream
   // rtl_433 decodes over USB, so on real hardware this stays empty.
-  const [packets, setPackets] = useState(() => (isDemo ? [
-    {
-      id: 1,
-      cat: 'subghz',
-      time: '03:52:10',
-      protocol: 'KeeLoq HCS301',
-      freq: '433.920 MHz',
-      idHex: '0x1A4F9C',
-      btn: 'BTN_A (Unlock)',
-      counter: 1428,
-      rssi: -62,
-      raw: '66-bit PWM Wakeup + Encrypted Rolling Payload'
-    },
-    {
-      id: 2,
-      cat: 'weather',
-      time: '03:52:14',
-      protocol: 'Ambient Weather WS-2902',
-      freq: '915.000 MHz',
-      idHex: 'WS-8421',
-      temp: '21.4°C (70.5°F)',
-      humidity: '58%',
-      wind: '6.2 mph NW',
-      rain: '0.0 mm',
-      battery: 'OK',
-      rssi: -71
-    },
-    {
-      id: 3,
-      cat: 'tpms',
-      time: '03:52:18',
-      protocol: 'Schrader FLM 64 (315 MHz)',
-      freq: '315.000 MHz',
-      idHex: 'TPMS-9FA104',
-      wheel: 'Front Left (FL)',
-      pressure: '32.6 PSI (2.25 bar)',
-      temp: '23°C',
-      status: 'Normal',
-      rssi: -68
-    },
-    {
-      id: 4,
-      cat: 'pagers',
-      time: '03:52:25',
-      protocol: 'FLEX 1600 (4-Level)',
-      freq: '929.6125 MHz',
-      capCode: '0098412',
-      func: 'ALPHANUMERIC',
-      msg: 'HOSPITAL STAT: CARDIAC UNIT 4 ROOM 210 - ATTEND DR. REED',
-      rssi: -58
-    },
-    {
-      id: 5,
-      cat: 'acars',
-      time: '03:52:31',
-      protocol: 'ACARS 2400 MSK',
-      freq: '131.550 MHz',
-      flight: 'UAL421',
-      tail: 'N78001 (B772)',
-      label: '5U (Weather Uplink)',
-      text: 'METAR KSFO 230356Z 28014KT 10SM FEW015 14/09 A2998',
-      rssi: -64
-    },
-    {
-      id: 6,
-      cat: 'ble',
-      time: '03:52:35',
-      protocol: 'BLE ADV_IND (Ch 37)',
-      freq: '2402.000 MHz',
-      mac: 'E4:95:6E:41:A2:8F',
-      type: 'Apple iBeacon',
-      uuid: 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825',
-      rssi: -49
-    }
-  ] : []));
+  const [packets, setPackets] = useState([]);
 
   // Demo mode only: invented packets on a timer.
-  useEffect(() => {
-    if (!isDemo) { setPackets([]); return undefined; }
-    const timer = setInterval(() => {
-      const now = new Date();
-      const timeStr = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}:${String(now.getUTCSeconds()).padStart(2, '0')}`;
-      
-      const generators = [
-        () => ({
-          id: Date.now(),
-          cat: 'subghz',
-          time: timeStr,
-          protocol: Math.random() > 0.5 ? 'Princeton PT2262' : 'CAME Top432',
-          freq: '433.920 MHz',
-          idHex: '0x' + Math.floor(Math.random() * 0xFFFFFF).toString(16).toUpperCase(),
-          btn: Math.random() > 0.5 ? 'OPEN' : 'CLOSE',
-          counter: Math.floor(Math.random() * 5000),
-          rssi: -60 - Math.floor(Math.random() * 25),
-          raw: '24-bit Tri-State Fixed Code (Pulse Width: 320 µs)'
-        }),
-        () => ({
-          id: Date.now(),
-          cat: 'weather',
-          time: timeStr,
-          protocol: 'Acurite 5-in-1 Weather',
-          freq: '433.920 MHz',
-          idHex: 'ACU-' + Math.floor(1000 + Math.random() * 9000),
-          temp: (18 + Math.random() * 6).toFixed(1) + '°C',
-          humidity: Math.floor(45 + Math.random() * 30) + '%',
-          wind: (Math.random() * 12).toFixed(1) + ' mph W',
-          rain: '0.0 mm',
-          battery: 'OK',
-          rssi: -70 - Math.floor(Math.random() * 15)
-        }),
-        () => ({
-          id: Date.now(),
-          cat: 'tpms',
-          time: timeStr,
-          protocol: 'Schrader FLM 64 (433 MHz)',
-          freq: '433.920 MHz',
-          idHex: 'TPMS-' + Math.floor(100000 + Math.random() * 900000).toString(16).toUpperCase(),
-          wheel: ['FL', 'FR', 'RL', 'RR'][Math.floor(Math.random() * 4)],
-          pressure: (31 + Math.random() * 3).toFixed(1) + ' PSI',
-          temp: Math.floor(20 + Math.random() * 8) + '°C',
-          status: 'Normal',
-          rssi: -65 - Math.floor(Math.random() * 20)
-        }),
-        () => ({
-          id: Date.now(),
-          cat: 'pagers',
-          time: timeStr,
-          protocol: 'POCSAG 1200 (BCH 31,21)',
-          freq: '154.600 MHz',
-          capCode: '0' + Math.floor(100000 + Math.random() * 800000),
-          func: 'ALPHA',
-          msg: 'PAGE: INCIDENT #' + Math.floor(1000 + Math.random() * 9000) + ' DISPATCH UNIT 12',
-          rssi: -62 - Math.floor(Math.random() * 18)
-        })
-      ];
-
-      const gen = generators[Math.floor(Math.random() * generators.length)];
-      setPackets(prev => [gen(), ...prev.slice(0, 49)]);
-    }, 5000);
-
-    return () => clearInterval(timer);
-  }, [isDemo]);
+  // No synthetic sensor packets: rtl_433-style decoding is not implemented over USB.
 
   const filteredPackets = packets.filter(p => {
     if (activeCategory !== 'all' && p.cat !== activeCategory) return false;
@@ -194,11 +56,7 @@ export default function SensorHubDeck({ centerFreq, onTuneFreq, isDemo = true })
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isDemo ? (
-        <DemoBanner>These sensor packets are invented by the demo, not decoded from RF.</DemoBanner>
-      ) : (
-        <DemoBanner demoOnly>Decoding sensors needs an rtl_433 feed, which the PortaPack doesn&apos;t send over USB. Nothing below comes from your HackRF.</DemoBanner>
-      )}
+      <DemoBanner demoOnly>Sub-GHz / weather / TPMS / pager / ACARS / BLE decoding is not implemented over USB yet, so nothing is listed here. The frequency buttons do retune your HackRF.</DemoBanner>
       {/* Top Banner & Protocol Stats */}
       <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">

@@ -4,7 +4,7 @@ import { powerSpectrumFromIQ } from './fft.js';
 import { Demodulator } from './hackrfDemod.js';
 
 /*
- * Two real transports plus a labeled demo:
+ * Two real transports (no demo mode):
  *   - Serial: the Mayhem "USB Serial Console" (ChibiOS shell, prompt `ch>`) in
  *     normal mode. Commands used here: info, setfreq <Hz>, button <1-8>,
  *     touch <x> <y>, keyboard <hex>, screenframeshort, applist,
@@ -40,16 +40,6 @@ export const MAYHEM_BUTTONS = {
   right: 1, left: 2, down: 3, up: 4, select: 5, dfu: 6, rotaryLeft: 7, rotaryRight: 8
 };
 
-// The demo's made-up identity. Real connections start blank and read `info`.
-const DEMO_IDENTITY = {
-  firmwareVersion: 'Mayhem v2.0.0 (Nightly-Git)',
-  boardId: 'HackRF One (rev. r9)',
-  cpldVersion: 'CPLD v1.0.0',
-  batteryMv: 4050,
-  sdCardMounted: true,
-  sdCardFreeGb: '14.2 GB / 16 GB'
-};
-
 export const FREQMAN_PRESETS = [
   { id: 'ism-433', freq: 433920000, mod: 'NFM', label: 'ISM 433.920 MHz (Keyfobs & Weather)', bw: 12500, category: 'ISM' },
   { id: 'ism-868', freq: 868300000, mod: 'NFM', label: 'ISM 868.300 MHz (EU LoRa / Smart Meters)', bw: 25000, category: 'ISM' },
@@ -82,8 +72,7 @@ export const MAYHEM_APPS = [
 export class MayhemPortaPackDriver {
   constructor() {
     this.isConnected = false;
-    this.isDemo = true;
-    this.connectionType = 'demo'; // 'demo', 'serial', 'webusb'
+    this.connectionType = null; // null (offline), 'serial', or 'webusb'
     this.port = null;
     this.usbDevice = null;
     this.reader = null;
@@ -98,7 +87,9 @@ export class MayhemPortaPackDriver {
     this.sampleRate = 2000000; // 2 MSPS
     this.activeApp = 'menu';
     this.selectedMenuIndex = 0;
-    Object.assign(this, DEMO_IDENTITY);
+    // Device identity: filled in only from the real device.
+    this.firmwareVersion = null; this.boardId = null; this.cpldVersion = null;
+    this.batteryMv = null; this.sdCardMounted = null; this.sdCardFreeGb = null;
 
     // Serial console state
     this.rxBuffer = '';               // partial line carried between chunks
@@ -158,7 +149,6 @@ export class MayhemPortaPackDriver {
     if (this.onStateChangeCallback) {
       this.onStateChangeCallback({
         isConnected: this.isConnected,
-        isDemo: this.isDemo,
         connectionType: this.connectionType,
         frequency: this.frequency,
         amp: this.amp,
@@ -176,19 +166,6 @@ export class MayhemPortaPackDriver {
         rssi: this.rssi
       });
     }
-  }
-
-  async connectDemo() {
-    Object.assign(this, DEMO_IDENTITY);
-    this.isConnected = true;
-    this.isDemo = true;
-    this.connectionType = 'demo';
-    this.log('Connected to Virtual PortaPack Mayhem H2+ (Demo Mode)', 'success');
-    this.log('Hardware: HackRF One (LPC4330 + MAX2837 + R820T2 + XC6SLX9 CPLD)', 'info');
-    this.log(`Firmware: ${this.firmwareVersion}`, 'info');
-    this.log(`SD Card: 16GB FAT32 Mounted, ${this.sdCardFreeGb} free`, 'info');
-    this.notifyState();
-    return true;
   }
 
   async connectHardware(options = {}) {
@@ -215,7 +192,6 @@ export class MayhemPortaPackDriver {
       catch (e) { releasePort(port, this._portOwner); throw e; }
       this.port = port;
       this.isConnected = true;
-      this.isDemo = false;
       this.connectionType = 'serial';
       // Drop the demo's identity; fill in only what the device reports.
       this.firmwareVersion = null; this.boardId = null; this.cpldVersion = null;
@@ -281,7 +257,6 @@ export class MayhemPortaPackDriver {
       } catch (_) {}
 
       this.isConnected = true;
-      this.isDemo = false;
       this.connectionType = 'webusb';
 
       const pName = this.usbDevice.productName || 'HackRF One';
@@ -743,8 +718,8 @@ export class MayhemPortaPackDriver {
 
   async sendCommand(cmd) {
     this.log(`> ${cmd}`, 'sent');
-    if (this.isDemo) {
-      this.handleDemoCommand(cmd);
+    if (!this.isConnected) {
+      this.log('Not connected. Connect a HackRF over WebUSB, or a PortaPack over serial, first.', 'warning');
       return;
     }
 
@@ -789,79 +764,16 @@ export class MayhemPortaPackDriver {
     }
   }
 
-  handleDemoCommand(cmd) {
-    const parts = cmd.trim().split(' ');
-    const action = parts[0].toLowerCase();
-
-    switch (action) {
-      case 'version':
-        this.log(`[PORTAPACK] ${this.firmwareVersion} | Board: ${this.boardId} | ${this.cpldVersion}`, 'info');
-        break;
-      case 'freq':
-        if (parts[1]) {
-          const f = parseInt(parts[1], 10);
-          if (!isNaN(f) && f >= 1000000 && f <= 6000000000) {
-            this.frequency = f;
-            this.log(`[TUNER] Synthesizer locked: ${(f / 1000000).toFixed(4)} MHz`, 'success');
-            this.notifyState();
-          } else {
-            this.log('Invalid frequency (Range: 1,000,000 Hz to 6,000,000,000 Hz)', 'warning');
-          }
-        }
-        break;
-      case 'amp':
-        this.amp = parts[1] === '1' ? 14 : 0;
-        this.log(`[RF] RF Amplifier: ${this.amp > 0 ? '+14 dB (ENABLED)' : '0 dB (BYPASSED)'}`, 'info');
-        this.notifyState();
-        break;
-      case 'lna':
-        if (parts[1]) {
-          this.lnaGain = Math.min(40, Math.max(0, parseInt(parts[1], 10)));
-          this.log(`[RF] LNA Gain: ${this.lnaGain} dB`, 'info');
-          this.notifyState();
-        }
-        break;
-      case 'vga':
-        if (parts[1]) {
-          this.vgaGain = Math.min(62, Math.max(0, parseInt(parts[1], 10)));
-          this.log(`[RF] Baseband VGA Gain: ${this.vgaGain} dB`, 'info');
-          this.notifyState();
-        }
-        break;
-      case 'app':
-        if (parts[1]) {
-          this.activeApp = parts[1];
-          this.log(`[UI] Launched PortaPack App: ${parts[1].toUpperCase()}`, 'info');
-          this.notifyState();
-        }
-        break;
-      case 'screenshot':
-        this.log('[LCD] Framebuffer dumped: 320x240 RGB565 (153,600 bytes received)', 'success');
-        break;
-      case 'reboot':
-        this.log('[SYS] Rebooting PortaPack Mayhem...', 'warning');
-        setTimeout(() => {
-          this.log('[SYS] Mayhem boot complete. Ready.', 'success');
-        }, 1500);
-        break;
-      case 'dfu':
-        this.log('[SYS] Entering NXP LPC43xx DFU bootloader mode (VID 1FC9, PID 000C)...', 'warning');
-        break;
-      default:
-        this.log(`Unknown PortaPack command: ${cmd}`, 'warning');
-    }
-  }
-
   // Keypad & D-Pad Navigation Controls
   pressKey(key) {
-    if (this.connectionType === 'serial' && !this.isDemo) {
+    if (this.connectionType === 'serial') {
       const map = { up: 'up', down: 'down', left: 'left', right: 'right', select: 'select',
                     step_up: 'rotaryRight', step_down: 'rotaryLeft', back: 'left' };
       const name = map[key];
       if (name) this.press(name).catch((e) => this.log(`button failed: ${e.message}`, 'error'));
       return;
     }
-    if (this.connectionType === 'webusb' && !this.isDemo) {
+    if (this.connectionType === 'webusb') {
       this.log('Buttons need the serial console: switch the PortaPack to normal mode and connect over serial.', 'warning');
       return;
     }
@@ -925,7 +837,7 @@ export class MayhemPortaPackDriver {
 
   async disconnect() {
     this.isConnected = false;
-    this.connectionType = 'demo';
+    this.connectionType = null;
     this.demod = null;
     if (this.usbDevice) {
       try { await this.usbDevice.close(); } catch (_) {}
@@ -944,7 +856,7 @@ export class MayhemPortaPackDriver {
     } else if (reader) {
       try { await reader.cancel(); } catch (_) {}
     }
-    this.log('Hardware disconnected. Returned to demo mode.', 'info');
+    this.log('Hardware disconnected.', 'info');
     this.notifyState();
   }
 }

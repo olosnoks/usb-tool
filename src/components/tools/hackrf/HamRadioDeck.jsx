@@ -51,68 +51,18 @@ const SAMPLE_FT8 = [
   { call: 'EA4URA', grid: 'IN80', snr: 2, dt: -0.1, msg: 'EA4URA F5IN R+02' }
 ];
 
-export default function HamRadioDeck({ centerFreq, onTuneFreq, isDemo = true }) {
+export default function HamRadioDeck({ centerFreq, onTuneFreq }) {
   const [activeHamTab, setActiveHamTab] = useState('digital'); // 'digital' | 'sat' | 'log'
   const [digitalMode, setDigitalMode] = useState('ft8'); // 'ft8' | 'psk' | 'rtty' | 'cw' | 'dmr'
-  const [ft8List, setFt8List] = useState(() => (isDemo ? [
-    { id: 1, time: '03:45:15', snr: 3, dt: 0.1, freqOffset: 1240, msg: 'CQ K1HTV FM18', call: 'K1HTV', grid: 'FM18' },
-    { id: 2, time: '03:45:15', snr: -9, dt: 0.2, freqOffset: 1560, msg: 'W3LPL K1RA FM19', call: 'W3LPL', grid: 'FM19' },
-    { id: 3, time: '03:45:30', snr: -14, dt: -0.1, freqOffset: 920, msg: 'DL8MAS N4OGG R-12', call: 'DL8MAS', grid: 'EM74' },
-    { id: 4, time: '03:45:30', snr: -4, dt: 0.3, freqOffset: 1840, msg: 'JA1ABC W6YX CM87', call: 'JA1ABC', grid: 'PM95' }
-  ] : []));
-  const [rttyText, setRttyText] = useState(isDemo ? 'RYRYRY CQ CQ DE W3LPL W3LPL K RYRYRY CQ DE W3LPL TEST...\n' : '');
-  const [pskText, setPskText] = useState(isDemo ? 'CQ CQ CQ DE K1RA K1RA BT NAME BOB QTH MD HW CPY? AR K...\n' : '');
-  const [cwText, setCwText] = useState(isDemo ? 'CQ CQ CQ DE N4OGG N4OGG 5NN EM74 BK...\n' : '');
+  const [ft8List, setFt8List] = useState([]);
+  const [rttyText, setRttyText] = useState('');
+  const [pskText, setPskText] = useState('');
+  const [cwText, setCwText] = useState('');
   const [selectedSat, setSelectedSat] = useState(SATELLITES[0]);
   const [dopplerOffsetHz, setDopplerOffsetHz] = useState(2450);
-  const [logEntries, setLogEntries] = useState(() => (isDemo ? [
-    { id: 1, date: '2026-10-22', time: '22:15', call: 'K1HTV', freq: '14.074', mode: 'FT8', rstS: '-08', rstR: '+02', grid: 'FM18' },
-    { id: 2, date: '2026-10-22', time: '22:31', call: 'W3LPL', freq: '7.074', mode: 'FT8', rstS: '+04', rstR: '-04', grid: 'FM19' }
-  ] : []));
+  const [logEntries, setLogEntries] = useState([]);
 
-  // Demo mode only: invented decodes on a timer.
-  useEffect(() => {
-    if (!isDemo) { setFt8List([]); setRttyText(''); setPskText(''); setCwText(''); return undefined; }
-    const timer = setInterval(() => {
-      // Pick random FT8 decode
-      const sample = SAMPLE_FT8[Math.floor(Math.random() * SAMPLE_FT8.length)];
-      const now = new Date();
-      const timeStr = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}:${String(now.getUTCSeconds()).padStart(2, '0')}`;
-      
-      setFt8List(prev => [
-        {
-          id: Date.now(),
-          time: timeStr,
-          snr: sample.snr + Math.floor(Math.random() * 5 - 2),
-          dt: sample.dt,
-          freqOffset: Math.floor(400 + Math.random() * 2200),
-          msg: sample.msg,
-          call: sample.call,
-          grid: sample.grid
-        },
-        ...prev.slice(0, 19)
-      ]);
-
-      // Add a bit to RTTY / PSK / CW
-      if (Math.random() > 0.6) {
-        setRttyText(t => (t.length > 500 ? t.slice(150) : t) + ` ${sample.call} 599 042 `);
-      }
-      if (Math.random() > 0.6) {
-        setPskText(t => (t.length > 500 ? t.slice(150) : t) + ` ${sample.call} RST 599 BTU `);
-      }
-      if (Math.random() > 0.5) {
-        setCwText(t => (t.length > 500 ? t.slice(150) : t) + ` ${sample.call} `);
-      }
-
-      // Drift satellite doppler
-      setDopplerOffsetHz(prev => {
-        const drift = Math.floor(Math.random() * 80 - 40);
-        return Math.max(-4500, Math.min(4500, prev + drift));
-      });
-    }, 4500);
-
-    return () => clearInterval(timer);
-  }, [isDemo]);
+  // No synthetic decodes: FT8/PSK/RTTY/CW decoding is not implemented over USB yet.
 
   const handleLogContact = (call, grid, freqMhz, mode) => {
     const now = new Date();
@@ -146,11 +96,7 @@ export default function HamRadioDeck({ centerFreq, onTuneFreq, isDemo = true }) 
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isDemo ? (
-        <DemoBanner>The decodes, satellite Doppler and sample log entries here are invented by the demo.</DemoBanner>
-      ) : (
-        <DemoBanner demoOnly>FT8 / PSK / RTTY / CW decoding isn&apos;t streamed from the PortaPack over USB, so these decoders stay empty. Tuning buttons do retune the radio, and your contact log still works.</DemoBanner>
-      )}
+      <DemoBanner demoOnly>FT8 / PSK / RTTY / CW decoding is not implemented over USB yet, so these panels stay empty. The band/mode buttons do retune the radio, and your contact log works.</DemoBanner>
       {/* Top Header Card: Ham Radio Quick Bands & Mode Presets */}
       <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-3">
         <div className="flex items-center justify-between">

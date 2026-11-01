@@ -64,7 +64,6 @@ beforeEach(() => _resetPortManager());
 describe('PortaPack Mayhem serial console (simulated device)', () => {
   it('reads the real identity on connect instead of keeping the demo one', async () => {
     const { d } = await connected();
-    expect(d.isDemo).toBe(false);
     expect(d.firmwareVersion).toBe('Mayhem v2.1.0');
     expect(d.batteryMv).toBe(null);
     expect(d.boardId).toBe(null);
@@ -118,15 +117,6 @@ describe('PortaPack Mayhem serial console (simulated device)', () => {
     expect(logs.some((l) => l.text === '[MAYHEM] *8D4840D6202CC371C32CE0576098;')).toBe(true);
     await d.disconnect();
   });
-
-  it('demo mode still works and keeps its labeled identity', async () => {
-    const d = new MayhemPortaPackDriver();
-    await d.connectDemo();
-    expect(d.isDemo).toBe(true);
-    expect(d.firmwareVersion).toMatch(/Mayhem/);
-    await d.sendCommand('freq 915000000');
-    expect(d.frequency).toBe(915000000);
-  });
 });
 
 
@@ -179,7 +169,6 @@ describe('PortaPack Mayhem over WebUSB (simulated HackRF)', () => {
       await d.connectWebUsb();
 
       expect(d.connectionType).toBe('webusb');
-      expect(d.isDemo).toBe(false);
       expect(d.rxEndpoint).toBe(1);                 // discovered bulk IN 0x81
       expect(d.firmwareVersion).toBe('git-abc 2024');
       expect(d.boardId).toBe('HackRF One');
@@ -210,7 +199,7 @@ describe('PortaPack Mayhem over WebUSB (simulated HackRF)', () => {
       expect(Math.max(...spec) - Math.min(...spec)).toBeGreaterThan(1);
 
       await d.disconnect();
-      expect(d.connectionType).toBe('demo');
+      expect(d.connectionType).toBe(null);
     } finally {
       vi.unstubAllGlobals();
     }
