@@ -14,6 +14,20 @@ import { powerSpectrumFromIQ } from './fft.js';
  * screenframeshort: one text line per screen row, one char per pixel,
  * char - 32 = 6-bit colour 00RRGGBB.
  */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// HackRF baseband filter bandwidths (Hz). libhackrf picks the largest value
+// strictly below the sample rate; fall back to the narrowest.
+const HACKRF_BB_FILTERS = [
+  1750000, 2500000, 3500000, 5000000, 5500000, 6000000, 7000000, 8000000,
+  9000000, 10000000, 12000000, 14000000, 15000000, 20000000, 24000000, 28000000
+];
+export function basebandFilterBwForRate(rateHz) {
+  let best = HACKRF_BB_FILTERS[0];
+  for (const bw of HACKRF_BB_FILTERS) { if (bw < rateHz) best = bw; else break; }
+  return best;
+}
+
 export const MAYHEM_USB_IDS = {
   MAYHEM_SERIAL: { vid: '1d50', pid: '6018', name: 'PortaPack Mayhem USB Serial Console (normal mode)' },
   HACKRF_RUNTIME: { vid: '1d50', pid: '6089', name: 'Great Scott Gadgets HackRF One / PortaPack Mayhem' },
@@ -77,8 +91,9 @@ export class MayhemPortaPackDriver {
     // Radio State
     this.frequency = 433920000; // 433.92 MHz
     this.amp = 0; // 0 or 14 dB
-    this.lnaGain = 16; // 0 - 40 dB in 8dB steps
-    this.vgaGain = 20; // 0 - 62 dB in 2dB steps
+    this.lnaGain = 24; // 0 - 40 dB in 8dB steps (RocketGod default 24)
+    this.vgaGain = 24; // 0 - 62 dB in 2dB steps (RocketGod default 24)
+    this.rxEndpoint = 1; // bulk IN endpoint number (0x81), discovered on connect
     this.sampleRate = 2000000; // 2 MSPS
     this.activeApp = 'menu';
     this.selectedMenuIndex = 0;
@@ -239,6 +254,14 @@ export class MayhemPortaPackDriver {
         // Interface may be vendor-specific
       }
 
+      // Discover the bulk IN endpoint (HackRF exposes 0x81) instead of assuming it.
+      try {
+        const iface = this.usbDevice.configuration?.interfaces?.find((i) => i.claimed) || this.usbDevice.configuration?.interfaces?.[0];
+        const alt = iface?.alternate;
+        const ep = alt?.endpoints?.find((e) => e.direction === 'in' && e.type === 'bulk');
+        if (ep) this.rxEndpoint = ep.endpointNumber;
+      } catch (_) {}
+
       this.isConnected = true;
       this.isDemo = false;
       this.connectionType = 'webusb';
@@ -249,6 +272,13 @@ export class MayhemPortaPackDriver {
       this.log(`Connected to ${pName} via WebUSB (VID: ${vid}, PID: ${pid}) - libhackrf protocol.`, 'success');
 
       // 1. Clean slate (RocketGod bring-up pattern):
+      // Stop any previous streaming first (mode OFF), then settle, then drop HW sync.
+      try {
+        await this.usbDevice.controlTransferOut({
+          requestType: 'vendor', recipient: 'device', request: 1, value: 0, index: 0 // SET_TRANSCEIVER_MODE OFF
+        });
+        await sleep(100);
+      } catch (_) {}
       // Turn off HW Sync (Request 29) to avoid waiting for external trigger
       try {
         await this.usbDevice.controlTransferOut({
@@ -310,8 +340,9 @@ export class MayhemPortaPackDriver {
           index: 0
         }, rateBuf);
 
-        // BASEBAND_FILTER_BW_SET (7): low 16 in value, high 16 in index
-        const bw = 1750000;
+        // BASEBAND_FILTER_BW_SET (7): low 16 in value, high 16 in index.
+        // Pick the filter from libhackrf's table (largest below the sample rate).
+        const bw = basebandFilterBwForRate(this.sampleRate);
         await this.usbDevice.controlTransferOut({
           requestType: 'vendor',
           recipient: 'device',
@@ -354,12 +385,18 @@ export class MayhemPortaPackDriver {
   }
 
   async startWebUsbBulkReading() {
-    this.log('[HackRF WebUSB] Async IQ receiver stream active on bulk endpoint 1.', 'info');
+    this.log(`[HackRF WebUSB] Async IQ receiver stream active on bulk endpoint 0x${(0x80 | this.rxEndpoint).toString(16)}.`, 'info');
+    let allZeroWarned = false;
     while (this.isConnected && this.connectionType === 'webusb') {
       try {
         if (!this.usbDevice || !this.usbDevice.opened) break;
-        // HackRF bulk IN endpoint is endpoint 1
-        const result = await this.usbDevice.transferIn(1, 16384);
+        const result = await this.usbDevice.transferIn(this.rxEndpoint, 65536);
+        // One-time hint if the radio streams only zeros (wrong mode / no bring-up).
+        if (!allZeroWarned && result?.data?.byteLength) {
+          let nonZero = false;
+          for (let i = 0; i < Math.min(512, result.data.byteLength); i++) { if (result.data.getUint8(i) !== 0) { nonZero = true; break; } }
+          if (!nonZero) { allZeroWarned = true; this.log('[HackRF WebUSB] IQ stream is all zeros — is the PortaPack in HackRF mode? (RX bring-up may not have taken.)', 'warning'); }
+        }
         if (result && result.data && result.data.buffer) {
           // Real FFT spectrum from the IQ, throttled to ~25 fps.
           const now = performance.now();

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { MayhemPortaPackDriver } from '../src/utils/mayhemDriver';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { MayhemPortaPackDriver, basebandFilterBwForRate } from '../src/utils/mayhemDriver';
 import { _resetPortManager } from '../src/utils/portManager';
 
 const enc = new TextEncoder(), dec = new TextDecoder();
@@ -126,5 +126,93 @@ describe('PortaPack Mayhem serial console (simulated device)', () => {
     expect(d.firmwareVersion).toMatch(/Mayhem/);
     await d.sendCommand('freq 915000000');
     expect(d.frequency).toBe(915000000);
+  });
+});
+
+
+describe('HackRF baseband filter selection', () => {
+  it('picks the largest libhackrf filter strictly below the sample rate', () => {
+    expect(basebandFilterBwForRate(2000000)).toBe(1750000);
+    expect(basebandFilterBwForRate(8000000)).toBe(7000000);
+    expect(basebandFilterBwForRate(10000001)).toBe(10000000);
+    expect(basebandFilterBwForRate(500000)).toBe(1750000);   // floor at the narrowest
+    expect(basebandFilterBwForRate(1e9)).toBe(28000000);     // cap at the widest
+  });
+});
+
+// A fake HackRF One over WebUSB: records control transfers, answers the
+// version/board reads, and streams a tone on the bulk IN endpoint.
+function makeFakeHackRf() {
+  const ctrlOut = [], ctrlIn = [];
+  const iq = new Int8Array(2048);
+  for (let k = 0; k < 1024; k++) { iq[2 * k] = Math.round(110 * Math.cos(k / 4)); iq[2 * k + 1] = Math.round(110 * Math.sin(k / 4)); }
+  const dev = {
+    vendorId: 0x1d50, productId: 0x6089, productName: 'HackRF One', opened: false,
+    configuration: null,
+    async open() { this.opened = true; },
+    async selectConfiguration() {
+      this.configuration = { interfaces: [{ claimed: true, alternate: { endpoints: [
+        { direction: 'in', type: 'bulk', endpointNumber: 1 }, { direction: 'out', type: 'bulk', endpointNumber: 2 }
+      ] } }] };
+    },
+    async claimInterface() {},
+    async controlTransferOut(setup, data) { ctrlOut.push({ request: setup.request, value: setup.value, index: setup.index, data: data ? new Uint8Array(data) : null }); return { status: 'ok' }; },
+    async controlTransferIn(setup, len) {
+      ctrlIn.push(setup.request);
+      if (setup.request === 15) return { data: new DataView(new TextEncoder().encode('git-abc 2024').buffer) };
+      if (setup.request === 14) return { data: new DataView(new Uint8Array([2]).buffer) }; // board id 2 = HackRF One
+      return { data: new DataView(new Uint8Array(len).buffer) };
+    },
+    async transferIn() { await Promise.resolve(); return { data: new DataView(iq.buffer.slice(0)) }; },
+    async close() { this.opened = false; }
+  };
+  return { dev, ctrlOut, ctrlIn };
+}
+
+describe('PortaPack Mayhem over WebUSB (simulated HackRF)', () => {
+  it('runs the libhackrf bring-up in order and streams a real FFT spectrum', async () => {
+    const { dev, ctrlOut, ctrlIn } = makeFakeHackRf();
+    vi.stubGlobal('navigator', { usb: { requestDevice: async () => dev, getDevices: async () => [] } });
+    try {
+      const d = new MayhemPortaPackDriver();
+      const firstFrame = new Promise((res) => { d.onSpectrumCallback = (spec, peak) => res({ spec, peak }); });
+      await d.connectWebUsb();
+
+      expect(d.connectionType).toBe('webusb');
+      expect(d.isDemo).toBe(false);
+      expect(d.rxEndpoint).toBe(1);                 // discovered bulk IN 0x81
+      expect(d.firmwareVersion).toBe('git-abc 2024');
+      expect(d.boardId).toBe('HackRF One');
+
+      // Transceiver mode (req 1): OFF (0) must come before RECEIVE (1).
+      const modes = ctrlOut.filter((c) => c.request === 1).map((c) => c.value);
+      expect(modes[0]).toBe(0);
+      expect(modes).toContain(1);
+
+      // Sample rate (req 6) = 2 MSPS; baseband filter (req 7) = 1.75 MHz.
+      const rate = ctrlOut.find((c) => c.request === 6);
+      expect(new DataView(rate.data.buffer).getUint32(0, true)).toBe(2000000);
+      expect(ctrlOut.find((c) => c.request === 7).value).toBe(1750000 & 0xffff);
+
+      // Freq (16), amp (17) and both gains (19 LNA, 20 VGA) were issued.
+      expect(ctrlOut.some((c) => c.request === 16)).toBe(true);
+      expect(ctrlOut.some((c) => c.request === 17)).toBe(true);
+      expect(ctrlOut.some((c) => c.request === 19)).toBe(true);
+      expect(ctrlOut.some((c) => c.request === 20)).toBe(true);
+      expect(ctrlIn).toContain(15); // version read
+      expect(ctrlIn).toContain(14); // board id read
+
+      // A real FFT came off the IQ stream: 256 finite bins that are not all equal.
+      const { spec, peak } = await firstFrame;
+      expect(spec.length).toBe(256);
+      expect(Number.isFinite(peak)).toBe(true);
+      expect(spec.every((v) => Number.isFinite(v))).toBe(true);
+      expect(Math.max(...spec) - Math.min(...spec)).toBeGreaterThan(1);
+
+      await d.disconnect();
+      expect(d.connectionType).toBe('demo');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -43,8 +43,8 @@ export default function PortapackWorkbench() {
     isDemo: true,
     frequency: 433920000,
     amp: 0,
-    lnaGain: 16,
-    vgaGain: 20,
+    lnaGain: 24,
+    vgaGain: 24,
     sampleRate: 2000000,
     activeApp: 'menu',
     selectedMenuIndex: 0,
@@ -100,6 +100,7 @@ export default function PortapackWorkbench() {
   const canvasRef = useRef(null);
   const waterfallCanvasRef = useRef(null);
   const logContainerRef = useRef(null);
+  const spectrumRef = useRef(null); // latest live FFT frame { spec, peakDb, ts }
 
   // Setup state callbacks and initial demo connection
   useEffect(() => {
@@ -107,10 +108,16 @@ export default function PortapackWorkbench() {
     driver.onLogCallback = (log) => {
       setLogs(prev => [...prev.slice(-100), log]);
     };
+    // Live FFT frames from the real HackRF IQ stream (WebUSB). Stored in a ref so
+    // the waterfall rAF loop can read the latest frame without re-subscribing.
+    driver.onSpectrumCallback = (spec, peakDb) => {
+      spectrumRef.current = { spec, peakDb, ts: performance.now() };
+    };
 
     driver.connectDemo();
 
     return () => {
+      driver.onSpectrumCallback = null;
       driver.disconnect();
     };
   }, [driver]);
@@ -122,101 +129,131 @@ export default function PortapackWorkbench() {
     }
   }, [logs]);
 
-  // Real-time Inferno Waterfall Animation for Audio Tab (RocketGod Style)
+  // Real-time spectrum + Inferno waterfall for the Audio tab.
+  // WebUSB: draws the live FFT of the HackRF IQ stream (spectrumRef, ~25 fps).
+  // Demo: a clearly-labelled synthetic trace. Serial: a note that IQ needs WebUSB.
   useEffect(() => {
-    if (activeTab !== 'audio') return;
-    let animId;
+    if (activeTab !== 'audio') return undefined;
     const canvas = waterfallCanvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return undefined;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) return undefined;
 
+    let animId;
     let tick = 0;
-    const width = canvas.width || 600;
-    const height = canvas.height || 300;
+    const width = canvas.width || 1200;
+    const height = canvas.height || 360;
     const spectrumHeight = 110;
     const waterfallHeight = height - spectrumHeight;
+    const isLiveRf = !state.isDemo && state.connectionType === 'webusb';
+    const isDemo = state.isDemo;
+
+    // dBFS display window for the live FFT (HackRF 8-bit IQ sits well under 0 dBFS).
+    const DB_TOP = 0;
+    const DB_BOTTOM = -90;
+    const frac = (db) => Math.min(1, Math.max(0, (db - DB_BOTTOM) / (DB_TOP - DB_BOTTOM)));
+    // Inferno-style colormap, val 0..1.
+    const inferno = (val) => {
+      const r = Math.min(255, Math.floor(val * 280));
+      const g = Math.min(255, Math.floor(Math.pow(val, 2.2) * 260));
+      const b = Math.min(255, Math.floor(Math.sin(val * Math.PI) * 160 + val * 60));
+      return `rgb(${r},${g},${b})`;
+    };
+    const unit = isLiveRf ? 'dBFS' : 'dBm';
 
     const render = () => {
       tick++;
+      const frame = isLiveRf ? spectrumRef.current : null;
+      const spec = frame && frame.spec && frame.spec.length ? frame.spec : null;
+      const live = !!spec;
+      const bins = live ? spec.length : width;
+      // Sample the spectrum at horizontal position x -> value 0..1 (and the peak).
+      let peakFrac = 0;
+      let peakX = width / 2;
+      const valueAt = (x) => {
+        if (live) {
+          const db = spec[Math.min(bins - 1, Math.floor((x / width) * bins))];
+          return frac(db);
+        }
+        if (isDemo) {
+          const dist = Math.abs(x - width / 2);
+          const noise = (Math.sin(x * 0.02 + tick * 0.1) * 0.06) + Math.random() * 0.08;
+          const carrier = dist < 40 ? (1 - dist / 40) * 0.7 : 0;
+          const ampBoost = state.amp > 0 ? 0.08 : 0;
+          const lnaBoost = (state.lnaGain / 40) * 0.1;
+          return Math.min(1, 0.15 + noise + carrier + ampBoost + lnaBoost);
+        }
+        return 0;
+      };
 
-      // 1. Draw Spectrum trace (upper section)
+      // 1. Spectrum panel background + dBFS/dBm grid.
       ctx.fillStyle = '#020617';
       ctx.fillRect(0, 0, width, spectrumHeight);
-
-      // dB Grid lines (-120 dBm to -20 dBm)
       ctx.strokeStyle = '#1e293b';
       ctx.lineWidth = 1;
-      const dbLevels = [-100, -80, -60, -40];
       ctx.fillStyle = '#475569';
-      ctx.font = '8px monospace';
-      dbLevels.forEach(db => {
-        const y = Math.floor(((db - (-20)) / -100) * spectrumHeight);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-        ctx.fillText(`${db} dBm`, 4, y - 2);
+      ctx.font = '9px monospace';
+      [-20, -40, -60, -80].forEach((db) => {
+        const y = Math.floor(spectrumHeight - frac(db) * spectrumHeight);
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+        ctx.fillText(`${db} ${unit}`, 4, y - 2);
       });
 
-      // Squelch Line
-      const squelchY = Math.floor(((squelchDb - (-20)) / -100) * spectrumHeight);
-      ctx.strokeStyle = '#f59e0b';
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(0, squelchY);
-      ctx.lineTo(width, squelchY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = '#f59e0b';
-      ctx.fillText(`SQL: ${squelchDb} dBm`, width - 75, squelchY - 2);
+      // Serial-but-no-IQ note.
+      if (!live && !isDemo) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '12px monospace';
+        ctx.fillText('Live spectrum needs a WebUSB connection (PortaPack in HackRF mode).', 16, spectrumHeight + 30);
+        ctx.fillText('The serial console does not stream IQ.', 16, spectrumHeight + 50);
+        animId = requestAnimationFrame(render);
+        return;
+      }
 
-      // Synthetic RF Spectrum Trace with Carrier Peak
-      ctx.strokeStyle = '#38bdf8';
+      // 2. Spectrum trace.
+      ctx.strokeStyle = live ? '#34d399' : '#38bdf8';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      const centerBin = width / 2;
-      for (let x = 0; x < width; x += 2) {
-        const distFromCenter = Math.abs(x - centerBin);
-        const noise = Math.sin(x * 0.05 + tick * 0.1) * 6 + (Math.random() - 0.5) * 8;
-        const carrier = distFromCenter < 12 ? (12 - distFromCenter) * 5 : 0;
-        const sideband = distFromCenter > 30 && distFromCenter < 50 ? (10 - Math.abs(distFromCenter - 40)) * 2 : 0;
-        const ampBoost = state.amp > 0 ? 8 : 0;
-        const lnaBoost = (state.lnaGain / 40) * 15;
-        const levelY = spectrumHeight - 20 - noise - carrier - sideband - ampBoost - lnaBoost;
-        if (x === 0) ctx.moveTo(x, levelY);
-        else ctx.lineTo(x, levelY);
+      for (let x = 0; x < width; x += 1) {
+        const v = valueAt(x);
+        if (v > peakFrac) { peakFrac = v; peakX = x; }
+        const y = spectrumHeight - 2 - v * (spectrumHeight - 6);
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
       ctx.stroke();
 
-      // Peak Carrier Label (RocketGod feature)
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillRect(centerBin - 1, 10, 2, spectrumHeight - 10);
-      ctx.fillStyle = 'rgba(2, 6, 23, 0.9)';
-      ctx.strokeStyle = '#38bdf8';
-      ctx.strokeRect(centerBin - 35, 12, 70, 16);
-      ctx.fillRect(centerBin - 35, 12, 70, 16);
-      ctx.fillStyle = '#38bdf8';
-      ctx.font = 'bold 8px monospace';
-      ctx.fillText(`${(state.frequency / 1e6).toFixed(3)} MHz`, centerBin - 30, 23);
+      // Squelch reference line (user control; shown on the same axis).
+      const squelchY = Math.floor(spectrumHeight - frac(squelchDb) * spectrumHeight);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(0, squelchY); ctx.lineTo(width, squelchY); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillText(`SQL ${squelchDb} ${unit}`, width - 90, squelchY - 2);
 
-      // 2. Scroll Waterfall Down (lower section)
+      // Peak marker + center-frequency label.
+      ctx.fillStyle = live ? '#34d399' : '#38bdf8';
+      ctx.fillRect(peakX - 1, 8, 2, spectrumHeight - 8);
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.9)';
+      ctx.strokeStyle = live ? '#34d399' : '#38bdf8';
+      const labelX = Math.min(width - 72, Math.max(2, peakX - 36));
+      ctx.fillRect(labelX, 10, 72, 16);
+      ctx.strokeRect(labelX, 10, 72, 16);
+      ctx.fillStyle = live ? '#34d399' : '#38bdf8';
+      ctx.font = 'bold 9px monospace';
+      ctx.fillText(`${(state.frequency / 1e6).toFixed(3)} MHz`, labelX + 4, 21);
+      if (live && frame) {
+        ctx.fillStyle = '#64748b';
+        ctx.fillText(`peak ${frame.peakDb.toFixed(0)} dBFS`, 4, spectrumHeight - 4);
+      } else if (isDemo) {
+        ctx.fillStyle = '#f59e0b';
+        ctx.fillText('DEMO — synthetic signal', 4, spectrumHeight - 4);
+      }
+
+      // 3. Scroll the waterfall down one row and draw the new row on top.
       const imgData = ctx.getImageData(0, spectrumHeight, width, waterfallHeight - 2);
       ctx.putImageData(imgData, 0, spectrumHeight + 2);
-
-      // Generate New Waterfall Row using RocketGod Inferno palette
       for (let x = 0; x < width; x += 2) {
-        const dist = Math.abs(x - centerBin);
-        const noiseVal = Math.random() * 0.15;
-        const carrierVal = dist < 14 ? (14 - dist) / 14 * 0.75 : 0;
-        const ampBoost = state.amp > 0 ? 0.1 : 0;
-        const val = Math.min(1.0, noiseVal + carrierVal + ampBoost);
-
-        // Inferno Colormap
-        const r = Math.min(255, Math.floor(val * 280));
-        const g = Math.min(255, Math.floor(Math.pow(val, 2.2) * 260));
-        const b = Math.min(255, Math.floor(Math.sin(val * Math.PI) * 160 + val * 60));
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillStyle = inferno(valueAt(x));
         ctx.fillRect(x, spectrumHeight, 2, 2);
       }
 
@@ -224,9 +261,8 @@ export default function PortapackWorkbench() {
     };
 
     render();
-
     return () => cancelAnimationFrame(animId);
-  }, [activeTab, state.frequency, state.lnaGain, state.vgaGain, state.amp, squelchDb]);
+  }, [activeTab, state.isDemo, state.connectionType, state.frequency, state.lnaGain, state.amp, squelchDb]);
 
   // Live Canvas Renderer (320x240 PortaPack LCD Display)
   useEffect(() => {
