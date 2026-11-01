@@ -46,9 +46,10 @@ function AppContent() {
     const vp = viewportRef.current;
     const saved = loadState(vp);
     const urlTool = toolFromUrl();
+    // Fresh visit: an empty desktop. A ?tool= link opens that tool; a saved
+    // layout from the last visit comes back as it was.
     let s = saved || createInitialState();
     if (urlTool) s = openWindow(s, urlTool, toolMeta(urlTool), vp);
-    else if (!s.windows.length) s = openWindow(s, 'flasher', toolMeta('flasher'), vp);
     return s;
   });
 
