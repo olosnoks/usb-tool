@@ -8,10 +8,10 @@
   }
   
   body {
-    background-color: #020617;
+    background-color: rgb(var(--tw-slate-950, 2 6 23));
     background-image: 
-      radial-gradient(rgba(30, 41, 59, 0.4) 1px, transparent 0),
-      radial-gradient(rgba(251, 191, 36, 0.03) 1px, transparent 0);
+      radial-gradient(rgb(var(--tw-slate-800, 30 41 59) / 0.4) 1px, transparent 0),
+      radial-gradient(rgb(var(--tw-amber-400, 251 191 36) / 0.03) 1px, transparent 0);
     background-size: 24px 24px, 96px 96px;
     background-position: 0 0, 12px 12px;
   }
@@ -24,16 +24,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #070c18;
+  background: rgb(var(--app-dark, 7 12 24));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: rgb(var(--tw-slate-800, 30 41 59));
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: rgb(var(--tw-slate-700, 51 65 85));
 }
 
 /* CRT / Cyber Scanline overlay (subtle) */

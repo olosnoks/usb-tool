@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { identifyUsbChip } from '../utils/usbDatabase';
 import PinoutModal from './PinoutModal';
+import { APP_THEMES, applyAppTheme, loadAppThemeId, saveAppThemeId, themeSwatch } from '../utils/appThemes';
 
 export default function HeaderHud({
   isConnected,
@@ -48,6 +49,7 @@ export default function HeaderHud({
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [showChipModal, setShowChipModal] = useState(false);
   const [showPinoutModal, setShowPinoutModal] = useState(false);
+  const [appTheme, setAppTheme] = useState(() => loadAppThemeId());
   const [isAssertingBreak, setIsAssertingBreak] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
 
@@ -93,7 +95,7 @@ export default function HeaderHud({
   };
 
   return (
-    <header className="border-b border-cyber-border bg-[#070c18]/90 backdrop-blur-md sticky top-0 z-40 px-3 sm:px-4 py-2.5 shadow-lg">
+    <header className="border-b border-cyber-border bg-cyber-dark/90 backdrop-blur-md sticky top-0 z-40 px-3 sm:px-4 py-2.5 shadow-lg">
       <div className="w-full flex flex-wrap items-center justify-between gap-3">
         {/* Brand & System Title */}
         <div className="flex items-center gap-2.5 sm:gap-3">
@@ -263,6 +265,22 @@ export default function HeaderHud({
             <BookOpen className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">PINOUTS</span>
           </button>
+
+          {/* App colour theme (VS Code palettes) */}
+          <div className="flex items-center gap-1 bg-cyber-card rounded-lg border border-slate-800 pl-2 pr-0.5" title="App colour theme">
+            <span className="flex rounded-sm overflow-hidden border border-slate-700 w-6 h-3.5">
+              {themeSwatch(appTheme).map((c, i) => <span key={i} className="flex-1" style={{ background: c }} />)}
+            </span>
+            <select
+              value={appTheme}
+              onChange={(e) => { setAppTheme(e.target.value); applyAppTheme(e.target.value); saveAppThemeId(e.target.value); }}
+              className="bg-transparent text-xs font-mono text-slate-300 px-1.5 py-1.5 outline-none cursor-pointer max-w-[7.5rem] sm:max-w-[10rem]"
+            >
+              {APP_THEMES.map((t) => (
+                <option key={t.id} value={t.id} className="bg-slate-900 text-slate-200">{t.name}</option>
+              ))}
+            </select>
+          </div>
 
           {/* PWA Install Button if available */}
           {deferredPrompt && (

@@ -24,7 +24,7 @@ Beyond serial it covers 802.11 monitor-mode capture for Alfa / RTL8812AU and Pan
 
 **Device Utilities** — MicroPython Files · Improv Wi-Fi · Telemetry Gauges · Crash & Panic Alerts · Test Runner & Scripts · USB Recon & Autopsy · Silicon Memory Dump
 
-**Setup & Reference** — In-app Knowledge Base Wiki · driver setup guides · pinout diagrams · VID/PID chip-intelligence database
+**Setup & Reference** — In-app Knowledge Base Wiki · driver setup guides · pinout diagrams · VID/PID chip-intelligence database · app-wide colour themes (Dracula, One Dark Pro, GitHub Dark, Monokai Pro, Night Owl, Tokyo Night, Nord, Solarized, Palenight, Ayu, SynthWave '84, Catppuccin) from the header
 
 ### Hardware support status
 

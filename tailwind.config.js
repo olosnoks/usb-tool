@@ -1,26 +1,44 @@
+import colors from 'tailwindcss/colors';
+
+// App-wide themes (src/utils/appThemes.js) swap the palette by setting CSS
+// variables on <html>; every shade of these hues reads its variable with
+// Tailwind's own colour as the fallback, so with no theme nothing changes.
+const THEMED_HUES = ['slate', 'purple', 'cyan', 'amber', 'emerald', 'rose', 'blue', 'pink', 'indigo', 'yellow', 'sky', 'teal', 'orange', 'violet'];
+const SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+const rgbOf = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
+};
+const themedScale = (hue) => Object.fromEntries(
+  SHADES.map((s) => [s, `rgb(var(--tw-${hue}-${s}, ${rgbOf(colors[hue][s])}) / <alpha-value>)`])
+);
+const themedColors = Object.fromEntries(THEMED_HUES.map((h) => [h, themedScale(h)]));
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
     "./index.html",
+    "./wiki/index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
       colors: {
+        ...themedColors,
         cyber: {
-          darkest: '#020617', // slate-950
-          dark: '#070c18',
-          card: '#0c1322',
-          border: '#1e293b',
-          muted: '#64748b',
-          amber: '#fbbf24', // Amber-400 primary accent
+          darkest: 'rgb(var(--tw-slate-950, 2 6 23) / <alpha-value>)',   // slate-950
+          dark: 'rgb(var(--app-dark, 7 12 24) / <alpha-value>)',
+          card: 'rgb(var(--app-card, 12 19 34) / <alpha-value>)',
+          border: 'rgb(var(--tw-slate-800, 30 41 59) / <alpha-value>)',
+          muted: 'rgb(var(--tw-slate-500, 100 116 139) / <alpha-value>)',
+          amber: 'rgb(var(--tw-amber-400, 251 191 36) / <alpha-value>)',     // Amber-400 primary accent
           amberGlow: 'rgba(251, 191, 36, 0.15)',
-          cyan: '#22d3ee',  // Cyan-400 data telemetry
+          cyan: 'rgb(var(--tw-cyan-400, 34 211 238) / <alpha-value>)',       // Cyan-400 data telemetry
           cyanGlow: 'rgba(34, 211, 238, 0.15)',
-          emerald: '#34d399', // Emerald-400 signal LEDs
+          emerald: 'rgb(var(--tw-emerald-400, 52 211 153) / <alpha-value>)', // Emerald-400 signal LEDs
           emeraldGlow: 'rgba(52, 211, 153, 0.2)',
-          rose: '#f43f5e',    // Rose-500 alarms & interrupts
-          violet: '#a78bfa',  // Violet-400 debug
+          rose: 'rgb(var(--tw-rose-500, 244 63 94) / <alpha-value>)',        // Rose-500 alarms & interrupts
+          violet: 'rgb(var(--tw-violet-400, 167 139 250) / <alpha-value>)',  // Violet-400 debug
         }
       },
       fontFamily: {

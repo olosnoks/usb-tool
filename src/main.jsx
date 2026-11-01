@@ -3,8 +3,10 @@ import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
 import { installDeviceCapture, record } from './utils/sessionLog';
+import { applyAppTheme, loadAppThemeId } from './utils/appThemes';
 
 installDeviceCapture();
+applyAppTheme(loadAppThemeId());   // app-wide colour theme, chosen in the header
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
