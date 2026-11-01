@@ -7,7 +7,11 @@ describe('waterfall themes', () => {
       const lut = buildLut(t.id);
       expect(lut.length).toBe(768);
       const lum = (i) => lut[i * 3] * 0.3 + lut[i * 3 + 1] * 0.59 + lut[i * 3 + 2] * 0.11;
-      expect(lum(255)).toBeGreaterThan(lum(0) + 100);
+      // Starts dark and reaches a bright region somewhere (rainbow maps end in deep red).
+      let maxLum = 0;
+      for (let i = 0; i < 256; i++) maxLum = Math.max(maxLum, lum(i));
+      expect(lum(0)).toBeLessThan(60);
+      expect(maxLum).toBeGreaterThan(lum(0) + 100);
       // Ends match the first and last stops exactly.
       expect([lut[0], lut[1], lut[2]]).toEqual(t.stops[0].slice(1));
       expect([lut[765], lut[766], lut[767]]).toEqual(t.stops[t.stops.length - 1].slice(1));
