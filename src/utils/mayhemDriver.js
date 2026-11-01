@@ -547,6 +547,39 @@ export class MayhemPortaPackDriver {
     }
   }
 
+  /**
+   * Wideband sweep: retune the HackRF across [startHz, endHz] one ~2 MHz window
+   * at a time and hand each settled FFT segment to onSegment. Returns when the
+   * band is covered or stopSweep() is called; the dial is restored afterwards.
+   */
+  async sweepBand({ startHz, endHz, onSegment, dwellMs = 70, settleMs = 300 } = {}) {
+    if (this.connectionType !== 'webusb') throw new Error('Sweep needs a WebUSB HackRF connection (PortaPack in HackRF mode).');
+    if (!(endHz > startHz)) throw new Error('Sweep end must be above the start.');
+    this._sweeping = true;
+    const span = this.sampleRate;
+    const useSpan = span * 0.75;            // trim the band edges (filter roll-off)
+    const savedFreq = this.frequency;
+    const savedDemod = this.demod;
+    this.demod = null;                      // no audio churn mid-sweep
+    try {
+      for (let center = startHz + useSpan / 2; center <= endHz && this._sweeping; center += useSpan) {
+        await this.setWebUsbFreq(Math.round(center));
+        this.latestSpectrum = null;
+        const t0 = performance.now();
+        while (this._sweeping && !this.latestSpectrum && performance.now() - t0 < settleMs) await sleep(10);
+        await sleep(dwellMs);
+        const spec = this.latestSpectrum;
+        if (spec && onSegment) onSegment({ centerHz: center, spanHz: span, spec: Float32Array.from(spec) });
+      }
+    } finally {
+      this._sweeping = false;
+      this.demod = savedDemod;
+      try { await this.setWebUsbFreq(savedFreq); } catch (_) {}
+    }
+  }
+
+  stopSweep() { this._sweeping = false; }
+
   async startReading() {
     if (!this.port || !this.port.readable) return;
     const textDecoder = new TextDecoderStream();

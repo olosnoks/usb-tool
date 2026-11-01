@@ -40,6 +40,63 @@ export default function LookingGlassDeck({ driver, centerFreq, sampleRate, onTun
   // Drop the demo's sample peaks once real hardware is connected.
   useEffect(() => { if (!isDemo) setPeaks([]); }, [isDemo]);
 
+  // Stitched wideband result across the whole preset band (peak-hold per cell).
+  const sweepModelRef = useRef(null);
+  const thresholdRef = useRef(thresholdDb);
+  useEffect(() => { thresholdRef.current = thresholdDb; }, [thresholdDb]);
+  const SWEEP_CELLS = 720;
+  useEffect(() => { sweepModelRef.current = null; }, [selectedPreset]);
+
+  // Real band sweep on hardware: retune the HackRF across the preset and
+  // peak-hold each FFT segment into the band model, refreshing the peak list.
+  useEffect(() => {
+    if (isDemo || !isSweeping || !driver || driver.connectionType !== 'webusb') return undefined;
+    let active = true;
+    const { startHz, endHz } = selectedPreset;
+    const model = { startHz, endHz, cells: new Float32Array(SWEEP_CELLS).fill(-200) };
+    sweepModelRef.current = model;
+
+    const buildPeaks = () => {
+      const cells = model.cells;
+      const found = [];
+      for (let i = 2; i < cells.length - 2; i++) {
+        if (cells[i] > thresholdRef.current && cells[i] >= cells[i - 1] && cells[i] > cells[i + 1] && cells[i] > cells[i - 2] && cells[i] > cells[i + 2]) {
+          const freqHz = Math.round(startHz + (i / SWEEP_CELLS) * (endHz - startHz));
+          found.push({ id: freqHz, freqHz, powerDb: Math.round(cells[i]), bwKhz: Math.max(1, Math.round((endHz - startHz) / SWEEP_CELLS / 1000)), type: 'Swept Peak', count: 1 });
+        }
+      }
+      found.sort((a, b) => b.powerDb - a.powerDb);
+      setPeaks(found.slice(0, 16));
+    };
+
+    const run = async () => {
+      while (active && isSweeping) {
+        try {
+          await driver.sweepBand({
+            startHz, endHz, dwellMs: 45,
+            onSegment: ({ centerHz, spanHz, spec }) => {
+              const N = spec.length;
+              const lo = centerHz - spanHz / 2;
+              for (let i = 0; i < N; i++) {
+                const f = lo + (i / (N - 1)) * spanHz;
+                if (f < startHz || f > endHz) continue;
+                const c = Math.min(SWEEP_CELLS - 1, Math.max(0, Math.floor(((f - startHz) / (endHz - startHz)) * SWEEP_CELLS)));
+                if (spec[i] > model.cells[c]) model.cells[c] = spec[i]; // peak-hold
+              }
+            }
+          });
+        } catch (e) {
+          break;
+        }
+        if (!active) break;
+        buildPeaks();
+        for (let i = 0; i < model.cells.length; i++) model.cells[i] = Math.max(-200, model.cells[i] - 3); // let stale signals fade
+      }
+    };
+    run();
+    return () => { active = false; driver.stopSweep(); sweepModelRef.current = null; };
+  }, [isSweeping, isDemo, selectedPreset, driver]);
+
   // Spectrum canvas: the REAL HackRF IQ FFT when it is streaming. The synthetic
   // sweep is drawn only in demo mode; on hardware with no data yet it waits.
   useEffect(() => {
@@ -60,11 +117,44 @@ export default function LookingGlassDeck({ driver, centerFreq, sampleRate, onTun
       const w = cvs.width;
       const h = cvs.height;
 
+      const model = (!isDemo && sweepModelRef.current) || null;
       const spec = driver && driver.latestSpectrum;
-      const live = !!(spec && spec.length);
+      const live = !model && !!(spec && spec.length);
 
       ctx.fillStyle = '#060813';
       ctx.fillRect(0, 0, w, h);
+
+      // Wideband stitched sweep across the whole band (real hardware).
+      if (model) {
+        ctx.strokeStyle = '#1e293b';
+        ctx.font = '9px monospace';
+        for (let y = 30; y < h; y += 30) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+          ctx.fillStyle = '#475569'; ctx.fillText(`${-Math.round((y / h) * 90)} dBFS`, 6, y - 2);
+        }
+        const threshY = dbfsToY(thresholdDb, h);
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)'; ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(0, threshY); ctx.lineTo(w, threshY); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = '#ef4444'; ctx.fillText(`TRIGGER ${thresholdDb} dB`, w - 110, threshY - 4);
+        ctx.beginPath();
+        const cells = model.cells;
+        for (let i = 0; i < cells.length; i++) {
+          const x = (i / (cells.length - 1)) * w;
+          const y = cells[i] <= -199 ? h : dbfsToY(cells[i], h);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, 'rgba(168, 85, 247, 0.4)');
+        grad.addColorStop(0.5, 'rgba(6, 182, 212, 0.2)');
+        grad.addColorStop(1, 'rgba(15, 23, 42, 0)');
+        ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fillStyle = grad; ctx.fill();
+        ctx.strokeStyle = '#22d3ee'; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = '#64748b'; ctx.font = '9px monospace';
+        ctx.fillText(`${(model.startHz / 1e6).toFixed(0)} MHz`, 4, h - 4);
+        ctx.fillText(`${(model.endHz / 1e6).toFixed(0)} MHz`, w - 56, h - 4);
+        if (isSweeping) animId = requestAnimationFrame(render);
+        return;
+      }
 
       // Grid lines + dB labels
       ctx.strokeStyle = '#1e293b';

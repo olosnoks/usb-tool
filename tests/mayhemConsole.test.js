@@ -163,7 +163,7 @@ function makeFakeHackRf() {
       if (setup.request === 14) return { data: new DataView(new Uint8Array([2]).buffer) }; // board id 2 = HackRF One
       return { data: new DataView(new Uint8Array(len).buffer) };
     },
-    async transferIn() { await Promise.resolve(); return { data: new DataView(iq.buffer.slice(0)) }; },
+    async transferIn() { await new Promise((r) => setTimeout(r, 1)); return { data: new DataView(iq.buffer.slice(0)) }; },
     async close() { this.opened = false; }
   };
   return { dev, ctrlOut, ctrlIn };
@@ -237,6 +237,46 @@ describe('PortaPack Mayhem WebUSB streaming concurrency', () => {
       expect(maxInFlight).toBeGreaterThan(1);       // not a single serial reader
       await d.disconnect();
       expect(inFlight).toBe(0);                     // every transfer unwound
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('PortaPack Mayhem wideband sweep (simulated HackRF)', () => {
+  it('retunes across the band, emits a segment per step, and restores the dial', async () => {
+    const { dev, ctrlOut } = makeFakeHackRf();
+    vi.stubGlobal('navigator', { usb: { requestDevice: async () => dev, getDevices: async () => [] } });
+    try {
+      const d = new MayhemPortaPackDriver();
+      await d.connectWebUsb();
+      const startFreq = d.frequency;
+      const segments = [];
+      await d.sweepBand({ startHz: 100e6, endHz: 106e6, dwellMs: 2, settleMs: 100, onSegment: (s) => segments.push(s) });
+      // span 2 MHz, useSpan 1.5 MHz -> centers at 100.75/102.25/103.75/105.25 MHz
+      expect(segments.length).toBe(4);
+      expect(segments.every((s) => s.spec.length === 256 && s.spanHz === 2000000)).toBe(true);
+      expect(Math.round(segments[0].centerHz)).toBe(100750000);
+      // Each step issued a SET_FREQ (req 16); the dial returned to the start.
+      expect(ctrlOut.filter((c) => c.request === 16).length).toBeGreaterThanOrEqual(5);
+      expect(d.frequency).toBe(startFreq);
+      await d.disconnect();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('stopSweep ends the sweep early', async () => {
+    const { dev } = makeFakeHackRf();
+    vi.stubGlobal('navigator', { usb: { requestDevice: async () => dev, getDevices: async () => [] } });
+    try {
+      const d = new MayhemPortaPackDriver();
+      await d.connectWebUsb();
+      let count = 0;
+      const p = d.sweepBand({ startHz: 100e6, endHz: 200e6, dwellMs: 2, settleMs: 100, onSegment: () => { count++; if (count === 2) d.stopSweep(); } });
+      await p;
+      expect(count).toBe(2);
+      await d.disconnect();
     } finally {
       vi.unstubAllGlobals();
     }
