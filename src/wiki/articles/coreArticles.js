@@ -6,6 +6,133 @@
 
 export const CORE_ARTICLES = [
   {
+    id: 'workspace',
+    toolId: null,
+    category: 'core',
+    title: 'Using the Workspace — Windows, Tiling & Shortcuts',
+    summary: 'How the app itself works: the sidebar, the windowed desktop (drag, resize, minimize, maximize, tiling and snap), running more than one tool at once, per-window zoom, themes, the command palette, the terminal drawer, and every keyboard shortcut.',
+    tags: ['Workspace', 'Windows', 'Tiling', 'Snap', 'Zoom', 'Shortcuts', 'Sidebar', 'Command Palette', 'Getting Started'],
+    readTime: '9 min read',
+    content: `
+# Using the Workspace
+
+Skon's USB Tool is a **windowed workspace**, like a tiny desktop inside your browser tab. Every tool opens in its own window, and several tools can run at once — each one talking to its own device. This guide explains the interface itself; the other articles cover the individual tools.
+
+> **Browser:** the hardware tools use the WebUSB, WebSerial, WebHID and Web Bluetooth APIs, which only exist in Chromium-based desktop browsers — **Google Chrome, Microsoft Edge, Brave or Opera**. Firefox and Safari can read the docs but cannot open devices.
+
+---
+
+### 1. The sidebar — opening tools
+
+The left sidebar lists every tool, grouped by category. Click a tool to open it in a window on the desktop.
+
+- **A tool you already opened** shows a small coloured dot. Clicking it again does not open a second copy — it brings the existing window to the front.
+- **Filter** the list with the search box at the top of the sidebar.
+- **Collapse** the sidebar with the chevron to give the desktop more room; your choice is remembered.
+- Entries marked **DEMO** are interface previews without hardware support yet.
+
+---
+
+### 2. Windows
+
+Each tool lives in a window you can move, size and stack like any desktop app.
+
+- **Move:** drag the title bar.
+- **Resize:** drag any edge or corner.
+- **Minimize / maximize / close:** the buttons at the right of the title bar. Minimize parks the window on the taskbar; the tool keeps running and its device stays connected. Double-clicking the title bar also toggles maximize.
+- **Focus:** click anywhere on a window to bring it to the front. The focused window has a coloured border.
+- **Taskbar:** the strip along the bottom lists every open window. Click an entry to focus or restore it. On the right are **Tile** (arrange all windows in a grid), **Cascade** (stack them diagonally) and **Close all**.
+
+Your whole layout — window positions, sizes, zoom and which tools are open — is saved and restored the next time you visit.
+
+---
+
+### 3. Tiling & snapping
+
+To put two tools side by side, **drag a window to an edge or corner of the desktop** and drop it. A cyan preview shows where it will land:
+
+| Drop zone | Result |
+| :--- | :--- |
+| Left edge | Fills the left half |
+| Right edge | Fills the right half |
+| Top edge | Maximizes |
+| Any corner | Fills that quarter |
+
+You can also tile the focused window from the keyboard:
+
+| Shortcut | Action |
+| :--- | :--- |
+| \`Ctrl\` + \`Alt\` + \`←\` | Left half |
+| \`Ctrl\` + \`Alt\` + \`→\` | Right half |
+| \`Ctrl\` + \`Alt\` + \`↑\` | Maximize |
+| \`Ctrl\` + \`Alt\` + \`↓\` | Restore |
+
+The taskbar's **Tile** button does the same for every open window at once.
+
+---
+
+### 4. Running more than one of the same tool
+
+Sometimes you want two of the same tool — for example two PortaPack receivers, each on a different HackRF. There are two ways to open another instance:
+
+- Click the **duplicate** button in a window's title bar (the copy-plus icon, left of minimize).
+- **Alt-click** (or Ctrl-click) the tool in the sidebar.
+
+Each instance is fully separate, with its own device connection, and is numbered in its title and on the taskbar — "PortaPack Mayhem SDR (2)". A plain sidebar click still just focuses the first instance, so you never open extra windows by accident.
+
+> A few tools keep some state shared across instances (for example the Mayhem tool's ADS-B aircraft list). Tuning, audio, capture and the like are always per window.
+
+---
+
+### 5. Zooming a tool
+
+Each window has its own **content zoom**, separate from the browser's page zoom, so you can make one tool's text larger without affecting anything else.
+
+- Use the **−** and **+** buttons in the title bar, or hold \`Ctrl\` and scroll the mouse wheel over the window.
+- The percentage button toggles **FIT**, which scales the tool so its full layout fits the window width — handy after snapping a tool into a narrow half or quarter.
+
+Because tools respond to their **window** size (not the screen), a tool in a quarter-screen tile automatically switches to its compact layout.
+
+---
+
+### 6. Themes
+
+The header has a colour-theme dropdown (with a swatch preview) that restyles the whole app. It offers the popular editor palettes — Dracula, One Dark Pro, GitHub Dark, Monokai Pro, Night Owl, Tokyo Night, Nord, Solarized, Palenight, Ayu, SynthWave '84 and Catppuccin — plus the default. Your pick is remembered. The Mayhem receiver additionally has its own waterfall colour themes.
+
+---
+
+### 7. The command palette & the terminal drawer
+
+- **Command palette** — press \`Ctrl\` + \`K\` (or \`⌘\` + \`K\`) to open a searchable list of every tool and common action: connect, disconnect, clear logs, set baud, export the session, open the pinouts or chip-intelligence references, and jump to any tool.
+- **Terminal drawer** — press \`Ctrl\` + backtick (the \`~\` key) or \`Ctrl\` + \`J\` to slide a live serial console up from the bottom, over whatever tool you are using, so you can watch raw output without leaving the current window.
+- **Workspace presets** — \`Alt\` + \`1\` … \`Alt\` + \`6\` jump to the preset layouts shown in the header.
+
+---
+
+### 8. Keyboard shortcuts at a glance
+
+| Shortcut | Action |
+| :--- | :--- |
+| \`Ctrl\` + \`K\` | Command palette |
+| \`Ctrl\` + backtick or \`Ctrl\` + \`J\` | Toggle the terminal drawer |
+| \`Alt\` + \`1\`…\`6\` | Workspace presets |
+| \`Ctrl\` + \`Alt\` + \`←\` / \`→\` | Tile the focused window to the left / right half |
+| \`Ctrl\` + \`Alt\` + \`↑\` / \`↓\` | Maximize / restore the focused window |
+| \`Ctrl\` + mouse wheel (over a window) | Zoom that tool |
+| Double-click a title bar | Maximize / restore |
+| Alt-click a sidebar tool | Open another instance |
+
+---
+
+### 9. First-time device tips
+
+- When you click **Connect** in a tool, the browser shows a device chooser. Nothing happens until you pick a device there and confirm — the page cannot see your hardware otherwise.
+- On **Windows**, some devices (the HackRF, many WebUSB gadgets) need the generic **WinUSB** driver bound with **Zadig** before the chooser can open them. Each tool's own guide says when this is needed.
+- Only one browser tab (or desktop app) can hold a given device at a time. If a connect fails with the port "in use", close other tabs or apps that might have it open.
+- A tool keeps its device while its window is minimized, so you can tuck a long capture out of the way and keep working.
+`
+  },
+  {
     id: 'terminal',
     toolId: 'terminal',
     category: 'core',
