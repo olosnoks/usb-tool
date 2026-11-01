@@ -26,6 +26,8 @@ Beyond serial it covers 802.11 monitor-mode capture for Alfa / RTL8812AU and Pan
 
 **Setup & Reference** — In-app Knowledge Base Wiki · driver setup guides · pinout diagrams · VID/PID chip-intelligence database · app-wide colour themes (Dracula, One Dark Pro, GitHub Dark, Monokai Pro, Night Owl, Tokyo Night, Nord, Solarized, Palenight, Ayu, SynthWave '84, Catppuccin) from the header
 
+**Windowed workspace** — every tool opens in its own draggable, resizable window (minimize, maximize, tile, cascade); open several at once to work with multiple devices side by side. The layout is remembered between visits.
+
 ### Hardware support status
 
 | Status | Tools |

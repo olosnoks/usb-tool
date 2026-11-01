@@ -35,6 +35,8 @@ import {
   ScrollText
 } from 'lucide-react';
 
+import { windowKeyFor } from '../../utils/windowManager';
+
 export const SIDEBAR_SECTIONS = [
   {
     id: 'core',
@@ -117,6 +119,7 @@ export const SIDEBAR_SECTIONS = [
 
 export default function Sidebar({
   activeTool,
+  openTools = [],          // window ids currently open on the desktop
   onSelectTool,
   isCollapsed,
   onToggleCollapse,
@@ -229,18 +232,22 @@ export default function Sidebar({
                     (item.id === 'ducky' && ['ducky', 'cyberchef'].includes(activeTool)) ||
                     (item.id === 'wardrive' && ['wardrive', 'ubx'].includes(activeTool)) ||
                     (item.id === 'programmers' && ['programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp'].includes(activeTool));
+                  const isOpen = !item.isModal && !item.href && openTools.includes(windowKeyFor(item.id));
 
                   return (
                     <button
                       key={item.id}
                       onClick={() => handleItemClick(item)}
-                      title={`${item.name}: ${item.desc}`}
+                      title={`${item.name}: ${item.desc}${isOpen ? ' (open — click to bring its window to the front)' : ''}`}
                       className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs border transition-all text-left ${getAccentStyles(
                         item,
                         isActive
                       )} ${isCollapsed ? 'justify-center px-1' : ''}`}
                     >
-                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'scale-110' : 'opacity-70'}`} />
+                      <span className="relative shrink-0">
+                        <Icon className={`w-4 h-4 ${isActive ? 'scale-110' : 'opacity-70'}`} />
+                        {isOpen && <span data-open-dot className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white' : 'bg-emerald-400'}`} />}
+                      </span>
                       {!isCollapsed && (
                         <div className="truncate flex-1 flex items-center gap-1.5">
                           <div className="truncate">{item.name}</div>

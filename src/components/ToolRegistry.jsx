@@ -1,0 +1,138 @@
+// Maps a tool id to the component that renders it, plus its title / icon /
+// accent for window chrome. App.jsx used to hold this as one long switch; the
+// window manager renders several tools at once, so it lives here.
+import React from 'react';
+import { SIDEBAR_SECTIONS } from './layout/Sidebar';
+import { windowKeyFor } from '../utils/windowManager';
+
+// Primary Tabs
+import TerminalTab from './tabs/TerminalTab';
+import FlasherTab from './tabs/FlasherTab';
+import HardwareControlsTab from './tabs/HardwareControlsTab';
+import HelpTroubleshootingTab from './tabs/HelpTroubleshootingTab';
+
+// Specialized Modules
+import SerialPlotter from './SerialPlotter';
+import SerialBridgeDeck from './SerialBridgeDeck';
+import MicroPythonFileManager from './MicroPythonFileManager';
+import ImprovWifiDeck from './ImprovWifiDeck';
+import TelemetryDashboard from './TelemetryDashboard';
+
+// Lazy-loaded workbenches keep the initial load light.
+const CanBusWorkbench = React.lazy(() => import('./tools/CanBusWorkbench'));
+const LogicAnalyzerWorkbench = React.lazy(() => import('./tools/LogicAnalyzerWorkbench'));
+const UsbPdWorkbench = React.lazy(() => import('./tools/UsbPdWorkbench'));
+const BusExplorerWorkbench = React.lazy(() => import('./tools/BusExplorerWorkbench'));
+const ModbusWorkbench = React.lazy(() => import('./tools/ModbusWorkbench'));
+const PortapackWorkbench = React.lazy(() => import('./tools/PortapackWorkbench'));
+const FlipperWorkbench = React.lazy(() => import('./tools/flipper/FlipperWorkbench'));
+const ProxmarkWorkbench = React.lazy(() => import('./tools/proxmark/ProxmarkWorkbench'));
+const CrashAlertDeck = React.lazy(() => import('./CrashAlertDeck'));
+const ScriptRunner = React.lazy(() => import('./ScriptRunner'));
+const UsbReconDeck = React.lazy(() => import('./UsbReconDeck'));
+const EspMemoryInspector = React.lazy(() => import('./EspMemoryInspector'));
+const AlfaWifiWorkbench = React.lazy(() => import('./workbenches/AlfaWifiWorkbench'));
+const WarhogPigletWorkbench = React.lazy(() => import('./workbenches/WarhogPigletWorkbench'));
+const BadUsbPayloadSuite = React.lazy(() => import('./tools/BadUsbPayloadSuite'));
+const ProtocolPacketLab = React.lazy(() => import('./tools/ProtocolPacketLab'));
+const GpsNavigationSuite = React.lazy(() => import('./tools/GpsNavigationSuite'));
+const HardwareProgrammersSuite = React.lazy(() => import('./tools/HardwareProgrammersSuite'));
+const DfuFlasher = React.lazy(() => import('./tools/DfuFlasher'));
+const FastbootWorkbench = React.lazy(() => import('./tools/FastbootWorkbench'));
+const UsbDescriptorExplorer = React.lazy(() => import('./tools/UsbDescriptorExplorer'));
+const AdbWorkbench = React.lazy(() => import('./tools/AdbWorkbench'));
+const HidInspectorWorkbench = React.lazy(() => import('./tools/HidInspectorWorkbench'));
+const UsbTmcWorkbench = React.lazy(() => import('./tools/UsbTmcWorkbench'));
+const MassStorageWorkbench = React.lazy(() => import('./tools/MassStorageWorkbench'));
+const PtpWorkbench = React.lazy(() => import('./tools/PtpWorkbench'));
+const Fido2Workbench = React.lazy(() => import('./tools/Fido2Workbench'));
+const SessionLogPanel = React.lazy(() => import('./tools/SessionLogPanel'));
+const BleExplorer = React.lazy(() => import('./tools/BleExplorer'));
+
+const ALL_ITEMS = SIDEBAR_SECTIONS.flatMap((s) => s.items || []);
+
+/** Title, icon and accent for a tool id (aliases resolve to their group's entry). */
+export function toolMeta(toolId) {
+  const item = ALL_ITEMS.find((i) => i.id === toolId) || ALL_ITEMS.find((i) => i.id === windowKeyFor(toolId));
+  return { title: item?.name || toolId, icon: item?.icon || null, accent: item?.accent || 'cyan', id: toolId };
+}
+
+/** Every id renderTool knows, including workbench-tab aliases. */
+export const KNOWN_TOOL_IDS = [
+  'flasher', 'terminal', 'hardware', 'setup', 'plotter', 'packet-analyzer', 'hex', 'packets', 'kismet', 'bridge',
+  'micropython', 'improv', 'telemetry', 'wardrive', 'ubx', 'alerts', 'automation', 'autopsy', 'esp-dump',
+  'programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp', 'can-bus', 'logic-analyzer', 'usb-pd', 'dfu',
+  'fastboot', 'adb', 'usb-descriptors', 'hid', 'usbtmc', 'mass-storage', 'ptp', 'fido2', 'session-log', 'ble',
+  'bus-explorer', 'modbus-rtu', 'alfa-wifi', 'wifi-scanner', 'warhog-piglet', 'mayhem', 'flipper', 'proxmark', 'rfid-nfc',
+  'ducky', 'cyberchef'
+];
+
+/**
+ * Render a tool. `serial` is the SerialContext value (shared serial port
+ * state for the tools that use the app-wide port).
+ */
+export function renderTool(toolId, serial) {
+  const {
+    isConnected, port, latestRxText, hexByteStream, clearHexStream, sendString, sendRawBytes, toggleSignal,
+    setBaudRate, baudRate, addLog, boards, activeBoardId, setActiveBoardId, setConsolePaused
+  } = serial;
+
+  switch (toolId) {
+    case 'flasher': return <FlasherTab />;
+    case 'terminal': return <TerminalTab />;
+    case 'hardware': return <HardwareControlsTab />;
+    case 'setup': return <HelpTroubleshootingTab />;
+    case 'plotter': return <SerialPlotter latestTextStream={latestRxText} isConnected={isConnected} />;
+    case 'packet-analyzer': case 'hex': case 'packets': case 'kismet':
+      return (
+        <ProtocolPacketLab
+          initialTab={toolId === 'hex' ? 'hex' : toolId === 'packets' ? 'packets' : toolId === 'kismet' ? 'kismet' : 'analyzer'}
+          hexByteStream={hexByteStream} onClearHex={clearHexStream} isConnected={isConnected}
+        />
+      );
+    case 'bridge': return <SerialBridgeDeck boards={boards} onSendRawBytes={sendRawBytes} onLogMessage={addLog} />;
+    case 'micropython':
+      return <MicroPythonFileManager isConnected={isConnected} onSendString={sendString} latestRxText={latestRxText} onLogMessage={addLog} boards={boards} activeBoardId={activeBoardId} onSelectBoard={setActiveBoardId} />;
+    case 'improv':
+      return <ImprovWifiDeck isConnected={isConnected} onSendRawBytes={sendRawBytes} onSendString={sendString} latestRxText={latestRxText} onLogMessage={addLog} boards={boards} activeBoardId={activeBoardId} onSelectBoard={setActiveBoardId} />;
+    case 'telemetry':
+      return <TelemetryDashboard latestTextStream={latestRxText} isConnected={isConnected} boards={boards} activeBoardId={activeBoardId} onSelectBoard={setActiveBoardId} />;
+    case 'wardrive': case 'ubx':
+      return <GpsNavigationSuite initialTab={toolId === 'ubx' ? 'ubx' : 'wardrive'} latestTextStream={latestRxText} isConnected={isConnected} onLogMessage={addLog} onSendRawBytes={sendRawBytes} />;
+    case 'alerts': return <CrashAlertDeck latestTextStream={latestRxText} onPauseTerminal={setConsolePaused} onLogMessage={addLog} />;
+    case 'automation': return <ScriptRunner isConnected={isConnected} onSendString={sendString} latestRxText={latestRxText} onLogMessage={addLog} />;
+    case 'autopsy':
+      return <UsbReconDeck isConnected={isConnected} onSendRawBytes={sendRawBytes} onSendString={sendString} onToggleSignal={toggleSignal} onBaudRateChange={setBaudRate} currentBaudRate={baudRate} onLogMessage={addLog} boards={boards} activeBoardId={activeBoardId} onSelectBoard={setActiveBoardId} />;
+    case 'esp-dump': return <EspMemoryInspector isConnected={isConnected} port={port} onLogMessage={addLog} />;
+    case 'programmers': case 'ch341a': case 'cmsis-dap': case 'jtag-programmer': case 'avr-isp':
+      return <HardwareProgrammersSuite initialTab={toolId} />;
+    case 'can-bus': return <CanBusWorkbench />;
+    case 'logic-analyzer': return <LogicAnalyzerWorkbench />;
+    case 'usb-pd': return <UsbPdWorkbench />;
+    case 'dfu': return <DfuFlasher />;
+    case 'fastboot': return <FastbootWorkbench />;
+    case 'adb': return <AdbWorkbench />;
+    case 'usb-descriptors': return <UsbDescriptorExplorer />;
+    case 'hid': return <HidInspectorWorkbench />;
+    case 'usbtmc': return <UsbTmcWorkbench />;
+    case 'mass-storage': return <MassStorageWorkbench />;
+    case 'ptp': return <PtpWorkbench />;
+    case 'fido2': return <Fido2Workbench />;
+    case 'session-log': return <SessionLogPanel />;
+    case 'ble': return <BleExplorer />;
+    case 'bus-explorer': return <BusExplorerWorkbench />;
+    case 'modbus-rtu': return <ModbusWorkbench />;
+    case 'alfa-wifi': case 'wifi-scanner': return <div className="w-full min-w-0 max-w-full"><AlfaWifiWorkbench /></div>;
+    case 'warhog-piglet': return <div className="w-full min-w-0 max-w-full"><WarhogPigletWorkbench /></div>;
+    case 'mayhem': return <PortapackWorkbench />;
+    case 'flipper': return <FlipperWorkbench />;
+    case 'proxmark': case 'rfid-nfc': return <ProxmarkWorkbench />;
+    case 'ducky': case 'cyberchef': return <BadUsbPayloadSuite initialTab={toolId === 'cyberchef' ? 'cyberchef' : 'ducky'} />;
+    default:
+      return (
+        <div className="py-16 text-center font-mono text-xs text-slate-500">
+          Unknown tool <span className="text-slate-300">{String(toolId)}</span>. Close this window and pick a tool from the sidebar.
+        </div>
+      );
+  }
+}
