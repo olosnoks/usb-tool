@@ -389,3 +389,63 @@ describe('PortaPack Mayhem WebUSB gains, AGC, capture (simulated HackRF)', () =>
     } finally { vi.unstubAllGlobals(); }
   });
 });
+
+
+describe('PortaPack Mayhem WebUSB bring-up resilience (simulated HackRF)', () => {
+  it('retries a step that fails once and still connects (names the step in the log)', async () => {
+    const { dev, ctrlOut } = makeFakeHackRf();
+    let failedOnce = false;
+    const orig = dev.controlTransferOut.bind(dev);
+    dev.controlTransferOut = async (setup, data) => {
+      if (setup.request === 6 && !failedOnce) { failedOnce = true; throw new Error("Failed to execute 'controlTransferOut' on 'USBDevice': A transfer error has occurred."); }
+      return orig(setup, data);
+    };
+    vi.stubGlobal('navigator', { usb: { requestDevice: async () => dev, getDevices: async () => [] } });
+    try {
+      const d = new MayhemPortaPackDriver();
+      const logs = [];
+      d.onLogCallback = (e) => logs.push(e.text);
+      await d.connectWebUsb();
+      expect(d.connectionType).toBe('webusb');
+      expect(logs.some((t) => /SAMPLE_RATE_SET 2 Msps failed .*retrying/.test(t))).toBe(true);
+      expect(ctrlOut.filter((c) => c.request === 6).length).toBe(1);   // the retry landed
+      expect(ctrlOut.some((c) => c.request === 1 && c.value === 1)).toBe(true);
+      await d.disconnect();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('a step that keeps failing is skipped with a warning, unless it is RECEIVE', async () => {
+    const { dev } = makeFakeHackRf();
+    const orig = dev.controlTransferOut.bind(dev);
+    dev.controlTransferOut = async (setup, data) => { if (setup.request === 29) throw new Error('transfer error'); return orig(setup, data); };
+    vi.stubGlobal('navigator', { usb: { requestDevice: async () => dev, getDevices: async () => [] } });
+    try {
+      const d = new MayhemPortaPackDriver();
+      const logs = [];
+      d.onLogCallback = (e) => logs.push(e.text);
+      await d.connectWebUsb();                 // HW sync off is optional
+      expect(d.connectionType).toBe('webusb');
+      expect(logs.some((t) => /SET_HW_SYNC_MODE off failed again/.test(t))).toBe(true);
+      await d.disconnect();
+
+      dev.controlTransferOut = async (setup, data) => { if (setup.request === 1 && setup.value === 1) throw new Error('transfer error'); return orig(setup, data); };
+      const d2 = new MayhemPortaPackDriver();
+      await expect(d2.connectWebUsb()).rejects.toThrow(/SET_TRANSCEIVER_MODE RECEIVE failed twice/);
+      expect(d2.isConnected).toBe(false);
+      expect(dev.opened).toBe(false);          // closed again after the failure
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('reads the board revision only after RX is up, so a stall on old firmware cannot break the bring-up', async () => {
+    const { dev, ctrlInFull, ctrlOut } = makeFakeHackRf();
+    vi.stubGlobal('navigator', { usb: { requestDevice: async () => dev, getDevices: async () => [] } });
+    try {
+      const d = new MayhemPortaPackDriver();
+      await d.connectWebUsb();
+      const rev = ctrlInFull.find((c) => c.request === 45);
+      const iRx = ctrlOut.findIndex((c) => c.request === 1 && c.value === 1);
+      expect(rev.seq).toBeGreaterThan(iRx);
+      await d.disconnect();
+    } finally { vi.unstubAllGlobals(); }
+  });
+});

@@ -277,7 +277,7 @@ export default function PortapackWorkbench() {
             <div>
               <div className="font-bold">Connection Error: {connectError}</div>
               <div className="text-[11px] text-rose-400/80 mt-1">
-                Tip: Click <strong>"Show All COM Ports"</strong> to pick COM13 directly. If COM13 is in use, make sure SDR#, GQRX, or another terminal is closed.
+                WebUSB: unplug and replug the HackRF (on a PortaPack, re-enter HackRF mode), close SDR# / SDR++ / hackrf_* tools, then Connect WebUSB again; the <strong>Console &amp; Log</strong> tab names the step that failed. COM Port: pick the PortaPack's COM port and make sure no terminal has it open.
               </div>
             </div>
           </div>

@@ -392,7 +392,7 @@ export class MayhemPortaPackDriver {
       try {
         await this.usbDevice.claimInterface(0);
       } catch (e) {
-        // Interface may be vendor-specific
+        this.log(`[HackRF WebUSB] claimInterface(0) failed: ${e.message} (continuing; control transfers go to the device).`, 'warning');
       }
 
       // Discover the bulk IN endpoint (HackRF exposes 0x81) instead of assuming it.
@@ -428,13 +428,15 @@ export class MayhemPortaPackDriver {
           if (bId === 5) this.log('HackRF Pro: expect to need roughly 28 dB more VGA than a HackRF One for the same level (or turn AGC on).', 'info');
         }
       } catch (_) {}
+
+      await this._bringUpRx();
+      this.startWebUsbBulkReading();
+      // Board revision is a newer request (older firmware stalls on it), so it
+      // goes last where a stall cannot disturb the bring-up.
       try {
         const rRes = await this._ctrlIn(HACKRF_REQ.BOARD_REV_READ, 0, 0, 1);
         if (rRes?.data?.byteLength) this.boardRev = rRes.data.getUint8(0);
       } catch (_) {}
-
-      await this._bringUpRx();
-      this.startWebUsbBulkReading();
       this.notifyState();
       return true;
     } catch (err) {
@@ -454,20 +456,38 @@ export class MayhemPortaPackDriver {
    * a no-op that streams zeros, hence the OFF first.
    */
   async _bringUpRx() {
-    await this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_OFF);
+    const step = (name, fn, fatal = false) => this._step(name, fn, fatal);
+    await step('SET_TRANSCEIVER_MODE OFF', () => this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_OFF));
     await sleep(100);
-    try { await this._ctrlOut(HACKRF_REQ.SET_HW_SYNC_MODE, 0); } catch (_) {}
-    await this._applySampleRate(this.sampleRate);
-    await this._setFreqRaw(this.frequency);
+    await step('SET_HW_SYNC_MODE off', () => this._ctrlOut(HACKRF_REQ.SET_HW_SYNC_MODE, 0));
+    await step(`SAMPLE_RATE_SET ${this.sampleRate / 1e6} Msps`, () => this._applySampleRate(this.sampleRate));
+    await step('SET_FREQ', () => this._setFreqRaw(this.frequency));
     await this.setWebUsbAmp(this.amp, { quiet: true });
     await this.setWebUsbGains(this.lnaGain, this.vgaGain, { quiet: true });
-    await this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_RECEIVE);
+    await step('SET_TRANSCEIVER_MODE RECEIVE', () => this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_RECEIVE), true);
     await sleep(40);
-    await this._setFreqRaw(this.frequency + 1000000);
-    await this._setFreqRaw(this.frequency);
+    await step('cache-bust retune', async () => { await this._setFreqRaw(this.frequency + 1000000); await this._setFreqRaw(this.frequency); });
     await this.setWebUsbGains(this.lnaGain, this.vgaGain, { quiet: true });
     await sleep(60);
     this.log(`HackRF: RX engaged at ${(this.frequency / 1e6).toFixed(4)} MHz, ${this.sampleRate / 1e6} Msps, LNA ${this.lnaGain} / VGA ${this.vgaGain} dB, amp ${this.amp ? 'on' : 'off'}.`, 'success');
+  }
+
+  /**
+   * One bring-up step: on a transfer error, say which step, wait, try once
+   * more, and carry on unless the step is fatal. (The earlier driver silently
+   * skipped failing steps; naming them is what lets a failure be diagnosed.)
+   */
+  async _step(name, fn, fatal = false) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { return await fn(); }
+      catch (e) {
+        if (attempt === 0) { this.log(`[HackRF WebUSB] ${name} failed (${e.message}); retrying once.`, 'warning'); await sleep(80); continue; }
+        if (fatal) throw new Error(`${name} failed twice: ${e.message}. Unplug and replug the HackRF (or re-enter HackRF mode on the PortaPack) and connect again.`);
+        this.log(`[HackRF WebUSB] ${name} failed again (${e.message}); continuing without it.`, 'warning');
+        return null;
+      }
+    }
+    return null;
   }
 
   async _applySampleRate(rateHz) {
