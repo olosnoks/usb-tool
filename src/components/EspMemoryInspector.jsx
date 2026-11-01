@@ -125,7 +125,7 @@ export default function EspMemoryInspector({
       </div>
 
       {/* Silicon Metadata Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-1 @sm:grid-cols-3 gap-2.5">
         <div className="bg-[#030712] border border-slate-800 rounded-lg p-3">
           <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Target MAC Address</span>
           <div className="text-sm font-bold text-cyber-cyan">
@@ -154,7 +154,7 @@ export default function EspMemoryInspector({
         <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-bold">
           Quick Backup Targets:
         </span>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2">
           {DUMP_PRESETS.map((p, idx) => (
             <button
               key={idx}

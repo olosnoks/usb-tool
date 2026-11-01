@@ -269,7 +269,7 @@ export default function Ch341aProgrammer() {
 
         {/* Chip Identification & Info Banner */}
         {isConnected && chipInfo && (
-          <div className="pt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div className="pt-3 grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-4 gap-3 text-xs">
             <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
               <span className="text-[10px] text-slate-500 font-bold uppercase">Detected Flash Chip</span>
               <div className="text-amber-300 font-bold text-sm mt-0.5">{chipInfo.model}</div>
@@ -381,7 +381,7 @@ export default function Ch341aProgrammer() {
       )}
 
       {isConnected && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs">
+        <div className="grid grid-cols-1 @lg:grid-cols-3 gap-3 text-xs">
           {/* Status registers and protection */}
           <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 shadow-xl space-y-2">
             <div className="font-bold text-slate-200 flex items-center gap-1.5"><Sliders className="w-3.5 h-3.5 text-cyan-400" /> STATUS & WRITE PROTECTION</div>

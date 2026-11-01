@@ -176,11 +176,11 @@ export default function UsbPdWorkbench() {
 
         {/* Live VBUS Multimeter Dials (simulation only: the STUSB4500 has no VBUS meter) */}
         {(isSimulated || !isConnected) && (
-        <div className="pt-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+        <div className="pt-4 grid grid-cols-2 @sm:grid-cols-4 @lg:grid-cols-6 gap-3">
           {/* Voltage */}
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">VBUS VOLTAGE</span>
-            <div className="text-2xl sm:text-3xl font-extrabold text-amber-400 font-mono tracking-tight my-1">
+            <div className="text-2xl @sm:text-3xl font-extrabold text-amber-400 font-mono tracking-tight my-1">
               {telemetry.voltageV.toFixed(3)} <span className="text-xs text-amber-500 font-bold">V</span>
             </div>
             <span className="text-[10px] text-slate-400">Target: {client.targetVoltageV.toFixed(1)}V</span>
@@ -189,7 +189,7 @@ export default function UsbPdWorkbench() {
           {/* Current */}
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">LOAD CURRENT</span>
-            <div className="text-2xl sm:text-3xl font-extrabold text-cyan-400 font-mono tracking-tight my-1">
+            <div className="text-2xl @sm:text-3xl font-extrabold text-cyan-400 font-mono tracking-tight my-1">
               {telemetry.currentA.toFixed(3)} <span className="text-xs text-cyan-500 font-bold">A</span>
             </div>
             <span className="text-[10px] text-slate-400">Limit: 5.000A</span>
@@ -198,7 +198,7 @@ export default function UsbPdWorkbench() {
           {/* Power */}
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ACTIVE POWER</span>
-            <div className="text-2xl sm:text-3xl font-extrabold text-emerald-400 font-mono tracking-tight my-1">
+            <div className="text-2xl @sm:text-3xl font-extrabold text-emerald-400 font-mono tracking-tight my-1">
               {telemetry.powerW.toFixed(2)} <span className="text-xs text-emerald-500 font-bold">W</span>
             </div>
             <span className="text-[10px] text-slate-400">Max Rating: 100W</span>
@@ -207,7 +207,7 @@ export default function UsbPdWorkbench() {
           {/* Temperature */}
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">CONNECTOR TEMP</span>
-            <div className="text-2xl sm:text-3xl font-extrabold text-rose-400 font-mono tracking-tight my-1">
+            <div className="text-2xl @sm:text-3xl font-extrabold text-rose-400 font-mono tracking-tight my-1">
               {telemetry.tempC.toFixed(1)} <span className="text-xs text-rose-500 font-bold">°C</span>
             </div>
             <span className="text-[10px] text-slate-400">Safe: &lt; 50°C</span>
@@ -225,7 +225,7 @@ export default function UsbPdWorkbench() {
                 <RotateCcw className="w-3 h-3" />
               </button>
             </div>
-            <div className="text-xl sm:text-2xl font-extrabold text-purple-400 font-mono tracking-tight my-1">
+            <div className="text-xl @sm:text-2xl font-extrabold text-purple-400 font-mono tracking-tight my-1">
               {telemetry.accumulatedMah} <span className="text-[10px] text-purple-500 font-bold">mAh</span>
             </div>
             <span className="text-[10px] text-slate-400">Cumulative</span>
@@ -234,7 +234,7 @@ export default function UsbPdWorkbench() {
           {/* Energy mWh */}
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ENERGY</span>
-            <div className="text-xl sm:text-2xl font-extrabold text-blue-400 font-mono tracking-tight my-1">
+            <div className="text-xl @sm:text-2xl font-extrabold text-blue-400 font-mono tracking-tight my-1">
               {telemetry.accumulatedMwh} <span className="text-[10px] text-blue-500 font-bold">mWh</span>
             </div>
             <span className="text-[10px] text-slate-400">Watt-Hours</span>
@@ -247,9 +247,9 @@ export default function UsbPdWorkbench() {
 
       {/* Contract Negotiator & PPS Slider */}
       {(isSimulated || !isConnected) && (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 @lg:grid-cols-3 gap-4">
         {/* Left: Fixed PDO Contract Buttons */}
-        <div className="lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+        <div className="@lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <span className="font-bold text-slate-200 text-xs flex items-center gap-2">
               <Sliders className="w-4 h-4 text-cyan-400" />
@@ -258,7 +258,7 @@ export default function UsbPdWorkbench() {
             <span className="text-[10px] text-slate-400">Click to Negotiate</span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+          <div className="grid grid-cols-2 @sm:grid-cols-5 gap-2.5">
             {FIXED_PDO_PROFILES.map((pdo) => {
               const isActive = isConnected && activePdoId === pdo.id && !isPps;
               return (
@@ -419,9 +419,9 @@ function Stusb4500Panel({ client, onError }) {
 
   const rdo = status?.rdo;
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 @lg:grid-cols-3 gap-4">
       <NvmPanel client={client} onError={onError} busyRef={busyRef} />
-      <div className="lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+      <div className="@lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
         <div className="flex items-center justify-between pb-2 border-b border-slate-800">
           <span className="font-bold text-slate-200 text-xs flex items-center gap-2">
             <Usb className="w-4 h-4 text-amber-400" />
@@ -434,7 +434,7 @@ function Stusb4500Panel({ client, onError }) {
         {!status ? (
           <p className="text-slate-500">Reading...</p>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3">
             <Stat label="SOURCE" value={status.attached ? 'ATTACHED' : 'NONE'} tone={status.attached ? 'text-emerald-400' : 'text-slate-500'} />
             <Stat label="CONTRACT" value={rdo ? `source PDO #${rdo.position}` : 'none'} tone="text-amber-400" />
             <Stat label="OPERATING CURRENT" value={rdo ? `${rdo.operatingCurrentA.toFixed(2)} A` : '-'} tone="text-cyan-400" />
@@ -541,7 +541,7 @@ function NvmPanel({ client, onError, busyRef }) {
   const btn = 'px-2 py-1 rounded border font-bold disabled:opacity-40';
 
   return (
-    <div className="lg:col-span-3 order-last bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3 text-xs">
+    <div className="@lg:col-span-3 order-last bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3 text-xs">
       <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
         <span className="font-bold text-slate-200">NVM: POWER-UP PDOs (SURVIVE POWER-OFF)</span>
         <div className="flex flex-wrap gap-1.5">

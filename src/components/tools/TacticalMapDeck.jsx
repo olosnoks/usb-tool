@@ -578,7 +578,7 @@ export default function TacticalMapDeck({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 font-mono text-xs">
+        <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-4 gap-2 font-mono text-xs">
           {filteredAircraft.map(ac => (
             <div
               key={ac.id || ac.icao}

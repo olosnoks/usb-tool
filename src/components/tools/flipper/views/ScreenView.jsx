@@ -13,7 +13,7 @@ export default function ScreenView({
   state
 }) {
   return (
-    <div className="bg-[#171920] border border-[#2b303c] rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center">
+    <div className="bg-[#171920] border border-[#2b303c] rounded-3xl p-6 @sm:p-8 shadow-2xl flex flex-col items-center">
       {/* Screen Stream Toolbar */}
       <div className="w-full flex items-center justify-between pb-4 border-b border-[#232733] mb-6">
         <div className="flex items-center gap-2 font-sans">

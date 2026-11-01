@@ -151,7 +151,7 @@ export default function UsbDescriptorExplorer() {
                 {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />} {copied ? 'Copied' : 'Copy report'}
               </button>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3">
               <Field label="Manufacturer" value={info.manufacturerName} />
               <Field label="Product" value={info.productName} />
               <Field label="Serial" value={info.serialNumber} />

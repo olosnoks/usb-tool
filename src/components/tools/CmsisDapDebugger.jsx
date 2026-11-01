@@ -243,7 +243,7 @@ export default function CmsisDapDebugger() {
                 size="md"
                 pulse={targetState === 'running'}
               />
-              <span className="text-[10px] text-slate-400 hidden sm:inline">
+              <span className="text-[10px] text-slate-400 hidden @sm:inline">
                 {isSimulated ? 'ARM Cortex-M4 (virtual)' : info ? `${info.core} via ${info.probe} (${info.transport})` : ''}
               </span>
             </div>
@@ -303,9 +303,9 @@ export default function CmsisDapDebugger() {
 
       {/* Main Debugger Grid */}
       {isConnected && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="grid grid-cols-1 @lg:grid-cols-12 gap-4">
           {/* Left: ARM Core Registers Table */}
-          <div className="lg:col-span-5 bg-[#030712] border border-cyber-border rounded-xl p-3.5 shadow-xl flex flex-col gap-2.5">
+          <div className="@lg:col-span-5 bg-[#030712] border border-cyber-border rounded-xl p-3.5 shadow-xl flex flex-col gap-2.5">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <span className="font-bold text-xs text-slate-200 flex items-center gap-1.5">
                 <Sliders className="w-3.5 h-3.5 text-cyan-400" />
@@ -341,7 +341,7 @@ export default function CmsisDapDebugger() {
           </div>
 
           {/* Right: SRAM Memory & Peripheral Inspector */}
-          <div className="lg:col-span-7 bg-[#030712] border border-cyber-border rounded-xl p-3.5 shadow-xl flex flex-col gap-3">
+          <div className="@lg:col-span-7 bg-[#030712] border border-cyber-border rounded-xl p-3.5 shadow-xl flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
               <span className="font-bold text-xs text-slate-200 flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5 text-emerald-400" />

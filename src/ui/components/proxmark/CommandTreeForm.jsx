@@ -137,7 +137,7 @@ export default function CommandTreeForm({
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Cascading Selectors Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 @md:grid-cols-3 gap-4">
           {/* Level 1: Domain */}
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">
@@ -195,7 +195,7 @@ export default function CommandTreeForm({
 
         {/* Action Details & Risk Indicator */}
         {currentAction && (
-          <div className="p-3 bg-slate-950/70 border border-slate-800/80 rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="p-3 bg-slate-950/70 border border-slate-800/80 rounded-lg flex flex-col @md:flex-row @md:items-center justify-between gap-3">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-slate-200">{currentAction.name}</span>
@@ -229,7 +229,7 @@ export default function CommandTreeForm({
               Command Parameters
             </h4>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 @md:grid-cols-2 gap-4">
               {currentAction.parameters.map((param) => (
                 <div key={param.id}>
                   <label className="block text-xs font-medium text-slate-300 mb-1">

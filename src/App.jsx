@@ -9,7 +9,7 @@ import { WORKSPACE_PRESETS } from './components/layout/WorkspacePresets';
 import { renderTool, toolMeta } from './components/ToolRegistry';
 import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize,
-  moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, loadState, saveState
+  moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, loadState, saveState, zoomStep, toggleFit
 } from './utils/windowManager';
 
 // Modals
@@ -79,11 +79,13 @@ function AppContent() {
   const onTile = useCallback(() => setWm((s) => tileWindows(s, viewportRef.current)), []);
   const onCascade = useCallback(() => setWm((s) => cascadeWindows(s, viewportRef.current)), []);
   const onCloseAll = useCallback(() => setWm((s) => closeAll(s)), []);
+  const onZoomStep = useCallback((id, dir, currentZoom) => setWm((s) => zoomStep(s, id, dir, currentZoom)), []);
+  const onToggleFit = useCallback((id) => setWm((s) => toggleFit(s, id)), []);
 
   const focused = focusedWindow(wm);
   const activeTool = focused?.toolId || null;           // the tool whose window has focus
   const openTools = useMemo(() => wm.windows.map((w) => w.id), [wm.windows]);
-  const iconFor = useCallback((toolId) => toolMeta(toolId).icon, []);
+  const metaFor = useCallback((toolId) => toolMeta(toolId), []);
   const renderToolInWindow = useCallback((toolId) => renderTool(toolId, serial), [serial]);
 
   // Sidebar collapse state (persisted)
@@ -194,10 +196,11 @@ function AppContent() {
         <div className="flex-1 flex flex-col overflow-hidden bg-cyber-darkest min-w-0">
           <Desktop
             state={wm} viewport={viewport} onViewport={onViewport}
-            renderTool={renderToolInWindow} iconFor={iconFor}
+            renderTool={renderToolInWindow} metaFor={metaFor}
             onFocus={onFocus} onMove={onMove} onResize={onResize} onMinimize={onMinimize}
             onToggleMaximize={onToggleMaximize} onClose={onClose}
             onTile={onTile} onCascade={onCascade} onCloseAll={onCloseAll}
+            onZoomStep={onZoomStep} onToggleFit={onToggleFit}
           />
 
           <TerminalDrawer

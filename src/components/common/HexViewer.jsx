@@ -132,7 +132,7 @@ export default function HexViewer({
               placeholder="Search hex (e.g. 55 AA)..."
               value={searchHex}
               onChange={(e) => setSearchHex(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2.5 py-1 text-[11px] text-slate-200 placeholder-slate-500 outline-none focus:border-cyan-500 w-36 sm:w-44"
+              className="bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2.5 py-1 text-[11px] text-slate-200 placeholder-slate-500 outline-none focus:border-cyan-500 w-36 @sm:w-44"
             />
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 top-2" />
           </div>
@@ -237,7 +237,7 @@ export default function HexViewer({
               </div>
 
               {/* ASCII representation */}
-              <div className="text-slate-400 border-l border-slate-800 pl-3 w-32 sm:w-44 shrink-0 tracking-widest">
+              <div className="text-slate-400 border-l border-slate-800 pl-3 w-32 @sm:w-44 shrink-0 tracking-widest">
                 {row.bytes.map((item) => {
                   const c = item.byte;
                   const isPrintable = c >= 32 && c <= 126;

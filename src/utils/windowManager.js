@@ -12,6 +12,10 @@ export const DEFAULT_H = 680;
 export const CASCADE_STEP = 32;
 export const KEEP_VISIBLE_PX = 140;   // how much of the title bar must stay on screen
 export const STORAGE_KEY = 'skon-workspace-windows-v1';
+// Per-window content zoom (CSS zoom on the tool, the browser viewport is untouched).
+export const ZOOM_MIN = 0.5;
+export const ZOOM_MAX = 1.5;
+export const ZOOM_STEPS = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5];
 
 /**
  * Tool ids that are tabs of one workbench share a window. Opening 'hex' when
@@ -81,7 +85,7 @@ export function openWindow(state, toolId, meta = {}, viewport) {
   const geo = clampToViewport({ ...defaultGeometry(viewport, state.windows.length) }, viewport);
   const win = {
     id, toolId, title: meta.title || toolId, accent: meta.accent || 'cyan',
-    ...geo, z, minimized: false, maximized: false, restore: null, openedAt: Date.now()
+    ...geo, z, minimized: false, maximized: false, restore: null, openedAt: Date.now(), zoom: 1, fit: false
   };
   return { ...state, nextZ, focusedId: id, windows: [...state.windows, win] };
 }
@@ -133,6 +137,34 @@ export function resizeWindow(state, id, geo, viewport) {
   };
 }
 
+/** Set a window's content zoom (clamped, 2 decimals); leaves fit-to-width mode. */
+export function setZoom(state, id, zoom) {
+  const z = clamp(Math.round((Number(zoom) || 1) * 100) / 100, ZOOM_MIN, ZOOM_MAX);
+  return { ...state, windows: state.windows.map((w) => (w.id === id ? { ...w, zoom: z, fit: false } : w)) };
+}
+
+/** Step the zoom to the next (dir > 0) or previous (dir < 0) preset. */
+export function zoomStep(state, id, dir, currentZoom) {
+  const win = state.windows.find((w) => w.id === id);
+  if (!win) return state;
+  const cur = Number.isFinite(currentZoom) ? currentZoom : (win.zoom ?? 1);
+  let next;
+  if (dir > 0) next = ZOOM_STEPS.find((z) => z > cur + 1e-6) ?? ZOOM_MAX;
+  else next = [...ZOOM_STEPS].reverse().find((z) => z < cur - 1e-6) ?? ZOOM_MIN;
+  return setZoom(state, id, next);
+}
+
+/** Fit-to-width: the window scales its tool so the tool's natural width fits. */
+export function toggleFit(state, id) {
+  return { ...state, windows: state.windows.map((w) => (w.id === id ? { ...w, fit: !w.fit } : w)) };
+}
+
+/** The zoom a fitted window uses for a given body width and tool width. */
+export function fitZoomFor(bodyWidth, naturalWidth) {
+  if (!(bodyWidth > 0) || !(naturalWidth > 0)) return 1;
+  return clamp(Math.round((bodyWidth / naturalWidth) * 100) / 100, ZOOM_MIN, 1);
+}
+
 /** Highest, non-minimized window; null when everything is minimized or closed. */
 export function topWindowId(state) {
   let best = null;
@@ -178,8 +210,8 @@ export function cascadeWindows(state, viewport) {
 export function serializeState(state) {
   return JSON.stringify({
     v: 1, focusedId: state.focusedId,
-    windows: state.windows.map(({ id, toolId, title, accent, x, y, w, h, z, minimized, maximized, restore }) =>
-      ({ id, toolId, title, accent, x, y, w, h, z, minimized, maximized, restore }))
+    windows: state.windows.map(({ id, toolId, title, accent, x, y, w, h, z, minimized, maximized, restore, zoom, fit }) =>
+      ({ id, toolId, title, accent, x, y, w, h, z, minimized, maximized, restore, zoom, fit }))
   });
 }
 
@@ -194,7 +226,8 @@ export function deserializeState(json, viewport) {
         x: Number.isFinite(w.x) ? w.x : 16, y: Number.isFinite(w.y) ? w.y : 12,
         w: Number.isFinite(w.w) ? w.w : DEFAULT_W, h: Number.isFinite(w.h) ? w.h : DEFAULT_H,
         z: Number.isFinite(w.z) ? w.z : i + 1, minimized: !!w.minimized, maximized: !!w.maximized,
-        restore: w.restore && Number.isFinite(w.restore.w) ? w.restore : null, openedAt: Date.now()
+        restore: w.restore && Number.isFinite(w.restore.w) ? w.restore : null, openedAt: Date.now(),
+        zoom: Number.isFinite(w.zoom) ? clamp(w.zoom, ZOOM_MIN, ZOOM_MAX) : 1, fit: !!w.fit
       }, viewport));
     const nextZ = windows.reduce((m, w) => Math.max(m, w.z), 0) + 1;
     const focusedId = windows.some((w) => w.id === d.focusedId) ? d.focusedId : topWindowId({ windows });

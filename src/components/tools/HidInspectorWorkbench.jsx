@@ -177,7 +177,7 @@ export default function HidInspectorWorkbench() {
       </div>
 
       {info && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 @lg:grid-cols-2 gap-4">
           {/* Live input */}
           <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
             <span className="font-bold text-slate-200 flex items-center gap-2"><Activity className="w-4 h-4 text-emerald-400" /> LIVE INPUT</span>

@@ -363,7 +363,7 @@ export default function StreamConsole({
               placeholder="Search stream..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2 py-0.5 text-[11px] text-slate-200 focus:border-cyber-cyan outline-none w-24 sm:w-32 transition-all"
+              className="bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2 py-0.5 text-[11px] text-slate-200 focus:border-cyber-cyan outline-none w-24 @sm:w-32 transition-all"
             />
             {searchQuery.trim() && (
               <span className="ml-1.5 px-1.5 py-0.2 rounded bg-amber-500/20 text-cyber-amber border border-amber-500/40 text-[10px] font-bold">
@@ -411,7 +411,7 @@ export default function StreamConsole({
             }`}
           >
             {isPaused ? <Play className="w-3 h-3 text-cyber-amber" /> : <Pause className="w-3 h-3" />}
-            <span className="hidden sm:inline">{isPaused ? 'PAUSED' : 'PAUSE'}</span>
+            <span className="hidden @sm:inline">{isPaused ? 'PAUSED' : 'PAUSE'}</span>
           </button>
 
           {/* AutoScroll */}
@@ -471,7 +471,7 @@ export default function StreamConsole({
                 <th className="p-2 w-20">DIR</th>
                 <th className="p-2 w-16">LEN</th>
                 <th className="p-2">ASCII PAYLOAD</th>
-                <th className="p-2 text-slate-500 hidden md:table-cell">HEX BYTES</th>
+                <th className="p-2 text-slate-500 hidden @md:table-cell">HEX BYTES</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-900 font-mono">
@@ -507,7 +507,7 @@ export default function StreamConsole({
                       <td className="p-2 text-slate-200 font-mono break-all">
                         {renderHighlight(entry.text, searchQuery)}
                       </td>
-                      <td className="p-2 text-slate-500 text-[10px] font-mono hidden md:table-cell truncate max-w-xs">
+                      <td className="p-2 text-slate-500 text-[10px] font-mono hidden @md:table-cell truncate max-w-xs">
                         {hexStr}{entry.text.length > 16 ? '...' : ''}
                       </td>
                     </tr>

@@ -240,9 +240,9 @@ export default function AutoResponderDeck({
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 @lg:grid-cols-3 gap-4">
         {/* Left Column: Rules Table & Add Rule Form */}
-        <div className="lg:col-span-2 space-y-3">
+        <div className="@lg:col-span-2 space-y-3">
           <div className="flex items-center justify-between">
             <span className="font-bold text-slate-300 flex items-center gap-1.5">
               <Zap className="w-4 h-4 text-purple-400" />
@@ -315,7 +315,7 @@ export default function AutoResponderDeck({
               <Plus className="w-3.5 h-3.5 text-purple-400" />
               CREATE NEW AUTO-ANSWER TRIGGER
             </span>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
+            <div className="grid grid-cols-1 @sm:grid-cols-4 gap-2 text-xs">
               <input
                 type="text"
                 placeholder="Rule Name (e.g. Echo Ack)"

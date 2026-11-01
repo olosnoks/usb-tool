@@ -463,7 +463,7 @@ export default function FlipperWorkbench() {
   return (
     <div className="w-full space-y-4 font-mono text-xs select-none">
       {/* 1. Official qFlipper Window Header Bar */}
-      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-3 sm:p-4 shadow-2xl flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-3 @sm:p-4 shadow-2xl flex flex-wrap items-center justify-between gap-3">
         {/* Left: Device Selector (qFlipper Style) */}
         <div className="flex items-center gap-3">
           <div className={`p-2.5 rounded-xl border flex-shrink-0 transition-all ${
@@ -612,10 +612,10 @@ export default function FlipperWorkbench() {
 
       {/* 2. Official qFlipper Disconnected Welcome Screen (NoDeviceOverlay) */}
       {!state.isConnected ? (
-        <div className="bg-[#171920] border border-[#2b303c] rounded-3xl p-8 sm:p-12 shadow-2xl flex flex-col items-center justify-center text-center max-w-4xl mx-auto my-4">
+        <div className="bg-[#171920] border border-[#2b303c] rounded-3xl p-8 @sm:p-12 shadow-2xl flex flex-col items-center justify-center text-center max-w-4xl mx-auto my-4">
           {/* Active Serial Connection in Main Header Alert */}
           {serialCtx?.isConnected && (
-            <div className="w-full max-w-xl bg-amber-950/40 border-2 border-amber-500/60 rounded-2xl p-4 sm:p-5 mb-6 text-amber-200 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-2xl text-left">
+            <div className="w-full max-w-xl bg-amber-950/40 border-2 border-amber-500/60 rounded-2xl p-4 @sm:p-5 mb-6 text-amber-200 flex flex-col @sm:flex-row items-center justify-between gap-4 shadow-2xl text-left">
               <div className="flex items-start gap-3">
                 <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex-shrink-0">
                   <Zap className="w-5 h-5" />
@@ -643,7 +643,7 @@ export default function FlipperWorkbench() {
 
           {/* Plugged-in / Pre-Authorized Device Detected Card */}
           {detectedPorts.length > 0 && !serialCtx?.isConnected && (
-            <div className="w-full max-w-xl bg-emerald-950/40 border border-emerald-500/50 rounded-2xl p-4 sm:p-5 mb-6 text-emerald-200 text-left shadow-2xl">
+            <div className="w-full max-w-xl bg-emerald-950/40 border border-emerald-500/50 rounded-2xl p-4 @sm:p-5 mb-6 text-emerald-200 text-left shadow-2xl">
               <div className="flex items-center justify-between mb-3 border-b border-emerald-500/20 pb-2">
                 <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
@@ -653,7 +653,7 @@ export default function FlipperWorkbench() {
               </div>
               <div className="space-y-2">
                 {detectedPorts.map((dp, i) => (
-                  <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#13151c] p-3 rounded-xl border border-emerald-500/30">
+                  <div key={i} className="flex flex-col @sm:flex-row @sm:items-center justify-between gap-3 bg-[#13151c] p-3 rounded-xl border border-emerald-500/30">
                     <div>
                       <div className="font-bold text-white text-xs flex items-center gap-2">
                         <Bot className="w-4 h-4 text-[#fe8a2c]" />
@@ -683,22 +683,22 @@ export default function FlipperWorkbench() {
           )}
 
           {/* Authentic qFlipper Vector Graphics: Flipper + Type-C Plug */}
-          <div className="relative w-full max-w-lg h-44 sm:h-52 flex items-center justify-center mb-6">
+          <div className="relative w-full max-w-lg h-44 @sm:h-52 flex items-center justify-center mb-6">
             <img 
               src={flipperSvg} 
               alt="Flipper Zero Outline" 
-              className="w-72 sm:w-80 h-auto object-contain filter drop-shadow-[0_0_35px_rgba(254,138,44,0.18)]"
+              className="w-72 @sm:w-80 h-auto object-contain filter drop-shadow-[0_0_35px_rgba(254,138,44,0.18)]"
             />
             {/* Sliding Type-C Cable inserting into top-left USB port */}
-            <div className="absolute top-[32px] sm:top-[38px] right-[10px] sm:right-[38px] flex items-center animate-pulse">
-              <img src={typecSvg} alt="USB Type-C" className="w-24 sm:w-32 h-auto" />
+            <div className="absolute top-[32px] @sm:top-[38px] right-[10px] @sm:right-[38px] flex items-center animate-pulse">
+              <img src={typecSvg} alt="USB Type-C" className="w-24 @sm:w-32 h-auto" />
             </div>
           </div>
 
-          <h3 className="text-xl sm:text-2xl font-bold text-white tracking-wide mb-2 font-sans">
+          <h3 className="text-xl @sm:text-2xl font-bold text-white tracking-wide mb-2 font-sans">
             CONNECT YOUR FLIPPER ZERO
           </h3>
-          <p className="text-xs sm:text-sm text-slate-400 max-w-lg mb-8 leading-relaxed font-sans">
+          <p className="text-xs @sm:text-sm text-slate-400 max-w-lg mb-8 leading-relaxed font-sans">
             Connect your Flipper Zero via USB cable to update firmware, manage MicroSD files, view real-time screen streaming, and control device peripherals.
           </p>
 

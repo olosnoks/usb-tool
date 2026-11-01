@@ -22,7 +22,7 @@ export default function RulesTab({
   return (
     <div className="p-4 space-y-5">
       {/* Top KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 @sm:grid-cols-4 gap-3">
         <div className="bg-slate-900/90 border border-amber-500/30 rounded-xl p-3">
           <div className="text-[11px] text-amber-300 uppercase font-semibold">Total Rules</div>
           <div className="text-2xl font-bold text-amber-400 mt-1">{rules.length}</div>
@@ -64,7 +64,7 @@ export default function RulesTab({
           <span className="text-[11px] text-slate-500">Configure triggers, targets, and reactive actions</span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 @md:grid-cols-3 gap-3">
           {/* Rule Name */}
           <div>
             <label className="text-[10px] text-slate-400 font-semibold block mb-1">
@@ -110,7 +110,7 @@ export default function RulesTab({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+        <div className="grid grid-cols-1 @md:grid-cols-3 gap-3 pt-1">
           {/* Action Type */}
           <div>
             <label className="text-[10px] text-slate-400 font-semibold block mb-1">
@@ -128,7 +128,7 @@ export default function RulesTab({
           </div>
 
           {/* Action Payload */}
-          <div className="md:col-span-2">
+          <div className="@md:col-span-2">
             <label className="text-[10px] text-slate-400 font-semibold block mb-1">
               Action Payload / Parameters:
             </label>

@@ -2741,7 +2741,7 @@ export default function AlfaWifiWorkbench() {
 
       {/* Windows Driver Setup Required Banner */}
       {!isConnected && showWindowsBanner && (
-        <div className="p-3.5 rounded-xl bg-amber-950/60 border border-amber-500/50 text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg animate-fade-in">
+        <div className="p-3.5 rounded-xl bg-amber-950/60 border border-amber-500/50 text-amber-200 flex flex-col @sm:flex-row items-start @sm:items-center justify-between gap-3 shadow-lg animate-fade-in">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
               <Cpu className="w-5 h-5 text-amber-400" />
@@ -2779,7 +2779,7 @@ export default function AlfaWifiWorkbench() {
 
       {/* Offline PCAP Replay Banner */}
       {replayingPcapState && (
-        <div className={`p-3.5 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg ${
+        <div className={`p-3.5 rounded-xl border flex flex-col @sm:flex-row items-start @sm:items-center justify-between gap-3 shadow-lg ${
           replayingPcapState.finished
             ? 'bg-emerald-950/80 border-emerald-500/60 text-emerald-200'
             : 'bg-blue-950/80 border-blue-500/60 text-blue-200'
@@ -2802,7 +2802,7 @@ export default function AlfaWifiWorkbench() {
                 }
               </div>
               {!replayingPcapState.finished && (
-                <div className="w-48 sm:w-72 bg-blue-950 h-1.5 rounded-full mt-2 overflow-hidden border border-blue-800/60">
+                <div className="w-48 @sm:w-72 bg-blue-950 h-1.5 rounded-full mt-2 overflow-hidden border border-blue-800/60">
                   <div
                     className="bg-blue-400 h-full transition-all duration-150 rounded-full"
                     style={{ width: `${replayingPcapState.percent}%` }}
@@ -2811,7 +2811,7 @@ export default function AlfaWifiWorkbench() {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2 self-end sm:self-auto">
+          <div className="flex items-center gap-2 self-end @sm:self-auto">
             {replayingPcapState.finished ? (
               <button
                 onClick={() => setReplayingPcapState(null)}
@@ -2964,7 +2964,7 @@ export default function AlfaWifiWorkbench() {
 
 
       {/* Header Card */}
-      <div className="bg-[#171920] border border-slate-800/80 rounded-xl p-4 sm:p-5 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-[#171920] border border-slate-800/80 rounded-xl p-4 @sm:p-5 shadow-lg flex flex-col @md:flex-row @md:items-center justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
@@ -3192,7 +3192,7 @@ export default function AlfaWifiWorkbench() {
               step="1"
               value={rxGain}
               onChange={(e) => handleRxGainChange(e.target.value)}
-              className="w-16 sm:w-20 accent-cyan-500 cursor-pointer"
+              className="w-16 @sm:w-20 accent-cyan-500 cursor-pointer"
             />
             <span className="text-xs font-mono font-bold text-cyan-300 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">
               {rxGain}/10
@@ -3210,7 +3210,7 @@ export default function AlfaWifiWorkbench() {
             title="Open Windows WebUSB WinUSB driver configuration guide"
           >
             <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
-            <span className="font-semibold hidden sm:inline">Driver Guide</span>
+            <span className="font-semibold hidden @sm:inline">Driver Guide</span>
           </button>
 
           {/* Hardware Status Introspection Toggle */}
@@ -3229,7 +3229,7 @@ export default function AlfaWifiWorkbench() {
             <span className={`w-1.5 h-1.5 rounded-full ${isConnected || isSimulateRf ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
           </button>
 
-          <div className="h-6 w-px bg-slate-800 mx-0.5 hidden sm:block" />
+          <div className="h-6 w-px bg-slate-800 mx-0.5 hidden @sm:block" />
 
           {/* Connect / Disconnect */}
           {!isConnected ? (
@@ -3278,7 +3278,7 @@ export default function AlfaWifiWorkbench() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs font-mono">
+          <div className="grid grid-cols-1 @sm:grid-cols-4 gap-3 text-xs font-mono">
             <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
               <div className="text-[10px] text-slate-500 uppercase font-semibold">Adapter MAC</div>
               <div className="text-cyan-300 font-bold mt-0.5 select-all text-[13px]">
@@ -3349,7 +3349,7 @@ export default function AlfaWifiWorkbench() {
       )}
 
       {/* Telemetry KPI Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-5 gap-3">
         {/* Metric 1: Monitor Channel */}
         <div className="bg-[#171920] border border-slate-800/80 rounded-xl p-3.5 flex items-center justify-between">
           <div>
@@ -3622,7 +3622,7 @@ export default function AlfaWifiWorkbench() {
             </>
           )}
 
-          <div className="h-4 w-px bg-slate-800 mx-1 hidden sm:block"></div>
+          <div className="h-4 w-px bg-slate-800 mx-1 hidden @sm:block"></div>
 
           {/* Auto-Hop Channels Toggle */}
           <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700">
@@ -3816,7 +3816,7 @@ export default function AlfaWifiWorkbench() {
               step="1"
               value={rfSensitivity}
               onChange={(e) => handleRfSensitivityChange(e.target.value)}
-              className="w-20 sm:w-24 accent-cyan-500 cursor-pointer"
+              className="w-20 @sm:w-24 accent-cyan-500 cursor-pointer"
             />
             <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
               rfSensitivity >= -65 ? 'text-emerald-400 bg-emerald-950/40' :
@@ -3838,7 +3838,7 @@ export default function AlfaWifiWorkbench() {
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs transition disabled:opacity-50 disabled:cursor-not-allowed font-bold"
           >
             <Save className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{isSavingSession ? 'Saving...' : 'Save Session'}</span>
+            <span className="hidden @sm:inline">{isSavingSession ? 'Saving...' : 'Save Session'}</span>
           </button>
 
           {/* Load Session from IndexedDB */}
@@ -3848,7 +3848,7 @@ export default function AlfaWifiWorkbench() {
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs transition font-bold"
           >
             <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden sm:inline">Load Session</span>
+            <span className="hidden @sm:inline">Load Session</span>
           </button>
 
           {/* Timeline Replay Toggle Button */}
@@ -3888,7 +3888,7 @@ export default function AlfaWifiWorkbench() {
             }`}
           >
             <Clock className={`w-3.5 h-3.5 ${isTimelineActive ? 'text-cyan-300 animate-pulse' : 'text-cyan-400'}`} />
-            <span className="hidden sm:inline">Timeline Replay</span>
+            <span className="hidden @sm:inline">Timeline Replay</span>
           </button>
 
           {/* Baseline Reference & Diffing Controls */}
@@ -4080,7 +4080,7 @@ export default function AlfaWifiWorkbench() {
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 text-xs transition disabled:opacity-50 disabled:cursor-not-allowed font-bold"
           >
             <Upload className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Upload PCAP</span>
+            <span className="hidden @sm:inline">Upload PCAP</span>
           </button>
 
           {/* Clear Buffer */}
@@ -4090,7 +4090,7 @@ export default function AlfaWifiWorkbench() {
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs transition font-bold"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Clear</span>
+            <span className="hidden @sm:inline">Clear</span>
           </button>
         </div>
       </div>
@@ -4399,10 +4399,10 @@ export default function AlfaWifiWorkbench() {
       )}
 
       {/* Main Diagnostic Dashboard Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
+      <div className="grid grid-cols-1 @lg:grid-cols-4 gap-4 items-start">
         {/* Main Table View (3 cols or full width if no selection) */}
         <div className={`bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl transition-all ${
-          selectedItem ? 'lg:col-span-3' : 'lg:col-span-4'
+          selectedItem ? '@lg:col-span-3' : '@lg:col-span-4'
         }`}>
           {/* Table Header Strip & Search & Sort */}
           <div className="px-4 py-2.5 bg-slate-900/60 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
@@ -4461,7 +4461,7 @@ export default function AlfaWifiWorkbench() {
                       setSearchQuery(e.target.value);
                       setTablePage(1);
                     }}
-                    className="bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2 py-1 text-xs text-slate-200 placeholder-slate-600 outline-none focus:border-cyan-500 w-44 sm:w-56"
+                    className="bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2 py-1 text-xs text-slate-200 placeholder-slate-600 outline-none focus:border-cyan-500 w-44 @sm:w-56"
                   />
                   <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 top-2 pointer-events-none" />
                 </div>
@@ -4744,7 +4744,7 @@ export default function AlfaWifiWorkbench() {
           const currentAnnotation = deviceAnnotations[targetMac] || null;
 
           return (
-            <div className="lg:col-span-1 bg-[#171920] border border-cyan-500/40 rounded-xl p-4 shadow-2xl space-y-4">
+            <div className="@lg:col-span-1 bg-[#171920] border border-cyan-500/40 rounded-xl p-4 shadow-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                 <div className="flex items-center gap-2">
                   {selectedItem.type === 'ap' ? (

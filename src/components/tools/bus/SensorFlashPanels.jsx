@@ -88,7 +88,7 @@ export default function SensorFlashPanels({ client, isConnected, selectedAddr, g
   const driver = driverId ? SENSOR_DRIVERS[driverId] : null;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+    <div className="grid grid-cols-1 @lg:grid-cols-2 gap-4 text-xs">
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
         <div className="flex items-center justify-between pb-2 border-b border-slate-800">
           <span className="font-bold text-slate-200 flex items-center gap-1.5"><Thermometer className="w-3.5 h-3.5 text-emerald-400" /> SENSOR READOUT ({hex2(selectedAddr)})</span>

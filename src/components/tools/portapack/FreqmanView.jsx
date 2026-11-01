@@ -64,7 +64,7 @@ export default function FreqmanView({
       </div>
 
       {/* Add Custom Frequency Entry */}
-      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 grid grid-cols-1 md:grid-cols-4 gap-2">
+      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 grid grid-cols-1 @md:grid-cols-4 gap-2">
         <input
           type="text"
           value={customFreqInput}

@@ -82,7 +82,7 @@ export default function SpectrumTab({
           </div>
         </div>
 
-        <div className="h-64 bg-slate-900/50 border border-slate-800 rounded-xl p-3 flex items-end gap-1 sm:gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-800">
+        <div className="h-64 bg-slate-900/50 border border-slate-800 rounded-xl p-3 flex items-end gap-1 @sm:gap-2 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-800">
           {spectrumChannels.map(c => {
             const count = channelStats[c.ch] || 0;
             const pct = spectrumStats.maxPkts > 0 ? Math.round((count / spectrumStats.maxPkts) * 100) : 0;

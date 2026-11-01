@@ -53,7 +53,7 @@ export default function UbxConfigDeck({
       </div>
 
       {/* Preset Action Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 @md:grid-cols-3 gap-3">
         {/* Update Rate Card */}
         <div className="bg-[#030712] border border-slate-800 rounded-xl p-3 flex flex-col justify-between gap-2.5">
           <div>

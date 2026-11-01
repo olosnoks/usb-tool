@@ -226,7 +226,7 @@ export default function ChannelOverlapChart({
       </div>
 
       {/* KPI Cards Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 @sm:grid-cols-4 gap-3">
         <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl">
           <div className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
             <span>Cleanest Primary Channel</span>

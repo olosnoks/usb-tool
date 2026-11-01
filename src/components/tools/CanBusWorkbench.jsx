@@ -774,7 +774,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
             <button onClick={handleScanPids} disabled={!!obdBusy} className={btn}>{obdBusy === 'pids' ? 'SCANNING...' : 'SCAN SUPPORTED PIDS'}</button>
             {vin && <span className="text-slate-300">VIN: <span className="text-amber-300 font-bold">{vin}</span></span>}
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-6 gap-3">
             {(() => {
               const fmt = (v, suffix = '') => (v === null || v === undefined ? '--' : v === 'n/a' ? 'n/a' : `${typeof v === 'number' && suffix === '' && v > 100 ? Math.round(v) : v}${suffix}`);
               return [
@@ -797,7 +797,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
           {pidTable && (
             <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 text-xs">
               <div className="font-bold text-slate-200 mb-2">SUPPORTED MODE 01 PIDS ({pidTable.length})</div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+              <div className="grid grid-cols-1 @md:grid-cols-2 gap-x-6">
                 {pidTable.map((r) => (
                   <div key={r.pid} className="flex justify-between border-b border-slate-900 py-0.5">
                     <span className="text-slate-400">0x{r.pid.toString(16).toUpperCase().padStart(2, '0')} {r.name}</span>

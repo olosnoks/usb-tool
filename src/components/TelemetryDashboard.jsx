@@ -220,7 +220,7 @@ export default function TelemetryDashboard({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-4">
         {/* Visual 1: Artificial Horizon / Attitude Gyro */}
         <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 flex flex-col items-center justify-between">
           <div className="w-full flex items-center justify-between border-b border-slate-800/80 pb-2 mb-3">

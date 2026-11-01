@@ -206,7 +206,7 @@ export default function HardwareControlsTab() {
         </p>
 
         {/* Sliders Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3">
+        <div className="grid grid-cols-1 @md:grid-cols-2 gap-4 pt-3">
           {/* Slider 1: Reset Hold Duration */}
           <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs">
@@ -295,7 +295,7 @@ export default function HardwareControlsTab() {
       </div>
 
       {/* 2. Manual DTR / RTS Toggles & Live UART Pin Status */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 @md:grid-cols-2 gap-4">
         {/* Output Controls */}
         <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl flex flex-col gap-3">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
@@ -439,7 +439,7 @@ export default function HardwareControlsTab() {
         </p>
 
         {/* Configuration Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
+        <div className="grid grid-cols-1 @sm:grid-cols-3 gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
           {/* Character selection */}
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-bold text-slate-500">INTERRUPT KEY:</label>

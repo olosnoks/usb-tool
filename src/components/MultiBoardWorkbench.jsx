@@ -119,7 +119,7 @@ export default function MultiBoardWorkbench({
         <div className="flex flex-wrap items-center gap-1.5">
           <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider pr-1.5 border-r border-slate-800 flex items-center gap-1">
             <Cpu className="w-3.5 h-3.5 text-cyber-cyan" />
-            <span className="hidden sm:inline">BOARDS:</span>
+            <span className="hidden @sm:inline">BOARDS:</span>
           </div>
 
           {boards.map((board, idx) => {
@@ -187,7 +187,7 @@ export default function MultiBoardWorkbench({
               }`}
             >
               <Columns2 className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">TILED</span>
+              <span className="hidden @md:inline">TILED</span>
             </button>
 
             <button
@@ -198,7 +198,7 @@ export default function MultiBoardWorkbench({
               }`}
             >
               <Move className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">MOVABLE</span>
+              <span className="hidden @md:inline">MOVABLE</span>
             </button>
 
             <button
@@ -209,7 +209,7 @@ export default function MultiBoardWorkbench({
               }`}
             >
               <Layers className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">TABS</span>
+              <span className="hidden @md:inline">TABS</span>
             </button>
           </div>
 
@@ -223,7 +223,7 @@ export default function MultiBoardWorkbench({
             }`}
           >
             <Binary className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">HEX GRID</span>
+            <span className="hidden @sm:inline">HEX GRID</span>
           </button>
         </div>
       </div>
@@ -264,10 +264,10 @@ export default function MultiBoardWorkbench({
         {layoutMode === 'tiled' && (
           <div className={`grid gap-3 ${
             visibleBoards.length === 1 
-              ? (showHexInspection ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1')
+              ? (showHexInspection ? 'grid-cols-1 @lg:grid-cols-2' : 'grid-cols-1')
               : visibleBoards.length === 2 
-                ? (showHexInspection ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2')
-                : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'
+                ? (showHexInspection ? 'grid-cols-1 @lg:grid-cols-3' : 'grid-cols-1 @lg:grid-cols-2')
+                : 'grid-cols-1 @md:grid-cols-2 @xl:grid-cols-3'
           } min-h-[460px]`}>
             {visibleBoards.map((board, idx) => {
               const colorTheme = BOARD_COLORS[idx % BOARD_COLORS.length];
@@ -487,7 +487,7 @@ export default function MultiBoardWorkbench({
 
         {/* LAYOUT MODE 3: TABBED FOCUS */}
         {layoutMode === 'tabs' && activeBoard && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-[460px]">
+          <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3 h-[460px]">
             <div className={`flex flex-col h-full rounded-xl border ${BOARD_COLORS[0].border} ${BOARD_COLORS[0].glow} overflow-hidden`}>
               <StreamConsole
                 entries={activeBoard.entries}

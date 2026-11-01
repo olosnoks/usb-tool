@@ -101,7 +101,7 @@ export default function CyberChefCharts({ data, blockSize = 256 }) {
   return (
     <div className="space-y-4">
       {/* Analytics Summary Header Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+      <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2 text-xs">
         <div className="bg-[#12141a] border border-[#282d3a] rounded-xl p-2.5">
           <span className="text-[10px] text-slate-500 uppercase block font-mono">Mean Shannon Entropy</span>
           <div className="flex items-center gap-2 mt-0.5">

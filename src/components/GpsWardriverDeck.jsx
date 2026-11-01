@@ -936,9 +936,9 @@ export default function GpsWardriverDeck({
       )}
 
       {/* Top Grid: Live GPS Telemetry Dashboard & Radar Canvas */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 @md:grid-cols-3 gap-3">
         {/* GPS Sensor Meters */}
-        <div className="md:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+        <div className="@md:col-span-2 grid grid-cols-2 @sm:grid-cols-3 gap-2.5">
           {/* Coordinates Card */}
           <div className="col-span-2 bg-[#030712] border border-slate-800 rounded-lg p-3 flex flex-col justify-between">
             <div className="flex items-center justify-between">
@@ -955,7 +955,7 @@ export default function GpsWardriverDeck({
               </button>
             </div>
 
-            <div className="my-1.5 font-bold text-sm sm:text-base text-slate-100 flex items-center gap-2">
+            <div className="my-1.5 font-bold text-sm @sm:text-base text-slate-100 flex items-center gap-2">
               <span className="text-cyber-emerald">{gpsData.lat ? gpsData.lat.toFixed(6) : '37.774929'}° N</span>
               <span className="text-slate-600">/</span>
               <span className="text-cyber-cyan">{gpsData.lon ? gpsData.lon.toFixed(6) : '-122.419416'}° W</span>

@@ -539,8 +539,8 @@ export default function ToolGuide({ toolId }) {
                 <span>HOW TO USE:</span>
                 <span className="text-cyan-400 font-bold">{guide.title.toUpperCase()}</span>
               </span>
-              <span className="text-slate-600 hidden sm:inline">•</span>
-              <span className="text-[11px] text-slate-400 truncate hidden md:inline">
+              <span className="text-slate-600 hidden @sm:inline">•</span>
+              <span className="text-[11px] text-slate-400 truncate hidden @md:inline">
                 {guide.shortDesc}
               </span>
             </div>
@@ -560,7 +560,7 @@ export default function ToolGuide({ toolId }) {
 
         {/* Expanded Guide Content */}
         {isOpen && (
-          <div className="p-3.5 sm:p-4 border-t border-slate-900 bg-[#020510] grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+          <div className="p-3.5 @sm:p-4 border-t border-slate-900 bg-[#020510] grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-3.5">
             {/* Column 1: Step-by-Step Instructions */}
             <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-850 flex flex-col gap-2">
               <div className="flex items-center gap-1.5 text-cyan-400 font-bold text-xs pb-1 border-b border-slate-850">
@@ -592,7 +592,7 @@ export default function ToolGuide({ toolId }) {
             </div>
 
             {/* Column 3: Quick Summary & Keybinds */}
-            <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-850 flex flex-col justify-between gap-2.5 md:col-span-2 lg:col-span-1">
+            <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-850 flex flex-col justify-between gap-2.5 @md:col-span-2 @lg:col-span-1">
               <div>
                 <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-xs pb-1 border-b border-slate-850">
                   <Info className="w-3.5 h-3.5" />

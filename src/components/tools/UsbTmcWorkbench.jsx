@@ -414,7 +414,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
                 </button>
               </div>
               {lstats && (
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                <div className="grid grid-cols-2 @sm:grid-cols-5 gap-2">
                   {[['NOW', lstats.last], ['MIN', lstats.min], ['MAX', lstats.max], ['MEAN', lstats.avg], ['STD DEV', lstats.std]].map(([k, v]) => (
                     <div key={k} className="bg-slate-950 border border-slate-800 rounded p-2 text-center">
                       <div className="text-[10px] text-slate-500 font-bold">{k}</div>

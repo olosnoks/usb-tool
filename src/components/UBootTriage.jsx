@@ -255,7 +255,7 @@ export default function UBootTriage({
       </div>
 
       {/* 1-Click Exploit Buttons */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3">
         {/* Root Bypass */}
         <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-col justify-between gap-2">
           <div>
@@ -307,7 +307,7 @@ export default function UBootTriage({
           <span className="text-[10px] text-slate-500">Extract firmware directly over UART</span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 @sm:grid-cols-3 gap-2">
           <div>
             <label className="text-[10px] text-slate-400 block mb-1">Start Address (Hex)</label>
             <input

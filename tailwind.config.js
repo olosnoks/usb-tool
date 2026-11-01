@@ -1,4 +1,5 @@
 import colors from 'tailwindcss/colors';
+import containerQueries from '@tailwindcss/container-queries';
 
 // App-wide themes (src/utils/appThemes.js) swap the palette by setting CSS
 // variables on <html>; every shade of these hues reads its variable with
@@ -41,6 +42,10 @@ export default {
           violet: 'rgb(var(--tw-violet-400, 167 139 250) / <alpha-value>)',  // Violet-400 debug
         }
       },
+      // Container-query breakpoints with the same widths as the viewport ones, so
+      // `@md:` inside a tool window means "this window is at least 768px wide".
+      // Tools live in windows, so viewport breakpoints no longer describe them.
+      containers: { sm: '640px', md: '768px', lg: '1024px', xl: '1280px', '2xl': '1536px' },
       fontFamily: {
         mono: ['"JetBrains Mono"', '"Fira Code"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
         display: ['"Rajdhani"', '"Orbitron"', 'sans-serif'],
@@ -63,5 +68,5 @@ export default {
       }
     },
   },
-  plugins: [],
+  plugins: [containerQueries],
 }

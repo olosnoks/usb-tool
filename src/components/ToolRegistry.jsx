@@ -51,10 +51,21 @@ const BleExplorer = React.lazy(() => import('./tools/BleExplorer'));
 
 const ALL_ITEMS = SIDEBAR_SECTIONS.flatMap((s) => s.items || []);
 
+/**
+ * The width (CSS px) at which a tool's layout is comfortable. Fit-to-width
+ * scales the tool down so this width fits the window.
+ */
+export const DEFAULT_NATURAL_WIDTH = 1100;
+export const TOOL_NATURAL_WIDTH = {
+  mayhem: 1180, 'alfa-wifi': 1280, 'warhog-piglet': 1200, 'logic-analyzer': 1200, 'packet-analyzer': 1200,
+  terminal: 900, flasher: 1000, hardware: 900, setup: 900, 'session-log': 900
+};
+
 /** Title, icon and accent for a tool id (aliases resolve to their group's entry). */
 export function toolMeta(toolId) {
   const item = ALL_ITEMS.find((i) => i.id === toolId) || ALL_ITEMS.find((i) => i.id === windowKeyFor(toolId));
-  return { title: item?.name || toolId, icon: item?.icon || null, accent: item?.accent || 'cyan', id: toolId };
+  const key = windowKeyFor(toolId);
+  return { title: item?.name || toolId, icon: item?.icon || null, accent: item?.accent || 'cyan', id: toolId, naturalWidth: TOOL_NATURAL_WIDTH[key] || DEFAULT_NATURAL_WIDTH };
 }
 
 /** Every id renderTool knows, including workbench-tab aliases. */

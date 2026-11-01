@@ -11,7 +11,7 @@ export default function RoamingTab({
   return (
     <div className="p-4 space-y-4">
       {/* Top Controls & KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3">
         <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl">
           <div className="text-[10px] text-slate-500 uppercase font-semibold">Total Roam Events</div>
           <div className="text-xl font-bold text-cyan-300 font-mono mt-0.5">

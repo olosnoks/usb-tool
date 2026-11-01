@@ -425,7 +425,7 @@ export default function BleExplorer() {
           )}
         </div>
         {device && (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+          <div className="grid grid-cols-2 @sm:grid-cols-5 gap-2 text-xs">
             <Field label="Name" value={device.name || '(no name)'} />
             <Field label="Device ID" value={device.id} mono />
             <Field label="Services" value={tree.length} />

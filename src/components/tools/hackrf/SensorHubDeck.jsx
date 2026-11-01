@@ -146,7 +146,7 @@ export default function SensorHubDeck({ centerFreq, onTuneFreq }) {
           {filteredPackets.map(pkt => (
             <div
               key={pkt.id}
-              className="p-2.5 rounded-lg bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-purple-500/30 transition flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs"
+              className="p-2.5 rounded-lg bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-purple-500/30 transition flex flex-col @md:flex-row @md:items-center justify-between gap-2 text-xs"
             >
               {/* Column 1: Time & RSSI */}
               <div className="flex items-center gap-2 w-32 flex-shrink-0">

@@ -158,7 +158,7 @@ export default function TopologyView({
   // If environment too dense (>50 nodes), show warning fallback
   if (isDense) {
     return (
-      <div className="p-8 sm:p-12 text-center space-y-4">
+      <div className="p-8 @sm:p-12 text-center space-y-4">
         <div className="inline-flex p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
           <AlertTriangle className="w-10 h-10 animate-pulse" />
         </div>

@@ -87,7 +87,7 @@ export default function TerminalTab() {
           <TerminalIcon className="w-4 h-4 text-cyan-400" />
           <span className="font-bold text-slate-100">DIAGNOSTIC TERMINAL WORKSPACE</span>
           <span className="text-[10px] text-slate-500">|</span>
-          <span className="text-slate-400 text-[11px] hidden sm:inline">
+          <span className="text-slate-400 text-[11px] hidden @sm:inline">
             Active: <strong className="text-amber-400">{baudRate} bps</strong>
           </span>
         </div>
@@ -134,10 +134,10 @@ export default function TerminalTab() {
 
       {/* Main Workspace Grid */}
       <div className={`grid gap-3 transition-all ${
-        activeSidePanel !== 'none' ? 'grid-cols-1 lg:grid-cols-12' : 'grid-cols-1'
+        activeSidePanel !== 'none' ? 'grid-cols-1 @lg:grid-cols-12' : 'grid-cols-1'
       }`}>
         {/* Serial Log Terminal */}
-        <div className={activeSidePanel !== 'none' ? 'lg:col-span-7 xl:col-span-8' : 'w-full'}>
+        <div className={activeSidePanel !== 'none' ? '@lg:col-span-7 @xl:col-span-8' : 'w-full'}>
           <StreamConsole
             entries={entries}
             onSend={(text, lineEnding) => sendString(text, lineEnding)}
@@ -148,7 +148,7 @@ export default function TerminalTab() {
 
         {/* Secondary Side Panel */}
         {activeSidePanel !== 'none' && (
-          <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-3">
+          <div className="@lg:col-span-5 @xl:col-span-4 flex flex-col gap-3">
             {/* Hex Stream Viewer */}
             {activeSidePanel === 'hex' && (
               <div className="flex flex-col gap-2">

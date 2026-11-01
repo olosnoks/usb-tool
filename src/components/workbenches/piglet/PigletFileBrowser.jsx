@@ -143,7 +143,7 @@ function CsvCards({ data }) {
       : <CsvCard val={t0.slice(5, 10) + ' → ' + t1.slice(5, 10)} label={'dates seen (' + t0.slice(0, 4) + ')'} />;
   }
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2">
+    <div className="grid grid-cols-2 @sm:grid-cols-4 @lg:grid-cols-5 gap-2">
       <CsvCard val={rows.length.toLocaleString()} label="networks logged" />
       <CsvCard val={wifi.length.toLocaleString()} label="Wi-Fi" />
       <CsvCard val={ble.toLocaleString()} label="BLE" />
@@ -738,7 +738,7 @@ export default function PigletFileBrowser({ client, connected, busy, setBusy, se
       {/* Status bar */}
       <div className="px-3 py-1.5 border-t border-slate-800 bg-slate-900 text-[11px] text-slate-400 flex justify-between gap-2">
         <span>{statusLine}</span>
-        <span className="hidden sm:inline text-slate-600">Double-click to open · Ctrl/Shift to multi-select · Del to delete</span>
+        <span className="hidden @sm:inline text-slate-600">Double-click to open · Ctrl/Shift to multi-select · Del to delete</span>
       </div>
 
       {preview && <PreviewModal preview={preview} onClose={() => { setPreview(null); listRef.current && listRef.current.focus(); }} />}

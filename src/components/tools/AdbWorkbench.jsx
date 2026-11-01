@@ -379,7 +379,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
           {tab === 'device' && (
             <div className="space-y-3">
               {props && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-3 gap-2">
                   {deviceSummary(props).map(([k, v]) => (
                     <div key={k} className="bg-slate-950 border border-slate-800 rounded p-2">
                       <div className="text-[10px] text-slate-500 font-bold uppercase">{k}</div>

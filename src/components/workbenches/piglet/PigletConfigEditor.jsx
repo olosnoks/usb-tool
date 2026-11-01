@@ -136,7 +136,7 @@ export default function PigletConfigEditor({ client, connected, busy, setBusy, s
       )}
 
       {loaded && valid && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2.5">
+        <div className="grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-3 gap-x-4 gap-y-2.5">
           {CFG_FIELDS.map((f) => {
             const cur = cfgReadKey(raw, f.k);
             if (f.type === 'bool') {

@@ -392,7 +392,7 @@ export default function SerialPlotter({
       </div>
 
       {/* Live Channel Telemetry Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+      <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2 pt-1">
         {channelStats.length === 0 ? (
           <div className="col-span-full text-center text-slate-600 py-2 text-[11px]">
             No active numeric channels detected. Stream numbers like <code>25.4, 102.1</code> over serial to plot live waveforms.

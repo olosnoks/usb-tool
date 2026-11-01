@@ -289,7 +289,7 @@ export default function JtagWorkbench() {
 
       {/* Detected JTAG TAP Devices */}
       {tapDevices.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
           {tapDevices.map((dev) => (
             <div key={dev.index} className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 shadow-md">
               <div className="flex items-center justify-between pb-2 border-b border-slate-850">
@@ -301,7 +301,7 @@ export default function JtagWorkbench() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 text-[11px]">
+              <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2 pt-2 text-[11px]">
                 <div>
                   <span className="text-[9px] text-slate-500 uppercase font-bold block">Silicon Family</span>
                   <span className="text-slate-300 font-semibold">{dev.family}</span>
@@ -325,7 +325,7 @@ export default function JtagWorkbench() {
       )}
 
       {/* SVF Player & Boundary Scan Pin Viewer */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 @lg:grid-cols-2 gap-4">
         {/* Left: SVF Bitstream Player */}
         <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
@@ -408,7 +408,7 @@ export default function JtagWorkbench() {
             Non-intrusively sample physical I/O pads across the BGA/QFP package without halting firmware:
           </p>
 
-          <div className="grid grid-cols-6 sm:grid-cols-8 gap-1.5 max-h-56 overflow-y-auto p-1 scrollbar-thin scrollbar-thumb-slate-800">
+          <div className="grid grid-cols-6 @sm:grid-cols-8 gap-1.5 max-h-56 overflow-y-auto p-1 scrollbar-thin scrollbar-thumb-slate-800">
             {client.pins.slice(0, 48).map((pin) => {
               let bg = 'bg-slate-900 text-slate-400 border-slate-800';
               if (pin.state === 'HIGH') bg = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
@@ -513,7 +513,7 @@ export default function JtagWorkbench() {
               </div>
             )}
             {bsCells && !bsdl && (
-              <div className="grid grid-cols-8 sm:grid-cols-12 gap-1 max-h-56 overflow-y-auto">
+              <div className="grid grid-cols-8 @sm:grid-cols-12 gap-1 max-h-56 overflow-y-auto">
                 {bsCells.map((v, i) => (
                   <div key={i} className={`p-0.5 rounded text-center border text-[9px] font-mono ${v ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
                     <span className="block font-bold">{i}</span>{v}

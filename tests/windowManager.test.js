@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize, moveWindow, resizeWindow,
   tileWindows, cascadeWindows, topWindowId, focusedWindow, serializeState, deserializeState, windowKeyFor, clampToViewport,
-  MIN_W, MIN_H, TITLE_BAR_H, KEEP_VISIBLE_PX
+  MIN_W, MIN_H, TITLE_BAR_H, KEEP_VISIBLE_PX, setZoom, zoomStep, toggleFit, fitZoomFor, ZOOM_MIN, ZOOM_MAX, ZOOM_STEPS
 } from '../src/utils/windowManager';
 
 const VP = { width: 1400, height: 900 };
@@ -138,6 +138,38 @@ describe('workspace window manager', () => {
     expect(deserializeState('not json', VP)).toBe(null);
     expect(deserializeState('{"v":2}', VP)).toBe(null);
     expect(deserializeState('{"v":1,"windows":[{"id":5}]}', VP).windows).toEqual([]);
+  });
+
+  it("zooms a window's content in preset steps, clamped, and fit-to-width scales the natural width into the body", () => {
+    let s = open(createInitialState(), 'a');
+    expect(s.windows[0].zoom).toBe(1); expect(s.windows[0].fit).toBe(false);
+    s = zoomStep(s, 'a', -1);
+    expect(s.windows[0].zoom).toBe(0.9);
+    s = zoomStep(s, 'a', -1); s = zoomStep(s, 'a', -1);
+    expect(s.windows[0].zoom).toBe(0.7);
+    s = zoomStep(s, 'a', 1);
+    expect(s.windows[0].zoom).toBe(0.8);
+    for (let i = 0; i < 20; i++) s = zoomStep(s, 'a', 1);
+    expect(s.windows[0].zoom).toBe(ZOOM_MAX);
+    for (let i = 0; i < 20; i++) s = zoomStep(s, 'a', -1);
+    expect(s.windows[0].zoom).toBe(ZOOM_MIN);
+    s = setZoom(s, 'a', 3); expect(s.windows[0].zoom).toBe(ZOOM_MAX);
+    s = setZoom(s, 'a', 0.853); expect(s.windows[0].zoom).toBe(0.85);
+    // stepping from the live (fitted) zoom lands on the neighbouring preset
+    s = zoomStep(s, 'a', 1, 0.82); expect(s.windows[0].zoom).toBe(0.9);
+    s = toggleFit(s, 'a'); expect(s.windows[0].fit).toBe(true);
+    s = setZoom(s, 'a', 1); expect(s.windows[0].fit).toBe(false);   // manual zoom leaves fit mode
+    expect(ZOOM_STEPS).toContain(1);
+    expect(fitZoomFor(1180, 1180)).toBe(1);
+    expect(fitZoomFor(590, 1180)).toBe(0.5);
+    expect(fitZoomFor(300, 1180)).toBe(ZOOM_MIN);   // never below the minimum
+    expect(fitZoomFor(2000, 1180)).toBe(1);         // fit never enlarges
+    expect(fitZoomFor(0, 1180)).toBe(1);
+    // zoom and fit survive storage
+    s = toggleFit(setZoom(s, 'a', 0.7), 'a');
+    const back = deserializeState(serializeState(s), VP);
+    expect(back.windows[0].zoom).toBe(0.7); expect(back.windows[0].fit).toBe(true);
+    expect(deserializeState('{"v":1,"windows":[{"id":"x","toolId":"x","zoom":9}]}', VP).windows[0].zoom).toBe(ZOOM_MAX);
   });
 
   it('a saved layout from a bigger screen is pulled back onto a smaller one', () => {

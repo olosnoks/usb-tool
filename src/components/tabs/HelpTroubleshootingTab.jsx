@@ -111,10 +111,10 @@ export default function HelpTroubleshootingTab() {
               <Terminal className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-xs sm:text-sm font-bold text-slate-100 flex items-center gap-2">
+              <h2 className="text-xs @sm:text-sm font-bold text-slate-100 flex items-center gap-2">
                 <span>HOW TO CONFIGURE LINUX USB PERMISSIONS & UDEV RULES</span>
               </h2>
-              <div className="text-[11px] text-slate-500 hidden sm:block">
+              <div className="text-[11px] text-slate-500 hidden @sm:block">
                 Fix "Access Denied" on /dev/ttyUSB* & /dev/ttyACM* ports without needing root
               </div>
             </div>
@@ -138,7 +138,7 @@ export default function HelpTroubleshootingTab() {
               On Linux (Ubuntu, Debian, Arch, Fedora), non-root users are restricted from accessing <code className="text-purple-300 bg-slate-900 px-1 py-0.5 rounded">/dev/ttyUSB*</code> and <code className="text-purple-300 bg-slate-900 px-1 py-0.5 rounded">/dev/ttyACM*</code> nodes by default. Run either of these commands in your terminal:
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+            <div className="grid grid-cols-1 @md:grid-cols-2 gap-4 pt-1">
               {/* Method A: Dialout group */}
               <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between gap-2.5">
                 <div>
@@ -211,10 +211,10 @@ export default function HelpTroubleshootingTab() {
               <Cpu className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-xs sm:text-sm font-bold text-slate-100 flex items-center gap-2">
+              <h2 className="text-xs @sm:text-sm font-bold text-slate-100 flex items-center gap-2">
                 <span>HOW TO IDENTIFY & INSTALL USB-TO-UART BRIDGE DRIVERS</span>
               </h2>
-              <div className="text-[11px] text-slate-500 hidden sm:block">
+              <div className="text-[11px] text-slate-500 hidden @sm:block">
                 CH340/CH341, CP2102, FTDI FT232, PL2303, ESP32-S3 CDC, and RP2040 Pico
               </div>
             </div>
@@ -234,7 +234,7 @@ export default function HelpTroubleshootingTab() {
 
         {openSections.drivers && (
           <div className="p-4 border-t border-slate-900 bg-[#020510]">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-3">
               {COMMON_DRIVERS.map((driver) => (
                 <div
                   key={driver.name}
@@ -290,10 +290,10 @@ export default function HelpTroubleshootingTab() {
               <AlertTriangle className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-xs sm:text-sm font-bold text-slate-100 flex items-center gap-2">
+              <h2 className="text-xs @sm:text-sm font-bold text-slate-100 flex items-center gap-2">
                 <span>HOW TO TROUBLESHOOT SERIAL CONNECTIVITY & FLASHER ERRORS</span>
               </h2>
-              <div className="text-[11px] text-slate-500 hidden sm:block">
+              <div className="text-[11px] text-slate-500 hidden @sm:block">
                 Solutions for port locks, packet header timeouts, baud mismatch, and missing capacitors
               </div>
             </div>
@@ -313,7 +313,7 @@ export default function HelpTroubleshootingTab() {
 
         {openSections.troubleshooting && (
           <div className="p-4 border-t border-slate-900 bg-[#020510]">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div className="grid grid-cols-1 @md:grid-cols-2 gap-3 text-xs">
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
                 <div className="font-bold text-amber-300 flex items-center gap-1.5 pb-1">
                   <span>⚠️ "Failed to open serial port / Access Denied"</span>

@@ -199,7 +199,7 @@ function SortableRecipeItem({
           </span>
 
           {op?.module && (
-            <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#14161d] text-slate-400 border border-[#2b303c] hidden sm:inline">
+            <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#14161d] text-slate-400 border border-[#2b303c] hidden @sm:inline">
               {op.module}
             </span>
           )}
@@ -1141,7 +1141,7 @@ export default function CyberChefWorkbench() {
       `}</style>
 
       {/* Top Header Card */}
-      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-3 shadow-xl">
+      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col @md:flex-row items-center justify-between gap-3 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
             <Sparkles className="w-5 h-5" />
@@ -1174,7 +1174,7 @@ export default function CyberChefWorkbench() {
               type="button"
             >
               <Moon className="w-3 h-3 text-cyan-400" />
-              <span className="hidden sm:inline">Cyber</span>
+              <span className="hidden @sm:inline">Cyber</span>
             </button>
             <button
               onClick={() => handleThemeChange('matrix')}
@@ -1187,7 +1187,7 @@ export default function CyberChefWorkbench() {
               type="button"
             >
               <Terminal className="w-3 h-3 text-emerald-400" />
-              <span className="hidden sm:inline">Matrix</span>
+              <span className="hidden @sm:inline">Matrix</span>
             </button>
             <button
               onClick={() => handleThemeChange('light')}
@@ -1200,7 +1200,7 @@ export default function CyberChefWorkbench() {
               type="button"
             >
               <Sun className="w-3 h-3 text-amber-400" />
-              <span className="hidden sm:inline">Light</span>
+              <span className="hidden @sm:inline">Light</span>
             </button>
           </div>
         </div>
@@ -1279,10 +1279,10 @@ export default function CyberChefWorkbench() {
       )}
 
       {/* Main 3-Column Layout: Operations Library | Recipe Pipeline | Input & Output */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <div className="grid grid-cols-1 @lg:grid-cols-12 gap-4">
         {/* Column 1: Operations Library & Time Machine History (3 cols) */}
         {!isPresentationMode && (
-          <div className="lg:col-span-3 bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col space-y-3 max-h-[750px] overflow-hidden">
+          <div className="@lg:col-span-3 bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col space-y-3 max-h-[750px] overflow-hidden">
 
           {/* Left Column Tabs: Operations vs History */}
           <div className="flex items-center gap-1 bg-[#14161f] p-1 rounded-xl border border-[#2b303c]">
@@ -1450,7 +1450,7 @@ export default function CyberChefWorkbench() {
 
         {/* Column 2: Recipe Pipeline (4 cols) */}
         {!isPresentationMode && (
-          <div className="lg:col-span-4 bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col space-y-3 max-h-[750px] overflow-hidden">
+          <div className="@lg:col-span-4 bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col space-y-3 max-h-[750px] overflow-hidden">
             <div className="flex items-center justify-between border-b border-[#232733] pb-2">
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5 text-cyan-400" />
@@ -1569,13 +1569,13 @@ export default function CyberChefWorkbench() {
         )}
 
         {/* Column 3: Input & Output Areas */}
-        <div className={`${isPresentationMode ? 'lg:col-span-12' : 'lg:col-span-5'} flex flex-col space-y-4`}>
+        <div className={`${isPresentationMode ? '@lg:col-span-12' : '@lg:col-span-5'} flex flex-col space-y-4`}>
           {isPresentationMode && (
             <div className="flex items-center justify-between p-3 bg-purple-950/30 border border-purple-500/40 rounded-2xl text-xs text-purple-200 shadow-lg">
               <div className="flex items-center gap-2">
                 <Maximize2 className="w-4 h-4 text-purple-400" />
                 <span className="font-bold">PRESENTATION MODE</span>
-                <span className="text-purple-300/70 text-[11px] hidden sm:inline">— Sidebars hidden for focused payload analysis and clean screenshots.</span>
+                <span className="text-purple-300/70 text-[11px] hidden @sm:inline">— Sidebars hidden for focused payload analysis and clean screenshots.</span>
               </div>
               <button
                 onClick={() => setIsPresentationMode(false)}
@@ -1754,7 +1754,7 @@ export default function CyberChefWorkbench() {
               </div>
 
               {/* Format Switcher */}
-              <div className="flex items-center gap-1 bg-[#12141a] p-0.5 rounded-lg border border-[#2b303c] overflow-x-auto max-w-sm sm:max-w-md scrollbar-none">
+              <div className="flex items-center gap-1 bg-[#12141a] p-0.5 rounded-lg border border-[#2b303c] overflow-x-auto max-w-sm @sm:max-w-md scrollbar-none">
                 {[
                   { id: 'text', label: 'Text' },
                   { id: 'hex', label: 'Hex' },

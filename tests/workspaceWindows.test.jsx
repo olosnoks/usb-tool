@@ -6,7 +6,7 @@ import Desktop from '../src/components/layout/Desktop';
 import ToolWindow from '../src/components/layout/ToolWindow';
 import Sidebar from '../src/components/layout/Sidebar';
 import { toolMeta, renderTool, KNOWN_TOOL_IDS } from '../src/components/ToolRegistry';
-import { createInitialState, openWindow, minimizeWindow, toggleMaximize } from '../src/utils/windowManager';
+import { createInitialState, openWindow, minimizeWindow, toggleMaximize, setZoom, toggleFit } from '../src/utils/windowManager';
 
 const VP = { width: 1400, height: 900 };
 const noop = () => {};
@@ -18,7 +18,7 @@ describe('windowed workspace', () => {
     s = openWindow(s, 'terminal', toolMeta('terminal'), VP);
     s = minimizeWindow(s, 'terminal');
     const html = renderToString(
-      <Desktop state={s} viewport={VP} onViewport={noop} renderTool={(id) => <div data-tool={id}>{`tool:${id}`}</div>} iconFor={() => null}
+      <Desktop state={s} viewport={VP} onViewport={noop} renderTool={(id) => <div data-tool={id}>{`tool:${id}`}</div>} metaFor={() => ({ icon: null, naturalWidth: 1100 })}
         onFocus={noop} onMove={noop} onResize={noop} onMinimize={noop} onToggleMaximize={noop} onClose={noop} onTile={noop} onCascade={noop} onCloseAll={noop} />
     );
     expect(html).toContain('data-window="mayhem"');
@@ -34,7 +34,7 @@ describe('windowed workspace', () => {
 
   it('shows the empty-desktop hint and no taskbar when nothing is open', () => {
     const html = renderToString(
-      <Desktop state={createInitialState()} viewport={VP} onViewport={noop} renderTool={() => null} iconFor={() => null}
+      <Desktop state={createInitialState()} viewport={VP} onViewport={noop} renderTool={() => null} metaFor={() => ({ icon: null, naturalWidth: 1100 })}
         onFocus={noop} onMove={noop} onResize={noop} onMinimize={noop} onToggleMaximize={noop} onClose={noop} onTile={noop} onCascade={noop} onCloseAll={noop} />
     );
     expect(html).toContain('WORKSPACE EMPTY');
@@ -57,6 +57,25 @@ describe('windowed workspace', () => {
     html = renderToString(<ToolWindow win={win} focused forceMaximized><p>body</p></ToolWindow>);
     expect(html).toContain('width:100%');
     expect(html).not.toContain('title="Maximize"');
+  });
+
+  it('a window applies its content zoom with CSS zoom on a container-query wrapper, and shows the percentage', () => {
+    let s = openWindow(createInitialState(), 'terminal', toolMeta('terminal'), VP);
+    let html = renderToString(<ToolWindow win={s.windows[0]} focused><p>body</p></ToolWindow>);
+    expect(html).toContain('data-tool-zoom="100"');
+    expect(html).toContain('@container');
+    expect(html).not.toContain('style="zoom');
+    expect(html).toContain('>100%<');
+    s = setZoom(s, 'terminal', 0.75);
+    html = renderToString(<ToolWindow win={s.windows[0]} focused><p>body</p></ToolWindow>);
+    expect(html).toContain('style="zoom:0.75"');
+    expect(html).toContain('>75%<');
+    s = toggleFit(s, 'terminal');
+    html = renderToString(<ToolWindow win={s.windows[0]} focused naturalWidth={900}><p>body</p></ToolWindow>);
+    expect(html).toMatch(/>FIT \d+%</);
+    expect(toolMeta('mayhem').naturalWidth).toBe(1180);
+    expect(toolMeta('hex').naturalWidth).toBe(1200);        // alias -> packet lab
+    expect(toolMeta('fido2').naturalWidth).toBe(1100);      // default
   });
 
   it('the sidebar marks tools that already have a window open (aliases included)', () => {

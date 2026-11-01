@@ -221,7 +221,7 @@ export default function CyberChefCommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-24 bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-16 @sm:pt-24 bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-150"
       onClick={onClose}
     >
       <div
@@ -280,7 +280,7 @@ export default function CyberChefCommandPalette({
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-xs sm:text-sm truncate text-slate-100">
+                        <span className="font-medium text-xs @sm:text-sm truncate text-slate-100">
                           {item.name}
                         </span>
                         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-400 border border-slate-700/60 shrink-0">
@@ -302,7 +302,7 @@ export default function CyberChefCommandPalette({
                       </span>
                     )}
                     {isSelected && (
-                      <span className="text-[10px] font-mono text-cyan-400 hidden sm:inline">
+                      <span className="text-[10px] font-mono text-cyan-400 hidden @sm:inline">
                         ↵ Run
                       </span>
                     )}

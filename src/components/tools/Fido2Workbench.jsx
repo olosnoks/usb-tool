@@ -106,7 +106,7 @@ export default function Fido2Workbench() {
 
       {info && (
         <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3">
             <Field label="CTAPHID version" value={ctap?.protocolVersion} />
             <Field label="Device version" value={ctap?.deviceVersion} />
             <Field label="AAGUID" value={info.aaguid} />

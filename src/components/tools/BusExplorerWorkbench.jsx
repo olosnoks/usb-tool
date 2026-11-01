@@ -225,9 +225,9 @@ export default function BusExplorerWorkbench() {
       </div>
 
       {/* Main Grid: Visual I2C Address Matrix & Chip Information */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 @lg:grid-cols-3 gap-4">
         {/* Left: 16x8 I2C Hex Address Matrix */}
-        <div className="lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+        <div className="@lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <span className="font-bold text-slate-200 text-xs flex items-center gap-2">
               <Layers className="w-4 h-4 text-cyan-400" />
@@ -380,7 +380,7 @@ export default function BusExplorerWorkbench() {
           </button>
         </div>
 
-        <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+        <div className="grid grid-cols-4 @sm:grid-cols-8 gap-2">
           {inspectRegs.map(({ reg, val }) => (
             <div key={reg} className="bg-slate-950 p-2 rounded-lg border border-slate-800 text-center font-mono">
               <span className="text-[9px] text-slate-500 block">R_0x{reg.toString(16).padStart(2, '0').toUpperCase()}</span>

@@ -722,7 +722,7 @@ export default function ReceiverDeck({ driver, state }) {
           {peaks.length === 0 ? (
             <div className="text-slate-500 text-[11px] py-2">{sweepPass === 0 ? 'Waiting for the first pass…' : 'Nothing above the threshold. Lower it, or widen the span for a faster pass.'}</div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
+            <div className="grid grid-cols-1 @md:grid-cols-2 @xl:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
               {peaks.map((p) => (
                 <div key={p.id} className="p-1.5 rounded-lg bg-slate-900/60 border border-slate-800 hover:border-purple-500/30 flex items-center justify-between gap-2">
                   <span className="font-bold text-purple-300">{(p.freqHz / 1e6).toFixed(4)} MHz</span>

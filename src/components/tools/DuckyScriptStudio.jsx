@@ -215,7 +215,7 @@ export default function DuckyScriptStudio() {
   return (
     <div className="flex flex-col gap-4 font-mono">
       {/* Header Deck */}
-      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-3 shadow-xl">
+      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col @md:flex-row items-center justify-between gap-3 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
             <Keyboard className="w-5 h-5" />
@@ -284,13 +284,13 @@ export default function DuckyScriptStudio() {
       )}
 
       {/* Main Grid: Presets & Editor | Simulator & Target Code */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <div className="grid grid-cols-1 @lg:grid-cols-12 gap-4">
         {/* Left: Presets & Editor (7 cols) */}
-        <div className="lg:col-span-7 space-y-4">
+        <div className="@lg:col-span-7 space-y-4">
           {/* Quick Presets */}
           <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 space-y-2">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">QUICK PRESET SCRIPTS</span>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 @md:grid-cols-2 gap-2">
               {DUCKY_PRESETS.map((p, idx) => (
                 <button
                   key={idx}
@@ -343,7 +343,7 @@ export default function DuckyScriptStudio() {
         </div>
 
         {/* Right: Simulation Monitor & Exported Output (5 cols) */}
-        <div className="lg:col-span-5 space-y-4">
+        <div className="@lg:col-span-5 space-y-4">
           {/* Keystroke Simulator Monitor */}
           <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 space-y-3">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">

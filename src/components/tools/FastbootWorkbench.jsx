@@ -320,7 +320,7 @@ export default function FastbootWorkbench() {
               {unlocked ? 'BOOTLOADER UNLOCKED' : 'BOOTLOADER LOCKED'}
             </span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3">
             <Field label="Product" value={summary.product} />
             <Field label="Bootloader" value={summary.bootloaderVersion} />
             <Field label="Serial" value={summary.serialno} />
@@ -490,7 +490,7 @@ export default function FastbootWorkbench() {
       {vars && (
         <details className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
           <summary className="font-bold text-slate-200 cursor-pointer flex items-center gap-2"><Info className="w-4 h-4 text-slate-400" /> ALL VARIABLES ({Object.keys(vars).length})</summary>
-          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-0.5 max-h-72 overflow-y-auto text-[11px]">
+          <div className="mt-2 grid grid-cols-1 @sm:grid-cols-2 gap-x-6 gap-y-0.5 max-h-72 overflow-y-auto text-[11px]">
             {Object.entries(vars).map(([k, v]) => (
               <div key={k} className="flex justify-between gap-2 border-b border-slate-900 py-0.5">
                 <span className="text-slate-500 truncate">{k}</span><span className="text-slate-300 truncate">{v}</span>

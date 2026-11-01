@@ -420,7 +420,7 @@ export default function UsbReconDeck({
           </div>
 
           {deviceInfo ? (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 @lg:grid-cols-3 gap-4">
               {/* Left Column: Silicon Fingerprint & Descriptors */}
               <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -467,7 +467,7 @@ export default function UsbReconDeck({
               </div>
 
               {/* Center & Right Column: USB Interfaces & Endpoint Interrogator */}
-              <div className="lg:col-span-2 bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-4">
+              <div className="@lg:col-span-2 bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                   <span className="font-bold text-slate-200 flex items-center gap-1.5">
                     <Layers className="w-4 h-4 text-cyan-400" />
@@ -483,7 +483,7 @@ export default function UsbReconDeck({
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">
                     Enumerated Interfaces:
                   </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 @sm:grid-cols-2 gap-2">
                     {interfaces.map(iface => {
                       const isClaimed = !!claimedInterfaces[iface.interfaceNumber];
                       const isSelected = selectedInterface === iface.interfaceNumber;
@@ -620,7 +620,7 @@ export default function UsbReconDeck({
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-3">
             {/* Forcer 1: 1200-Baud CDC Magic Knock */}
             <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-3">
               <div className="space-y-1.5">
@@ -779,7 +779,7 @@ export default function UsbReconDeck({
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 @md:grid-cols-2 gap-4">
             {/* Step 1: Power & Battery Safety */}
             <div className={`border rounded-xl transition-all overflow-hidden ${
               openGuideSteps.step1 ? 'bg-slate-900 border-rose-500/50' : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'

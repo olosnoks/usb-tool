@@ -388,7 +388,7 @@ export default function FlasherTab() {
       ) : (
         <>
           {/* Presets Header Card */}
-          <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 sm:p-4 shadow-xl">
+          <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 @sm:p-4 shadow-xl">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
               <div>
                 <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
@@ -466,7 +466,7 @@ export default function FlasherTab() {
       </div>
 
       {/* Multi-Binary Upload Slots (1 to 4) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
         {slots.map((slot, index) => {
           const numOffset = parseHexOffset(slot.offset);
           const isValidOffset = numOffset !== null;
@@ -492,7 +492,7 @@ export default function FlasherTab() {
                     type="text"
                     value={slot.label}
                     onChange={(e) => updateSlot(slot.id, { label: e.target.value })}
-                    className="bg-transparent border-b border-transparent hover:border-slate-700 focus:border-cyan-500 font-bold text-xs text-slate-200 outline-none w-36 sm:w-44"
+                    className="bg-transparent border-b border-transparent hover:border-slate-700 focus:border-cyan-500 font-bold text-xs text-slate-200 outline-none w-36 @sm:w-44"
                   />
                 </div>
 
@@ -628,7 +628,7 @@ export default function FlasherTab() {
 
         {/* Pulse Timing Sliders for Flasher */}
         {flasherMode === 'esp-rom' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-950/60 p-2.5 rounded-lg border border-slate-850 text-xs">
+          <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3 bg-slate-950/60 p-2.5 rounded-lg border border-slate-850 text-xs">
             <div>
               <div className="flex items-center justify-between text-[11px] pb-1">
                 <span className="text-slate-400 font-bold">Reset Pulse Duration:</span>

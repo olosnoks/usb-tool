@@ -233,7 +233,7 @@ export default function MassStorageWorkbench() {
       </div>
 
       {inquiry && capacity && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl grid grid-cols-2 @sm:grid-cols-4 gap-3">
           <Field label="Vendor" value={inquiry.vendor} />
           <Field label="Product" value={inquiry.product} />
           <Field label="Revision" value={inquiry.revision} />

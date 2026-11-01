@@ -490,22 +490,22 @@ export default function WarhogPigletWorkbench() {
   const statusTone = tkStatus.tone === 'ok' ? 'text-emerald-300' : tkStatus.tone === 'bad' ? 'text-rose-300' : 'text-slate-400';
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto p-2 sm:p-4 text-slate-200">
+    <div className="space-y-4 max-w-7xl mx-auto p-2 @sm:p-4 text-slate-200">
       {/* Header Banner */}
-      <div className="bg-[#10131a] border border-amber-500/30 rounded-xl p-4 sm:p-5 shadow-2xl relative overflow-hidden">
+      <div className="bg-[#10131a] border border-amber-500/30 rounded-xl p-4 @sm:p-5 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-40 bg-gradient-to-bl from-amber-500/10 to-transparent pointer-events-none" />
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex flex-col @md:flex-row items-start @md:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2.5">
               <span className="text-2xl">🐗</span>
-              <h1 className="text-xl sm:text-2xl font-black tracking-wider text-slate-100 uppercase">
+              <h1 className="text-xl @sm:text-2xl font-black tracking-wider text-slate-100 uppercase">
                 WARHOG &amp; PIGLET TOOLSUITE
               </h1>
               <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
                 WT Protocol v1
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
+            <p className="text-xs @sm:text-sm text-slate-400 max-w-2xl">
               The Piglet Toolkit from the WarHog web flasher: connect your <strong className="text-amber-400">Piglet</strong> over USB to browse its SD card, view WiGLE logs, and edit <code className="text-cyan-300">wardriver.cfg</code> through the firmware&apos;s <code className="text-amber-300">SerialTool</code> WT protocol.
             </p>
           </div>
@@ -693,8 +693,8 @@ export default function WarhogPigletWorkbench() {
 
       {/* TAB 4: SERIAL CONSOLE (same USB session as the toolkit) */}
       {activeTab === 'serial' && (
-        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5 space-y-4">
+          <div className="flex flex-col @sm:flex-row items-start @sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Terminal className="w-4 h-4 text-emerald-400" />
@@ -771,8 +771,8 @@ export default function WarhogPigletWorkbench() {
 
       {/* TAB 5: WEB FLASHER */}
       {activeTab === 'flasher' && (
-        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-5">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5 space-y-5">
+          <div className="flex flex-col @sm:flex-row items-start @sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <Flame className="w-4 h-4 text-amber-400" />
@@ -793,7 +793,7 @@ export default function WarhogPigletWorkbench() {
             </a>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-4 gap-3">
             {Object.entries(HARDWARE_PRESETS).map(([k, p]) => (
               <div
                 key={k}
@@ -860,7 +860,7 @@ export default function WarhogPigletWorkbench() {
 
       {/* TAB 6: HARDWARE PINOUTS */}
       {activeTab === 'pinouts' && (
-        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
+        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5 space-y-4">
           <div className="space-y-1 pb-3 border-b border-slate-800">
             <div className="flex items-center gap-2">
               <Cpu className="w-4 h-4 text-emerald-400" />
@@ -871,7 +871,7 @@ export default function WarhogPigletWorkbench() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-3">
             {HARDWARE_PINOUTS.map((h, i) => (
               <div key={i} className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
                 <div className="font-bold text-xs text-amber-300">{h.board}</div>

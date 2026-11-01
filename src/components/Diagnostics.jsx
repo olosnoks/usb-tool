@@ -389,7 +389,7 @@ export default function Diagnostics({
             Transmits high-frequency characters in a 20ms burst loop to catch bootloader autoboot countdowns (e.g. Das U-Boot, RedBoot, CFE, OpenWrt).
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 @sm:grid-cols-3 gap-3">
             {/* Character Selector */}
             <div>
               <label className="text-slate-400 block mb-1">Interrupt Key / Character</label>

@@ -140,7 +140,7 @@ export default function MacroDecks({
           </p>
 
           {/* REPL Control Keys */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 @sm:grid-cols-5 gap-2">
             <button
               onClick={() => sendControlCode(0x03, 'Ctrl+C (KeyboardInterrupt)')}
               disabled={!isConnected}
@@ -192,7 +192,7 @@ export default function MacroDecks({
             <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-bold">
               COMMON REPL DIAGNOSTIC ONE-LINERS
             </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 @sm:grid-cols-2 gap-2">
               <button
                 onClick={() => sendMacroCommand('import sys; print(sys.implementation)', '\r\n', 'System Implementation')}
                 disabled={!isConnected}
@@ -252,7 +252,7 @@ export default function MacroDecks({
             Standard Hayes AT Command set for ESP8266/ESP32 AT firmware, SIMCOM cellular modems, Quectel, HC-05 Bluetooth, etc.
           </p>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2">
             {[
               { cmd: 'AT', desc: 'Ping / Test OK' },
               { cmd: 'AT+GMR', desc: 'Firmware & SDK Version' },
@@ -284,7 +284,7 @@ export default function MacroDecks({
             <span>Quick-access macro triggers. Click the pencil icon to customize slots.</span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2">
             {customMacros.map((macro) => (
               <div 
                 key={macro.id}

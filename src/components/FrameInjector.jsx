@@ -191,9 +191,9 @@ export default function FrameInjector({
       </div>
 
       {/* Input & Checksum Algo Selection */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 @md:grid-cols-3 gap-3">
         {/* Hex Input */}
-        <div className="md:col-span-2 space-y-1">
+        <div className="@md:col-span-2 space-y-1">
           <label className="text-[10px] text-slate-400 uppercase tracking-wider block">
             Payload Bytes (Hex / \x / Comma)
           </label>

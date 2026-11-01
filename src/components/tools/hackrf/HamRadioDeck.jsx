@@ -274,7 +274,7 @@ export default function HamRadioDeck({ centerFreq, onTuneFreq }) {
       {/* Tab 2: Satellite Tracking & Doppler */}
       {activeHamTab === 'sat' && (
         <div className="space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
             {/* Sat Selector */}
             <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 space-y-2">
               <span className="text-slate-400 font-bold block mb-1">SELECT SATELLITE (SGP4 PROPAGATOR)</span>

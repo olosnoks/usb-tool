@@ -9,8 +9,9 @@ import ToolWindow from './ToolWindow';
 export const FORCE_MAXIMIZE_BELOW_PX = 768;
 
 export default function Desktop({
-  state, viewport, onViewport, renderTool, iconFor,
-  onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onTile, onCascade, onCloseAll
+  state, viewport, onViewport, renderTool, metaFor,
+  onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onTile, onCascade, onCloseAll,
+  onZoomStep, onToggleFit
 }) {
   const ref = useRef(null);
 
@@ -52,8 +53,10 @@ export default function Desktop({
         )}
         {windows.map((win) => (
           <ToolWindow
-            key={win.id} win={win} focused={state.focusedId === win.id} forceMaximized={forceMax} icon={iconFor?.(win.toolId)}
+            key={win.id} win={win} focused={state.focusedId === win.id} forceMaximized={forceMax}
+            icon={metaFor?.(win.toolId)?.icon} naturalWidth={metaFor?.(win.toolId)?.naturalWidth}
             onFocus={onFocus} onMove={onMove} onResize={onResize} onMinimize={onMinimize} onToggleMaximize={onToggleMaximize} onClose={onClose}
+            onZoomStep={onZoomStep} onToggleFit={onToggleFit}
           >
             <React.Suspense fallback={
               <div className="py-20 flex flex-col items-center justify-center text-slate-400 font-mono text-xs space-y-3">
@@ -71,7 +74,7 @@ export default function Desktop({
       {state.windows.length > 0 && (
         <div data-testid="taskbar" className="shrink-0 h-9 border-t border-slate-800 bg-slate-950/90 backdrop-blur flex items-center gap-1 px-2 font-mono text-[11px] overflow-x-auto">
           {[...state.windows].sort((a, b) => (a.openedAt || 0) - (b.openedAt || 0)).map((w) => {
-            const Icon = iconFor?.(w.toolId);
+            const Icon = metaFor?.(w.toolId)?.icon;
             const active = state.focusedId === w.id && !w.minimized;
             return (
               <button key={w.id} onClick={() => onFocus?.(w.id)} title={w.minimized ? `Restore ${w.title}` : `Focus ${w.title}`}

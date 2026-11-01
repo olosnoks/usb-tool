@@ -125,9 +125,9 @@ export default function FilesView({
       </div>
 
       {/* Two-Pane Tree & Inspector */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+      <div className="grid grid-cols-1 @md:grid-cols-12 gap-4">
         {/* File List Table */}
-        <div className="md:col-span-5 bg-[#1e212b] border border-[#2b303c] rounded-2xl p-3 max-h-[460px] overflow-y-auto space-y-1">
+        <div className="@md:col-span-5 bg-[#1e212b] border border-[#2b303c] rounded-2xl p-3 max-h-[460px] overflow-y-auto space-y-1">
           {/* Up One Level row */}
           {currentDir !== '/' && currentDir !== '/ext' && (
             <div
@@ -185,7 +185,7 @@ export default function FilesView({
         </div>
 
         {/* File Viewer & Content */}
-        <div className="md:col-span-7 bg-[#1e212b] border border-[#2b303c] rounded-2xl p-4 flex flex-col justify-between min-h-[460px]">
+        <div className="@md:col-span-7 bg-[#1e212b] border border-[#2b303c] rounded-2xl p-4 flex flex-col justify-between min-h-[460px]">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-[#2b303c] mb-3">
               <div className="truncate mr-2">

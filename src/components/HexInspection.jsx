@@ -118,7 +118,7 @@ export default function HexInspection({
               placeholder="Search Hex (e.g. 55 AA)..."
               value={searchHex}
               onChange={(e) => setSearchHex(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2 py-0.5 text-[11px] text-slate-200 focus:border-cyber-amber outline-none w-32 sm:w-40"
+              className="bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2 py-0.5 text-[11px] text-slate-200 focus:border-cyber-amber outline-none w-32 @sm:w-40"
             />
           </div>
 
@@ -213,7 +213,7 @@ export default function HexInspection({
             <div className="flex items-center text-[10px] text-slate-500 uppercase tracking-wider pb-1 border-b border-slate-800/80 select-none">
               <span className="w-20 text-slate-600">OFFSET</span>
               <span className="w-4 text-slate-800 text-center">|</span>
-              <div className={`flex gap-1.5 ${rowWidth === 8 ? 'w-48 sm:w-56' : 'w-96'}`}>
+              <div className={`flex gap-1.5 ${rowWidth === 8 ? 'w-48 @sm:w-56' : 'w-96'}`}>
                 {Array.from({ length: rowWidth }).map((_, idx) => (
                   <span key={idx} className="w-5 text-center text-slate-600">
                     {idx.toString(16).toUpperCase()}
@@ -238,7 +238,7 @@ export default function HexInspection({
                 <span className="w-4 text-slate-800 text-center select-none">|</span>
 
                 {/* Hex Bytes */}
-                <div className={`flex gap-1.5 ${rowWidth === 8 ? 'w-48 sm:w-56' : 'w-96'}`}>
+                <div className={`flex gap-1.5 ${rowWidth === 8 ? 'w-48 @sm:w-56' : 'w-96'}`}>
                   {Array.from({ length: rowWidth }).map((_, idx) => {
                     const item = row.bytes[idx];
                     if (!item) {

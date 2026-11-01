@@ -301,7 +301,7 @@ export default function DfuFlasher() {
         </div>
 
         {ifaceInfo && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-2">
+          <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2 text-xs pt-2">
             <InfoCell label="Interface" value={`#${ifaceInfo.interfaceNumber}`} />
             <InfoCell label="Transfer" value={`${ifaceInfo.transferSize} B`} />
             <InfoCell
@@ -376,7 +376,7 @@ export default function DfuFlasher() {
 
         {/* Address controls for raw .bin on ST DfuSe bootloaders */}
         {needsAddress && (
-          <div className="grid sm:grid-cols-2 gap-3 pt-1">
+          <div className="grid @sm:grid-cols-2 gap-3 pt-1">
             <label className="text-xs text-slate-400 space-y-1">
               <span>Target flash address</span>
               <input
@@ -395,7 +395,7 @@ export default function DfuFlasher() {
                 placeholder="2048"
               />
             </label>
-            <div className="sm:col-span-2 flex items-start gap-2 text-[11px] text-slate-500">
+            <div className="@sm:col-span-2 flex items-start gap-2 text-[11px] text-slate-500">
               <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               Raw .bin has no address — defaulting to the STM32 flash base. Set the page size for
               your part (STM32F1 = 1024/2048; F4 uses variable sectors — prefer a .dfu there).

@@ -129,7 +129,7 @@ export default function HidReportTools({ device, isSimulated, info, meta, addTap
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+    <div className="grid grid-cols-1 @lg:grid-cols-2 gap-4 text-xs">
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
         <div className="font-bold text-slate-200 flex items-center gap-1.5"><Send className="w-3.5 h-3.5 text-cyan-400" /> SEND REPORTS</div>
         {outputs.length ? (

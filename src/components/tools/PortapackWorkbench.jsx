@@ -208,7 +208,7 @@ export default function PortapackWorkbench() {
 
         {/* Center/Right: Hardware Chip & Connect Actions */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-cyan-950/60 border border-cyan-500/30 rounded text-[11px] font-mono text-cyan-300">
+          <div className="hidden @md:flex items-center gap-1.5 px-2.5 py-1 bg-cyan-950/60 border border-cyan-500/30 rounded text-[11px] font-mono text-cyan-300">
             <CheckCircle2 className={`w-3.5 h-3.5 flex-shrink-0 ${state.isConnected ? 'text-emerald-400' : 'text-slate-500'}`} />
             <span>
               {!state.isConnected ? 'Not connected'
@@ -302,7 +302,7 @@ export default function PortapackWorkbench() {
 
       {/* Collapsible Virtual PortaPack LCD & Hardware Controls Drawer */}
       {showVirtualLcd && (
-        <div className="w-full bg-slate-950/95 border border-purple-500/40 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col items-center animate-in slide-in-from-top-2 duration-200">
+        <div className="w-full bg-slate-950/95 border border-purple-500/40 rounded-2xl p-4 @sm:p-5 shadow-2xl flex flex-col items-center animate-in slide-in-from-top-2 duration-200">
           <div className="w-full flex items-center justify-between pb-3 border-b border-slate-800/80 mb-4">
             <span className="text-xs font-bold text-purple-400 tracking-wider flex items-center gap-2">
               <Radio className="w-4 h-4" /> 320x240 LCD SCREEN // ILI9341 & HARDWARE CONTROLS
@@ -474,11 +474,11 @@ export default function PortapackWorkbench() {
             })}
             {state.isConnected && (
               <div className="ml-auto shrink-0 flex items-center gap-1.5 pl-2">
-                <span className="hidden md:flex items-center gap-1.5 px-2 py-0.5 bg-cyan-950/60 border border-cyan-500/30 rounded text-[11px] font-mono text-cyan-300" title={state.connectionType === 'serial' ? 'Mayhem serial console (1D50:6018)' : 'HackRF One (1D50:6089 WinUSB)'}>
+                <span className="hidden @md:flex items-center gap-1.5 px-2 py-0.5 bg-cyan-950/60 border border-cyan-500/30 rounded text-[11px] font-mono text-cyan-300" title={state.connectionType === 'serial' ? 'Mayhem serial console (1D50:6018)' : 'HackRF One (1D50:6089 WinUSB)'}>
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                   {state.connectionType === 'serial' ? 'Mayhem serial' : (state.boardId || 'HackRF One')}{state.firmwareVersion ? ` · ${state.firmwareVersion}` : ''}
                 </span>
-                <a href="https://github.com/RocketGod-git/mayhem-mobile" target="_blank" rel="noopener noreferrer" className="hidden lg:inline text-[10px] text-purple-300/80 hover:text-purple-200 underline decoration-purple-500/40" title="Based on RocketGod's mayhem-mobile">RocketGod</a>
+                <a href="https://github.com/RocketGod-git/mayhem-mobile" target="_blank" rel="noopener noreferrer" className="hidden @lg:inline text-[10px] text-purple-300/80 hover:text-purple-200 underline decoration-purple-500/40" title="Based on RocketGod's mayhem-mobile">RocketGod</a>
                 <button onClick={() => driver.disconnect()} className="px-2 py-0.5 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 rounded text-xs font-mono flex items-center gap-1" title="Disconnect the HackRF">
                   <RotateCcw className="w-3 h-3" /> Disconnect
                 </button>

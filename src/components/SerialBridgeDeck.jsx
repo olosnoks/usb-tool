@@ -185,7 +185,7 @@ export default function SerialBridgeDeck({
             placeholder="Search dialogue text or hex..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-slate-950 border border-slate-800 rounded pl-7 pr-2 py-1 text-xs text-slate-200 outline-none focus:border-cyan-500 w-48 sm:w-64"
+            className="bg-slate-950 border border-slate-800 rounded pl-7 pr-2 py-1 text-xs text-slate-200 outline-none focus:border-cyan-500 w-48 @sm:w-64"
           />
         </div>
 

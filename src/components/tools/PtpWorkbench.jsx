@@ -201,7 +201,7 @@ export default function PtpWorkbench() {
       </div>
 
       {info && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl grid grid-cols-2 @sm:grid-cols-4 gap-3">
           <Field label="Manufacturer" value={info.manufacturer} />
           <Field label="Model" value={info.model} />
           <Field label="Firmware" value={info.deviceVersion} />

@@ -256,7 +256,7 @@ export default function CyberChefRecipeTestModal({
               </div>
 
               {/* Input and Expected Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[10px] font-mono uppercase text-slate-400">Input Payload</label>
                   <textarea

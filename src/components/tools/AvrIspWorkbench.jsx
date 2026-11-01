@@ -216,7 +216,7 @@ export default function AvrIspWorkbench() {
         </div>
 
         {isConnected && chipInfo && (
-          <div className="pt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px]">
+          <div className="pt-3 grid grid-cols-2 @sm:grid-cols-4 gap-3 text-[11px]">
             <Card label="Target Microcontroller" value={chipInfo.name} sub={chipInfo.family} color="text-amber-300" />
             <Card label="Signature" value={`0x${(chipInfo.signature ?? 0).toString(16).toUpperCase().padStart(6, '0')}`} sub="Read over ISP" color="text-cyan-300" />
             <Card
@@ -244,8 +244,8 @@ export default function AvrIspWorkbench() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+      <div className="grid grid-cols-1 @lg:grid-cols-3 gap-4">
+        <div className="@lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
               <Sliders className="w-4 h-4 text-cyan-400" />
@@ -254,7 +254,7 @@ export default function AvrIspWorkbench() {
             <span className="text-[10px] text-slate-500">0 = programmed. Edit, then write.</span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3">
             {FUSE_FIELDS.map(([k, label, color]) => (
               <div key={k} className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
                 <span className="text-[10px] text-slate-500 uppercase font-bold block">{label}</span>

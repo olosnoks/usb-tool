@@ -241,7 +241,7 @@ export default function HackRfFlasherWorkbench({ embedded = false, receiverConne
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 @xl:grid-cols-2 gap-4">
         {/* Step 1 */}
         <div className={card}>
           <div className="font-bold text-slate-200 flex items-center gap-2"><Download className="w-4 h-4 text-cyan-400" /> 1 · FIRMWARE</div>
@@ -262,7 +262,7 @@ export default function HackRfFlasherWorkbench({ embedded = false, receiverConne
             <label className="cursor-pointer text-slate-300 hover:text-white">Local .dfu <input type="file" accept=".dfu" className="hidden" onChange={(e) => onLocalFile(e, 'dfu')} /></label>
             <label className="cursor-pointer text-slate-300 hover:text-white">Local SD zip <input type="file" accept=".zip" className="hidden" onChange={(e) => onLocalFile(e, 'zip')} /></label>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
+          <div className="grid grid-cols-1 @md:grid-cols-3 gap-2 text-[11px]">
             <div className="bg-slate-900/70 rounded p-2"><div className="text-slate-500">SPI image (.bin)</div><div className={image ? 'text-cyan-300 font-bold' : 'text-slate-600'}>{image ? `${image.name} · ${fmtKb(image.bytes.length)}` : 'none yet'}</div>{image && <div className="text-slate-500">{image.from}</div>}</div>
             <div className="bg-slate-900/70 rounded p-2"><div className="text-slate-500">RAM image (.dfu, DFU rescue)</div><div className={dfuImage ? 'text-cyan-300 font-bold' : 'text-slate-600'}>{dfuImage ? `${dfuImage.name} · ${fmtKb(dfuImage.bytes.length)}` : 'none yet'}</div></div>
             <div className="bg-slate-900/70 rounded p-2"><div className="text-slate-500">SD-card zip</div><div className={sdZip ? 'text-emerald-300 font-bold' : 'text-slate-600'}>{sdZip ? `${sdZip.name} · ${sdZip.files} files` : 'none yet'}</div></div>

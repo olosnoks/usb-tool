@@ -246,7 +246,7 @@ export default function ImprovWifiDeck({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 @lg:grid-cols-3 gap-4">
         {/* Left Column: Scanned Access Points */}
         <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -307,7 +307,7 @@ export default function ImprovWifiDeck({
         </div>
 
         {/* Center & Right Column: Credentials Input & Device State */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="@lg:col-span-2 space-y-4">
           {/* Status Banner */}
           <div className={`p-3 rounded-xl border flex items-center justify-between transition-all ${
             improvState === IMPROV_STATE_PROVISIONED 
@@ -351,7 +351,7 @@ export default function ImprovWifiDeck({
               WI-FI CREDENTIALS & DEPLOYMENT
             </span>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-[10px] text-slate-400 uppercase font-bold block mb-1">
                   Network SSID:

@@ -185,8 +185,8 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
   return (
     <div className="space-y-4">
       {/* Search & Filter Header (Compact) */}
-      <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2.5 sm:p-3 space-y-2">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+      <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2.5 @sm:p-3 space-y-2">
+        <div className="flex flex-col @sm:flex-row items-stretch @sm:items-center justify-between gap-2">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input
@@ -198,7 +198,7 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
             />
           </div>
 
-          <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
+          <div className="flex items-center gap-1.5 self-end @sm:self-auto shrink-0">
             <button
               onClick={() => loadCatalog(true)}
               disabled={isLoading}
@@ -278,7 +278,7 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
           No firmware matched your search criteria.
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-3.5">
           {filteredSuites.map((suite, idx) => {
             if (suite.isPigletSuite) {
               return (

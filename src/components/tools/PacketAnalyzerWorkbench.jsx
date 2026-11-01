@@ -142,7 +142,7 @@ export default function PacketAnalyzerWorkbench() {
   return (
     <div className="flex flex-col gap-4 font-mono">
       {/* Top Header Card */}
-      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-3 shadow-xl">
+      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col @md:flex-row items-center justify-between gap-3 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400">
             <Activity className="w-5 h-5" />
@@ -221,9 +221,9 @@ export default function PacketAnalyzerWorkbench() {
       </div>
 
       {/* Main Grid: Packet Stream List (Top) & Packet Hex/Detail Inspector (Bottom) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <div className="grid grid-cols-1 @lg:grid-cols-12 gap-4">
         {/* Packet Stream Table (7 cols) */}
-        <div className="lg:col-span-7 bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col space-y-3 max-h-[600px] overflow-hidden">
+        <div className="@lg:col-span-7 bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col space-y-3 max-h-[600px] overflow-hidden">
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
             <Layers className="w-3.5 h-3.5 text-purple-400" />
             <span>PACKET CAPTURE STREAM</span>
@@ -278,7 +278,7 @@ export default function PacketAnalyzerWorkbench() {
         </div>
 
         {/* Packet Inspector (5 cols) */}
-        <div className="lg:col-span-5 bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col space-y-3 max-h-[600px] overflow-hidden">
+        <div className="@lg:col-span-5 bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col space-y-3 max-h-[600px] overflow-hidden">
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
             <Radio className="w-3.5 h-3.5 text-purple-400" />
             <span>FRAME DETAILS & HEX INSPECTOR</span>

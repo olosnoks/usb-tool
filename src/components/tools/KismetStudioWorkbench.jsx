@@ -479,7 +479,7 @@ kismet -c ${monIface} --no-ncurses`;
         </div>
       )}
       {/* Top Banner Card */}
-      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 shadow-xl flex flex-col @md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-xl text-purple-400 shadow-inner">
             <Radio className="w-6 h-6 animate-pulse" />
@@ -503,7 +503,7 @@ kismet -c ${monIface} --no-ncurses`;
         </div>
 
         {/* Server & Demo Mode Controller */}
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+        <div className="flex flex-wrap items-center gap-2 w-full @md:w-auto justify-end">
           <div className="flex items-center bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800 text-xs gap-2">
             <Server className="w-3.5 h-3.5 text-slate-400" />
             <input
@@ -557,7 +557,7 @@ kismet -c ${monIface} --no-ncurses`;
       </div>
 
       {/* Live Capture Stats Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+      <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3 text-xs">
         <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-3 flex items-center justify-between">
           <div>
             <div className="text-[10px] uppercase text-slate-400 font-semibold">Active Hardware</div>
@@ -681,7 +681,7 @@ kismet -c ${monIface} --no-ncurses`;
         <div className="space-y-3">
           {/* Filter Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-[#171920] border border-[#2b303c] rounded-xl p-3 text-xs">
-            <div className="flex items-center bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 w-full sm:w-72">
+            <div className="flex items-center bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 w-full @sm:w-72">
               <Search className="w-3.5 h-3.5 text-slate-400 mr-2" />
               <input
                 type="text"
@@ -824,7 +824,7 @@ kismet -c ${monIface} --no-ncurses`;
                   {selectedDevice.type}
                 </span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-3">
+              <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3 text-xs mb-3">
                 <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
                   <span className="text-slate-500 text-[10px] block">OUI Manufacturer</span>
                   <span className="text-slate-200 font-semibold">{selectedDevice.manufacturer}</span>
@@ -907,7 +907,7 @@ kismet -c ${monIface} --no-ncurses`;
             <p className="text-[11px] text-slate-400 mb-3">
               5 GHz channels offer 80MHz/160MHz wide channels with zero channel overlap between non-DFS channels.
             </p>
-            <div className="grid grid-cols-8 sm:grid-cols-16 gap-1.5 h-32 items-end bg-slate-950 p-3 rounded-xl border border-slate-800">
+            <div className="grid grid-cols-8 @sm:grid-cols-16 gap-1.5 h-32 items-end bg-slate-950 p-3 rounded-xl border border-slate-800">
               {Object.entries(channelData5G).map(([ch, count]) => {
                 const heightPct = Math.min(100, count * 35 + 10);
                 return (
@@ -950,7 +950,7 @@ kismet -c ${monIface} --no-ncurses`;
               {alerts.map((alt) => (
                 <div
                   key={alt.id}
-                  className={`p-3 rounded-xl border text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+                  className={`p-3 rounded-xl border text-xs flex flex-col @sm:flex-row items-start @sm:items-center justify-between gap-3 ${
                     alt.severity === 'CRITICAL'
                       ? 'bg-rose-950/30 border-rose-500/40 text-rose-200'
                       : alt.severity === 'WARN'
@@ -993,7 +993,7 @@ kismet -c ${monIface} --no-ncurses`;
               <Cpu className="w-4 h-4 text-cyan-400" />
               Select Alfa Wi-Fi Adapter Model
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-3 gap-3">
               {ALFA_PROFILES.map((card) => {
                 const isSelected = selectedAlfa.id === card.id;
                 return (

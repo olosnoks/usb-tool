@@ -9,7 +9,7 @@ export default function HeuristicsTab({
   return (
     <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
       {/* Summary KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 @sm:grid-cols-4 gap-3">
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3">
           <div className="text-[11px] text-slate-400 uppercase font-semibold">Total Vulnerabilities</div>
           <div className={`text-2xl font-bold mt-1 ${heuristicReport.totalVulnerabilities > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>

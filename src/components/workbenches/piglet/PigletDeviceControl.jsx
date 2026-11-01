@@ -131,8 +131,8 @@ export default function PigletDeviceControl({ client, connected, active, busy, s
   const services = st ? [st.hasWdgwars && 'WDGoWars', st.hasWigle && 'WiGLE', st.hasWardrift && 'Wardrift'].filter(Boolean) : [];
 
   return (
-    <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+    <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5 space-y-4">
+      <div className="flex flex-col @sm:flex-row items-start @sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4 text-cyan-400" />
@@ -165,7 +165,7 @@ export default function PigletDeviceControl({ client, connected, active, busy, s
         <p className="text-xs p-2.5 rounded-lg border text-amber-300 border-amber-500/30 bg-amber-500/10">Status read failed: {err}</p>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+      <div className="grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-6 gap-2.5">
         <Card label="Scanning" value={scan.value} tone={scan.tone} sub={scan.sub} />
         <Card label="GPS" value={st ? (st.gpsFix ? 'FIX' : 'SEARCHING') : '--'} tone={st?.gpsFix ? 'text-emerald-400' : 'text-rose-400'} />
         <Card label="Found 2.4 GHz" value={st ? st.found2g.toLocaleString() : '--'} tone="text-amber-400" />

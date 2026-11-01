@@ -17,9 +17,9 @@ export default function DeviceView({
   vibrating
 }) {
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div className="grid grid-cols-1 @lg:grid-cols-12 gap-6">
       {/* Left Column (5 cols): Authentic Flipper Zero Device Silhouette & Screen */}
-      <div className="lg:col-span-5 bg-[#171920] border border-[#2b303c] rounded-3xl p-6 shadow-2xl flex flex-col items-center">
+      <div className="@lg:col-span-5 bg-[#171920] border border-[#2b303c] rounded-3xl p-6 shadow-2xl flex flex-col items-center">
         {/* Header: Model & Edition */}
         <div className="w-full flex items-center justify-between pb-3 border-b border-[#232733] mb-5">
           <span className="text-xs font-bold text-[#fe8a2c] flex items-center gap-1.5 font-sans">
@@ -192,7 +192,7 @@ export default function DeviceView({
       </div>
 
       {/* Right Column (7 cols): qFlipper Hardware, Storage & Firmware Overview */}
-      <div className="lg:col-span-7 bg-[#171920] border border-[#2b303c] rounded-3xl p-6 shadow-2xl flex flex-col justify-between space-y-6">
+      <div className="@lg:col-span-7 bg-[#171920] border border-[#2b303c] rounded-3xl p-6 shadow-2xl flex flex-col justify-between space-y-6">
         <div>
           {/* Top Bar: Device Name & Action */}
           <div className="flex items-center justify-between pb-4 border-b border-[#232733]">
