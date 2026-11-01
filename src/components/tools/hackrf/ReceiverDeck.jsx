@@ -14,6 +14,7 @@ import { MODE_BANDWIDTH_HZ } from '../../../utils/hackrfDemod';
 import { HACKRF_SAMPLE_RATES, HACKRF_FREQ_MIN, HACKRF_FREQ_MAX } from '../../../utils/mayhemDriver';
 import { SPEC_RANGE_DB, SPEC_FLOOR_PAD_DB } from '../../../utils/hackrfDsp';
 import { createHackRfAudioPlayer } from '../../../utils/hackrfAudioPlayer';
+import { WATERFALL_THEMES, buildLut, getTheme, themeGradient, loadThemeId, saveThemeId } from '../../../utils/waterfallThemes';
 
 export const SWEEP_PRESETS = [
   { name: 'HF (1-30 MHz)', startHz: 1000000, endHz: 30000000 },
@@ -40,14 +41,6 @@ const TUNE_STEPS = [{ l: '5 kHz', v: 5000 }, { l: '12.5 kHz', v: 12500 }, { l: '
 const W = 1200, SPEC_H = 150, WF_H = 240, H = SPEC_H + WF_H;
 const MAX_ROWS = WF_H;
 
-// Inferno-style colour LUT (val 0..255 -> [r,g,b]).
-const LUT = new Uint8Array(256 * 3);
-for (let i = 0; i < 256; i++) {
-  const v = i / 255;
-  LUT[i * 3] = Math.min(255, Math.floor(v * 280));
-  LUT[i * 3 + 1] = Math.min(255, Math.floor(Math.pow(v, 2.2) * 260));
-  LUT[i * 3 + 2] = Math.min(255, Math.floor(Math.sin(v * Math.PI) * 160 + v * 60));
-}
 
 const clampHz = (hz) => Math.max(HACKRF_FREQ_MIN, Math.min(HACKRF_FREQ_MAX, Math.round(hz)));
 const fmtMHz = (hz, span = 2e6) => {
@@ -84,6 +77,12 @@ function sampleRow(row, f0, f1) {
 export default function ReceiverDeck({ driver, state }) {
   const isLiveRf = state.connectionType === 'webusb';
   const [rxMode, setRxMode] = useState('live');          // 'live' | 'sweep'
+  // Waterfall colour theme (remembered across sessions).
+  const [themeId, setThemeId] = useState(() => loadThemeId());
+  const lutRef = useRef(buildLut(themeId));
+  const themeIdRef = useRef(themeId);
+  const traceColorRef = useRef(getTheme(themeId).trace);
+  useEffect(() => { lutRef.current = buildLut(themeId); themeIdRef.current = themeId; traceColorRef.current = getTheme(themeId).trace; saveThemeId(themeId); }, [themeId]);
   const rxModeRef = useRef('live');
 
   // Tuner
@@ -426,7 +425,7 @@ export default function ReceiverDeck({ driver, state }) {
           if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
           if (v > peakV) { peakV = v; peakX = x; }
         }
-        ctx.strokeStyle = mode === 'sweep' ? '#22d3ee' : '#34d399';
+        ctx.strokeStyle = mode === 'sweep' ? '#22d3ee' : traceColorRef.current;
         ctx.lineWidth = 1.2;
         ctx.stroke();
         if (Number.isFinite(peakV)) {
@@ -482,7 +481,8 @@ export default function ReceiverDeck({ driver, state }) {
 
       // --- waterfall ---
       const rows = rowsRef.current;
-      const wfKey = `${vlo}:${vhi}:${rowsVerRef.current}:${Math.round(floor * 2)}`;
+      const LUT = lutRef.current;
+      const wfKey = `${vlo}:${vhi}:${rowsVerRef.current}:${Math.round(floor * 2)}:${themeIdRef.current}`;
       const cache = wfCacheRef.current;
       if (!cache.img || cache.key !== wfKey || newRow) {
         const img = cache.img && cache.img.width === W ? cache.img : ctx.createImageData(W, WF_H);
@@ -639,6 +639,12 @@ export default function ReceiverDeck({ driver, state }) {
           </>
         )}
         <div className="flex items-center gap-1 ml-auto">
+          <label className="flex items-center gap-1.5 mr-2" title="Waterfall colour theme">
+            <span className="inline-block w-10 h-3 rounded border border-slate-700" style={{ background: themeGradient(themeId) }} />
+            <select value={themeId} onChange={(e) => setThemeId(e.target.value)} className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1.5 py-1">
+              {WATERFALL_THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </label>
           <span className="text-slate-500">{fmtMHz(viewInfo.lo, vspan)} – {fmtMHz(viewInfo.hi, vspan)} ({fmtSpan(vspan || 0)})</span>
           <button onClick={() => zoomCenter(0.5)} className="p-1 bg-slate-800 border border-slate-700 rounded text-slate-300 hover:text-white" title="Zoom in (or mouse wheel on the display)"><ZoomIn className="w-3.5 h-3.5" /></button>
           <button onClick={() => zoomCenter(2)} className="p-1 bg-slate-800 border border-slate-700 rounded text-slate-300 hover:text-white" title="Zoom out"><ZoomOut className="w-3.5 h-3.5" /></button>

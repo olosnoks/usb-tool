@@ -458,7 +458,7 @@ export const TOOL_GUIDES = {
     steps: [
       'Put the device in HackRF mode (PortaPack: pick "HackRF" on its screen; a bare HackRF One is ready as-is) and click "Connect WebUSB". The log shows the firmware, board and the RX bring-up.',
       'On "Receiver": type a frequency and press Enter (or use the quick buttons / ± steps), pick SPAN (the HackRF sample rate, 2–20 MHz), and set LNA / VGA / AMP — or turn AGC on to let the tool hold the ADC level.',
-      'Mouse wheel on the display zooms at the cursor, drag pans, the Fit button returns to the whole span. Click a signal to pick it as the channel (the purple band), then LISTEN; double-click to move the LO there instead.',
+      'Mouse wheel on the display zooms at the cursor, drag pans, the Fit button returns to the whole span. Click a signal to pick it as the channel (the purple band), then LISTEN; double-click to move the LO there instead. The dropdown next to the zoom buttons changes the waterfall colour theme (Inferno, Viridis, Turbo, classic SDR, GQRX, phosphor…).',
       'Choose the demod (WFM for broadcast, NFM for ham/PMR/ISM, AM for air band, USB/LSB for HF voice), set volume, and raise SQL until the noise mutes between transmissions; the bar shows the channel power.',
       'Switch to SWEEP (Looking Glass) to scan a preset band or a custom start/end: the sweep is stitched into the spectrum and waterfall, peaks above the threshold are listed, and clicking one (or the display) tunes there and goes back to LIVE.',
       'The "IQ Recorder" tab records the raw stream to a .c8 file or a Mayhem .C16 + .TXT pair for Replay; FREQMAN manages presets; the Tactical Map shows ADS-B aircraft (tune 1090 MHz with the 2 MHz span).',
