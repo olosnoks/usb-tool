@@ -473,6 +473,25 @@ export const TOOL_GUIDES = {
     ],
     shortcuts: 'PortaPack Mayhem & HackRF Suite'
   },
+  'hackrf-flash': {
+    title: 'HackRF / PortaPack Flasher & First-Time Setup',
+    shortDesc: 'Flashes Mayhem or stock HackRF firmware into the 1 MiB SPI flash over WebUSB (the same vendor requests as hackrf_spiflash, with read-back verification), rescues a blank or bricked board through the LPC43xx DFU bootloader, and copies the Mayhem SD-card files onto a FAT32 card.',
+    steps: [
+      'Step 1: choose PortaPack Mayhem or stock HackRF, pick a release, and click "Get firmware" (and "Get SD-card files" for Mayhem). Local .bin / .dfu / zip files work too.',
+      'Step 2: plug the board in with a data cable and click Connect WebUSB. A HackRF (stock firmware, or a PortaPack switched to HackRF mode on its screen) is ready to flash.',
+      'Bricked or blank board: hold the DFU button while plugging in, Connect, load the stock RAM image (hackrf_one_usb.dfu), wait for it to re-enumerate, then Connect again.',
+      'Step 3: read the warning, enable flashing, and click ERASE, WRITE & VERIFY. The flash is erased, written in 256-byte pages, read back, and the board reset.',
+      'Step 4 (Mayhem): format the microSD as FAT32, click "Pick the SD card & copy", choose the card root, and let the files copy. Eject, insert in the PortaPack, power on.',
+      'First boot: accept the CPLD update if offered, calibrate the touchscreen, then open the PortaPack Mayhem SDR tool to receive.'
+    ],
+    tips: [
+      'On Windows the HackRF (1d50:6089) and the DFU bootloader (1fc9:000c) both need the WinUSB driver (Zadig) for WebUSB to see them.',
+      'A PortaPack showing as 1d50:6018 is still in Mayhem serial mode: pick "HackRF" mode on its screen first, or flash the .ppfw.tar from the SD card with Mayhem\'s Flash utility.',
+      'If verification fails, do not unplug; just flash again. If the board no longer enumerates, the DFU button route recovers it.',
+      'GitHub release downloads go through the same proxy chain as the ESP firmware catalog; if a mirror is down, download the zip yourself and use the local-file buttons.'
+    ],
+    shortcuts: 'HackRF / PortaPack Flasher'
+  },
   flipper: {
     title: 'Flipper Zero Workbench & qFlipper Companion',
     shortDesc: 'Manage Flipper Zero over USB CDC Serial, navigate virtual 128x64 orange LCD, browse MicroSD tree, replay Sub-GHz signals, analyze NFC/RFID cards, and test BadUSB DuckyScripts.',
