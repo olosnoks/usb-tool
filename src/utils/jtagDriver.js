@@ -555,4 +555,41 @@ export class JtagClient {
     this._syncState();
     return tdo.slice(target, target + bsrLength);
   }
+
+  /**
+   * Drive pins with EXTEST: preload the boundary register with SAMPLE/PRELOAD,
+   * switch to EXTEST (the pins take the preloaded values), then shift the vector
+   * again, which also captures the pins. vector[n] is boundary cell n.
+   * The chip stays in EXTEST until resetTap().
+   */
+  async extest({ target, irLengths, preloadOp, extestOp, vector }) {
+    if (!this.isConnected || this.isSimulated) throw new Error('Connect a probe first.');
+    const n = irLengths.length;
+    if (target < 0 || target >= n) throw new Error('Pick a device in the chain.');
+    const irFor = (op) => {
+      const ir = [];
+      for (let d = 0; d < n; d++) ir.push(...(d === target ? hexToBits(op.toString(16), irLengths[d]) : new Array(irLengths[d]).fill(1)));
+      return ir;
+    };
+    const dr = [];
+    for (let d = 0; d < n; d++) { if (d === target) dr.push(...vector); else dr.push(0); }
+    const e = this.engine;
+    e.shift('IR', irFor(preloadOp), { endState: 'IDLE' });
+    e.shift('DR', dr, { endState: 'IDLE' });
+    e.shift('IR', irFor(extestOp), { endState: 'IDLE' });
+    const p = e.shift('DR', dr, { capture: true, endState: 'IDLE' });
+    await e.flush();
+    const tdo = await p;
+    this._syncState();
+    return tdo.slice(target, target + vector.length);
+  }
+
+  /** Test-Logic-Reset: every device leaves EXTEST and goes back to normal operation. */
+  async resetTap() {
+    if (!this.engine) return;
+    this.engine.goto('RESET');
+    this.engine.goto('IDLE');
+    await this.engine.flush();
+    this._syncState();
+  }
 }

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Cpu,
   Play,
@@ -15,6 +15,7 @@ import {
   Usb
 } from 'lucide-react';
 import { JtagClient } from '../../utils/jtagDriver';
+import { parseBsdl, opcodeValue, idcodeMatches, pinStates, extestVector } from '../../utils/bsdl';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
@@ -54,6 +55,11 @@ export default function JtagWorkbench() {
   const [bsOpcode, setBsOpcode] = useState('0x01');
   const [bsLength, setBsLength] = useState('');
   const [bsCells, setBsCells] = useState(null);
+  const [bsdl, setBsdl] = useState(null);
+  const [bsLive, setBsLive] = useState(false);
+  const [drive, setDrive] = useState({}); // port -> 0 | 1 while EXTEST is active
+  const [extestOk, setExtestOk] = useState(false);
+  const bsdlRef = useRef(null);
 
   const guard = async (label, fn) => {
     setBusy(label);
@@ -111,11 +117,60 @@ export default function JtagWorkbench() {
 
   const handleReadPins = () => guard('pins', async () => setProbePins(await client.readProbePins()));
 
-  const handleSample = () => guard('sample', async () => {
+  const chainIrLengths = () => {
     const irLengths = bsIrLens.split(/[\s,]+/).filter(Boolean).map(Number);
     if (irLengths.length !== tapDevices.length || irLengths.some((n) => !Number.isInteger(n) || n < 2)) {
       throw new Error(`Enter one IR length per device in the chain (${tapDevices.length}), from the device's BSDL file.`);
     }
+    return irLengths;
+  };
+
+  const onBsdlFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const b = parseBsdl(await file.text());
+      setBsdl(b);
+      const sample = opcodeValue(b, 'SAMPLE') ?? opcodeValue(b, 'SAMPLE/PRELOAD');
+      if (sample !== null) setBsOpcode(`0x${sample.toString(16).toUpperCase()}`);
+      setBsLength(String(b.bsrLength));
+      const lens = bsIrLens.split(/[\s,]+/).filter(Boolean);
+      const list = tapDevices.map((d, i) => lens[i] || '');
+      if (list.length) { list[Number(bsTarget)] = String(b.irLength); setBsIrLens(list.join(', ')); }
+      setDrive({});
+    } catch (err) {
+      setError(`${file.name}: ${err.message}`);
+    }
+  };
+
+  const handleExtest = (port, level) => {
+    if (!extestOk && !window.confirm('EXTEST takes the pins away from the chip\'s own logic and drives them from here.\n\nDriving a pin that something else also drives can damage hardware. Only drive pins you know are free (LEDs, test points). RESET TAP returns the chip to normal.')) return;
+    setExtestOk(true);
+    const next = { ...drive };
+    if (level === null) delete next[port]; else next[port] = level;
+    guard('extest', async () => {
+      const extestOp = opcodeValue(bsdl, 'EXTEST');
+      if (extestOp === null) throw new Error('The BSDL file lists no EXTEST opcode.');
+      const preloadOp = opcodeValue(bsdl, 'SAMPLE') ?? opcodeValue(bsdl, 'PRELOAD');
+      setBsCells(await client.extest({ target: Number(bsTarget), irLengths: chainIrLengths(), preloadOp, extestOp, vector: extestVector(bsdl, next) }));
+      setDrive(next);
+    });
+  };
+
+  const handleResetTap = () => guard('reset', async () => {
+    await client.resetTap();
+    setDrive({});
+  });
+
+  useEffect(() => {
+    if (!bsLive) return undefined;
+    const t = setInterval(() => { if (!busy) handleSample(); }, 700);
+    return () => clearInterval(t);
+  }, [bsLive, busy, bsIrLens, bsOpcode, bsLength, bsTarget]);
+
+  const handleSample = () => guard('sample', async () => {
+    const irLengths = chainIrLengths();
     const opcode = parseInt(bsOpcode.replace(/^0x/i, ''), 16);
     const bsrLength = Number(bsLength);
     if (Number.isNaN(opcode)) throw new Error('SAMPLE opcode must be hex.');
@@ -418,7 +473,45 @@ export default function JtagWorkbench() {
             <button onClick={handleSample} disabled={!!busy || !tapDevices.length} className="w-full py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold text-xs disabled:opacity-40">
               {busy === 'sample' ? 'SAMPLING...' : tapDevices.length ? 'SAMPLE BOUNDARY CELLS' : 'SCAN THE CHAIN FIRST'}
             </button>
-            {bsCells && (
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <input ref={bsdlRef} type="file" accept=".bsd,.bsdl,.bsm,.txt" className="hidden" onChange={onBsdlFile} />
+              <button onClick={() => bsdlRef.current?.click()} className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-200 font-bold">{bsdl ? `BSDL: ${bsdl.entity}` : 'LOAD BSDL FILE'}</button>
+              {bsdl && tapDevices[Number(bsTarget)]?.idcode != null && (() => {
+                const ok = idcodeMatches(bsdl, tapDevices[Number(bsTarget)].idcode);
+                return ok === null ? null : <span className={ok ? 'text-emerald-300' : 'text-rose-300 font-bold'}>{ok ? 'IDCODE matches the BSDL' : 'IDCODE does NOT match this BSDL'}</span>;
+              })()}
+              <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={bsLive} onChange={(e) => setBsLive(e.target.checked)} className="accent-emerald-500" /> live</label>
+              {Object.keys(drive).length > 0 && <span className="text-amber-300 font-bold">EXTEST active ({Object.keys(drive).length} pin(s) driven)</span>}
+              <button onClick={handleResetTap} disabled={!!busy || !tapDevices.length} className="px-2 py-1 rounded bg-slate-900 border border-amber-500/40 text-amber-300 font-bold disabled:opacity-40">RESET TAP</button>
+            </div>
+            {bsdl && bsCells && (
+              <div className="max-h-72 overflow-y-auto border border-slate-800 rounded">
+                <table className="w-full text-[11px]">
+                  <thead className="text-slate-500 text-left sticky top-0 bg-slate-950"><tr><th className="px-1">PORT</th><th>PIN</th><th>IN</th><th>OUT</th><th>DRIVE (EXTEST)</th></tr></thead>
+                  <tbody>
+                    {pinStates(bsdl, bsCells).map((pn) => (
+                      <tr key={pn.port} className="border-t border-slate-900">
+                        <td className="px-1 text-slate-200">{pn.port}</td>
+                        <td className="text-slate-500">{pn.pins.join(', ')}</td>
+                        <td className={pn.input === 1 ? 'text-emerald-300 font-bold' : 'text-slate-500'}>{pn.input ?? ''}</td>
+                        <td className="text-slate-400">{pn.outputCell !== undefined ? `${pn.output}${pn.driving ? '' : ' (off)'}` : ''}</td>
+                        <td>
+                          {pn.outputCell !== undefined && (
+                            <span className="flex gap-1">
+                              {[0, 1].map((lv) => (
+                                <button key={lv} onClick={() => handleExtest(pn.port, lv)} disabled={!!busy} className={`px-1.5 rounded border ${drive[pn.port] === lv ? 'border-amber-500/60 text-amber-300' : 'border-slate-700 text-slate-400'}`}>{lv}</button>
+                              ))}
+                              {pn.port in drive && <button onClick={() => handleExtest(pn.port, null)} disabled={!!busy} className="px-1.5 rounded border border-slate-700 text-slate-400">off</button>}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {bsCells && !bsdl && (
               <div className="grid grid-cols-8 sm:grid-cols-12 gap-1 max-h-56 overflow-y-auto">
                 {bsCells.map((v, i) => (
                   <div key={i} className={`p-0.5 rounded text-center border text-[9px] font-mono ${v ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
