@@ -136,7 +136,8 @@ export default function PortapackWorkbench() {
     if (activeTab !== 'audio') return undefined;
     const canvas = waterfallCanvasRef.current;
     if (!canvas) return undefined;
-    const ctx = canvas.getContext('2d');
+    // willReadFrequently: the waterfall scroll reads back the canvas every frame.
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return undefined;
 
     let animId;
