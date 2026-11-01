@@ -51,7 +51,7 @@ export const SIDEBAR_SECTIONS = [
       { id: 'packet-analyzer', name: 'Packet & Protocol Lab', icon: Activity, accent: 'purple', desc: 'Wi-Fi 802.11, PCAP, Hex Stream & Packet Framer' },
       { id: 'logic-analyzer', name: '24MHz Logic Analyzer', icon: Activity, accent: 'cyan', desc: '8-channel capture (SUMP, fx2lafw, VCD/.sr) with I2C, UART, SPI, 1-Wire, CAN, WS2812, IR & SWD decoders' },
       { id: 'can-bus', name: 'CAN Bus & OBD-II Scanner', icon: Gauge, accent: 'emerald', desc: 'Sniffer with DBC decoding, replay, OBD-II and UDS diagnostics' },
-      { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', desc: 'I2C scan, chip ID, register read/write and SPI through a Bus Pirate' },
+      { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', desc: 'I2C scan, registers, live sensor readouts, OLED test and SPI flash dumps via Bus Pirate' },
       { id: 'modbus-rtu', name: 'Modbus RTU & RS-485', icon: Activity, accent: 'amber', desc: 'Industrial holding registers & inverter telemetry' },
       { id: 'plotter', name: 'Oscilloscope Plotter', icon: Activity, accent: 'rose', desc: 'Multi-channel live waveforms' },
       { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer' },

@@ -21,6 +21,7 @@ import {
 } from '../../utils/busExplorerDriver';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
+import SensorFlashPanels from './bus/SensorFlashPanels';
 
 export default function BusExplorerWorkbench() {
   const [client] = useState(() => new BusExplorerClient(console.log));
@@ -138,7 +139,7 @@ export default function BusExplorerWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && <DemoBanner>Simulated I2C bus: the devices and register values below are invented.</DemoBanner>}
+      {isSimulated && <DemoBanner>Simulated I2C bus: the devices, sensor readings, OLED and SPI flash below are invented.</DemoBanner>}
       {error && (
         <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
           <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
@@ -412,6 +413,8 @@ export default function BusExplorerWorkbench() {
         </div>
         {spiIn && <div className="text-xs text-emerald-300">MISO: {spiIn}</div>}
       </div>
+
+      <SensorFlashPanels client={client} isConnected={isConnected} selectedAddr={selectedAddr} guard={guard} busy={busy} />
     </div>
   );
 }

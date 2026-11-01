@@ -6,6 +6,7 @@
  * Simulation: five common sensors on a virtual I2C bus.
  */
 
+import { createSimulatedSensorBus } from './sensorDrivers';
 import { SerialLink } from './serialLink';
 
 
@@ -229,7 +230,8 @@ export class BusExplorerClient {
   connectSimulation() {
     this.isConnected = true;
     this.isSimulated = true;
-    this.detectedDevices = [0x3C, 0x48, 0x50, 0x68, 0x76]; // OLED, ADC, EEPROM, MPU6050, BMP280
+    this.detectedDevices = [0x3C, 0x40, 0x48, 0x50, 0x68, 0x76]; // OLED, INA219, ADC, EEPROM, MPU6050, BME280
+    this._simSensors = null;
     this.initSimulatedRegisters(0x68);
     this.log('Simulated I2C bus with five sensors online.');
     return true;
@@ -325,7 +327,7 @@ export class BusExplorerClient {
     if (!this.isConnected) return [];
     if (this.isSimulated) {
       await sleep(200);
-      this.detectedDevices = [0x3C, 0x48, 0x50, 0x68, 0x76];
+      this.detectedDevices = [0x3C, 0x40, 0x48, 0x50, 0x68, 0x76];
     } else {
       if (this.busType !== 'i2c') await this.setBus('i2c');
       const found = [];
@@ -369,11 +371,53 @@ export class BusExplorerClient {
   /** SPI full-duplex exchange (CS held low). Returns the bytes clocked in. */
   async spiTransfer(bytes) {
     if (this.isSimulated) {
-      // A simulated W25Q64 answers JEDEC ID; everything else reads 0xFF.
+      // A simulated W25Q64 answers JEDEC ID and READ; everything else reads 0xFF.
       if (bytes[0] === 0x9f) return [0xff, 0xef, 0x40, 0x17, ...bytes.slice(4).map(() => 0xff)].slice(0, bytes.length);
+      if (bytes[0] === 0x03) {
+        const a = (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+        return bytes.map((_, i) => (i < 4 ? 0xff : simFlashByte(a + i - 4)));
+      }
       return bytes.map(() => 0xff);
     }
     if (this.busType !== 'spi') await this.setBus('spi');
     return this.bp.spiTransfer(bytes);
   }
+
+  /** Register-level access for the sensor drivers: { read(addr, reg, n), write(addr, reg, bytes) }. */
+  sensorBus() {
+    if (this.isSimulated) {
+      if (!this._simSensors) this._simSensors = createSimulatedSensorBus();
+      return this._simSensors;
+    }
+    return {
+      read: async (addr, reg, n) => { if (this.busType !== 'i2c') await this.setBus('i2c'); return this.bp.i2cReadRegisters(addr, reg, n); },
+      write: async (addr, reg, values) => { if (this.busType !== 'i2c') await this.setBus('i2c'); return this.bp.i2cWriteRegister(addr, reg, values); }
+    };
+  }
+
+  /** JEDEC ID of an SPI flash on the bus (0x9F), as a 24-bit number. */
+  async spiFlashId() {
+    const r = await this.spiTransfer([0x9f, 0, 0, 0]);
+    return (r[1] << 16) | (r[2] << 8) | r[3];
+  }
+
+  /** Read an SPI flash with 0x03 READ. CS stays low for each 4 KB chunk. */
+  async spiFlashRead(addr, length, onProgress) {
+    const out = new Uint8Array(length);
+    const chunk = 4096;
+    for (let off = 0; off < length; off += chunk) {
+      const n = Math.min(chunk, length - off);
+      const a = addr + off;
+      const r = await this.spiTransfer([0x03, (a >> 16) & 0xff, (a >> 8) & 0xff, a & 0xff, ...new Array(n).fill(0xff)]);
+      out.set(r.slice(4), off);
+      onProgress?.((off + n) / length);
+    }
+    return out;
+  }
+}
+
+// Contents of the simulated SPI flash: a text header, then a counting pattern.
+const SIM_FLASH_HEADER = new TextEncoder().encode('BUS PIRATE SIMULATED W25Q64\0');
+function simFlashByte(a) {
+  return a < SIM_FLASH_HEADER.length ? SIM_FLASH_HEADER[a] : a < 0x100 ? 0xff : (a * 7) & 0xff;
 }
