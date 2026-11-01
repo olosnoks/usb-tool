@@ -31,6 +31,7 @@ import {
 import { BleSerialPort, BLE_UART_SERVICE_UUIDS, looksLikeUart, uartProfileFor } from '../../utils/bleSerial';
 import { useSerial } from '../../context/SerialContext';
 import StatusBadge from '../common/StatusBadge';
+import { WriteComposer, DfuPanel } from './ble/BleWriteAndDfu';
 
 const PROP_LABELS = [
   ['read', 'Read'],
@@ -92,6 +93,7 @@ export default function BleExplorer() {
   // Set when the device asked for pairing (or dropped the link mid-read, which
   // is how many devices react to an unencrypted read of a protected value).
   const [pairingHint, setPairingHint] = useState(null);
+  const [writeTarget, setWriteTarget] = useState(null);
   const lastDeviceRef = useRef(null);
   const readingRef = useRef(false);
   const { connectBle, isConnected: serialConnected, transportType: serialTransport } = useSerial();
@@ -259,30 +261,8 @@ export default function BleExplorer() {
     }
   };
 
-  const handleWrite = async (ch) => {
-    const input = window.prompt(
-      `Write to "${ch.name}" — enter hex bytes (e.g. 01 ff a0):`,
-      ''
-    );
-    if (input == null) return;
-    const clean = input.replace(/[^0-9a-fA-F]/g, '');
-    if (clean.length === 0 || clean.length % 2 !== 0) {
-      addLog('Write cancelled: hex must be whole bytes.', 'err');
-      return;
-    }
-    const bytes = new Uint8Array(clean.match(/.{2}/g).map((h) => parseInt(h, 16)));
-    try {
-      if (ch.properties.writeWithoutResponse && !ch.properties.write) {
-        await ch._ref.writeValueWithoutResponse(bytes);
-      } else {
-        await ch._ref.writeValueWithResponse(bytes);
-      }
-      addLog(`Wrote ${bytesToHex(bytes)} to ${ch.name}.`, 'ok');
-      if (ch.properties.read) await readEverything(tree);   // show the result of the write
-    } catch (err) {
-      addLog(`Write ${ch.name} failed: ${err.message}`, 'err');
-    }
-  };
+  // Writes go through the inline composer (formats, preview, history).
+  const handleWrite = (ch) => setWriteTarget(ch);
 
   const saveCustom = (list) => {
     setCustomServices(list);
@@ -560,6 +540,17 @@ export default function BleExplorer() {
           </div>
         </div>
       ))}
+
+      {writeTarget && (
+        <WriteComposer
+          key={writeTarget.uuid}
+          ch={writeTarget}
+          onClose={() => setWriteTarget(null)}
+          onWritten={() => { if (writeTarget.properties.read) readEverything(tree); }}
+          addLog={addLog}
+        />
+      )}
+      {tree.length > 0 && <DfuPanel tree={tree} addLog={addLog} />}
 
       {/* Log */}
       <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
