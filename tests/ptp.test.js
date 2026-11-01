@@ -82,3 +82,42 @@ describe('PtpDevice against a simulated camera', () => {
     await expect(ptp.transaction(0x1099)).rejects.toMatchObject({ responseCode: 0x2005 });
   });
 });
+
+describe('PTP storage, battery, capture and delete', () => {
+  const Dev = PtpDevice; const sim = createSimulatedPtp; const OP = PTP_OP;
+  const open = async () => {
+    const t = sim();
+    const d = new Dev(t);
+    await d.open();
+    await d.openSession();
+    await d.getDeviceInfo();
+    return { d, t };
+  };
+
+  it('reads storage info and battery level', async () => {
+    const { d } = await open();
+    const [sid] = await d.getStorageIds();
+    const s = await d.getStorageInfo(sid);
+    expect(s).toMatchObject({ storageType: 'removable RAM', readOnly: false, description: 'SD card', volumeLabel: 'SIMCAM', freeImages: 1840 });
+    expect(s.maxCapacity).toBe(16 * 2 ** 32);
+    expect(await d.getBatteryLevel()).toBe(87);
+  });
+
+  it('captures a new picture and deletes it', async () => {
+    const { d, t } = await open();
+    expect(d.supports(OP.InitiateCapture)).toBe(true);
+    const fresh = await d.capture({ pollMs: 5 });
+    expect(fresh).toEqual([3]);
+    expect((await d.getObjectInfo(3)).filename).toBe('IMG_0003.JPG');
+    await d.deleteObject(3);
+    expect(t.state.deleted).toEqual([3]);
+    expect(await d.getObjectHandles()).toEqual([1, 2]);
+  });
+
+  it('returns thumbnails', async () => {
+    const { d } = await open();
+    const th = await d.getThumb(1);
+    expect(String.fromCharCode(th[0], th[1])).toBe('BM');
+    expect((await d.getObjectInfo(1)).thumbFormat).toBe(0x3804);
+  });
+});

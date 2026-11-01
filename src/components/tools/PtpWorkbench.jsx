@@ -1,6 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { Camera, Usb, Power, ShieldAlert, Sparkles, Download, RefreshCw, Loader2 } from 'lucide-react';
-import { PtpDevice, requestPtpDevice, createSimulatedPtp, objectFormatName } from '../../utils/ptpDriver';
+import { Camera, Usb, Power, ShieldAlert, Sparkles, Download, RefreshCw, Loader2, Image as ImageIcon, Trash2, Aperture } from 'lucide-react';
+import JSZip from 'jszip';
+import { PtpDevice, requestPtpDevice, createSimulatedPtp, objectFormatName, PTP_OP } from '../../utils/ptpDriver';
+import { imageMime } from '../../utils/scpiTools';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
@@ -18,6 +20,11 @@ export default function PtpWorkbench() {
   const [objects, setObjects] = useState([]); // { handle, info }
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [storage, setStorage] = useState([]);
+  const [battery, setBattery] = useState(null);
+  const [thumbs, setThumbs] = useState({}); // handle -> object URL
+  const [selected, setSelected] = useState(new Set());
+  const [bulk, setBulk] = useState(null); // { done, total }
   const webUsbAvailable = typeof navigator !== 'undefined' && 'usb' in navigator;
 
   const loadObjects = async (dev) => {
@@ -39,6 +46,11 @@ export default function PtpWorkbench() {
       await dev.openSession();
       setInfo(await dev.getDeviceInfo());
       setPtp(dev); setIsSimulated(simulated); setStatus(simulated ? 'warning' : 'online');
+      const ids = await dev.getStorageIds().catch(() => []);
+      const st = [];
+      for (const id of ids) { try { st.push({ id, ...(await dev.getStorageInfo(id)) }); } catch (e) { /* not supported */ } }
+      setStorage(st);
+      setBattery(await dev.getBatteryLevel());
       await loadObjects(dev);
     } catch (err) { setError(err.message); setStatus('warning'); }
     finally { setBusy(''); }
@@ -47,7 +59,81 @@ export default function PtpWorkbench() {
   const disconnect = async () => {
     try { await ptp?.closeSession(); await ptp?.close(); } catch (e) { /* ignore */ }
     setPtp(null); setIsSimulated(false); setStatus('offline'); setInfo(null); setObjects([]);
+    Object.values(thumbs).forEach((u) => URL.revokeObjectURL(u));
+    setThumbs({}); setSelected(new Set()); setStorage([]); setBattery(null);
   };
+
+  const loadThumbs = async () => {
+    setBusy('thumbs'); setError('');
+    try {
+      const next = { ...thumbs };
+      for (const o of objects.slice(0, 300)) {
+        if (next[o.handle] || !o.info.thumbCompressedSize) continue;
+        const data = await ptp.getThumb(o.handle);
+        if (data && imageMime(data)) next[o.handle] = URL.createObjectURL(new Blob([data], { type: imageMime(data) }));
+        setThumbs({ ...next });
+      }
+    } catch (err) { setError(err.message); }
+    finally { setBusy(''); }
+  };
+
+  /** Save several files: into a folder you pick (Chrome/Edge) or as one zip. */
+  const downloadMany = async (list) => {
+    if (!list.length) return;
+    setBusy('bulk'); setError('');
+    try {
+      let dir = null;
+      if (window.showDirectoryPicker) {
+        try { dir = await window.showDirectoryPicker({ mode: 'readwrite' }); } catch (e) { if (e.name === 'AbortError') return; }
+      }
+      const zip = dir ? null : new JSZip();
+      for (let i = 0; i < list.length; i++) {
+        setBulk({ done: i, total: list.length });
+        const o = list[i];
+        const name = o.info.filename || `object_${o.handle}`;
+        const data = await ptp.getObject(o.handle);
+        if (dir) {
+          const fh = await dir.getFileHandle(name, { create: true });
+          const w = await fh.createWritable();
+          await w.write(data);
+          await w.close();
+        } else zip.file(name, data);
+      }
+      if (zip) {
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `${info?.model || 'camera'}-photos.zip`; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      setBulk({ done: list.length, total: list.length });
+    } catch (err) { setError(err.message); }
+    finally { setBusy(''); }
+  };
+
+  const deleteSelected = async () => {
+    const list = objects.filter((o) => selected.has(o.handle));
+    if (!list.length || !window.confirm(`Delete ${list.length} file(s) from the camera? This cannot be undone.`)) return;
+    setBusy('delete'); setError('');
+    try {
+      for (const o of list) await ptp.deleteObject(o.handle);
+      setSelected(new Set());
+      await loadObjects(ptp);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(''); }
+  };
+
+  const capture = async () => {
+    setBusy('capture'); setError('');
+    try {
+      const fresh = await ptp.capture();
+      await loadObjects(ptp);
+      setSelected(new Set(fresh));
+    } catch (err) { setError(err.message); }
+    finally { setBusy(''); }
+  };
+
+  const toggle = (h) => setSelected((prev) => { const n = new Set(prev); if (n.has(h)) n.delete(h); else n.add(h); return n; });
 
   const download = async (obj) => {
     setBusy(`dl-${obj.handle}`); setError('');
@@ -72,8 +158,8 @@ export default function PtpWorkbench() {
               <Camera className="w-4 h-4 text-purple-400" /> <span>PTP / MTP CAMERA</span>
             </h2>
             <p className="text-[11px] text-slate-400 max-w-3xl">
-              Pull photos and metadata off a camera or phone in <b>PTP mode</b> (on a phone: USB → "Transfer photos / PTP"). List files,
-              read their info, and download them. Read-only browsing — nothing is deleted.
+              Pull photos and metadata off a camera or phone in <b>PTP mode</b> (on a phone: USB → "Transfer photos / PTP"). See storage and
+              battery, browse with thumbnails, download one, several or all files, delete, and fire the shutter remotely on cameras that allow it.
             </p>
           </div>
           <StatusBadge status={status} label={status === 'online' ? 'PTP' : status === 'warning' ? 'SIM' : 'IDLE'} value={ptp ? (isSimulated ? 'Demo' : 'Connected') : 'Offline'} />
@@ -119,6 +205,10 @@ export default function PtpWorkbench() {
           <Field label="Model" value={info.model} />
           <Field label="Firmware" value={info.deviceVersion} />
           <Field label="Serial" value={info.serialNumber} />
+          {battery !== null && <Field label="Battery" value={`${battery}%`} />}
+          {storage.map((st) => (
+            <Field key={st.id} label={`Storage ${st.description || st.id.toString(16)}`} value={`${fmtBytes(st.freeSpace)} free of ${fmtBytes(st.maxCapacity)}${st.volumeLabel ? ` · ${st.volumeLabel}` : ''}${st.readOnly ? ' · read-only' : ''}`} />
+          ))}
         </div>
       )}
 
@@ -126,7 +216,22 @@ export default function PtpWorkbench() {
         <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <span className="font-bold text-slate-200">FILES</span>
-            <span className="text-slate-500">{objects.length} object(s)</span>
+            <span className="text-slate-500">{objects.length} object(s){selected.size ? ` · ${selected.size} selected` : ''}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            <button onClick={loadThumbs} disabled={!!busy || !objects.length} className="flex items-center gap-1 px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-200 font-bold disabled:opacity-40"><ImageIcon className="w-3.5 h-3.5" /> THUMBNAILS</button>
+            <button onClick={() => downloadMany(objects.filter((o) => selected.has(o.handle)))} disabled={!!busy || !selected.size} className="flex items-center gap-1 px-2 py-1 rounded bg-purple-500/20 border border-purple-500/40 text-purple-300 font-bold disabled:opacity-40"><Download className="w-3.5 h-3.5" /> DOWNLOAD SELECTED</button>
+            <button onClick={() => downloadMany(objects)} disabled={!!busy || !objects.length} className="flex items-center gap-1 px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-200 font-bold disabled:opacity-40"><Download className="w-3.5 h-3.5" /> DOWNLOAD ALL</button>
+            {ptp.supports(PTP_OP.DeleteObject) && (
+              <button onClick={deleteSelected} disabled={!!busy || !selected.size} className="flex items-center gap-1 px-2 py-1 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold disabled:opacity-40"><Trash2 className="w-3.5 h-3.5" /> DELETE</button>
+            )}
+            {ptp.supports(PTP_OP.InitiateCapture) && (
+              <button onClick={capture} disabled={!!busy} className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold disabled:opacity-40">
+                {busy === 'capture' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Aperture className="w-3.5 h-3.5" />} CAPTURE
+              </button>
+            )}
+            {bulk && busy === 'bulk' && <span className="text-slate-400">{bulk.done} / {bulk.total}</span>}
+            {bulk && busy !== 'bulk' && bulk.done === bulk.total && <span className="text-emerald-300">Saved {bulk.total} file(s).</span>}
           </div>
           <div className="mt-2 max-h-96 overflow-auto">
             {objects.length === 0 ? (
@@ -134,11 +239,13 @@ export default function PtpWorkbench() {
             ) : (
               <table className="w-full text-left">
                 <thead className="text-slate-500 text-[10px] uppercase">
-                  <tr><th className="py-1">Filename</th><th>Format</th><th>Size</th><th>Dimensions</th><th>Date</th><th></th></tr>
+                  <tr><th className="py-1 w-6"><input type="checkbox" checked={selected.size === objects.length} onChange={(e) => setSelected(e.target.checked ? new Set(objects.map((o) => o.handle)) : new Set())} /></th><th /><th className="py-1">Filename</th><th>Format</th><th>Size</th><th>Dimensions</th><th>Date</th><th></th></tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900">
                   {objects.map((o) => (
                     <tr key={o.handle} className="hover:bg-slate-900/40">
+                      <td><input type="checkbox" checked={selected.has(o.handle)} onChange={() => toggle(o.handle)} /></td>
+                      <td>{thumbs[o.handle] && <img src={thumbs[o.handle]} alt="" className="h-10 rounded border border-slate-800" />}</td>
                       <td className="py-1 text-slate-200">{o.info.filename || `#${o.handle}`}</td>
                       <td className="text-slate-400">{objectFormatName(o.info.objectFormat)}</td>
                       <td className="text-slate-400">{fmtBytes(o.info.compressedSize)}</td>

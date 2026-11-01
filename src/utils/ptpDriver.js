@@ -12,6 +12,8 @@
  * References: PIMA 15740 / ISO 15740 (PTP); MTP is PTP with vendor extensions.
  */
 
+import { demoScreenshotBmp } from './scpiTools';
+
 export const PTP_CLASS = { classCode: 0x06, subclassCode: 0x01, protocolCode: 0x01 }; // Still Image / PTP
 
 export const PTP_TYPE = { COMMAND: 1, DATA: 2, RESPONSE: 3, EVENT: 4 };
@@ -19,8 +21,10 @@ export const PTP_OP = {
   GetDeviceInfo: 0x1001, OpenSession: 0x1002, CloseSession: 0x1003,
   GetStorageIDs: 0x1004, GetStorageInfo: 0x1005, GetNumObjects: 0x1006,
   GetObjectHandles: 0x1007, GetObjectInfo: 0x1008, GetObject: 0x1009,
-  GetThumb: 0x100a, DeleteObject: 0x100b, InitiateCapture: 0x100e
+  GetThumb: 0x100a, DeleteObject: 0x100b, InitiateCapture: 0x100e,
+  GetDevicePropDesc: 0x1014, GetDevicePropValue: 0x1015, GetPartialObject: 0x101b
 };
+export const PTP_PROP = { BatteryLevel: 0x5001 };
 export const PTP_RESP = { OK: 0x2001, SessionNotOpen: 0x2003, SessionAlreadyOpen: 0x201e };
 
 const OBJECT_FORMATS = {
@@ -94,6 +98,23 @@ export function parseDeviceInfo(bytes) {
     serialNumber: r.str()
   };
   return info;
+}
+
+export function parseStorageInfo(bytes) {
+  const r = new DataReader(bytes);
+  const storageType = r.u16();
+  const filesystemType = r.u16();
+  const accessCapability = r.u16();
+  return {
+    storageType: { 1: 'fixed ROM', 2: 'removable ROM', 3: 'fixed RAM', 4: 'removable RAM' }[storageType] || `type ${storageType}`,
+    filesystemType,
+    readOnly: accessCapability !== 0,
+    maxCapacity: r.u64(),
+    freeSpace: r.u64(),
+    freeImages: r.u32(),
+    description: r.str(),
+    volumeLabel: r.str()
+  };
 }
 
 export function parseObjectInfo(bytes) {
@@ -178,7 +199,39 @@ export class PtpDevice {
     });
   }
 
-  async getDeviceInfo() { return parseDeviceInfo((await this.transaction(PTP_OP.GetDeviceInfo)).data); }
+  async getDeviceInfo() {
+    this.deviceInfo = parseDeviceInfo((await this.transaction(PTP_OP.GetDeviceInfo)).data);
+    return this.deviceInfo;
+  }
+
+  /** True when the camera lists the operation in its DeviceInfo. */
+  supports(op) { return !!this.deviceInfo?.operationsSupported.includes(op); }
+
+  async getStorageInfo(storageId) { return parseStorageInfo((await this.transaction(PTP_OP.GetStorageInfo, [storageId])).data); }
+
+  /** Battery level in percent, or null when the camera doesn't report it. */
+  async getBatteryLevel() {
+    if (!this.deviceInfo?.devicePropertiesSupported.includes(PTP_PROP.BatteryLevel)) return null;
+    try { return (await this.transaction(PTP_OP.GetDevicePropValue, [PTP_PROP.BatteryLevel])).data[0]; } catch (e) { return null; }
+  }
+
+  async deleteObject(handle) { await this.transaction(PTP_OP.DeleteObject, [handle, 0]); }
+
+  /**
+   * Trigger the shutter (InitiateCapture) and wait for the new object(s) to
+   * appear in the handle list. Returns the new handles.
+   */
+  async capture({ timeoutMs = 20000, pollMs = 500 } = {}) {
+    const before = new Set(await this.getObjectHandles());
+    await this.transaction(PTP_OP.InitiateCapture, [0, 0]);
+    const end = Date.now() + timeoutMs;
+    while (Date.now() < end) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      const fresh = (await this.getObjectHandles()).filter((h) => !before.has(h));
+      if (fresh.length) return fresh;
+    }
+    throw new PtpError('The camera took no picture (check focus, the lens cap, or that remote capture is allowed in its settings).');
+  }
 
   async openSession(sessionId = 1) {
     try { await this.transaction(PTP_OP.OpenSession, [sessionId]); }
@@ -267,23 +320,24 @@ const arr32 = (list) => concat([u32a(list.length), ...list.map(u32a)]);
 const arr16 = (list) => concat([u32a(list.length), ...list.map(u16a)]);
 
 export function createSimulatedPtp() {
+  const thumb = demoScreenshotBmp(160, 120);
   const objects = {
     1: { info: { storageId: 0x10001, objectFormat: 0x3801, compressedSize: 12, imagePixWidth: 4000, imagePixHeight: 3000, filename: 'IMG_0001.JPG', captureDate: '20240131T101500' }, data: new TextEncoder().encode('JPEGDATA0001') },
     2: { info: { storageId: 0x10001, objectFormat: 0x3801, compressedSize: 12, imagePixWidth: 4000, imagePixHeight: 3000, filename: 'IMG_0002.JPG', captureDate: '20240131T101530' }, data: new TextEncoder().encode('JPEGDATA0002') }
   };
-  const state = { simulated: true, sessionOpen: false, objects };
+  const state = { simulated: true, sessionOpen: false, objects, captures: 0, deleted: [] };
   let pending = [];
   const devInfo = () => concat([
     u16a(100), u32a(0), u16a(100), ptpString('sim'), u16a(0),
-    arr16([0x1001, 0x1002, 0x1003, 0x1004, 0x1007, 0x1008, 0x1009]),
-    arr16([]), arr16([]), arr16([]), arr16([0x3801]),
+    arr16([0x1001, 0x1002, 0x1003, 0x1004, 0x1005, 0x1007, 0x1008, 0x1009, 0x100a, 0x100b, 0x100e, 0x1015]),
+    arr16([0x4002, 0x400d]), arr16([0x5001]), arr16([0x3801]), arr16([0x3801]),
     ptpString('Simulated Optics'), ptpString('SimCam X1'), ptpString('1.0'), ptpString('SNCAM00001')
   ]);
   const objInfo = (h) => {
     const i = objects[h].info;
     return concat([
       u32a(i.storageId), u16a(i.objectFormat), u16a(0), u32a(i.compressedSize),
-      u16a(0), u32a(0), u32a(0), u32a(0), u32a(i.imagePixWidth), u32a(i.imagePixHeight),
+      u16a(0x3804), u32a(thumb.length), u32a(160), u32a(120), u32a(i.imagePixWidth), u32a(i.imagePixHeight),
       u32a(24), u32a(0), u16a(0), u32a(0), u32a(h),
       ptpString(i.filename), ptpString(i.captureDate), ptpString(''), ptpString('')
     ]);
@@ -306,7 +360,19 @@ export function createSimulatedPtp() {
         case PTP_OP.GetObjectHandles: reply(PTP_TYPE.DATA, h.code, h.transactionId, arr32(Object.keys(objects).map(Number))); ok(h.transactionId); break;
         case PTP_OP.GetObjectInfo: reply(PTP_TYPE.DATA, h.code, h.transactionId, objInfo(p[0])); ok(h.transactionId); break;
         case PTP_OP.GetObject: reply(PTP_TYPE.DATA, h.code, h.transactionId, objects[p[0]].data); ok(h.transactionId); break;
-        case PTP_OP.GetThumb: pending.push(buildContainer(PTP_TYPE.RESPONSE, 0x2001, h.transactionId)); break;
+        case PTP_OP.GetThumb: reply(PTP_TYPE.DATA, h.code, h.transactionId, thumb); ok(h.transactionId); break;
+        case PTP_OP.GetStorageInfo:
+          reply(PTP_TYPE.DATA, h.code, h.transactionId, concat([u16a(4), u16a(2), u16a(0), u32a(0), u32a(16), u32a(0x40000000), u32a(9), u32a(1840), ptpString('SD card'), ptpString('SIMCAM')]));
+          ok(h.transactionId);
+          break;
+        case PTP_OP.GetDevicePropValue: reply(PTP_TYPE.DATA, h.code, h.transactionId, Uint8Array.from([87])); ok(h.transactionId); break;
+        case PTP_OP.DeleteObject: delete objects[p[0]]; state.deleted.push(p[0]); ok(h.transactionId); break;
+        case PTP_OP.InitiateCapture: {
+          const n = 3 + state.captures++;
+          objects[n] = { info: { ...objects[1]?.info, storageId: 0x10001, objectFormat: 0x3801, compressedSize: 12, imagePixWidth: 4000, imagePixHeight: 3000, filename: `IMG_000${n}.JPG`, captureDate: '20260131T120000' }, data: new TextEncoder().encode(`JPEGDATA000${n}`) };
+          ok(h.transactionId);
+          break;
+        }
         default: pending.push(buildContainer(PTP_TYPE.RESPONSE, 0x2005, h.transactionId)); // OperationNotSupported
       }
     },
