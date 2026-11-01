@@ -456,20 +456,55 @@ export class MayhemPortaPackDriver {
    * a no-op that streams zeros, hence the OFF first.
    */
   async _bringUpRx() {
+    try {
+      await this._bringUpSequence('mayhem-mobile');
+    } catch (e) {
+      // Some firmware (the HackRF image inside Mayhem among them) has refused
+      // RECEIVE in this order while accepting the older one: retune first,
+      // gains after RX. Reset what we can and try that.
+      this.log(`[HackRF WebUSB] ${e.message}`, 'warning');
+      this.log('[HackRF WebUSB] Retrying with the legacy bring-up order (retune before RECEIVE, gains after).', 'warning');
+      await this._recoverDevice();
+      await this._bringUpSequence('legacy');
+    }
+  }
+
+  async _bringUpSequence(order) {
     const step = (name, fn, fatal = false) => this._step(name, fn, fatal);
+    this.bringUpOrder = order;
     await step('SET_TRANSCEIVER_MODE OFF', () => this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_OFF));
     await sleep(100);
     await step('SET_HW_SYNC_MODE off', () => this._ctrlOut(HACKRF_REQ.SET_HW_SYNC_MODE, 0));
     await step(`SAMPLE_RATE_SET ${this.sampleRate / 1e6} Msps`, () => this._applySampleRate(this.sampleRate));
     await step('SET_FREQ', () => this._setFreqRaw(this.frequency));
     await this.setWebUsbAmp(this.amp, { quiet: true });
-    await this.setWebUsbGains(this.lnaGain, this.vgaGain, { quiet: true });
-    await step('SET_TRANSCEIVER_MODE RECEIVE', () => this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_RECEIVE), true);
-    await sleep(40);
-    await step('cache-bust retune', async () => { await this._setFreqRaw(this.frequency + 1000000); await this._setFreqRaw(this.frequency); });
-    await this.setWebUsbGains(this.lnaGain, this.vgaGain, { quiet: true });
+    if (order === 'mayhem-mobile') {
+      await this.setWebUsbGains(this.lnaGain, this.vgaGain, { quiet: true });
+      await step('SET_TRANSCEIVER_MODE RECEIVE', () => this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_RECEIVE), true);
+      await sleep(40);
+      await step('cache-bust retune', async () => { await this._setFreqRaw(this.frequency + 1000000); await this._setFreqRaw(this.frequency); });
+      await this.setWebUsbGains(this.lnaGain, this.vgaGain, { quiet: true });
+    } else {
+      await step('cache-bust retune', async () => { await this._setFreqRaw(this.frequency + 1000000); await this._setFreqRaw(this.frequency); });
+      await sleep(40);
+      await step('SET_TRANSCEIVER_MODE RECEIVE', () => this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_RECEIVE), true);
+      await sleep(40);
+      await this.setWebUsbGains(this.lnaGain, this.vgaGain, { quiet: true });
+    }
     await sleep(60);
-    this.log(`HackRF: RX engaged at ${(this.frequency / 1e6).toFixed(4)} MHz, ${this.sampleRate / 1e6} Msps, LNA ${this.lnaGain} / VGA ${this.vgaGain} dB, amp ${this.amp ? 'on' : 'off'}.`, 'success');
+    this.log(`HackRF: RX engaged (${order} order) at ${(this.frequency / 1e6).toFixed(4)} MHz, ${this.sampleRate / 1e6} Msps, LNA ${this.lnaGain} / VGA ${this.vgaGain} dB, amp ${this.amp ? 'on' : 'off'}.`, 'success');
+  }
+
+  /** Best-effort device recovery between bring-up attempts (nothing here is fatal). */
+  async _recoverDevice() {
+    const dev = this.usbDevice;
+    if (!dev) return;
+    try { if (typeof dev.reset === 'function') { await dev.reset(); this.log('[HackRF WebUSB] USB device reset.', 'info'); } }
+    catch (e) { this.log(`[HackRF WebUSB] Device reset not available here (${e.message}); continuing.`, 'info'); }
+    try { if (dev.configuration === null) await dev.selectConfiguration(1); } catch (_) {}
+    try { await dev.releaseInterface(0); } catch (_) {}
+    try { await dev.claimInterface(0); } catch (_) {}
+    await sleep(250);
   }
 
   /**

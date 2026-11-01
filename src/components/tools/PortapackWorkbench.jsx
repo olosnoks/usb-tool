@@ -64,6 +64,11 @@ export default function PortapackWorkbench() {
   const [cliInput, setCliInput] = useState('');
   const [logs, setLogs] = useState([]);
   const [connectError, setConnectError] = useState(null);
+  const [connectDetails, setConnectDetails] = useState([]);
+  const failConnect = (err) => {
+    setConnectError(err.message);
+    setConnectDetails(driver.logs.filter((l) => l.type === 'warning' || l.type === 'error').slice(-8).map((l) => l.text));
+  };
   const [showVirtualLcd, setShowVirtualLcd] = useState(false);
   // Real screen mirror (serial console `screenframeshort`)
   const [mirrorTick, setMirrorTick] = useState(0);
@@ -227,7 +232,7 @@ export default function PortapackWorkbench() {
                   try {
                     await driver.connectWebUsb();
                   } catch (err) {
-                    setConnectError(err.message);
+                    failConnect(err);
                   }
                 }}
                 className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded text-xs font-mono transition shadow-md shadow-cyan-600/20 flex items-center gap-1.5"
@@ -242,7 +247,7 @@ export default function PortapackWorkbench() {
                   try {
                     await driver.connectHardware({ baudRate: 115200, noFilter: true });
                   } catch (err) {
-                    setConnectError(err.message);
+                    failConnect(err);
                   }
                 }}
                 className="px-2.5 py-1 bg-purple-600/20 hover:bg-purple-600/40 text-purple-200 border border-purple-500/30 rounded text-xs font-mono transition flex items-center gap-1"
@@ -277,8 +282,13 @@ export default function PortapackWorkbench() {
             <div>
               <div className="font-bold">Connection Error: {connectError}</div>
               <div className="text-[11px] text-rose-400/80 mt-1">
-                WebUSB: unplug and replug the HackRF (on a PortaPack, re-enter HackRF mode), close SDR# / SDR++ / hackrf_* tools, then Connect WebUSB again; the <strong>Console &amp; Log</strong> tab names the step that failed. COM Port: pick the PortaPack's COM port and make sure no terminal has it open.
+                WebUSB: unplug and replug the HackRF (on a PortaPack, re-enter HackRF mode), close SDR# / SDR++ / hackrf_* tools, then Connect WebUSB again. COM Port: pick the PortaPack's COM port and make sure no terminal has it open.
               </div>
+              {connectDetails.length > 0 && (
+                <div className="mt-2 text-[10px] text-rose-200/80 space-y-0.5 border-t border-rose-500/20 pt-1.5">
+                  {connectDetails.map((t, i) => <div key={i}>{t}</div>)}
+                </div>
+              )}
             </div>
           </div>
           <button 

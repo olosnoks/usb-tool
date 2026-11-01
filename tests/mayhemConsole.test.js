@@ -449,3 +449,38 @@ describe('PortaPack Mayhem WebUSB bring-up resilience (simulated HackRF)', () =>
     } finally { vi.unstubAllGlobals(); }
   });
 });
+
+
+describe('PortaPack Mayhem WebUSB legacy bring-up fallback (simulated HackRF)', () => {
+  it('falls back to retune-before-RECEIVE when the firmware refuses RECEIVE in the first order', async () => {
+    const { dev, ctrlOut } = makeFakeHackRf();
+    // This firmware accepts RECEIVE only right after a SET_FREQ (legacy order).
+    const orig = dev.controlTransferOut.bind(dev);
+    dev.controlTransferOut = async (setup, data) => {
+      if (setup.request === 1 && setup.value === 1) {
+        const prev = ctrlOut[ctrlOut.length - 1];
+        if (!prev || prev.request !== 16) throw new Error("Failed to execute 'controlTransferOut' on 'USBDevice': A transfer error has occurred.");
+      }
+      return orig(setup, data);
+    };
+    let resets = 0;
+    dev.reset = async () => { resets++; };
+    dev.releaseInterface = async () => {};
+    vi.stubGlobal('navigator', { usb: { requestDevice: async () => dev, getDevices: async () => [] } });
+    try {
+      const d = new MayhemPortaPackDriver();
+      const logs = [];
+      d.onLogCallback = (e) => logs.push(e.text);
+      await d.connectWebUsb();
+      expect(d.connectionType).toBe('webusb');
+      expect(d.bringUpOrder).toBe('legacy');
+      expect(resets).toBe(1);
+      expect(logs.some((t) => /Retrying with the legacy bring-up order/.test(t))).toBe(true);
+      expect(logs.some((t) => /RX engaged \(legacy order\)/.test(t))).toBe(true);
+      // In the legacy order the gains are set after RECEIVE.
+      const rxIdx = ctrlOut.map((c, i) => (c.request === 1 && c.value === 1 ? i : -1)).filter((i) => i >= 0).pop();
+      expect(rxIdx).toBeGreaterThan(0);
+      await d.disconnect();
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
