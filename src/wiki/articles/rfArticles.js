@@ -576,7 +576,7 @@ A live span shows at most 20 MHz at once. **SWEEP** retunes the HackRF across a 
 
 ### 5. IQ Recorder
 
-The **IQ Recorder** tab records the raw 8-bit IQ exactly as the HackRF streams it (4 MB/s at 2 Msps), up to a size limit you choose, and saves it as:
+**REC** in the receiver's audio row records the raw 8-bit IQ exactly as the HackRF streams it (4 MB/s at 2 Msps), up to the size limit you pick next to it (16 MB to 512 MB). When you stop, a strip under the audio row saves it as:
 - **.c8** — HackRF native int8 I/Q, the format \`hackrf_transfer -r\` writes, or
 - **Mayhem .C16 + .TXT** — int16 I/Q plus a sidecar with \`sample_rate=\` and \`center_frequency=\`, the pair the PortaPack **Replay** app expects in \`/CAPTURES\`.
 
@@ -622,7 +622,7 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 | **Display: click / drag / double-click** | Mouse | Pick the channel (LIVE) or tune there (SWEEP) / pan / move the LO. |
 | **LISTEN, demod, SQL, volume** | Row | Audio on/off, WFM / NFM / AM / USB / LSB, squelch on the channel power, output level. |
 | **Tactical Map tab** | Tab | Leaflet map tracking ADS-B aircraft decoded from the 1090 MHz IQ. |
-| **IQ Recorder tab** | Tab | Records raw IQ to .c8 or Mayhem .C16 + .TXT. |
+| **MAX + REC, capture strip** | Row | Records raw IQ (up to 512 MB) and saves it as .c8 or Mayhem .C16 + .TXT. |
 | **FREQMAN tab** | Panel | Edits channel presets and exports FREQMAN.TXT for the microSD card; TUNE opens the receiver on that channel. |
 
 ---

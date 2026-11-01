@@ -3,7 +3,6 @@ import {
   Radio,
   RotateCcw,
   Terminal as TerminalIcon,
-  Disc,
   Zap,
   ChevronUp,
   ChevronDown,
@@ -23,7 +22,6 @@ import ReceiverDeck from './hackrf/ReceiverDeck';
 import HackRfFlasherWorkbench from './HackRfFlasherWorkbench';
 import StatusBadge from '../common/StatusBadge';
 import FreqmanView from './portapack/FreqmanView';
-import CaptureView from './portapack/CaptureView';
 import CliView from './portapack/CliView';
 
 // Tabs kept out of the UI until they do something real over USB:
@@ -453,7 +451,6 @@ export default function PortapackWorkbench() {
               { id: 'receiver', name: 'Receiver: Spectrum, Audio & Sweep', icon: Flame },
               { id: 'map', name: 'Tactical Map (ADS-B)', icon: MapPin },
               { id: 'freqman', name: 'FREQMAN (SD Cards)', icon: FileText },
-              { id: 'capture', name: 'IQ Recorder', icon: Disc },
               { id: 'flash', name: 'Flash & First-Time Setup', icon: Zap },
               { id: 'cli', name: 'Console & Log', icon: TerminalIcon }
             ].map(tab => {
@@ -504,10 +501,6 @@ export default function PortapackWorkbench() {
               setCustomLabel={setCustomLabel}
               setCustomMod={setCustomMod}
             />
-          )}
-
-          {activeTab === 'capture' && (
-            <CaptureView driver={driver} state={state} />
           )}
 
           {activeTab === 'flash' && (

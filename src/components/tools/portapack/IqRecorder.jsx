@@ -1,7 +1,7 @@
-// Shared IQ recorder pieces for the PortaPack Mayhem workbench. The receiver
-// tab shows the compact REC button next to LISTEN; the IQ Recorder tab shows
-// the full card. Both drive the same recording in the driver, and the finished
-// capture lives on the driver (lastCapture) so it can be saved from either tab.
+// IQ recorder controls for the receiver tab of the PortaPack Mayhem workbench:
+// the REC button with its size limit next to LISTEN, and the "last capture"
+// strip with the save buttons. The finished capture lives on the driver
+// (lastCapture) so it survives tab changes until discarded.
 import { useEffect, useState } from 'react';
 import { Disc, Square, Download, FileText, X } from 'lucide-react';
 import { HACKRF_CAPTURE_MAX_BYTES } from '../../../utils/mayhemDriver';
@@ -132,44 +132,6 @@ export function CaptureResultStrip({ driver, state }) {
         <button onClick={() => driver.clearLastCapture()} title="Discard this capture and free its memory" className="p-1 text-slate-500 hover:text-rose-300">
           <X className="w-3.5 h-3.5" />
         </button>
-      </div>
-    </div>
-  );
-}
-
-/** Full result card for the IQ Recorder tab. */
-export function CaptureResultCard({ driver, state }) {
-  const result = useLastCapture(driver, state);
-  if (!result) return null;
-  return (
-    <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-      <div className="flex justify-between border-b border-slate-800 pb-2">
-        <span className="text-slate-400">Capture</span>
-        <span className="text-cyan-300 font-bold">{captureBaseName(result)}</span>
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
-        <div><span className="text-slate-500 block">Center</span><span className="text-emerald-400 font-bold">{(result.centerHz / 1e6).toFixed(4)} MHz</span></div>
-        <div><span className="text-slate-500 block">Sample rate</span><span className="text-slate-200">{result.sampleRate / 1e6} Msps</span></div>
-        <div><span className="text-slate-500 block">Duration</span><span className="text-amber-400">{result.seconds.toFixed(2)} s</span></div>
-        <div><span className="text-slate-500 block">Size</span><span className="text-slate-200">{fmtMb(result.bytes)} MB (int8 I/Q){result.full ? ' · limit' : ''}</span></div>
-      </div>
-      <div className="pt-2 flex flex-wrap gap-2">
-        <button onClick={() => saveC8(result)}
-          className="px-3 py-1.5 bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-200 border border-cyan-500/40 rounded flex items-center gap-1.5">
-          <Download className="w-3.5 h-3.5" /> Save .c8 (HackRF / hackrf_transfer)
-        </button>
-        <button onClick={() => saveC16(result, driver)}
-          className="px-3 py-1.5 bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 rounded flex items-center gap-1.5">
-          <FileText className="w-3.5 h-3.5" /> Save Mayhem .C16 + .TXT (Replay)
-        </button>
-        <button onClick={() => driver.clearLastCapture()}
-          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded flex items-center gap-1.5">
-          <X className="w-3.5 h-3.5" /> Discard
-        </button>
-      </div>
-      <div className="text-[10px] text-slate-500">
-        The .C16 is twice the size (int8 scaled to int16). Mayhem Replay reads the sample rate and centre from the .TXT; keep both files together.
-        The recording is held in browser memory until you discard it or reload the page.
       </div>
     </div>
   );
