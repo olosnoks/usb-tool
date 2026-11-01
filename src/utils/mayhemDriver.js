@@ -1,7 +1,6 @@
 import { globalAdsbDecoder } from './adsbDecoder.js';
 import { requestPortFor, releasePort, closeSerialPort } from './portManager';
-import { powerSpectrumFromIQ } from './fft.js';
-import { Demodulator } from './hackrfDemod.js';
+import { createHackRfDsp } from './hackrfDspClient.js';
 
 /*
  * Two real transports (no demo mode):
@@ -10,12 +9,23 @@ import { Demodulator } from './hackrfDemod.js';
  *     touch <x> <y>, keyboard <hex>, screenframeshort, applist,
  *     appstart <name>, reboot, dfu. The shell has no RF amp / LNA / VGA
  *     commands; those work only in HackRF mode (WebUSB).
- *   - WebUSB libhackrf (HackRF mode): raw IQ, tuning, amp and gains.
- *   - Demo: everything simulated, labeled DEMO in the UI.
+ *   - WebUSB libhackrf (HackRF mode): raw IQ, tuning, amp and gains. The
+ *     control-transfer semantics follow libhackrf exactly (the gain requests
+ *     are IN transfers that return a 1-byte ack), and the RX bring-up order is
+ *     the one RocketGod's mayhem-mobile proved on HackRF One / r9 / Pro.
  * screenframeshort: one text line per screen row, one char per pixel,
  * char - 32 = 6-bit colour 00RRGGBB.
  */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// libhackrf vendor request numbers.
+export const HACKRF_REQ = {
+  SET_TRANSCEIVER_MODE: 1, SAMPLE_RATE_SET: 6, BASEBAND_FILTER_BW_SET: 7,
+  BOARD_ID_READ: 14, VERSION_STRING_READ: 15, SET_FREQ: 16, AMP_ENABLE: 17,
+  SET_LNA_GAIN: 19, SET_VGA_GAIN: 20, SET_TXVGA_GAIN: 21, SET_HW_SYNC_MODE: 29, BOARD_REV_READ: 45
+};
+const MODE_OFF = 0, MODE_RECEIVE = 1;
+const BOARD_NAMES = ['Jellybean', 'Jawbreaker', 'HackRF One', 'rad1o', 'HackRF One r9', 'HackRF Pro'];
 
 // HackRF baseband filter bandwidths (Hz). libhackrf picks the largest value
 // strictly below the sample rate; fall back to the narrowest.
@@ -28,6 +38,11 @@ export function basebandFilterBwForRate(rateHz) {
   for (const bw of HACKRF_BB_FILTERS) { if (bw < rateHz) best = bw; else break; }
   return best;
 }
+
+/** Sample rates the receiver offers (HackRF: 2–20 Msps). */
+export const HACKRF_SAMPLE_RATES = [2000000, 4000000, 8000000, 10000000, 20000000];
+export const HACKRF_FREQ_MIN = 1000000;
+export const HACKRF_FREQ_MAX = 6000000000;
 
 export const MAYHEM_USB_IDS = {
   MAYHEM_SERIAL: { vid: '1d50', pid: '6018', name: 'PortaPack Mayhem USB Serial Console (normal mode)' },
@@ -69,6 +84,10 @@ export const MAYHEM_APPS = [
   { id: 'antenna', name: 'Antenna Length Calc', category: 'Tools', icon: 'Ruler' }
 ];
 
+// AGC window in ADC counts (RocketGod's agcStep): hold the IQ RMS between
+// these so the 8-bit ADC is neither starved nor clipping.
+const AGC_LO_COUNTS = 7, AGC_HI_COUNTS = 22, AGC_PERIOD_MS = 400;
+
 export class MayhemPortaPackDriver {
   constructor() {
     this.isConnected = false;
@@ -85,10 +104,12 @@ export class MayhemPortaPackDriver {
     this.vgaGain = 24; // 0 - 62 dB in 2dB steps (RocketGod default 24)
     this.rxEndpoint = 1; // bulk IN endpoint number (0x81), discovered on connect
     this.sampleRate = 2000000; // 2 MSPS
+    this.agcEnabled = false;
+    this._agcLastTs = 0;
     this.activeApp = 'menu';
     this.selectedMenuIndex = 0;
     // Device identity: filled in only from the real device.
-    this.firmwareVersion = null; this.boardId = null; this.cpldVersion = null;
+    this.firmwareVersion = null; this.boardId = null; this.boardIdNum = null; this.boardRev = null; this.cpldVersion = null;
     this.batteryMv = null; this.sdCardMounted = null; this.sdCardFreeGb = null;
 
     // Serial console state
@@ -113,30 +134,139 @@ export class MayhemPortaPackDriver {
     this.onLogCallback = null;
     this.onStateChangeCallback = null;
 
-    // Live FFT spectrum from the real HackRF IQ stream (WebUSB mode)
-    this.latestSpectrum = null;   // Float32Array of dBFS bins, DC centered
+    // Live spectrum from the real HackRF IQ stream (WebUSB mode), computed by
+    // the DSP worker: averaged Hann FFTs, `spectrumBins` dBFS values, DC centred.
+    this.latestSpectrum = null;   // Float32Array of dBFS bins
     this.latestLevelDbfs = -120;  // peak bin, dBFS
-    this.spectrumFftSize = 256;
-    this.onSpectrumCallback = null;
-    this._lastSpectrumTs = 0;
+    this.latestFloorDb = null;    // median noise floor, dBFS
+    this.latestRmsCounts = 0;     // IQ RMS in ADC counts
+    this.spectrumBins = 1024;
+    this.spectrumSeq = 0;         // bumps on every spectrum frame
+    this.onSpectrumCallback = null;   // (spec, peakDb, centerHz, sampleRate, floorDb)
 
-    // Audio demodulation (WebUSB only). When demod is set, each IQ buffer is
-    // turned into audio and handed to onAudioCallback(float32, audioRate).
-    this.demod = null;
+    // Audio demodulation (WebUSB only): demod runs in the DSP worker and
+    // hands audio chunks to onAudioCallback(samples, rate, { channelDb, open }).
+    this.audioMode = 'WFM';
+    this.audioOn = false;
+    this.channelOffsetHz = 0;     // listen this far from the LO centre
+    this.squelchDb = -200;
     this.onAudioCallback = null;
+    this.dsp = null;
+
+    // Raw IQ capture (WebUSB only)
+    this._capture = null;
   }
+
+  // ---- audio / channel ---------------------------------------------------
 
   /** Start demodulating the live IQ to audio in the given mode (WFM/NFM/AM/USB/LSB). */
-  enableAudio(mode = 'WFM') {
-    this.demod = new Demodulator({ inRate: this.sampleRate, audioRate: 48000, mode });
-    this.log(`[HackRF WebUSB] Audio demod: ${mode} at ${Math.round(this.demod.audioRate)} Hz.`, 'info');
+  enableAudio(mode = this.audioMode) {
+    this.audioMode = mode; this.audioOn = true;
+    this._dspConfig({ audioOn: true, mode });
+    this.log(`[HackRF WebUSB] Audio demod: ${mode}${this.channelOffsetHz ? ` at ${((this.frequency + this.channelOffsetHz) / 1e6).toFixed(4)} MHz` : ''}.`, 'info');
   }
 
-  setAudioMode(mode) {
-    if (this.demod) this.demod.setMode(mode); else this.enableAudio(mode);
+  setAudioMode(mode) { this.audioMode = mode; this._dspConfig({ mode }); }
+  disableAudio() { this.audioOn = false; this._dspConfig({ audioOn: false }); }
+
+  /** Listen `hz` away from the LO centre (click-to-tune on the waterfall). */
+  setChannelOffset(hz) {
+    const half = this.sampleRate / 2;
+    this.channelOffsetHz = Math.max(-half, Math.min(half, Math.round(hz || 0)));
+    this._dspConfig({ offsetHz: this.channelOffsetHz });
+    this.notifyState();
   }
 
-  disableAudio() { this.demod = null; }
+  /** Squelch threshold on the channel power (dBFS); -200 keeps it open. */
+  setSquelch(db) { this.squelchDb = db; this._dspConfig({ squelchDb: db }); }
+
+  /** The frequency the audio is actually listening to. */
+  get listeningHz() { return this.frequency + this.channelOffsetHz; }
+
+  _dspConfig(partial) { if (this.dsp) this.dsp.configure(partial); }
+
+  _ensureDsp() {
+    if (this.dsp) return this.dsp;
+    const dsp = createHackRfDsp({
+      sampleRate: this.sampleRate, bins: this.spectrumBins, mode: this.audioMode,
+      offsetHz: this.channelOffsetHz, audioOn: this.audioOn, squelchDb: this.squelchDb
+    });
+    dsp.onSpectrum = (f) => {
+      this.latestSpectrum = f.spec;
+      this.latestLevelDbfs = f.peakDb;
+      this.latestFloorDb = f.floorDb;
+      this.latestRmsCounts = f.rmsCounts;
+      this.rssi = Math.round(f.peakDb);
+      this.spectrumSeq++;
+      this._agcTick(f.rmsCounts);
+      if (this.onSpectrumCallback) this.onSpectrumCallback(f.spec, f.peakDb, this.frequency, f.sampleRate, f.floorDb);
+    };
+    dsp.onAudio = (a) => { if (this.onAudioCallback) this.onAudioCallback(a.samples, a.rate, { channelDb: a.channelDb, open: a.open }); };
+    this.dsp = dsp;
+    return dsp;
+  }
+
+  // ---- AGC ---------------------------------------------------------------
+
+  setAgc(on) {
+    this.agcEnabled = !!on;
+    this.log(`[RF WebUSB] AGC ${this.agcEnabled ? 'on: holding the IQ RMS between 7 and 22 counts' : 'off (manual gains)'}.`, 'info');
+    this.notifyState();
+  }
+
+  /** One AGC step (RocketGod agcStep): VGA first, then LNA, in the native step sizes. */
+  _agcTick(rmsCounts) {
+    if (!this.agcEnabled || this.connectionType !== 'webusb' || this._sweeping || this._gainBusy) return;
+    const now = performance.now();
+    if (now - this._agcLastTs < AGC_PERIOD_MS) return;
+    this._agcLastTs = now;
+    let lna = this.lnaGain, vga = this.vgaGain;
+    if (rmsCounts < AGC_LO_COUNTS) {
+      if (vga < 62) vga += 2; else if (lna < 40) lna += 8; else return;
+    } else if (rmsCounts > AGC_HI_COUNTS) {
+      if (vga > 0) vga -= 2; else if (lna > 0) lna -= 8; else return;
+    } else return;
+    this.setWebUsbGains(lna, vga, { quiet: true }).catch(() => {});
+  }
+
+  // ---- IQ capture --------------------------------------------------------
+
+  /** Record the raw int8 IQ stream (HackRF native .c8) until stopCapture(). */
+  startCapture({ maxBytes = 64 * 1024 * 1024 } = {}) {
+    if (this.connectionType !== 'webusb') throw new Error('IQ capture needs a WebUSB HackRF connection.');
+    this._capture = { chunks: [], bytes: 0, maxBytes, startedAt: Date.now(), centerHz: this.frequency, sampleRate: this.sampleRate, full: false };
+    this.log(`[Capture] Recording IQ at ${(this.frequency / 1e6).toFixed(4)} MHz, ${this.sampleRate / 1e6} Msps (up to ${Math.round(maxBytes / 1048576)} MB).`, 'info');
+    this.notifyState();
+    return this._capture;
+  }
+
+  captureStatus() {
+    const c = this._capture;
+    if (!c) return null;
+    return { bytes: c.bytes, seconds: c.bytes / 2 / c.sampleRate, full: c.full, centerHz: c.centerHz, sampleRate: c.sampleRate };
+  }
+
+  /** Stop and return { c8 (Int8Array), c16 (Int16Array builder), sidecar, ... }. */
+  stopCapture() {
+    const c = this._capture;
+    this._capture = null;
+    this.notifyState();
+    if (!c) return null;
+    const c8 = new Int8Array(c.bytes);
+    let o = 0;
+    for (const ch of c.chunks) { c8.set(ch, o); o += ch.length; }
+    const seconds = c.bytes / 2 / c.sampleRate;
+    this.log(`[Capture] Stopped: ${(c.bytes / 1048576).toFixed(1)} MB, ${seconds.toFixed(2)} s of IQ.`, 'success');
+    return {
+      c8, bytes: c.bytes, seconds, centerHz: c.centerHz, sampleRate: c.sampleRate,
+      // Mayhem's capture metadata (.TXT next to the .C16), so Replay can play it.
+      sidecar: `sample_rate=${c.sampleRate}\ncenter_frequency=${c.centerHz}\n`,
+      /** Mayhem .C16: signed 16-bit I/Q (int8 << 8). */
+      toC16() { const out = new Int16Array(c8.length); for (let i = 0; i < c8.length; i++) out[i] = c8[i] << 8; return out; }
+    };
+  }
+
+  // ---- logging / state ---------------------------------------------------
 
   log(msg, type = 'info') {
     const entry = { time: new Date().toLocaleTimeString(), text: msg, type };
@@ -151,14 +281,18 @@ export class MayhemPortaPackDriver {
         isConnected: this.isConnected,
         connectionType: this.connectionType,
         frequency: this.frequency,
+        channelOffsetHz: this.channelOffsetHz,
         amp: this.amp,
         lnaGain: this.lnaGain,
         vgaGain: this.vgaGain,
+        agcEnabled: this.agcEnabled,
         sampleRate: this.sampleRate,
+        capturing: !!this._capture,
         activeApp: this.activeApp,
         selectedMenuIndex: this.selectedMenuIndex,
         firmwareVersion: this.firmwareVersion,
         boardId: this.boardId,
+        boardRev: this.boardRev,
         cpldVersion: this.cpldVersion,
         batteryMv: this.batteryMv,
         sdCardMounted: this.sdCardMounted,
@@ -167,6 +301,8 @@ export class MayhemPortaPackDriver {
       });
     }
   }
+
+  // ---- serial console connect --------------------------------------------
 
   async connectHardware(options = {}) {
     if (!('serial' in navigator)) {
@@ -178,7 +314,7 @@ export class MayhemPortaPackDriver {
 
     try {
       this.log(`Opening Web Serial selector (${forceNoFilter ? 'Showing All COM Ports' : 'Filtered for PortaPack VID 1D50'})...`, 'info');
-      
+
       // If forceNoFilter is true, call requestPort() with NO arguments to guarantee all COM ports show
       if (!this._portOwner) this._portOwner = { name: 'PortaPack Mayhem SDR', release: () => this.disconnect() };
       const port = await requestPortFor(this._portOwner, forceNoFilter ? undefined : {
@@ -193,8 +329,8 @@ export class MayhemPortaPackDriver {
       this.port = port;
       this.isConnected = true;
       this.connectionType = 'serial';
-      // Drop the demo's identity; fill in only what the device reports.
-      this.firmwareVersion = null; this.boardId = null; this.cpldVersion = null;
+      // Fill in only what the device reports.
+      this.firmwareVersion = null; this.boardId = null; this.boardIdNum = null; this.boardRev = null; this.cpldVersion = null;
       this.batteryMv = null; this.sdCardMounted = null; this.sdCardFreeGb = null;
       this.rxBuffer = ''; this.consoleWaiter = null; this.lastFrame = null;
 
@@ -215,6 +351,16 @@ export class MayhemPortaPackDriver {
     }
   }
 
+  // ---- WebUSB (libhackrf) -------------------------------------------------
+
+  _ctrlOut(request, value = 0, index = 0, data) {
+    return this.usbDevice.controlTransferOut({ requestType: 'vendor', recipient: 'device', request, value, index }, data);
+  }
+
+  _ctrlIn(request, value, index, length) {
+    return this.usbDevice.controlTransferIn({ requestType: 'vendor', recipient: 'device', request, value, index }, length);
+  }
+
   async connectWebUsb() {
     if (!('usb' in navigator)) {
       throw new Error('WebUSB is not supported in this browser. Please use Chrome or Edge.');
@@ -233,9 +379,10 @@ export class MayhemPortaPackDriver {
         ]
       });
 
-      // RocketGod: Check if PortaPack is left in Mayhem Serial mode (0x6018)
+      // A PortaPack left in Mayhem serial mode (0x6018) speaks a different protocol.
       if (this.usbDevice.productId === 0x6018) {
-        this.log("PortaPack detected in Mayhem Serial mode (0x6018). For direct HackRF DSP, switch PortaPack on-screen to 'HackRF' mode, or click 'Connect Web Serial'.", 'warning');
+        this.log("PortaPack detected in Mayhem Serial mode (0x6018). For direct HackRF DSP, switch PortaPack on-screen to 'HackRF' mode, or click 'COM Port' for the console.", 'warning');
+        throw new Error('PortaPack is in Mayhem serial mode: switch it to HackRF mode on its screen, then connect again.');
       }
 
       await this.usbDevice.open();
@@ -258,135 +405,113 @@ export class MayhemPortaPackDriver {
 
       this.isConnected = true;
       this.connectionType = 'webusb';
+      this.firmwareVersion = null; this.boardId = null; this.boardIdNum = null; this.boardRev = null;
 
       const pName = this.usbDevice.productName || 'HackRF One';
       const vid = '0x' + this.usbDevice.vendorId.toString(16).toUpperCase();
       const pid = '0x' + this.usbDevice.productId.toString(16).toUpperCase();
       this.log(`Connected to ${pName} via WebUSB (VID: ${vid}, PID: ${pid}) - libhackrf protocol.`, 'success');
 
-      // 1. Clean slate (RocketGod bring-up pattern):
-      // Stop any previous streaming first (mode OFF), then settle, then drop HW sync.
+      // Identify: version string, board id, board rev (rev read may be unsupported).
       try {
-        await this.usbDevice.controlTransferOut({
-          requestType: 'vendor', recipient: 'device', request: 1, value: 0, index: 0 // SET_TRANSCEIVER_MODE OFF
-        });
-        await sleep(100);
+        const verRes = await this._ctrlIn(HACKRF_REQ.VERSION_STRING_READ, 0, 0, 255);
+        const verStr = verRes?.data ? new TextDecoder().decode(verRes.data).replace(/\0/g, '').trim() : '';
+        if (verStr) { this.firmwareVersion = verStr; this.log(`HackRF Firmware: ${verStr}`, 'success'); }
       } catch (_) {}
-      // Turn off HW Sync (Request 29) to avoid waiting for external trigger
       try {
-        await this.usbDevice.controlTransferOut({
-          requestType: 'vendor',
-          recipient: 'device',
-          request: 29, // SET_HW_SYNC_MODE
-          value: 0,
-          index: 0
-        });
-      } catch (_) {}
-
-      // 2. Query Firmware Version (Request 15 = VERSION_STRING_READ)
-      try {
-        const verRes = await this.usbDevice.controlTransferIn({
-          requestType: 'vendor',
-          recipient: 'device',
-          request: 15,
-          value: 0,
-          index: 0
-        }, 64);
-        if (verRes && verRes.data) {
-          const decoder = new TextDecoder();
-          const verStr = decoder.decode(verRes.data).replace(/\0/g, '').trim();
-          if (verStr) {
-            this.firmwareVersion = verStr;
-            this.log(`HackRF Firmware: ${verStr}`, 'success');
-          }
-        }
-      } catch (_) {}
-
-      // 3. Query Board ID (Request 14 = BOARD_ID_READ)
-      try {
-        const bRes = await this.usbDevice.controlTransferIn({
-          requestType: 'vendor',
-          recipient: 'device',
-          request: 14,
-          value: 0,
-          index: 0
-        }, 1);
-        if (bRes && bRes.data) {
+        const bRes = await this._ctrlIn(HACKRF_REQ.BOARD_ID_READ, 0, 0, 1);
+        if (bRes?.data?.byteLength) {
           const bId = bRes.data.getUint8(0);
-          const boardNames = ['Jellybean', 'Jawbreaker', 'HackRF One', 'rad1o', 'HackRF One r9', 'HackRF Pro'];
-          this.boardId = boardNames[bId] || `HackRF Board ID ${bId}`;
+          this.boardIdNum = bId;
+          this.boardId = BOARD_NAMES[bId] || `HackRF Board ID ${bId}`;
           this.log(`Board ID: ${bId} (${this.boardId})`, 'info');
+          if (bId === 5) this.log('HackRF Pro: expect to need roughly 28 dB more VGA than a HackRF One for the same level (or turn AGC on).', 'info');
         }
       } catch (_) {}
-
-      // 4. Set Sample Rate (Request 6 = SAMPLE_RATE_SET) & Baseband Filter (Request 7)
       try {
-        const rateBuf = new ArrayBuffer(8);
-        const rateView = new DataView(rateBuf);
-        rateView.setUint32(0, 2000000, true); // 2 MSPS
-        rateView.setUint32(4, 1, true); // divider 1
-        await this.usbDevice.controlTransferOut({
-          requestType: 'vendor',
-          recipient: 'device',
-          request: 6,
-          value: 0,
-          index: 0
-        }, rateBuf);
-
-        // BASEBAND_FILTER_BW_SET (7): low 16 in value, high 16 in index.
-        // Pick the filter from libhackrf's table (largest below the sample rate).
-        const bw = basebandFilterBwForRate(this.sampleRate);
-        await this.usbDevice.controlTransferOut({
-          requestType: 'vendor',
-          recipient: 'device',
-          request: 7,
-          value: bw & 0xFFFF,
-          index: (bw >> 16) & 0xFFFF
-        });
+        const rRes = await this._ctrlIn(HACKRF_REQ.BOARD_REV_READ, 0, 0, 1);
+        if (rRes?.data?.byteLength) this.boardRev = rRes.data.getUint8(0);
       } catch (_) {}
 
-      // 5. Apply current frequency, amp, and gains with RocketGod Pro cache-busting retune
-      await this.setWebUsbFreq(this.frequency);
-      await this.setWebUsbAmp(this.amp);
-      await this.setWebUsbGains(this.lnaGain, this.vgaGain);
-
-      // RocketGod cache-bust retune (+1 MHz then back)
-      try {
-        await this.setWebUsbFreq(this.frequency + 1000000);
-        await this.setWebUsbFreq(this.frequency);
-      } catch (_) {}
-
-      // 6. Enter Receive Mode (Request 1 = SET_TRANSCEIVER_MODE, 1 = RECEIVE)
-      try {
-        await this.usbDevice.controlTransferOut({
-          requestType: 'vendor',
-          recipient: 'device',
-          request: 1,
-          value: 1, // MODE_RECEIVE
-          index: 0
-        });
-        this.log('HackRF: RX transceiver mode engaged (streaming IQ)', 'success');
-        this.startWebUsbBulkReading();
-      } catch (_) {}
-
+      await this._bringUpRx();
+      this.startWebUsbBulkReading();
       this.notifyState();
       return true;
     } catch (err) {
       this.log(`WebUSB Connection Error: ${err.message}`, 'error');
+      if (this.usbDevice) { try { await this.usbDevice.close(); } catch (_) {} this.usbDevice = null; }
+      this.isConnected = false; this.connectionType = null;
       throw err;
     }
   }
 
-  // HackRF One streams ~4 MB/s of IQ; one transfer at a time leaves gaps in
-  // which the device's FIFO overflows and the firmware halts the stream (the
-  // "connects but reads nothing" symptom). RocketGod's driver keeps several
-  // transfers in flight at once — so do we: INFLIGHT independent pump loops,
-  // each always holding a transferIn, drain the endpoint continuously.
+  /**
+   * RX bring-up in the order mayhem-mobile proved on One / r9 / Pro:
+   * OFF → settle → HW sync off → sample rate → baseband filter → freq → amp →
+   * gains → RECEIVE → settle → cache-bust retune (+1 MHz and back; the Pro's
+   * tuning path caches the frequency so an unchanged re-tune is a no-op) →
+   * re-assert gains → settle. A HackRF left in RECEIVE makes a second RECEIVE
+   * a no-op that streams zeros, hence the OFF first.
+   */
+  async _bringUpRx() {
+    await this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_OFF);
+    await sleep(100);
+    try { await this._ctrlOut(HACKRF_REQ.SET_HW_SYNC_MODE, 0); } catch (_) {}
+    await this._applySampleRate(this.sampleRate);
+    await this._setFreqRaw(this.frequency);
+    await this.setWebUsbAmp(this.amp, { quiet: true });
+    await this.setWebUsbGains(this.lnaGain, this.vgaGain, { quiet: true });
+    await this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_RECEIVE);
+    await sleep(40);
+    await this._setFreqRaw(this.frequency + 1000000);
+    await this._setFreqRaw(this.frequency);
+    await this.setWebUsbGains(this.lnaGain, this.vgaGain, { quiet: true });
+    await sleep(60);
+    this.log(`HackRF: RX engaged at ${(this.frequency / 1e6).toFixed(4)} MHz, ${this.sampleRate / 1e6} Msps, LNA ${this.lnaGain} / VGA ${this.vgaGain} dB, amp ${this.amp ? 'on' : 'off'}.`, 'success');
+  }
+
+  async _applySampleRate(rateHz) {
+    // SAMPLE_RATE_SET (6): { u32 rate, u32 divider } little-endian.
+    const rateBuf = new ArrayBuffer(8);
+    const v = new DataView(rateBuf);
+    v.setUint32(0, rateHz, true);
+    v.setUint32(4, 1, true);
+    await this._ctrlOut(HACKRF_REQ.SAMPLE_RATE_SET, 0, 0, rateBuf);
+    // BASEBAND_FILTER_BW_SET (7): low 16 in value, high 16 in index.
+    const bw = basebandFilterBwForRate(rateHz);
+    await this._ctrlOut(HACKRF_REQ.BASEBAND_FILTER_BW_SET, bw & 0xFFFF, (bw >> 16) & 0xFFFF);
+    this.sampleRate = rateHz;
+  }
+
+  /** Change the sample rate (span) while streaming; the DSP follows. */
+  async setSampleRate(rateHz) {
+    if (this.connectionType !== 'webusb' || !this.usbDevice?.opened) { this.sampleRate = rateHz; this.notifyState(); return; }
+    const rate = Math.max(1000000, Math.min(20000000, Math.round(rateHz)));
+    try {
+      await this._applySampleRate(rate);
+      // Retune (cache-bust) so the new filter and rate settle on the Pro too.
+      await this._setFreqRaw(this.frequency + 1000000);
+      await this._setFreqRaw(this.frequency);
+      this.setChannelOffset(this.channelOffsetHz);   // clamp to the new span
+      this._dspConfig({ sampleRate: rate });
+      this._adsbRateWarned = false;
+      this.log(`[HackRF WebUSB] Sample rate ${rate / 1e6} Msps, baseband filter ${basebandFilterBwForRate(rate) / 1e6} MHz.`, 'info');
+      this.notifyState();
+    } catch (err) {
+      this.log(`Failed to set sample rate: ${err.message}`, 'error');
+    }
+  }
+
+  // HackRF One streams ~4 MB/s of IQ at 2 Msps (40 MB/s at 20); one transfer
+  // at a time leaves gaps in which the device's FIFO overflows and the firmware
+  // halts the stream. mayhem-mobile keeps 8 × 64 KiB in flight — so do we:
+  // INFLIGHT independent pump loops, each always holding a transferIn.
   startWebUsbBulkReading() {
     const ep = this.rxEndpoint;
     const INFLIGHT = 8;
     const SIZE = 65536;
-    this.log(`[HackRF WebUSB] IQ stream active on bulk endpoint 0x${(0x80 | ep).toString(16)} (${INFLIGHT} transfers in flight).`, 'info');
+    this._ensureDsp();
+    this.log(`[HackRF WebUSB] IQ stream active on bulk endpoint 0x${(0x80 | ep).toString(16)} (${INFLIGHT} transfers in flight, DSP ${this.dsp.kind === 'worker' ? 'in a worker' : 'inline'}).`, 'info');
     this._allZeroWarned = false;
     this._gotIq = false;
     this._iqStartTs = performance.now();
@@ -414,7 +539,7 @@ export class MayhemPortaPackDriver {
     // HackRF mode (or the bring-up did not take). Say so once.
     setTimeout(() => {
       if (this.connectionType === 'webusb' && !this._gotIq) {
-        this.log('[HackRF WebUSB] No IQ received. On a PortaPack, switch the device to "HackRF" mode on its screen; a bare HackRF One should just stream.', 'warning');
+        this.log('[HackRF WebUSB] No IQ received. On a PortaPack, switch the device to "HackRF" mode on its screen; a bare HackRF One should just stream. Check the cable and USB power too.', 'warning');
       }
     }, 1500);
   }
@@ -425,131 +550,127 @@ export class MayhemPortaPackDriver {
     if (!this._allZeroWarned) {
       let nonZero = false;
       for (let i = 0; i < Math.min(512, data.byteLength); i++) { if (data.getUint8(i) !== 0) { nonZero = true; break; } }
-      if (!nonZero) { this._allZeroWarned = true; this.log('[HackRF WebUSB] IQ stream is all zeros — is the PortaPack in HackRF mode? (RX bring-up may not have taken.)', 'warning'); }
+      if (!nonZero) { this._allZeroWarned = true; this.log('[HackRF WebUSB] IQ stream is all zeros — is the PortaPack in HackRF mode? (RX bring-up may not have taken; try Disconnect and connect again.)', 'warning'); }
     }
-    // Real FFT spectrum from the IQ, throttled to ~25 fps.
-    const now = performance.now();
-    if (now - this._lastSpectrumTs >= 40 && data.byteLength >= this.spectrumFftSize * 2) {
-      this._lastSpectrumTs = now;
-      const spec = powerSpectrumFromIQ(data, this.spectrumFftSize);
-      this.latestSpectrum = spec;
-      let peak = -200;
-      for (let i = 0; i < spec.length; i++) if (spec[i] > peak) peak = spec[i];
-      this.latestLevelDbfs = peak;
-      this.rssi = Math.round(peak); // real relative level (dBFS)
-      if (this.onSpectrumCallback) this.onSpectrumCallback(spec, peak, this.frequency, this.sampleRate);
-    }
-    // Near 1090 MHz, decode real Mode-S (ADS-B) packets from the raw IQ.
+    const bytes = new Int8Array(data.buffer, data.byteOffset, data.byteLength);
+    // Near 1090 MHz, decode real Mode-S (ADS-B) packets from the raw IQ. The
+    // preamble correlator is written for 2 Msps (1 µs = 2 samples).
     if (Math.abs(this.frequency - 1090000000) < 6000000) {
-      globalAdsbDecoder.processRawIq(data.buffer);
+      if (this.sampleRate === 2000000) globalAdsbDecoder.processRawIq(data.buffer);
+      else if (!this._adsbRateWarned) { this._adsbRateWarned = true; this.log('[ADS-B] The Mode-S decoder needs the 2 MHz span; set SPAN to 2 MHz to decode aircraft.', 'warning'); }
     }
-    // Demodulate to audio (every buffer, so playback stays continuous).
-    if (this.demod && this.onAudioCallback) {
-      const audio = this.demod.process(data);
-      if (audio && audio.length) this.onAudioCallback(audio, this.demod.audioRate);
+    // Raw IQ recording (copy: the buffer is handed to the worker next).
+    const cap = this._capture;
+    if (cap && !cap.full) {
+      const room = cap.maxBytes - cap.bytes;
+      const take = Math.min(room, bytes.length);
+      if (take > 0) { cap.chunks.push(bytes.slice(0, take)); cap.bytes += take; }
+      if (cap.bytes >= cap.maxBytes) { cap.full = true; this.log('[Capture] Buffer full; recording stopped at the size limit.', 'warning'); }
     }
+    // Spectrum, AGC level and audio come back from the DSP (worker or inline).
+    const buf = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength ? data.buffer : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    this._ensureDsp().push(buf);
   }
 
-  async setWebUsbFreq(hz) {
-    if (!this.usbDevice || !this.usbDevice.opened) return;
-    try {
-      const freqMhz = Math.floor(hz / 1000000);
-      const freqHz = hz % 1000000;
-      const buf = new ArrayBuffer(8);
-      const view = new DataView(buf);
-      view.setUint32(0, freqMhz, true);
-      view.setUint32(4, freqHz, true);
+  /** SET_FREQ (16): { u32 MHz, u32 Hz remainder } little-endian. */
+  async _setFreqRaw(hz) {
+    const freqMhz = Math.floor(hz / 1000000);
+    const freqHz = hz - freqMhz * 1000000;
+    const buf = new ArrayBuffer(8);
+    const view = new DataView(buf);
+    view.setUint32(0, freqMhz, true);
+    view.setUint32(4, freqHz, true);
+    await this._ctrlOut(HACKRF_REQ.SET_FREQ, 0, 0, buf);
+  }
 
-      await this.usbDevice.controlTransferOut({
-        requestType: 'vendor',
-        recipient: 'device',
-        request: 16, // HACKRF_VENDOR_REQUEST_SET_FREQ
-        value: 0,
-        index: 0
-      }, buf);
-      this.frequency = hz;
-      this.log(`[TUNER WebUSB] Synthesizer locked to ${(hz / 1000000).toFixed(4)} MHz`, 'success');
+  async setWebUsbFreq(hz, { quiet = false } = {}) {
+    if (!this.usbDevice || !this.usbDevice.opened) return;
+    const target = Math.max(HACKRF_FREQ_MIN, Math.min(HACKRF_FREQ_MAX, Math.round(hz)));
+    try {
+      // Cache-bust retune (+1 MHz then the target): on a HackRF Pro an
+      // unchanged re-tune is a firmware no-op; harmless on a One.
+      await this._setFreqRaw(target + 1000000);
+      await this._setFreqRaw(target);
+      this.frequency = target;
+      if (!quiet && !this._sweeping) this.log(`[TUNER WebUSB] Synthesizer locked to ${(target / 1000000).toFixed(4)} MHz`, 'success');
       this.notifyState();
     } catch (err) {
       this.log(`Failed to tune frequency via WebUSB: ${err.message}`, 'error');
     }
   }
 
-  async setWebUsbAmp(ampOn) {
+  async setWebUsbAmp(ampOn, { quiet = false } = {}) {
     if (!this.usbDevice || !this.usbDevice.opened) return;
     try {
-      await this.usbDevice.controlTransferOut({
-        requestType: 'vendor',
-        recipient: 'device',
-        request: 17, // HACKRF_VENDOR_REQUEST_AMP_ENABLE
-        value: ampOn > 0 ? 1 : 0,
-        index: 0
-      });
+      await this._ctrlOut(HACKRF_REQ.AMP_ENABLE, ampOn > 0 ? 1 : 0, 0);
       this.amp = ampOn > 0 ? 14 : 0;
-      this.log(`[RF WebUSB] RF Front-End Amp: ${this.amp > 0 ? '+14 dB (ENABLED)' : '0 dB (BYPASSED)'}`, 'info');
+      if (!quiet) this.log(`[RF WebUSB] RF Front-End Amp: ${this.amp > 0 ? '+14 dB (ENABLED)' : '0 dB (BYPASSED)'}`, 'info');
       this.notifyState();
     } catch (err) {
       this.log(`Failed to set Amp via WebUSB: ${err.message}`, 'error');
     }
   }
 
-  async setWebUsbGains(lna, vga) {
+  /**
+   * LNA / VGA gains. libhackrf sends these as IN control transfers with the
+   * gain in wIndex and reads a 1-byte ack (0 = rejected). Values are rounded
+   * to the hardware steps (LNA 8 dB, VGA 2 dB) exactly as libhackrf does.
+   */
+  async setWebUsbGains(lna, vga, { quiet = false } = {}) {
     if (!this.usbDevice || !this.usbDevice.opened) return;
+    const lnaDb = Math.min(40, Math.max(0, Math.round(lna))) & ~7;
+    const vgaDb = Math.min(62, Math.max(0, Math.round(vga))) & ~1;
+    this._gainBusy = true;
     try {
-      // SET_LNA_GAIN (19)
-      await this.usbDevice.controlTransferOut({
-        requestType: 'vendor',
-        recipient: 'device',
-        request: 19,
-        value: 0,
-        index: Math.min(40, Math.max(0, lna))
-      });
-      this.lnaGain = lna;
-
-      // SET_VGA_GAIN (20)
-      await this.usbDevice.controlTransferOut({
-        requestType: 'vendor',
-        recipient: 'device',
-        request: 20,
-        value: 0,
-        index: Math.min(62, Math.max(0, vga))
-      });
-      this.vgaGain = vga;
-      this.log(`[RF WebUSB] Gains set: LNA ${lna} dB | VGA ${vga} dB`, 'info');
+      const ackL = await this._ctrlIn(HACKRF_REQ.SET_LNA_GAIN, 0, lnaDb, 1);
+      if (ackL?.data?.byteLength && ackL.data.getUint8(0) === 0) throw new Error(`LNA gain ${lnaDb} dB rejected by the firmware`);
+      this.lnaGain = lnaDb;
+      const ackV = await this._ctrlIn(HACKRF_REQ.SET_VGA_GAIN, 0, vgaDb, 1);
+      if (ackV?.data?.byteLength && ackV.data.getUint8(0) === 0) throw new Error(`VGA gain ${vgaDb} dB rejected by the firmware`);
+      this.vgaGain = vgaDb;
+      if (!quiet) this.log(`[RF WebUSB] Gains set: LNA ${lnaDb} dB | VGA ${vgaDb} dB`, 'info');
       this.notifyState();
     } catch (err) {
       this.log(`Failed to set gains via WebUSB: ${err.message}`, 'error');
+    } finally {
+      this._gainBusy = false;
     }
   }
 
   /**
-   * Wideband sweep: retune the HackRF across [startHz, endHz] one ~2 MHz window
-   * at a time and hand each settled FFT segment to onSegment. Returns when the
-   * band is covered or stopSweep() is called; the dial is restored afterwards.
+   * Wideband sweep: retune the HackRF across [startHz, endHz] one window at a
+   * time (the flat central `useFraction` of the span, DC spike masked) and hand
+   * each settled, averaged FFT segment to onSegment. Each step waits for
+   * `settleFrames` fresh spectrum frames so buffers still in flight from the
+   * previous frequency are not counted. Returns when the band is covered or
+   * stopSweep() is called; the dial is restored afterwards.
    */
-  async sweepBand({ startHz, endHz, onSegment, dwellMs = 70, settleMs = 300 } = {}) {
+  async sweepBand({ startHz, endHz, onSegment, settleFrames = 3, settleMs = 400, useFraction = 0.6, dwellMs = 0 } = {}) {
     if (this.connectionType !== 'webusb') throw new Error('Sweep needs a WebUSB HackRF connection (PortaPack in HackRF mode).');
     if (!(endHz > startHz)) throw new Error('Sweep end must be above the start.');
     this._sweeping = true;
     const span = this.sampleRate;
-    const useSpan = span * 0.75;            // trim the band edges (filter roll-off)
+    const useSpan = span * useFraction;
     const savedFreq = this.frequency;
-    const savedDemod = this.demod;
-    this.demod = null;                      // no audio churn mid-sweep
+    const savedAudio = this.audioOn;
+    if (savedAudio) this._dspConfig({ audioOn: false });   // no audio churn mid-sweep
     try {
-      for (let center = startHz + useSpan / 2; center <= endHz && this._sweeping; center += useSpan) {
-        await this.setWebUsbFreq(Math.round(center));
-        this.latestSpectrum = null;
+      for (let center = startHz + useSpan / 2; center - useSpan / 2 < endHz && this._sweeping; center += useSpan) {
+        const c = Math.round(Math.max(HACKRF_FREQ_MIN, Math.min(HACKRF_FREQ_MAX, center)));
+        await this.setWebUsbFreq(c, { quiet: true });
+        const target = this.spectrumSeq + settleFrames;
         const t0 = performance.now();
-        while (this._sweeping && !this.latestSpectrum && performance.now() - t0 < settleMs) await sleep(10);
-        await sleep(dwellMs);
+        while (this._sweeping && this.spectrumSeq < target && performance.now() - t0 < settleMs + dwellMs) await sleep(5);
+        if (dwellMs) await sleep(dwellMs);
         const spec = this.latestSpectrum;
-        if (spec && onSegment) onSegment({ centerHz: center, spanHz: span, spec: Float32Array.from(spec) });
+        if (spec && onSegment && this._sweeping) {
+          onSegment({ centerHz: c, spanHz: span, useSpanHz: useSpan, spec: Float32Array.from(spec), floorDb: this.latestFloorDb });
+        }
       }
     } finally {
       this._sweeping = false;
-      this.demod = savedDemod;
-      try { await this.setWebUsbFreq(savedFreq); } catch (_) {}
+      if (savedAudio) this._dspConfig({ audioOn: true });
+      try { await this.setWebUsbFreq(savedFreq, { quiet: true }); } catch (_) {}
     }
   }
 
@@ -734,10 +855,14 @@ export class MayhemPortaPackDriver {
         await this.setWebUsbGains(parseInt(parts[1], 10), this.vgaGain);
       } else if (action === 'vga' && parts[1]) {
         await this.setWebUsbGains(this.lnaGain, parseInt(parts[1], 10));
+      } else if (action === 'rate' && parts[1]) {
+        await this.setSampleRate(parseInt(parts[1], 10));
+      } else if (action === 'agc') {
+        this.setAgc(parts[1] !== '0' && parts[1] !== 'off');
       } else if (action === 'version') {
-        this.log(`[HACKRF WebUSB] Hardware: ${this.boardId} | Firmware: ${this.firmwareVersion}`, 'info');
+        this.log(`[HACKRF WebUSB] Hardware: ${this.boardId}${this.boardRev != null ? ` rev ${this.boardRev}` : ''} | Firmware: ${this.firmwareVersion}`, 'info');
       } else {
-        this.log(`Command '${action}' acknowledged via WebUSB control pipe.`, 'info');
+        this.log(`'${action}' is not a HackRF (WebUSB) command. Available: freq <Hz>, amp 0|1, lna <dB>, vga <dB>, rate <Hz>, agc on|off, version. Mayhem shell commands need the serial console.`, 'warning');
       }
       return;
     }
@@ -838,13 +963,18 @@ export class MayhemPortaPackDriver {
   async disconnect() {
     this.isConnected = false;
     this.connectionType = null;
-    this.demod = null;
+    this._sweeping = false;
+    this._capture = null;
     if (this.usbDevice) {
+      // Leave the radio idle so the next bring-up starts from OFF.
+      try { if (this.usbDevice.opened) await this._ctrlOut(HACKRF_REQ.SET_TRANSCEIVER_MODE, MODE_OFF); } catch (_) {}
       try { await this.usbDevice.close(); } catch (_) {}
       this.usbDevice = null;
     }
     // Let the IQ pump loops unwind (their in-flight transfers reject on close).
     if (this._iqPumps) { try { await Promise.allSettled(this._iqPumps); } catch (_) {} this._iqPumps = null; }
+    if (this.dsp) { this.dsp.terminate(); this.dsp = null; }
+    this.latestSpectrum = null; this.latestFloorDb = null;
     if (this.consoleWaiter) { clearTimeout(this.consoleWaiter.timer); this.consoleWaiter.resolve(this.consoleWaiter.buffer); this.consoleWaiter = null; }
     this.rxBuffer = '';
     const port = this.port, reader = this.reader, readLoop = this._readLoop, pipe = this._pipe;

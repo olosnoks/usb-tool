@@ -7,7 +7,7 @@ import { UsbPdClient } from '../src/utils/usbPdDriver';
 import { JtagClient } from '../src/utils/jtagDriver';
 import SensorHubDeck from '../src/components/tools/hackrf/SensorHubDeck';
 import HamRadioDeck from '../src/components/tools/hackrf/HamRadioDeck';
-import LookingGlassDeck from '../src/components/tools/hackrf/LookingGlassDeck';
+import ReceiverDeck from '../src/components/tools/hackrf/ReceiverDeck';
 import KismetStudioWorkbench from '../src/components/tools/KismetStudioWorkbench';
 import { ProxmarkDevice, evaluateCompatibility } from '../src/devices/proxmark';
 
@@ -54,8 +54,14 @@ describe('simulated data is never passed off as hardware', () => {
     expect(ham).not.toContain('CQ K1HTV FM18');
     expect(ham).toContain('Demo only');
 
-    const sweep = renderToString(<LookingGlassDeck driver={null} centerFreq={100000000} sampleRate={2000000} onTuneFreq={() => {}} />);
-    expect(sweep).not.toContain('Simulated data');
+    // The receiver with nothing connected: controls disabled, no invented levels or peaks.
+    const stubDriver = { frequency: 100000000, sampleRate: 2000000, channelOffsetHz: 0, audioMode: 'WFM', connectionType: null,
+      setSquelch() {}, setAudioMode() {}, sendCommand() {}, setChannelOffset() {}, stopSweep() {}, log() {} };
+    const rxState = { connectionType: null, frequency: 100000000, channelOffsetHz: 0, sampleRate: 2000000, lnaGain: 24, vgaGain: 24, amp: 0, agcEnabled: false, rssi: -120 };
+    const rx = renderToString(<ReceiverDeck driver={stubDriver} state={rxState} />);
+    expect(rx).not.toContain('Simulated data');
+    expect(rx).toContain('LISTEN');
+    expect(rx).not.toContain('Tune &amp; Listen');   // no peaks without a sweep
   });
 
   it('Kismet Studio starts with demo mode off and no mock devices', () => {

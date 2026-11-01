@@ -133,7 +133,7 @@ describe('HackRF baseband filter selection', () => {
 // A fake HackRF One over WebUSB: records control transfers, answers the
 // version/board reads, and streams a tone on the bulk IN endpoint.
 function makeFakeHackRf() {
-  const ctrlOut = [], ctrlIn = [];
+  const ctrlOut = [], ctrlIn = [], ctrlInFull = [];
   const iq = new Int8Array(2048);
   for (let k = 0; k < 1024; k++) { iq[2 * k] = Math.round(110 * Math.cos(k / 4)); iq[2 * k + 1] = Math.round(110 * Math.sin(k / 4)); }
   const dev = {
@@ -149,19 +149,24 @@ function makeFakeHackRf() {
     async controlTransferOut(setup, data) { ctrlOut.push({ request: setup.request, value: setup.value, index: setup.index, data: data ? new Uint8Array(data) : null }); return { status: 'ok' }; },
     async controlTransferIn(setup, len) {
       ctrlIn.push(setup.request);
+      ctrlInFull.push({ request: setup.request, value: setup.value, index: setup.index, seq: ctrlOut.length });
       if (setup.request === 15) return { data: new DataView(new TextEncoder().encode('git-abc 2024').buffer) };
       if (setup.request === 14) return { data: new DataView(new Uint8Array([2]).buffer) }; // board id 2 = HackRF One
+      if (setup.request === 45) return { data: new DataView(new Uint8Array([4]).buffer) }; // board rev
+      // Gain requests (19/20) are IN transfers that ack with 1 (libhackrf), 0 = rejected.
+      if (setup.request === 19) return { data: new DataView(new Uint8Array([setup.index <= 40 && setup.index % 8 === 0 ? 1 : 0]).buffer) };
+      if (setup.request === 20) return { data: new DataView(new Uint8Array([setup.index <= 62 && setup.index % 2 === 0 ? 1 : 0]).buffer) };
       return { data: new DataView(new Uint8Array(len).buffer) };
     },
     async transferIn() { await new Promise((r) => setTimeout(r, 1)); return { data: new DataView(iq.buffer.slice(0)) }; },
     async close() { this.opened = false; }
   };
-  return { dev, ctrlOut, ctrlIn };
+  return { dev, ctrlOut, ctrlIn, ctrlInFull };
 }
 
 describe('PortaPack Mayhem over WebUSB (simulated HackRF)', () => {
   it('runs the libhackrf bring-up in order and streams a real FFT spectrum', async () => {
-    const { dev, ctrlOut, ctrlIn } = makeFakeHackRf();
+    const { dev, ctrlOut, ctrlIn, ctrlInFull } = makeFakeHackRf();
     vi.stubGlobal('navigator', { usb: { requestDevice: async () => dev, getDevices: async () => [] } });
     try {
       const d = new MayhemPortaPackDriver();
@@ -183,17 +188,34 @@ describe('PortaPack Mayhem over WebUSB (simulated HackRF)', () => {
       expect(new DataView(rate.data.buffer).getUint32(0, true)).toBe(2000000);
       expect(ctrlOut.find((c) => c.request === 7).value).toBe(1750000 & 0xffff);
 
-      // Freq (16), amp (17) and both gains (19 LNA, 20 VGA) were issued.
+      // Freq (16) and amp (17) are OUT transfers; the gains (19 LNA, 20 VGA)
+      // are IN transfers with the dB value in wIndex (libhackrf), never OUT.
       expect(ctrlOut.some((c) => c.request === 16)).toBe(true);
       expect(ctrlOut.some((c) => c.request === 17)).toBe(true);
-      expect(ctrlOut.some((c) => c.request === 19)).toBe(true);
-      expect(ctrlOut.some((c) => c.request === 20)).toBe(true);
+      expect(ctrlOut.some((c) => c.request === 19 || c.request === 20)).toBe(false);
+      const lna = ctrlInFull.filter((c) => c.request === 19), vga = ctrlInFull.filter((c) => c.request === 20);
+      expect(lna.length).toBeGreaterThanOrEqual(2);          // before RECEIVE and re-asserted after the retune
+      expect(lna.every((c) => c.index === 24 && c.value === 0)).toBe(true);
+      expect(vga.every((c) => c.index === 24 && c.value === 0)).toBe(true);
       expect(ctrlIn).toContain(15); // version read
       expect(ctrlIn).toContain(14); // board id read
+      expect(ctrlIn).toContain(45); // board rev read
+      expect(d.boardRev).toBe(4);
 
-      // A real FFT came off the IQ stream: 256 finite bins that are not all equal.
+      // Order: OFF, HW sync off, rate, filter, freq, amp, gains, RECEIVE, then the
+      // +1 MHz / back cache-bust retune and the gains again (mayhem-mobile bring-up).
+      const seq = ctrlOut.map((c) => c.request);
+      const iOff = seq.indexOf(1), iSync = seq.indexOf(29), iRate = seq.indexOf(6), iBw = seq.indexOf(7), iFreq = seq.indexOf(16);
+      const iRx = ctrlOut.findIndex((c) => c.request === 1 && c.value === 1);
+      expect(iOff).toBeLessThan(iSync); expect(iSync).toBeLessThan(iRate); expect(iRate).toBeLessThan(iBw); expect(iBw).toBeLessThan(iFreq);
+      expect(iFreq).toBeLessThan(iRx);
+      const freqsAfterRx = ctrlOut.slice(iRx + 1).filter((c) => c.request === 16).map((c) => new DataView(c.data.buffer).getUint32(0, true));
+      expect(freqsAfterRx.slice(0, 2)).toEqual([434, 433]);  // 433.92 + 1 MHz, then back
+      expect(lna[lna.length - 1].seq).toBeGreaterThan(iRx);
+
+      // A real averaged FFT came off the IQ stream: 1024 finite bins that are not all equal.
       const { spec, peak } = await firstFrame;
-      expect(spec.length).toBe(256);
+      expect(spec.length).toBe(1024);
       expect(Number.isFinite(peak)).toBe(true);
       expect(spec.every((v) => Number.isFinite(v))).toBe(true);
       expect(Math.max(...spec) - Math.min(...spec)).toBeGreaterThan(1);
@@ -241,13 +263,13 @@ describe('PortaPack Mayhem wideband sweep (simulated HackRF)', () => {
       await d.connectWebUsb();
       const startFreq = d.frequency;
       const segments = [];
-      await d.sweepBand({ startHz: 100e6, endHz: 106e6, dwellMs: 2, settleMs: 100, onSegment: (s) => segments.push(s) });
-      // span 2 MHz, useSpan 1.5 MHz -> centers at 100.75/102.25/103.75/105.25 MHz
-      expect(segments.length).toBe(4);
-      expect(segments.every((s) => s.spec.length === 256 && s.spanHz === 2000000)).toBe(true);
-      expect(Math.round(segments[0].centerHz)).toBe(100750000);
+      await d.sweepBand({ startHz: 100e6, endHz: 106e6, settleMs: 300, onSegment: (s) => segments.push(s) });
+      // span 2 MHz, flat 60% = 1.2 MHz windows -> centers at 100.6/101.8/103.0/104.2/105.4 MHz
+      expect(segments.length).toBe(5);
+      expect(segments.every((s) => s.spec.length === 1024 && s.spanHz === 2000000 && s.useSpanHz === 1200000)).toBe(true);
+      expect(Math.round(segments[0].centerHz)).toBe(100600000);
       // Each step issued a SET_FREQ (req 16); the dial returned to the start.
-      expect(ctrlOut.filter((c) => c.request === 16).length).toBeGreaterThanOrEqual(5);
+      expect(ctrlOut.filter((c) => c.request === 16).length).toBeGreaterThanOrEqual(6);
       expect(d.frequency).toBe(startFreq);
       await d.disconnect();
     } finally {
@@ -262,12 +284,108 @@ describe('PortaPack Mayhem wideband sweep (simulated HackRF)', () => {
       const d = new MayhemPortaPackDriver();
       await d.connectWebUsb();
       let count = 0;
-      const p = d.sweepBand({ startHz: 100e6, endHz: 200e6, dwellMs: 2, settleMs: 100, onSegment: () => { count++; if (count === 2) d.stopSweep(); } });
+      const p = d.sweepBand({ startHz: 100e6, endHz: 200e6, settleMs: 300, onSegment: () => { count++; if (count === 2) d.stopSweep(); } });
       await p;
       expect(count).toBe(2);
       await d.disconnect();
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+
+describe('PortaPack Mayhem WebUSB gains, AGC, capture (simulated HackRF)', () => {
+  async function up() {
+    const fake = makeFakeHackRf();
+    vi.stubGlobal('navigator', { usb: { requestDevice: async () => fake.dev, getDevices: async () => [] } });
+    const d = new MayhemPortaPackDriver();
+    const logs = [];
+    d.onLogCallback = (e) => logs.push(e);
+    await d.connectWebUsb();
+    return { d, logs, ...fake };
+  }
+
+  it('rounds gains to the hardware steps and reports a firmware rejection', async () => {
+    const { d, ctrlInFull, logs } = await up();
+    try {
+      await d.setWebUsbGains(30, 33);          // -> LNA 24 (8 dB steps), VGA 32 (2 dB steps)
+      expect(d.lnaGain).toBe(24); expect(d.vgaGain).toBe(32);
+      const last = ctrlInFull.slice(-2);
+      expect(last.map((c) => [c.request, c.index])).toEqual([[19, 24], [20, 32]]);
+      await d.sendCommand('lna 48');            // clamps to 40
+      expect(d.lnaGain).toBe(40);
+      // A device that acks 0 is reported, not silently accepted.
+      d.usbDevice.controlTransferIn = async () => ({ data: new DataView(new Uint8Array([0]).buffer) });
+      await d.setWebUsbGains(16, 16);
+      expect(d.lnaGain).toBe(40);
+      expect(logs.some((l) => /rejected by the firmware/.test(l.text))).toBe(true);
+    } finally { await d.disconnect(); vi.unstubAllGlobals(); }
+  });
+
+  it('AGC raises the VGA when the IQ is quiet and lowers it when it is hot', async () => {
+    const { d } = await up();
+    try {
+      d.setAgc(true);
+      const vga0 = d.vgaGain;
+      d._agcLastTs = -1e9; d._agcTick(2);      // quiet: 2 counts RMS
+      await new Promise((r) => setTimeout(r, 5));
+      expect(d.vgaGain).toBe(vga0 + 2);
+      d._agcLastTs = -1e9; d._agcTick(60);     // hot: 60 counts RMS
+      await new Promise((r) => setTimeout(r, 5));
+      expect(d.vgaGain).toBe(vga0);
+      d._agcLastTs = -1e9; d._agcTick(12);     // in the window: untouched
+      await new Promise((r) => setTimeout(r, 5));
+      expect(d.vgaGain).toBe(vga0);
+      d.setAgc(false);
+      d._agcLastTs = -1e9; d._agcTick(2);
+      await new Promise((r) => setTimeout(r, 5));
+      expect(d.vgaGain).toBe(vga0);            // off: no change
+    } finally { await d.disconnect(); vi.unstubAllGlobals(); }
+  });
+
+  it('records the raw IQ stream and builds Mayhem C16 + sidecar from it', async () => {
+    const { d } = await up();
+    try {
+      d.startCapture({ maxBytes: 6000 });
+      await new Promise((r) => setTimeout(r, 40));
+      const cap = d.stopCapture();
+      expect(cap.bytes).toBe(6000);            // capped at the limit
+      expect(cap.c8.length).toBe(6000);
+      expect(cap.sampleRate).toBe(2000000);
+      expect(cap.centerHz).toBe(433920000);
+      expect(cap.sidecar).toBe('sample_rate=2000000\ncenter_frequency=433920000\n');
+      const c16 = cap.toC16();
+      expect(c16[0]).toBe(cap.c8[0] << 8);
+      expect(d.captureStatus()).toBe(null);
+    } finally { await d.disconnect(); vi.unstubAllGlobals(); }
+  });
+
+  it('changes the sample rate live and keeps the channel offset inside the span', async () => {
+    const { d, ctrlOut } = await up();
+    try {
+      d.setChannelOffset(900000);
+      expect(d.channelOffsetHz).toBe(900000);
+      await d.setSampleRate(8000000);
+      const rates = ctrlOut.filter((c) => c.request === 6).map((c) => new DataView(c.data.buffer).getUint32(0, true));
+      expect(rates[rates.length - 1]).toBe(8000000);
+      const bw = ctrlOut.filter((c) => c.request === 7).pop();
+      expect(bw.value).toBe(7000000 & 0xffff);
+      expect(d.sampleRate).toBe(8000000);
+      expect(d.listeningHz).toBe(433920000 + 900000);
+      d.setChannelOffset(5000000);               // beyond +/-4 MHz -> clamped
+      expect(d.channelOffsetHz).toBe(4000000);
+    } finally { await d.disconnect(); vi.unstubAllGlobals(); }
+  });
+
+  it('refuses a PortaPack still in Mayhem serial mode instead of pretending to stream', async () => {
+    const { dev } = makeFakeHackRf();
+    dev.productId = 0x6018;
+    vi.stubGlobal('navigator', { usb: { requestDevice: async () => dev, getDevices: async () => [] } });
+    try {
+      const d = new MayhemPortaPackDriver();
+      await expect(d.connectWebUsb()).rejects.toThrow(/HackRF mode/);
+      expect(d.isConnected).toBe(false);
+    } finally { vi.unstubAllGlobals(); }
   });
 });

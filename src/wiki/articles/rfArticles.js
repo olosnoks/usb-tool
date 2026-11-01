@@ -476,13 +476,13 @@ If your Proxmark3 is bricked or stuck in bootloader mode (e.g. following a faile
     toolId: 'mayhem',
     category: 'rf',
     title: 'PortaPack Mayhem SDR — Tactical Radar, ADS-B, FREQMAN & Spectrum Studio',
-    summary: 'HackRF One receiver companion: live spectrum + waterfall and demodulated audio (WFM/NFM/AM/USB/LSB) over WebUSB, a real wideband LookingGlass sweep, ADS-B 1090MHz aircraft radar on the TacticalMap, FREQMAN editor, and a serial LCD mirror. Hardware only — no demo mode.',
-    tags: ['PortaPack', 'Mayhem', 'HackRF', 'SDR', 'FREQMAN', 'ADS-B', 'TacticalMap', 'LookingGlass', 'HamRadio', 'SensorHub'],
+    summary: 'HackRF One receiver companion over WebUSB (libhackrf): averaged FFT spectrum + waterfall with zoom and pan, click-to-tune channel audio (WFM/NFM/AM/USB/LSB) with squelch and AGC, 2–20 MHz spans, a wideband Looking Glass sweep in the same display, ADS-B 1090 MHz aircraft radar on the TacticalMap, a raw IQ recorder (.c8 / Mayhem .C16), FREQMAN editor, and a serial LCD mirror. Hardware only — no demo mode.',
+    tags: ['PortaPack', 'Mayhem', 'HackRF', 'SDR', 'FREQMAN', 'ADS-B', 'TacticalMap', 'LookingGlass', 'Waterfall', 'IQ'],
     readTime: '28 min read',
     content: `
 # PortaPack Mayhem SDR — Tactical Radar & Spectrum Studio
 
-The **PortaPack Mayhem SDR** workbench is a browser companion for the HackRF One software-defined radio equipped with a PortaPack H1/H2 running Mayhem firmware. Sourced directly from the native \`mayhemDriver.js\`, \`adsbDecoder.js\`, and the specialized deck implementations (\`TacticalMapDeck\`, \`LookingGlassDeck\`, \`HamRadioDeck\`, \`SensorHubDeck\`), this guide documents every radio feature and sub-receiver in the toolkit.
+The **PortaPack Mayhem SDR** workbench is a browser companion for the HackRF One software-defined radio equipped with a PortaPack H1/H2 running Mayhem firmware. Sourced directly from the native \`mayhemDriver.js\` (libhackrf over WebUSB), the DSP worker (\`hackrfDsp.js\`, \`hackrfDemod.js\`), \`adsbDecoder.js\`, and the \`ReceiverDeck\` / \`TacticalMapDeck\` implementations, this guide documents every radio feature in the toolkit. The receiver follows the bring-up and DSP design of RocketGod's mayhem-mobile.
 
 ---
 
@@ -514,14 +514,17 @@ Proper gain staging is the difference between clean reception and completely blo
 
 ---
 
-### Audio Receiver — WFM / NFM / AM / USB / LSB
+### The Receiver page — spectrum, waterfall, audio and sweep in one place
 
-On the **Audio & Waterfall** tab (WebUSB only), the live IQ is demodulated to sound in the browser with Web Audio:
-- **WFM** (broadcast FM, 75 µs de-emphasis), **NFM** (PMR/ham), **AM** (envelope with DC blocker), and **USB/LSB** (product detector). Audio is decimated to ~48 kHz.
-- **LISTEN** starts/stops playback; **Volume** scales the output; **Squelch** mutes when the live spectrum peak is below the set level.
-- The waterfall above it is the real FFT of the stream (green trace, peak marker, dBFS axis).
+Everything on the **Receiver** tab comes from the HackRF IQ stream (WebUSB only):
 
-The demodulator lives in \`utils/hackrfDemod.js\`; the driver runs it on every IQ buffer and plays the frames through an AudioContext.
+- **Tuner bar**: LO frequency (type and press Enter, ± steps, quick buttons), **SPAN** = the HackRF sample rate (2 / 4 / 8 / 10 / 20 MHz), LNA / VGA sliders, the +14 dB **AMP**, and **AGC**, which holds the IQ RMS between 7 and 22 ADC counts by stepping the VGA first and then the LNA (the mayhem-mobile rule).
+- **Spectrum + waterfall**: Hann FFTs averaged over every sample between display frames (not one short FFT per buffer), 1024 bins across the span, coloured relative to the median noise floor (floor − 4 dB … floor + 40 dB). **Mouse wheel zooms at the cursor, drag pans, Fit returns to the whole span**; the waterfall keeps its history through zooms and retunes because every row remembers its own frequency range.
+- **Click-to-tune**: click a signal to make it the channel (purple band; its width is the demod bandwidth) without moving the LO, so the HackRF DC spike stays out of the audio. Double-click moves the LO there instead; "centre" moves the LO onto the current channel.
+- **Audio**: **WFM** (two-stage decimation to ~240 kHz then audio, 75 µs de-emphasis), **NFM** (6.5 kHz 4th-order Butterworth channel filter, DC blocker, discriminator), **AM** (5 kHz filter, envelope with carrier tracking), **USB/LSB** (Weaver method, 1.5 kHz pivot, 3 kHz passband). The DSP runs in a Web Worker; playback is an AudioWorklet ring buffer that resamples to the sound card and never clicks on a late chunk. **SQL** compares the channel power (shown on the bar) with the threshold.
+- **SWEEP (Looking Glass)**: see the next section.
+
+The decimators and detectors live in \`utils/hackrfDemod.js\`, the spectrum averager and worker core in \`utils/hackrfDsp.js\`.
 
 ---
 
@@ -560,29 +563,28 @@ ADS-B compresses 24-bit latitude and longitude into 17-bit fractional representa
 
 ---
 
-### 4. LookingGlassDeck — Wideband Spectrum Sweeper
+### 4. Looking Glass — Wideband Sweep (SWEEP mode on the Receiver page)
 
-Standard SDR waterfalls can only display the instantaneous bandwidth of the ADC (up to 20 MHz wide).
-The **LookingGlassDeck** implements a high-speed synthesizer sweeper:
-- **Sweeping Algorithm**: Rapidly retunes the HackRF's mixer across a wide frequency span (e.g. from 24 MHz up to 1.8 GHz) in fast hops.
-- **FFT Binning**: Computes Fast Fourier Transforms at each hop, stitches the spectrum slices together, and renders a panoramic real-time spectrum graph.
-- **Peak Hold & Threshold Markers**: Automatically identifies rogue RF spikes, wireless microphones, or hidden analog bugs.
-
----
-
-### 5. SensorHubDeck — ISM Band Tuner (decoders not implemented)
-
-The **SensorHubDeck** gives one-click tuning to the common Sub-GHz ISM bands (315 / 433.92 / 868 / 915 MHz) so you can see real energy on the spectrum and waterfall there.
-
-**It does not decode packets.** rtl_433-style decoding (weather stations, automotive TPMS, pagers, ACARS, BLE) is **not implemented over USB yet**, so the packet list stays empty — the deck never invents data. The frequency buttons do retune your HackRF.
+A live span shows at most 20 MHz at once. **SWEEP** retunes the HackRF across a preset band (or a custom start/end in MHz) in hops:
+- Each hop keeps the flat central **60 %** of the span (the baseband filter rolls off at the edges) and masks the HackRF DC spike, which is what caused the comb pattern of the old sweep.
+- Each hop waits for three fresh averaged spectrum frames so IQ still in flight from the previous frequency is not counted.
+- Hops are stitched into one 2048-cell trace in the same display; every completed pass becomes a waterfall row, so the waterfall shows the band over time. Zoom and pan work exactly as in LIVE.
+- Peaks above the **THRESHOLD** are listed after each pass; **Tune & Listen** (or a click on the display) tunes the LO there and returns to LIVE.
+- A wider SPAN makes passes faster: 8 MHz covers 4.8 MHz per hop, 20 MHz covers 12 MHz.
 
 ---
 
-### 6. HamRadioDeck — Band Tuner & Contact Log (decoders not implemented)
+### 5. IQ Recorder
 
-The **HamRadioDeck** offers quick tuning to the amateur VHF (2 m) and UHF (70 cm) bands and keeps a contact log you can export to ADIF.
+The **IQ Recorder** tab records the raw 8-bit IQ exactly as the HackRF streams it (4 MB/s at 2 Msps), up to a size limit you choose, and saves it as:
+- **.c8** — HackRF native int8 I/Q, the format \`hackrf_transfer -r\` writes, or
+- **Mayhem .C16 + .TXT** — int16 I/Q plus a sidecar with \`sample_rate=\` and \`center_frequency=\`, the pair the PortaPack **Replay** app expects in \`/CAPTURES\`.
 
-**The digital decoders are not implemented.** FT8 / PSK / RTTY / CW are **not decoded over USB yet**, so those panels stay empty — the deck never shows invented decodes. The band/mode buttons retune the radio, and the contact log works.
+---
+
+### 6. Hidden until they work: Transmit, HAM digital decoders, rtl_433 sensor hub
+
+These tabs are **not shown** at the moment. The old Transmit Lab only ran a timer, and the HAM (FT8 / PSK / RTTY / CW) and rtl_433-style sensor decoders are not implemented over USB. The components remain in the source tree (\`HamRadioDeck\`, \`SensorHubDeck\`, \`TxView\`) and will come back when they do something real.
 
 ---
 
@@ -610,18 +612,18 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 | :--- | :--- | :--- |
 | **Connect WebUSB** | Button | Connects the HackRF One over WebUSB (libhackrf) for live IQ: spectrum, audio, sweep and ADS-B. Put a PortaPack in HackRF mode first. |
 | **COM Port** | Button | Connects the PortaPack Mayhem serial console (115200 baud) for the LCD screen mirror and the ChibiOS shell. No IQ on this path. |
-| **LISTEN** | Button | Starts/stops demodulated audio (Audio tab, WebUSB). |
-| **DEMOD selector** | Buttons | Chooses WFM / NFM / AM / USB / LSB. |
-| **Volume / Squelch** | Sliders | Output level, and the spectrum-peak threshold below which audio mutes. |
-| **Frequency Input** | Numeric Box | Configures target center tuning frequency in Hertz or Megahertz (1 MHz to 6 GHz). |
-| **LNA Gain Slider** | Slider | Steps low-noise front-end amplifier from 0 dB to 40 dB in 8 dB increments. |
-| **VGA Gain Slider** | Slider | Steps baseband variable amplifier from 0 dB to 62 dB in 2 dB increments. |
-| **AMP Toggle** | Switch | Engages or disengages the 14 dB front-end RF preamplifier. |
-| **TacticalMapDeck Tab** | Tab | Opens real-time Leaflet OpenStreetMap view tracking ADS-B aircraft squitters. |
-| **LookingGlassDeck Tab** | Tab | Opens wideband fast-sweep panoramic spectrum analyzer and waterfall. |
-| **SensorHubDeck Tab** | Tab | Tunes the ISM bands and shows the live spectrum there. Packet decoding is not implemented. |
-| **HamRadioDeck Tab** | Tab | Tunes the 2 m / 70 cm bands and keeps an ADIF contact log. Digital decoders are not implemented. |
-| **FREQMAN Manager** | Panel | Reads, edits, and writes channel frequency files on the PortaPack microSD card. |
+| **LO (MHz) + TUNE / ± step** | Input | Centre frequency, 1 MHz to 6 GHz; Enter tunes. The step select sets the ± increment. |
+| **SPAN** | Select | HackRF sample rate = visible bandwidth: 2 / 4 / 8 / 10 / 20 MHz (ADS-B decoding needs 2 MHz). |
+| **LNA / VGA sliders** | Sliders | RF gain 0–40 dB in 8 dB steps; baseband gain 0–62 dB in 2 dB steps (sent as libhackrf IN requests with an ack). |
+| **AMP** | Toggle | The 14 dB front-end preamplifier. |
+| **AGC** | Toggle | Holds the IQ RMS between 7 and 22 ADC counts automatically (disables the sliders). |
+| **LIVE / SWEEP** | Toggle | Live span, or the Looking Glass band sweep in the same display. |
+| **Zoom in / out / Fit** | Buttons | Same as mouse wheel on the display; Fit shows the whole span or band. |
+| **Display: click / drag / double-click** | Mouse | Pick the channel (LIVE) or tune there (SWEEP) / pan / move the LO. |
+| **LISTEN, demod, SQL, volume** | Row | Audio on/off, WFM / NFM / AM / USB / LSB, squelch on the channel power, output level. |
+| **Tactical Map tab** | Tab | Leaflet map tracking ADS-B aircraft decoded from the 1090 MHz IQ. |
+| **IQ Recorder tab** | Tab | Records raw IQ to .c8 or Mayhem .C16 + .TXT. |
+| **FREQMAN tab** | Panel | Edits channel presets and exports FREQMAN.TXT for the microSD card; TUNE opens the receiver on that channel. |
 
 ---
 
@@ -630,16 +632,16 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 #### Walkthrough A: Setting Up Mode-S ADS-B Aviation Radar
 1. Attach a tuned 1090 MHz antenna (or standard telescopic antenna extended to ~6.8 cm for quarter-wave resonance) to the HackRF SMA jack.
 2. In the workbench, put the device in HackRF mode and click **Connect WebUSB**.
-3. Switch to the **TacticalMapDeck** tab.
-4. Set **Frequency** to \`1090.000 MHz\`, **LNA Gain** to \`32 dB\`, and **VGA Gain** to \`40 dB\`.
+3. On **Receiver**, click the **1090 ADS-B** quick button (or type 1090 and Enter) and keep **SPAN** at 2 MHz, then open the **Tactical Map** tab.
+4. Set **LNA Gain** to \`32 dB\` and **VGA Gain** to \`40 dB\`, or turn **AGC** on.
 5. Keep **AMP** OFF to prevent saturation.
 6. As aircraft transmit Mode-S squitters, their ICAO hex addresses, flight callsigns, altitudes, and GPS vectors appear on the interactive map canvas.
 
 #### Walkthrough B: Panoramic Wideband Spectrum Surveillance
-1. Switch to the **LookingGlassDeck** tab.
-2. Set **Start Frequency** to \`400.000 MHz\` and **Stop Frequency** to \`500.000 MHz\`.
-3. Select an FFT resolution of 1024 bins.
-4. Click **Start Sweep**. The HackRF retunes rapidly across the 100 MHz band, plotting peak signal spikes and waterfalling RF activity over time.
+1. On **Receiver**, set **SPAN** to 8 MHz (faster passes) and switch the mode toggle to **SWEEP**.
+2. Pick a preset band, or type a custom start and end in MHz (for example 400 and 500).
+3. The HackRF hops across the band; the stitched trace fills in, each pass adds a waterfall row, and peaks above the **THRESHOLD** are listed.
+4. Wheel-zoom into a busy stretch, then click a peak (or **Tune & Listen**) to tune there and listen in LIVE.
 
 ---
 
@@ -649,7 +651,9 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 | :--- | :--- | :--- |
 | **Flat waterfall / no audio over WebUSB** | PortaPack not in HackRF mode, or you connected the serial COM path (no IQ). | Switch the PortaPack to HackRF mode and use Connect WebUSB. The log warns if no IQ arrives in ~1.5 s. |
 | **No ADS-B Aircraft Appearing** | Insufficient gain or incorrect antenna length. | Extend antenna to 6.8 cm. Raise LNA to 32 dB and VGA to 40 dB. Ensure line of sight to open sky. |
-| **LookingGlass Showing Ghost Spikes** | Front-end amplifier saturation causing intermodulation products. | Turn off the 14 dB AMP switch. Lower LNA gain by 8–16 dB. |
+| **Sweep or spectrum showing ghost spikes** | Front-end amplifier saturation causing intermodulation products. | Turn off the 14 dB AMP switch. Lower LNA gain by 8–16 dB, or turn AGC on. |
+| **Audio stutters / display lags at 20 MHz span** | The DSP worker cannot keep up on this machine. | Drop SPAN to 8 MHz or lower; the sweep still covers 4.8 MHz per hop. |
+| **Gains seem to do nothing on a HackRF Pro** | The Pro needs ~28 dB more VGA than a One for the same level. | Raise VGA or turn AGC on. |
 | **WebSerial Buffer Overrun** | Browser tab throttled in background or high system load. | Keep browser tab active. Disable high-resolution waterfall rendering if CPU load exceeds 80%. |
 
 ---

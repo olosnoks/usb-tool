@@ -18,7 +18,7 @@ export default function CliView({
       >
         {logs.length === 0 ? (
           <div className="text-slate-500 text-center py-8">
-            No PortaPack serial activity yet.
+            No activity yet. Connect a HackRF (WebUSB) or a PortaPack console (serial).
           </div>
         ) : (
           logs.map((l, i) => (
@@ -45,7 +45,7 @@ export default function CliView({
           type="text"
           value={cliInput}
           onChange={(e) => setCliInput(e.target.value)}
-          placeholder="e.g. freq 433920000, amp 1, lna 32, app adsb, version"
+          placeholder="HackRF: freq 433920000 · lna 32 · vga 20 · amp 1 · rate 8000000 · agc on   |   Mayhem serial: info, applist, appstart <name>, setfreq <Hz>"
           className="flex-1 bg-slate-950 border border-slate-800 text-slate-100 font-mono px-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-purple-500"
         />
         <button
@@ -62,9 +62,12 @@ export default function CliView({
           { label: 'version', cmd: 'version' },
           { label: 'amp 1', cmd: 'amp 1' },
           { label: 'amp 0', cmd: 'amp 0' },
-          { label: 'screenshot', cmd: 'screenshot' },
-          { label: 'reboot', cmd: 'reboot' },
-          { label: 'dfu', cmd: 'dfu' }
+          { label: 'agc on', cmd: 'agc on' },
+          { label: 'rate 2000000', cmd: 'rate 2000000' },
+          { label: 'info (serial)', cmd: 'info' },
+          { label: 'applist (serial)', cmd: 'applist' },
+          { label: 'reboot (serial)', cmd: 'reboot' },
+          { label: 'dfu (serial)', cmd: 'dfu' }
         ].map(b => (
           <button
             key={b.label}
