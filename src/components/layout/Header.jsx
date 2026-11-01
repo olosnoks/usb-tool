@@ -20,6 +20,7 @@ import {
 import { useSerial } from '../../context/SerialContext';
 import { identifyUsbChip } from '../../utils/usbDatabase';
 import StatusBadge from '../common/StatusBadge';
+import { APP_THEMES, applyAppTheme, loadAppThemeId, saveAppThemeId, themeSwatch } from '../../utils/appThemes';
 
 export default function Header({
   activeTool = 'flasher',
@@ -52,6 +53,7 @@ export default function Header({
   } = useSerial();
 
   const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [appTheme, setAppTheme] = useState(() => loadAppThemeId());
 
   const standardBauds = [
     300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880, 115200, 
@@ -216,6 +218,22 @@ export default function Header({
               <PanelBottom className="w-3.5 h-3.5" />
             </button>
           )}
+
+          {/* App colour theme (VS Code palettes + Dracula) */}
+          <div className="flex items-center gap-1 bg-slate-900 rounded-lg border border-slate-800 pl-2 pr-0.5" title="App colour theme">
+            <span className="flex rounded-sm overflow-hidden border border-slate-700 w-6 h-3.5 shrink-0">
+              {themeSwatch(appTheme).map((c, i) => <span key={i} className="flex-1" style={{ background: c }} />)}
+            </span>
+            <select
+              value={appTheme}
+              onChange={(e) => { setAppTheme(e.target.value); applyAppTheme(e.target.value); saveAppThemeId(e.target.value); }}
+              className="bg-transparent text-xs font-mono text-slate-300 px-1 py-1.5 outline-none cursor-pointer max-w-[6.5rem] md:max-w-[10rem]"
+            >
+              {APP_THEMES.map((t) => (
+                <option key={t.id} value={t.id} className="bg-slate-900 text-slate-200">{t.name}</option>
+              ))}
+            </select>
+          </div>
 
           {/* Standalone Wiki Link (Deep-linked to current active tool) */}
           <a
