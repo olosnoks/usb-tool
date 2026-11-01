@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize, moveWindow, resizeWindow,
   tileWindows, cascadeWindows, topWindowId, focusedWindow, serializeState, deserializeState, windowKeyFor, clampToViewport,
-  MIN_W, MIN_H, TITLE_BAR_H, KEEP_VISIBLE_PX, setZoom, zoomStep, toggleFit, fitZoomFor, ZOOM_MIN, ZOOM_MAX, ZOOM_STEPS
+  MIN_W, MIN_H, TITLE_BAR_H, KEEP_VISIBLE_PX, setZoom, zoomStep, toggleFit, fitZoomFor, ZOOM_MIN, ZOOM_MAX, ZOOM_STEPS,
+  duplicateWindow, baseIdOf, instanceOf, instanceCount, displayTitle
 } from '../src/utils/windowManager';
 
 const VP = { width: 1400, height: 900 };
@@ -25,6 +26,64 @@ describe('workspace window manager', () => {
       expect(w.y).toBeLessThanOrEqual(VP.height - TITLE_BAR_H);
       expect(w.title).toBe(w.id.toUpperCase());
     }
+  });
+
+  it('opens multiple instances of the same tool, each in its own window', () => {
+    let s = createInitialState();
+    const meta = { title: 'PortaPack Mayhem SDR', accent: 'purple' };
+    s = openWindow(s, 'mayhem', meta, VP);
+    expect(s.windows[0].id).toBe('mayhem');
+    expect(s.windows[0].instance).toBe(1);
+    // forceNew opens a second instance with a distinct id
+    s = openWindow(s, 'mayhem', meta, VP, { forceNew: true });
+    s = openWindow(s, 'mayhem', meta, VP, { forceNew: true });
+    expect(s.windows.map((w) => w.id)).toEqual(['mayhem', 'mayhem#2', 'mayhem#3']);
+    expect(s.windows.map((w) => w.instance)).toEqual([1, 2, 3]);
+    expect(s.focusedId).toBe('mayhem#3');
+    expect(instanceCount(s, 'mayhem')).toBe(3);
+    // each window carries the real tool id so renderTool mounts a fresh component
+    expect(s.windows.every((w) => w.toolId === 'mayhem')).toBe(true);
+    // display title numbers the extra instances
+    expect(displayTitle(s.windows[0])).toBe('PortaPack Mayhem SDR');
+    expect(displayTitle(s.windows[2])).toBe('PortaPack Mayhem SDR (3)');
+    // id helpers
+    expect(baseIdOf('mayhem#3')).toBe('mayhem');
+    expect(instanceOf('mayhem#3')).toBe(3);
+    expect(baseIdOf('mayhem')).toBe('mayhem');
+    expect(instanceOf('mayhem')).toBe(1);
+  });
+
+  it('duplicateWindow clones a window\'s tool into a new instance, and ids are reused as gaps close', () => {
+    let s = createInitialState();
+    s = open(s, 'terminal');
+    s = duplicateWindow(s, 'terminal', VP);
+    expect(s.windows.map((w) => w.id)).toEqual(['terminal', 'terminal#2']);
+    expect(s.focusedId).toBe('terminal#2');
+    // close the first instance; the second stays, still numbered 2
+    s = closeWindow(s, 'terminal');
+    expect(s.windows.map((w) => w.id)).toEqual(['terminal#2']);
+    expect(displayTitle(s.windows[0])).toBe('TERMINAL (2)');
+    // opening again (no forceNew) focuses the surviving instance rather than making a new one
+    s = open(s, 'terminal');
+    expect(s.windows.length).toBe(1);
+    expect(s.focusedId).toBe('terminal#2');
+    // a fresh forceNew picks the next free number above the max in use
+    s = duplicateWindow(s, 'terminal#2', VP);
+    expect(s.windows.map((w) => w.id)).toEqual(['terminal#2', 'terminal#3']);
+  });
+
+  it('round-trips instances through storage', () => {
+    let s = createInitialState();
+    s = open(s, 'mayhem');
+    s = duplicateWindow(s, 'mayhem', VP);
+    const back = deserializeState(serializeState(s), VP);
+    expect(back.windows.map((w) => w.id)).toEqual(['mayhem', 'mayhem#2']);
+    expect(back.windows.map((w) => w.instance)).toEqual([1, 2]);
+    expect(back.windows[1].baseId).toBe('mayhem');
+    // a legacy saved window without instance fields still loads
+    const legacy = deserializeState('{"v":1,"windows":[{"id":"flipper#2","toolId":"flipper"}]}', VP);
+    expect(legacy.windows[0].baseId).toBe('flipper');
+    expect(legacy.windows[0].instance).toBe(2);
   });
 
   it('re-opening a tool (or one of its workbench tabs) focuses the existing window instead of duplicating it', () => {

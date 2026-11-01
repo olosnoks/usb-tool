@@ -128,10 +128,10 @@ export default function Sidebar({
 }) {
   const [filterQuery, setFilterQuery] = useState('');
 
-  const handleItemClick = (item) => {
+  const handleItemClick = (item, ev) => {
     if (item.id === 'wiki-external' || item.href) {
-      const targetUrl = item.id === 'wiki-external' 
-        ? `./wiki/?tool=${activeTool || 'flasher'}` 
+      const targetUrl = item.id === 'wiki-external'
+        ? `./wiki/?tool=${activeTool || 'flasher'}`
         : item.href;
       window.open(targetUrl, '_blank', 'noopener,noreferrer');
       return;
@@ -141,7 +141,9 @@ export default function Sidebar({
     } else if (item.id === 'intel-modal') {
       onOpenHardwareIntel?.();
     } else {
-      onSelectTool(item.id);
+      // Alt/Ctrl-click opens another instance in a new window instead of
+      // focusing the one that's already open.
+      onSelectTool(item.id, (ev && (ev.altKey || ev.ctrlKey || ev.metaKey)) ? { forceNew: true } : undefined);
     }
   };
 
@@ -237,8 +239,8 @@ export default function Sidebar({
                   return (
                     <button
                       key={item.id}
-                      onClick={() => handleItemClick(item)}
-                      title={`${item.name}: ${item.desc}${isOpen ? ' (open — click to bring its window to the front)' : ''}`}
+                      onClick={(e) => handleItemClick(item, e)}
+                      title={`${item.name}: ${item.desc}${isOpen ? ' (open — click to bring its window to the front; Alt-click to open another instance)' : ''}`}
                       className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs border transition-all text-left ${getAccentStyles(
                         item,
                         isActive

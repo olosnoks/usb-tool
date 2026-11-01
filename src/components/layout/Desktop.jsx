@@ -4,6 +4,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { LayoutGrid, Layers, X, AppWindow } from 'lucide-react';
 import ToolWindow from './ToolWindow';
+import { displayTitle } from '../../utils/windowManager';
 
 // Below this width (phones, narrow split screens) every window fills the desktop.
 export const FORCE_MAXIMIZE_BELOW_PX = 768;
@@ -11,7 +12,7 @@ export const FORCE_MAXIMIZE_BELOW_PX = 768;
 export default function Desktop({
   state, viewport, onViewport, renderTool, metaFor,
   onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onTile, onCascade, onCloseAll,
-  onZoomStep, onToggleFit
+  onZoomStep, onToggleFit, onDuplicate
 }) {
   const ref = useRef(null);
 
@@ -56,7 +57,7 @@ export default function Desktop({
             key={win.id} win={win} focused={state.focusedId === win.id} forceMaximized={forceMax}
             icon={metaFor?.(win.toolId)?.icon} naturalWidth={metaFor?.(win.toolId)?.naturalWidth}
             onFocus={onFocus} onMove={onMove} onResize={onResize} onMinimize={onMinimize} onToggleMaximize={onToggleMaximize} onClose={onClose}
-            onZoomStep={onZoomStep} onToggleFit={onToggleFit}
+            onZoomStep={onZoomStep} onToggleFit={onToggleFit} onDuplicate={onDuplicate}
           >
             <React.Suspense fallback={
               <div className="py-20 flex flex-col items-center justify-center text-slate-400 font-mono text-xs space-y-3">
@@ -77,12 +78,12 @@ export default function Desktop({
             const Icon = metaFor?.(w.toolId)?.icon;
             const active = state.focusedId === w.id && !w.minimized;
             return (
-              <button key={w.id} onClick={() => onFocus?.(w.id)} title={w.minimized ? `Restore ${w.title}` : `Focus ${w.title}`}
+              <button key={w.id} onClick={() => onFocus?.(w.id)} title={w.minimized ? `Restore ${displayTitle(w)}` : `Focus ${displayTitle(w)}`}
                 className={`flex items-center gap-1.5 px-2 py-1 rounded border max-w-[14rem] truncate ${
                   active ? 'bg-slate-800 border-slate-600 text-white' : w.minimized ? 'bg-transparent border-slate-800 text-slate-500 italic' : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'
                 }`}>
                 {Icon && <Icon className="w-3 h-3 shrink-0" />}
-                <span className="truncate">{w.title}</span>
+                <span className="truncate">{displayTitle(w)}</span>
               </button>
             );
           })}

@@ -33,6 +33,28 @@ export const TOOL_GROUPS = {
 
 export const windowKeyFor = (toolId) => TOOL_GROUPS[toolId] || toolId;
 
+// A window's id is its tool group key for the first instance, and
+// `<key>#<n>` for additional instances, so the same tool can open more than
+// once (each window gets its own component and its own device).
+export const baseIdOf = (windowId) => String(windowId).split('#')[0];
+export const instanceOf = (windowId) => {
+  const n = String(windowId).split('#')[1];
+  return n ? parseInt(n, 10) : 1;
+};
+/** Next free instance number for a tool group (1 when none are open). */
+export function nextInstanceFor(state, baseId) {
+  let max = 0;
+  for (const w of state.windows) if (baseIdOf(w.id) === baseId) max = Math.max(max, w.instance || instanceOf(w.id));
+  return max + 1;
+}
+/** How many windows of this tool group are open. */
+export const instanceCount = (state, baseId) => state.windows.filter((w) => baseIdOf(w.id) === baseId).length;
+/** Title with an instance number when the tool is open more than once. */
+export const displayTitle = (win) => {
+  const n = win.instance || instanceOf(win.id);
+  return n > 1 ? `${win.title} (${n})` : win.title;
+};
+
 export const createInitialState = () => ({ windows: [], nextZ: 1, focusedId: null });
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -74,20 +96,35 @@ export function focusWindow(state, id) {
 }
 
 /**
- * Open a tool. If its window (or its group's window) is already open, focus
- * and restore it; otherwise add a new window cascaded after the others.
+ * Open a tool. By default, if an instance of the tool (or its group) is already
+ * open it is focused and restored; pass { forceNew: true } to open another
+ * instance in a new window, each with its own component and device.
  * meta: { title, accent } for the title bar.
  */
-export function openWindow(state, toolId, meta = {}, viewport) {
-  const id = windowKeyFor(toolId);
-  if (state.windows.some((w) => w.id === id)) return focusWindow(state, id);
+export function openWindow(state, toolId, meta = {}, viewport, opts = {}) {
+  const baseId = windowKeyFor(toolId);
+  if (!opts.forceNew) {
+    const existing = state.windows
+      .filter((w) => baseIdOf(w.id) === baseId)
+      .sort((a, b) => (a.instance || instanceOf(a.id)) - (b.instance || instanceOf(b.id)))[0];
+    if (existing) return focusWindow(state, existing.id);
+  }
+  const instance = nextInstanceFor(state, baseId);
+  const id = instance === 1 ? baseId : `${baseId}#${instance}`;
   const { z, nextZ } = bump(state);
   const geo = clampToViewport({ ...defaultGeometry(viewport, state.windows.length) }, viewport);
   const win = {
-    id, toolId, title: meta.title || toolId, accent: meta.accent || 'cyan',
+    id, toolId, baseId, instance, title: meta.title || toolId, accent: meta.accent || 'cyan',
     ...geo, z, minimized: false, maximized: false, restore: null, openedAt: Date.now(), zoom: 1, fit: false
   };
   return { ...state, nextZ, focusedId: id, windows: [...state.windows, win] };
+}
+
+/** Open another instance of an open window's tool. */
+export function duplicateWindow(state, id, viewport) {
+  const w = state.windows.find((x) => x.id === id);
+  if (!w) return state;
+  return openWindow(state, w.toolId, { title: w.title, accent: w.accent }, viewport, { forceNew: true });
 }
 
 export function closeWindow(state, id) {
@@ -210,8 +247,8 @@ export function cascadeWindows(state, viewport) {
 export function serializeState(state) {
   return JSON.stringify({
     v: 1, focusedId: state.focusedId,
-    windows: state.windows.map(({ id, toolId, title, accent, x, y, w, h, z, minimized, maximized, restore, zoom, fit }) =>
-      ({ id, toolId, title, accent, x, y, w, h, z, minimized, maximized, restore, zoom, fit }))
+    windows: state.windows.map(({ id, toolId, baseId, instance, title, accent, x, y, w, h, z, minimized, maximized, restore, zoom, fit }) =>
+      ({ id, toolId, baseId, instance, title, accent, x, y, w, h, z, minimized, maximized, restore, zoom, fit }))
   });
 }
 
@@ -222,7 +259,8 @@ export function deserializeState(json, viewport) {
     const windows = d.windows
       .filter((w) => w && typeof w.id === 'string' && typeof w.toolId === 'string')
       .map((w, i) => clampToViewport({
-        id: w.id, toolId: w.toolId, title: w.title || w.toolId, accent: w.accent || 'cyan',
+        id: w.id, toolId: w.toolId, baseId: w.baseId || baseIdOf(w.id), instance: Number.isFinite(w.instance) ? w.instance : instanceOf(w.id),
+        title: w.title || w.toolId, accent: w.accent || 'cyan',
         x: Number.isFinite(w.x) ? w.x : 16, y: Number.isFinite(w.y) ? w.y : 12,
         w: Number.isFinite(w.w) ? w.w : DEFAULT_W, h: Number.isFinite(w.h) ? w.h : DEFAULT_H,
         z: Number.isFinite(w.z) ? w.z : i + 1, minimized: !!w.minimized, maximized: !!w.maximized,

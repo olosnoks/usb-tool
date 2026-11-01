@@ -9,7 +9,8 @@ import { WORKSPACE_PRESETS } from './components/layout/WorkspacePresets';
 import { renderTool, toolMeta } from './components/ToolRegistry';
 import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize,
-  moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, loadState, saveState, zoomStep, toggleFit
+  moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, loadState, saveState, zoomStep, toggleFit,
+  duplicateWindow, baseIdOf
 } from './utils/windowManager';
 
 // Modals
@@ -69,7 +70,8 @@ function AppContent() {
     return () => clearTimeout(t);
   }, [wm]);
 
-  const open = useCallback((toolId) => setWm((s) => openWindow(s, toolId, toolMeta(toolId), viewportRef.current)), []);
+  const open = useCallback((toolId, opts) => setWm((s) => openWindow(s, toolId, toolMeta(toolId), viewportRef.current, opts)), []);
+  const onDuplicate = useCallback((id) => setWm((s) => duplicateWindow(s, id, viewportRef.current)), []);
   const onFocus = useCallback((id) => setWm((s) => focusWindow(s, id)), []);
   const onClose = useCallback((id) => setWm((s) => closeWindow(s, id)), []);
   const onMinimize = useCallback((id) => setWm((s) => minimizeWindow(s, id)), []);
@@ -84,7 +86,7 @@ function AppContent() {
 
   const focused = focusedWindow(wm);
   const activeTool = focused?.toolId || null;           // the tool whose window has focus
-  const openTools = useMemo(() => wm.windows.map((w) => w.id), [wm.windows]);
+  const openTools = useMemo(() => wm.windows.map((w) => w.baseId || baseIdOf(w.id)), [wm.windows]);
   const metaFor = useCallback((toolId) => toolMeta(toolId), []);
   const renderToolInWindow = useCallback((toolId) => renderTool(toolId, serial), [serial]);
 
@@ -181,8 +183,8 @@ function AppContent() {
         <Sidebar
           activeTool={activeTool}
           openTools={openTools}
-          onSelectTool={(toolId) => {
-            open(toolId);
+          onSelectTool={(toolId, opts) => {
+            open(toolId, opts);
             // The full terminal makes the drawer redundant
             if (toolId === 'terminal') setIsDrawerOpen(false);
           }}
@@ -200,7 +202,7 @@ function AppContent() {
             onFocus={onFocus} onMove={onMove} onResize={onResize} onMinimize={onMinimize}
             onToggleMaximize={onToggleMaximize} onClose={onClose}
             onTile={onTile} onCascade={onCascade} onCloseAll={onCloseAll}
-            onZoomStep={onZoomStep} onToggleFit={onToggleFit}
+            onZoomStep={onZoomStep} onToggleFit={onToggleFit} onDuplicate={onDuplicate}
           />
 
           <TerminalDrawer

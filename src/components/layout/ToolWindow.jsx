@@ -8,8 +8,8 @@
 // The wrapper is also a container-query root (`@container`), so tools that use
 // `@md:` / `@lg:` breakpoints respond to the window width, not the screen.
 import React, { useRef, useCallback, useEffect, useState } from 'react';
-import { Minus, Square, Copy, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { TITLE_BAR_H, MIN_W, MIN_H, fitZoomFor } from '../../utils/windowManager';
+import { Minus, Square, Copy, X, ZoomIn, ZoomOut, CopyPlus } from 'lucide-react';
+import { TITLE_BAR_H, MIN_W, MIN_H, fitZoomFor, displayTitle } from '../../utils/windowManager';
 
 const ACCENT = {
   cyan: 'border-cyan-500/60 shadow-cyan-glow', amber: 'border-amber-500/60 shadow-amber-glow',
@@ -34,7 +34,7 @@ const iconBtn = 'p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800'
 
 export default function ToolWindow({
   win, focused, forceMaximized = false, icon: Icon = null, naturalWidth = 1100, children,
-  onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onZoomStep, onToggleFit
+  onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onZoomStep, onToggleFit, onDuplicate
 }) {
   const dragRef = useRef(null);
   const sectionRef = useRef(null);
@@ -131,7 +131,7 @@ export default function ToolWindow({
         } ${maximized ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
       >
         {Icon && <Icon className={`w-3.5 h-3.5 shrink-0 ${focused ? ACCENT_TEXT[win.accent] || ACCENT_TEXT.cyan : 'text-slate-500'}`} />}
-        <span className={`text-xs font-bold tracking-wide truncate flex-1 ${focused ? 'text-slate-100' : 'text-slate-400'}`}>{win.title}</span>
+        <span className={`text-xs font-bold tracking-wide truncate flex-1 ${focused ? 'text-slate-100' : 'text-slate-400'}`}>{displayTitle(win)}</span>
 
         {/* Content zoom */}
         <div className="flex items-center gap-0.5 mr-1" data-zoom-controls title="Tool zoom: scales this tool inside its window (Ctrl+wheel also works). The page itself is not zoomed.">
@@ -145,6 +145,7 @@ export default function ToolWindow({
         </div>
 
         <div className="flex items-center gap-0.5">
+          {onDuplicate && <button onClick={() => onDuplicate(win.id)} title="Open another instance of this tool (new window, its own device)" className={iconBtn}><CopyPlus className="w-3.5 h-3.5" /></button>}
           <button onClick={() => onMinimize?.(win.id)} title="Minimize to the taskbar" className={iconBtn}><Minus className="w-3.5 h-3.5" /></button>
           {!forceMaximized && (
             <button onClick={() => onToggleMaximize?.(win.id)} title={win.maximized ? 'Restore size' : 'Maximize'} className={iconBtn}>
