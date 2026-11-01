@@ -65,6 +65,14 @@ export default function Fido2Workbench() {
             <ShieldAlert className="w-4 h-4 shrink-0" /> WebHID needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.
           </div>
         )}
+        <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg border border-slate-700 bg-slate-900/60 text-slate-300 text-[11px]">
+          <ShieldAlert className="w-4 h-4 shrink-0 text-amber-300" />
+          <span>
+            Chrome and Edge hide security keys (HID usage page F1D0) from web pages, so the device chooser normally shows nothing here.
+            To read a key you own, start the browser with <code className="text-amber-200">--disable-hid-blocklist</code> for this session only,
+            then close it again: that flag lets every site you visit ask for blocked HID devices.
+          </span>
+        </div>
         {error && (
           <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 font-bold">
             <ShieldAlert className="w-4 h-4 shrink-0" /> {error}
