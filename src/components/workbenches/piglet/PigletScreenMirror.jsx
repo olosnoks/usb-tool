@@ -178,11 +178,11 @@ export default function PigletScreenMirror({ client, connected, log }) {
       </div>
 
       <div className="flex justify-center">
-        <div className="relative inline-block bg-black rounded-lg overflow-hidden border border-slate-800" style={{ maxWidth: '100%' }}>
+        <div className="relative bg-black rounded-lg overflow-hidden border border-slate-800 w-full" style={{ maxWidth: dims.w ? Math.min(dims.w * 3, 560) + 'px' : '420px' }}>
           <canvas
             ref={canvasRef} width={dims.w || 240} height={dims.h || 320}
-            className="block select-none touch-none"
-            style={{ width: dims.w ? Math.min(dims.w * 1.5, 360) + 'px' : '240px', imageRendering: 'pixelated', cursor: on ? 'pointer' : 'default' }}
+            className="block w-full h-auto select-none touch-none"
+            style={{ aspectRatio: dims.w ? `${dims.w} / ${dims.h}` : '3 / 4', imageRendering: 'pixelated', cursor: on ? 'pointer' : 'default' }}
             onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
           />
           {!dims.w && (

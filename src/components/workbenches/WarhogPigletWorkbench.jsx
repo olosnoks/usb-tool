@@ -12,14 +12,12 @@ import {
   ExternalLink,
   Flame,
   Cable,
-  Activity,
   Monitor,
   Gauge
 } from 'lucide-react';
 import { PigletToolkitClient } from '../../utils/pigletToolkit';
 import PigletFileBrowser from './piglet/PigletFileBrowser';
 import PigletConfigEditor from './piglet/PigletConfigEditor';
-import PigletDeviceControl from './piglet/PigletDeviceControl';
 import PigletMonitor from './piglet/PigletMonitor';
 import PigletScreenMirror from './piglet/PigletScreenMirror';
 
@@ -377,7 +375,7 @@ const HARDWARE_PINOUTS = [
 const FLASHER_URL = 'https://olosnoks.github.io/warhog/';
 
 export default function WarhogPigletWorkbench() {
-  const [activeTab, setActiveTab] = useState('sd'); // 'sd' | 'config' | 'device' | 'serial' | 'monitor' | 'screen' | 'flasher' | 'pinouts'
+  const [activeTab, setActiveTab] = useState('sd'); // 'sd' | 'config' | 'live' | 'flasher' | 'pinouts'
 
   // Piglet Toolkit (WT protocol over USB): same client as the web flasher
   const [tkConnected, setTkConnected] = useState(false);
@@ -557,54 +555,15 @@ export default function WarhogPigletWorkbench() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('device')}
+            onClick={() => setActiveTab('live')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              activeTab === 'device'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5" />
-            <span>Device Control (USB)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('serial')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              activeTab === 'serial'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Terminal className="w-3.5 h-3.5" />
-            <span>Serial Console ({tkConnected ? 'Live' : 'Closed'})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('monitor')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              activeTab === 'monitor'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Gauge className="w-3.5 h-3.5" />
-            <span>Core Monitor</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('screen')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              activeTab === 'screen'
+              activeTab === 'live'
                 ? 'bg-amber-500 text-slate-950 shadow-md'
                 : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
             }`}
           >
             <Monitor className="w-3.5 h-3.5" />
-            <span>Screen Mirror</span>
+            <span>Live Console ({tkConnected ? 'Live' : 'Closed'})</span>
           </button>
 
           <button
@@ -636,7 +595,7 @@ export default function WarhogPigletWorkbench() {
       </div>
 
       {/* Piglet Toolkit connection bar (shared by the SD, config and console tabs) */}
-      {(activeTab === 'sd' || activeTab === 'config' || activeTab === 'device' || activeTab === 'serial' || activeTab === 'monitor' || activeTab === 'screen') && (
+      {(activeTab === 'sd' || activeTab === 'config' || activeTab === 'live') && (
         <div className="bg-[#12151c] border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -707,113 +666,98 @@ export default function WarhogPigletWorkbench() {
         />
       </div>
 
-      {/* TAB 3: DEVICE CONTROL over USB (replaces the SoftAP Web UI bridge) */}
-      <div className={activeTab === 'device' ? '' : 'hidden'}>
-        <PigletDeviceControl
-          client={client}
-          connected={tkConnected}
-          active={activeTab === 'device'}
-          busy={tkBusy}
-          setBusy={setTkBusy}
-          setStatus={setStatus}
-          log={log}
-          onEditConfig={() => setActiveTab('config')}
-        />
-      </div>
-
-      {/* TAB 4: SERIAL CONSOLE (same USB session as the toolkit) */}
-      {activeTab === 'serial' && (
-        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5 space-y-4">
-          <div className="flex flex-col @sm:flex-row items-start @sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-emerald-400" />
-                <h2 className="font-bold text-slate-100 text-sm">Serial Console</h2>
-                {tkInfo && (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                    {tkInfo}
-                  </span>
-                )}
+      {/* TAB: LIVE CONSOLE — screen mirror, Core monitor and serial console together */}
+      {activeTab === 'live' && (
+        <div className="space-y-4">
+          {/* Screen mirror + Core monitor, side by side on wide windows */}
+          <div className="grid grid-cols-1 @lg:grid-cols-[minmax(0,620px)_1fr] gap-4 items-start">
+            <PigletScreenMirror client={client} connected={tkConnected} log={log} />
+            <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5">
+              <div className="flex items-center gap-2 pb-3 mb-3 border-b border-slate-800">
+                <Gauge className="w-4 h-4 text-amber-400" />
+                <h2 className="font-bold text-slate-100 text-sm">WarHog Core Monitor</h2>
+                <span className="text-[11px] text-slate-500 hidden @md:inline">live dashboard from the Core&apos;s debug telemetry</span>
               </div>
-              <p className="text-xs text-slate-400">
-                Firmware debug output from the toolkit&apos;s USB session. Lines you send go straight to the Piglet; WT replies that no file operation is waiting for show up here.
-              </p>
+              <PigletMonitor client={client} connected={tkConnected} info={tkInfo} />
             </div>
-            <button
-              type="button"
-              onClick={() => setSerialLogs([])}
-              className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-400 hover:text-slate-200 border border-slate-800"
-            >
-              Clear Logs
-            </button>
           </div>
 
-          <div
-            ref={logContainerRef}
-            className="w-full h-80 bg-slate-950 border border-slate-800 rounded-lg p-3 overflow-y-auto font-mono text-[11px] leading-relaxed text-slate-300 space-y-0.5"
-          >
-            {serialLogs.length === 0 ? (
-              <div className="py-12 text-center text-slate-600">
-                {tkConnected ? 'Waiting for firmware output…' : 'Connect over USB to see the Piglet’s serial output.'}
-              </div>
-            ) : (
-              serialLogs.map((l, i) => (
-                <div key={i} className="break-all whitespace-pre-wrap">
-                  {l}
+          {/* Serial console, full width beneath */}
+          <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5 space-y-4">
+            <div className="flex flex-col @sm:flex-row items-start @sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-emerald-400" />
+                  <h2 className="font-bold text-slate-100 text-sm">Serial Console</h2>
+                  {tkInfo && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                      {tkInfo}
+                    </span>
+                  )}
                 </div>
-              ))
-            )}
-          </div>
+                <p className="text-xs text-slate-400">
+                  Firmware debug output from the toolkit&apos;s USB session. Lines you send go straight to the Piglet; WT replies that no file operation is waiting for show up here.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSerialLogs([])}
+                className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-400 hover:text-slate-200 border border-slate-800"
+              >
+                Clear Logs
+              </button>
+            </div>
 
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const line = serialInput.trim();
-              if (!line || !tkConnected) return;
-              try {
-                await client.writeLine(line);
-                setSerialLogs((prev) => [...prev, `> ${line}`]);
-                setSerialInput('');
-              } catch (err) {
-                setSerialLogs((prev) => [...prev, `[ERROR] ${err.message}`]);
-              }
-            }}
-            className="flex items-center gap-2"
-          >
-            <input
-              type="text"
-              value={serialInput}
-              onChange={(e) => setSerialInput(e.target.value)}
-              placeholder={tkBusy ? 'Waiting for the current file operation…' : 'Send a line to the Piglet (e.g. WT HELLO)'}
-              disabled={!tkConnected || tkBusy}
-              className="flex-1 bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs font-mono text-slate-200 outline-none focus:border-amber-500/50 disabled:opacity-50"
-            />
-            <button
-              type="submit"
-              disabled={!tkConnected || tkBusy || !serialInput.trim()}
-              className="px-4 py-1.5 rounded bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs transition"
+            <div
+              ref={logContainerRef}
+              className="w-full h-72 bg-slate-950 border border-slate-800 rounded-lg p-3 overflow-y-auto font-mono text-[11px] leading-relaxed text-slate-300 space-y-0.5"
             >
-              Send
-            </button>
-          </form>
-        </div>
-      )}
+              {serialLogs.length === 0 ? (
+                <div className="py-12 text-center text-slate-600">
+                  {tkConnected ? 'Waiting for firmware output…' : 'Connect over USB to see the Piglet’s serial output.'}
+                </div>
+              ) : (
+                serialLogs.map((l, i) => (
+                  <div key={i} className="break-all whitespace-pre-wrap">
+                    {l}
+                  </div>
+                ))
+              )}
+            </div>
 
-      {/* TAB: CORE MONITOR (live telemetry from the serial stream) */}
-      {activeTab === 'monitor' && (
-        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5">
-          <div className="flex items-center gap-2 pb-3 mb-3 border-b border-slate-800">
-            <Gauge className="w-4 h-4 text-amber-400" />
-            <h2 className="font-bold text-slate-100 text-sm">WarHog Core Monitor</h2>
-            <span className="text-[11px] text-slate-500">live dashboard from the Core&apos;s debug telemetry</span>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const line = serialInput.trim();
+                if (!line || !tkConnected) return;
+                try {
+                  await client.writeLine(line);
+                  setSerialLogs((prev) => [...prev, `> ${line}`]);
+                  setSerialInput('');
+                } catch (err) {
+                  setSerialLogs((prev) => [...prev, `[ERROR] ${err.message}`]);
+                }
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={serialInput}
+                onChange={(e) => setSerialInput(e.target.value)}
+                placeholder={tkBusy ? 'Waiting for the current file operation…' : 'Send a line to the Piglet (e.g. WT HELLO)'}
+                disabled={!tkConnected || tkBusy}
+                className="flex-1 bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs font-mono text-slate-200 outline-none focus:border-amber-500/50 disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!tkConnected || tkBusy || !serialInput.trim()}
+                className="px-4 py-1.5 rounded bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs transition"
+              >
+                Send
+              </button>
+            </form>
           </div>
-          <PigletMonitor client={client} connected={tkConnected} info={tkInfo} />
         </div>
-      )}
-
-      {/* TAB: SCREEN MIRROR + remote touch (CYD / W550) */}
-      {activeTab === 'screen' && (
-        <PigletScreenMirror client={client} connected={tkConnected} log={log} />
       )}
 
       {/* TAB 5: WEB FLASHER */}
