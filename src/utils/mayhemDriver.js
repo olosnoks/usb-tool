@@ -1,6 +1,7 @@
 import { globalAdsbDecoder } from './adsbDecoder.js';
 import { requestPortFor, releasePort, closeSerialPort } from './portManager';
 import { powerSpectrumFromIQ } from './fft.js';
+import { Demodulator } from './hackrfDemod.js';
 
 /*
  * Two real transports plus a labeled demo:
@@ -127,7 +128,24 @@ export class MayhemPortaPackDriver {
     this.spectrumFftSize = 256;
     this.onSpectrumCallback = null;
     this._lastSpectrumTs = 0;
+
+    // Audio demodulation (WebUSB only). When demod is set, each IQ buffer is
+    // turned into audio and handed to onAudioCallback(float32, audioRate).
+    this.demod = null;
+    this.onAudioCallback = null;
   }
+
+  /** Start demodulating the live IQ to audio in the given mode (WFM/NFM/AM/USB/LSB). */
+  enableAudio(mode = 'WFM') {
+    this.demod = new Demodulator({ inRate: this.sampleRate, audioRate: 48000, mode });
+    this.log(`[HackRF WebUSB] Audio demod: ${mode} at ${Math.round(this.demod.audioRate)} Hz.`, 'info');
+  }
+
+  setAudioMode(mode) {
+    if (this.demod) this.demod.setMode(mode); else this.enableAudio(mode);
+  }
+
+  disableAudio() { this.demod = null; }
 
   log(msg, type = 'info') {
     const entry = { time: new Date().toLocaleTimeString(), text: msg, type };
@@ -449,6 +467,11 @@ export class MayhemPortaPackDriver {
     // Near 1090 MHz, decode real Mode-S (ADS-B) packets from the raw IQ.
     if (Math.abs(this.frequency - 1090000000) < 6000000) {
       globalAdsbDecoder.processRawIq(data.buffer);
+    }
+    // Demodulate to audio (every buffer, so playback stays continuous).
+    if (this.demod && this.onAudioCallback) {
+      const audio = this.demod.process(data);
+      if (audio && audio.length) this.onAudioCallback(audio, this.demod.audioRate);
     }
   }
 
@@ -870,6 +893,7 @@ export class MayhemPortaPackDriver {
   async disconnect() {
     this.isConnected = false;
     this.connectionType = 'demo';
+    this.demod = null;
     if (this.usbDevice) {
       try { await this.usbDevice.close(); } catch (_) {}
       this.usbDevice = null;

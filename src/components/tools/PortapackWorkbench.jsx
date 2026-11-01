@@ -91,6 +91,7 @@ export default function PortapackWorkbench() {
   const [audioMode, setAudioMode] = useState('WFM');
   const [squelchDb, setSquelchDb] = useState(-70);
   const [volume, setVolume] = useState(75);
+  const [audioOn, setAudioOn] = useState(false);
   const [txMode, setTxMode] = useState('tone');
   const [txConfirmed, setTxConfirmed] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
@@ -101,6 +102,9 @@ export default function PortapackWorkbench() {
   const waterfallCanvasRef = useRef(null);
   const logContainerRef = useRef(null);
   const spectrumRef = useRef(null); // latest live FFT frame { spec, peakDb, ts }
+  const audioCtxRef = useRef(null);  // Web Audio context + gain for demodulated sound
+  const audioGainRef = useRef(null);
+  const audioNextTimeRef = useRef(0);
 
   // Setup state callbacks and initial demo connection
   useEffect(() => {
@@ -264,6 +268,59 @@ export default function PortapackWorkbench() {
     render();
     return () => cancelAnimationFrame(animId);
   }, [activeTab, state.isDemo, state.connectionType, state.frequency, state.lnaGain, state.amp, squelchDb]);
+
+  // Live volume/squelch read by the audio callback without re-subscribing.
+  const volumeRef = useRef(volume);
+  const squelchRef = useRef(squelchDb);
+  useEffect(() => { volumeRef.current = volume; if (audioGainRef.current) audioGainRef.current.gain.value = volume / 100; }, [volume]);
+  useEffect(() => { squelchRef.current = squelchDb; }, [squelchDb]);
+  useEffect(() => { if (audioOn) driver.setAudioMode(audioMode); }, [audioMode, audioOn, driver]);
+
+  // Web Audio playback of the demodulated HackRF stream (WebUSB only).
+  useEffect(() => {
+    const teardown = () => {
+      driver.onAudioCallback = null;
+      driver.disableAudio();
+      const c = audioCtxRef.current;
+      audioCtxRef.current = null; audioGainRef.current = null;
+      if (c) c.close().catch(() => {});
+    };
+    if (!audioOn || state.connectionType !== 'webusb') { teardown(); return teardown; }
+
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { driver.log('Web Audio is not supported in this browser.', 'warning'); return undefined; }
+    const ctx = new AC();
+    const gain = ctx.createGain();
+    gain.gain.value = volumeRef.current / 100;
+    gain.connect(ctx.destination);
+    audioCtxRef.current = ctx;
+    audioGainRef.current = gain;
+    audioNextTimeRef.current = 0;
+    driver.enableAudio(audioMode);
+
+    driver.onAudioCallback = (audio, rate) => {
+      const c = audioCtxRef.current;
+      const g = audioGainRef.current;
+      if (!c || !g) return;
+      // Software squelch from the live spectrum peak (dBFS).
+      const peak = spectrumRef.current ? spectrumRef.current.peakDb : -200;
+      if (peak < squelchRef.current) { audioNextTimeRef.current = 0; return; }
+      try {
+        const buf = c.createBuffer(1, audio.length, Math.max(3000, Math.round(rate)));
+        buf.copyToChannel(audio instanceof Float32Array ? audio : Float32Array.from(audio), 0);
+        const src = c.createBufferSource();
+        src.buffer = buf;
+        src.connect(g);
+        const now = c.currentTime;
+        let start = audioNextTimeRef.current;
+        if (start < now + 0.02) start = now + 0.05; // (re)prime the queue after a gap
+        src.start(start);
+        audioNextTimeRef.current = start + buf.duration;
+      } catch (_) { /* buffer rejected: skip this frame */ }
+    };
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    return teardown;
+  }, [audioOn, state.connectionType, driver]);
 
   // Live Canvas Renderer (320x240 PortaPack LCD Display)
   useEffect(() => {
@@ -968,6 +1025,9 @@ export default function PortapackWorkbench() {
               setVolume={setVolume}
               squelchDb={squelchDb}
               volume={volume}
+              audioOn={audioOn}
+              setAudioOn={setAudioOn}
+              canListen={!state.isDemo && state.connectionType === 'webusb'}
               waterfallCanvasRef={waterfallCanvasRef}
             />
           )}

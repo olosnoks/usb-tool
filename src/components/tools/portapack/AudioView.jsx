@@ -1,6 +1,6 @@
 // "audio" view of the PortaPack workbench (PortapackWorkbench.jsx).
 // Extracted as-is; all state and handlers come in as props.
-import { Flame, Volume2 } from 'lucide-react';
+import { Flame, Volume2, Headphones } from 'lucide-react';
 
 export default function AudioView({
   agcEnabled,
@@ -10,12 +10,23 @@ export default function AudioView({
   setVolume,
   squelchDb,
   volume,
+  audioOn,
+  setAudioOn,
+  canListen,
   waterfallCanvasRef
 }) {
   return (
     <div className="space-y-4 flex-1 flex flex-col font-mono text-xs">
       <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setAudioOn(!audioOn)}
+            disabled={!canListen}
+            title={canListen ? 'Demodulate the live IQ to audio through your speakers' : 'Connect over WebUSB (HackRF mode) to listen'}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded font-bold transition disabled:opacity-40 ${audioOn ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-emerald-300 border border-emerald-500/40'}`}
+          >
+            <Headphones className="w-3.5 h-3.5" /> {audioOn ? 'LISTENING' : 'LISTEN'}
+          </button>
           <span className="text-slate-400 font-bold">DEMOD:</span>
           <div className="flex items-center bg-slate-900 border border-slate-700 rounded p-0.5 text-xs">
             {['WFM', 'NFM', 'AM', 'USB', 'LSB'].map(m => (
