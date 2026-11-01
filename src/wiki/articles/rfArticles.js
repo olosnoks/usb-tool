@@ -476,7 +476,7 @@ If your Proxmark3 is bricked or stuck in bootloader mode (e.g. following a faile
     toolId: 'mayhem',
     category: 'rf',
     title: 'PortaPack Mayhem SDR — Tactical Radar, ADS-B, FREQMAN & Spectrum Studio',
-    summary: 'Exhaustive SDR companion guide: ADS-B 1090MHz Mode-S aircraft radar with TacticalMapDeck, LookingGlass wideband spectrum sweeper, SensorHub weather/TPMS decoders, HamRadio CTCSS repeaters, and FREQMAN editor.',
+    summary: 'HackRF One receiver companion: live spectrum + waterfall and demodulated audio (WFM/NFM/AM/USB/LSB) over WebUSB, a real wideband LookingGlass sweep, ADS-B 1090MHz aircraft radar on the TacticalMap, FREQMAN editor, and a serial LCD mirror. Hardware only — no demo mode.',
     tags: ['PortaPack', 'Mayhem', 'HackRF', 'SDR', 'FREQMAN', 'ADS-B', 'TacticalMap', 'LookingGlass', 'HamRadio', 'SensorHub'],
     readTime: '28 min read',
     content: `
@@ -511,6 +511,17 @@ Proper gain staging is the difference between clean reception and completely blo
 3. **VGA Gain (Variable Gain Amplifier - 0 to 62 dB in 2dB steps)**:
    - Located in the baseband section after the mixer.
    - Amplifies the downconverted analog signal before it enters the 8-bit ADC.
+
+---
+
+### Audio Receiver — WFM / NFM / AM / USB / LSB
+
+On the **Audio & Waterfall** tab (WebUSB only), the live IQ is demodulated to sound in the browser with Web Audio:
+- **WFM** (broadcast FM, 75 µs de-emphasis), **NFM** (PMR/ham), **AM** (envelope with DC blocker), and **USB/LSB** (product detector). Audio is decimated to ~48 kHz.
+- **LISTEN** starts/stops playback; **Volume** scales the output; **Squelch** mutes when the live spectrum peak is below the set level.
+- The waterfall above it is the real FFT of the stream (green trace, peak marker, dBFS axis).
+
+The demodulator lives in \`utils/hackrfDemod.js\`; the driver runs it on every IQ buffer and plays the frames through an AudioContext.
 
 ---
 
@@ -559,23 +570,19 @@ The **LookingGlassDeck** implements a high-speed synthesizer sweeper:
 
 ---
 
-### 5. SensorHubDeck — Environmental & TPMS Decoders
+### 5. SensorHubDeck — ISM Band Tuner (decoders not implemented)
 
-The **SensorHubDeck** decodes Sub-GHz consumer sensors transmitting on ISM bands:
-- **Weather Stations (433.92 MHz & 868 MHz)**:
-  - Oregon Scientific protocols (v1, v2.1, v3.0).
-  - Ambient Weather, Acurite, and LaCrosse temperature and humidity sensors.
-- **Automotive TPMS (Tire Pressure Monitoring Systems - 315 MHz & 433.92 MHz)**:
-  - Decodes Schrader, Continental, and Pacific tire sensors.
-  - Displays individual wheel sensor IDs, tire pressure in PSI / bar, and temperature in °C.
+The **SensorHubDeck** gives one-click tuning to the common Sub-GHz ISM bands (315 / 433.92 / 868 / 915 MHz) so you can see real energy on the spectrum and waterfall there.
+
+**It does not decode packets.** rtl_433-style decoding (weather stations, automotive TPMS, pagers, ACARS, BLE) is **not implemented over USB yet**, so the packet list stays empty — the deck never invents data. The frequency buttons do retune your HackRF.
 
 ---
 
-### 6. HamRadioDeck — Repeaters & CTCSS Tones
+### 6. HamRadioDeck — Band Tuner & Contact Log (decoders not implemented)
 
-For amateur radio operators, the **HamRadioDeck** provides tuning controls for VHF (2-meter band: 144–148 MHz) and UHF (70-centimeter band: 420–450 MHz):
-- **Repeater Offset Generator**: Automatically applies standard transmit frequency offsets (+600 kHz or -600 kHz on 2m; +5.0 MHz on 70cm).
-- **CTCSS (Continuous Tone-Coded Squelch System)**: Generates and decodes standard sub-audible tone frequencies (from 67.0 Hz up to 254.1 Hz) to open commercial and amateur repeaters.
+The **HamRadioDeck** offers quick tuning to the amateur VHF (2 m) and UHF (70 cm) bands and keeps a contact log you can export to ADIF.
+
+**The digital decoders are not implemented.** FT8 / PSK / RTTY / CW are **not decoded over USB yet**, so those panels stay empty — the deck never shows invented decodes. The band/mode buttons retune the radio, and the contact log works.
 
 ---
 
@@ -601,15 +608,19 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Connect Mayhem** | Button | Connects WebSerial at 115200 baud to HackRF/PortaPack serial interface. |
+| **Connect WebUSB** | Button | Connects the HackRF One over WebUSB (libhackrf) for live IQ: spectrum, audio, sweep and ADS-B. Put a PortaPack in HackRF mode first. |
+| **COM Port** | Button | Connects the PortaPack Mayhem serial console (115200 baud) for the LCD screen mirror and the ChibiOS shell. No IQ on this path. |
+| **LISTEN** | Button | Starts/stops demodulated audio (Audio tab, WebUSB). |
+| **DEMOD selector** | Buttons | Chooses WFM / NFM / AM / USB / LSB. |
+| **Volume / Squelch** | Sliders | Output level, and the spectrum-peak threshold below which audio mutes. |
 | **Frequency Input** | Numeric Box | Configures target center tuning frequency in Hertz or Megahertz (1 MHz to 6 GHz). |
 | **LNA Gain Slider** | Slider | Steps low-noise front-end amplifier from 0 dB to 40 dB in 8 dB increments. |
 | **VGA Gain Slider** | Slider | Steps baseband variable amplifier from 0 dB to 62 dB in 2 dB increments. |
 | **AMP Toggle** | Switch | Engages or disengages the 14 dB front-end RF preamplifier. |
 | **TacticalMapDeck Tab** | Tab | Opens real-time Leaflet OpenStreetMap view tracking ADS-B aircraft squitters. |
 | **LookingGlassDeck Tab** | Tab | Opens wideband fast-sweep panoramic spectrum analyzer and waterfall. |
-| **SensorHubDeck Tab** | Tab | Opens environmental telemetry decoder for weather sensors and automotive TPMS. |
-| **HamRadioDeck Tab** | Tab | Opens repeater controller with CTCSS tone generator and offset calculator. |
+| **SensorHubDeck Tab** | Tab | Tunes the ISM bands and shows the live spectrum there. Packet decoding is not implemented. |
+| **HamRadioDeck Tab** | Tab | Tunes the 2 m / 70 cm bands and keeps an ADIF contact log. Digital decoders are not implemented. |
 | **FREQMAN Manager** | Panel | Reads, edits, and writes channel frequency files on the PortaPack microSD card. |
 
 ---
@@ -618,7 +629,7 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 
 #### Walkthrough A: Setting Up Mode-S ADS-B Aviation Radar
 1. Attach a tuned 1090 MHz antenna (or standard telescopic antenna extended to ~6.8 cm for quarter-wave resonance) to the HackRF SMA jack.
-2. In the workbench, click **Connect Mayhem**.
+2. In the workbench, put the device in HackRF mode and click **Connect WebUSB**.
 3. Switch to the **TacticalMapDeck** tab.
 4. Set **Frequency** to \`1090.000 MHz\`, **LNA Gain** to \`32 dB\`, and **VGA Gain** to \`40 dB\`.
 5. Keep **AMP** OFF to prevent saturation.
@@ -636,6 +647,7 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 
 | Error Message / Symptom | Root Cause | Engineering Solution |
 | :--- | :--- | :--- |
+| **Flat waterfall / no audio over WebUSB** | PortaPack not in HackRF mode, or you connected the serial COM path (no IQ). | Switch the PortaPack to HackRF mode and use Connect WebUSB. The log warns if no IQ arrives in ~1.5 s. |
 | **No ADS-B Aircraft Appearing** | Insufficient gain or incorrect antenna length. | Extend antenna to 6.8 cm. Raise LNA to 32 dB and VGA to 40 dB. Ensure line of sight to open sky. |
 | **LookingGlass Showing Ghost Spikes** | Front-end amplifier saturation causing intermodulation products. | Turn off the 14 dB AMP switch. Lower LNA gain by 8–16 dB. |
 | **WebSerial Buffer Overrun** | Browser tab throttled in background or high system load. | Keep browser tab active. Disable high-resolution waterfall rendering if CPU load exceeds 80%. |
@@ -655,7 +667,7 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 
 ### Implementation & Architecture
 
-The deck drives a **real PortaPack** over the Mayhem **USB serial console** (the ChibiOS shell, prompt \`ch>\`) — the same interface hackrf.app and mayhem-mobile use. There is no simulated data.
+This tool is **hardware only — there is no demo or simulation mode.** Two real transports: WebUSB (libhackrf) for the HackRF's raw IQ — spectrum, demodulated audio, wideband sweep and ADS-B — and the Mayhem **USB serial console** (ChibiOS shell, prompt \`ch>\`) for the live LCD mirror and control pad. The IQ stream is drained with several bulk transfers in flight at once (RocketGod's mayhem-mobile model), so the HackRF keeps streaming without its FIFO overflowing.
 
 - **Component:** [\`components/tools/PortapackWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/PortapackWorkbench.jsx) renders a live LCD mirror, a hardware control pad, tuning, and a device-info panel over [\`utils/mayhemDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/mayhemDriver.js).
 - **Live screen mirror:** \`captureScreen()\` sends \`screenframeshort\` and decodes the reply — one character per pixel, \`value = char - 32\` packing 6-bit \`00RRGGBB\` (2 bits/channel, scaled ×85) — into an RGBA frame drawn to a canvas. Frame dimensions are inferred from the response (width = chars/line, height = line count), so it adapts to the firmware's resolution.

@@ -454,20 +454,20 @@ export const TOOL_GUIDES = {
   },
   'mayhem': {
     title: 'PortaPack Mayhem & HackRF One Suite',
-    shortDesc: 'Control HackRF One + PortaPack Mayhem firmware over Web Serial, manage FREQMAN database, inspect raw C16 IQ captures, and navigate virtual 320x240 LCD display.',
+    shortDesc: 'Live HackRF One receiver over WebUSB (libhackrf): real spectrum + waterfall, demodulated audio (WFM/NFM/AM/USB/LSB), wideband sweep and ADS-B. A PortaPack can also connect over serial to mirror its 320x240 screen. Hardware only — there is no demo mode.',
     steps: [
-      'Connect HackRF One with PortaPack H1/H2/H2+/H3/H4 attached via USB.',
-      'Click "CONNECT WEB SERIAL (PORTAPACK)" (or test the rich built-in simulation).',
-      'Use the on-screen D-Pad and Rotary Jog Dial to navigate the 320x240 LCD display and launch apps (ADS-B, Audio RX, Capture, Sub-GHz).',
-      'Use the "RF Tuner & Gains" tab to adjust Frequency (1MHz–6GHz), LNA Gain (0–40dB), VGA Gain (0–62dB), and toggle the +14dB RF amplifier.',
-      'In the "FREQMAN" tab, browse standard presets, add custom frequencies, tune in 1-click, and export FREQMAN.TXT directly to your MicroSD card.',
-      'Drag and drop raw .C16 files into the IQ Inspector to verify sample rate, center frequency, duration, and FFT power spectrum.'
+      'For live RF (spectrum, audio, sweep, ADS-B): put the device in HackRF mode and click "Connect WebUSB". A bare HackRF One streams straight away.',
+      'For the PortaPack screen mirror and console: click "COM Port" to connect the Mayhem serial console (leave the PortaPack in normal mode).',
+      'On the "Audio & Waterfall" tab, watch the live FFT/waterfall and click LISTEN to hear the signal; pick the demod (WFM/NFM/AM/USB/LSB) and set volume + squelch.',
+      'Use "RF Tuner & Gains" to set Frequency (1MHz–6GHz), LNA (0–40dB), VGA (0–62dB) and the +14dB amp.',
+      'On "Looking Glass", pick a band and START SWEEP to retune the HackRF across it and list the detected peaks (click a peak to tune to it).',
+      'FREQMAN manages presets/custom channels; the IQ Inspector opens raw .C16 files to check sample rate, center frequency and FFT.'
     ],
     tips: [
-      'To enter DFU mode for firmware flashing, click the "DFU" button or hold the DFU button while plugging in USB.',
-      'PortaPack Mayhem serial CLI communicates at 115,200 baud, 8-N-1.',
-      'Format MicroSD cards as FAT32 (32KB clusters) for maximum C16 capture write speeds.',
-      'Turn off the +14dB RF amp when receiving strong local signals to prevent front-end saturation.'
+      'Flat waterfall / no audio? The device is probably not in HackRF mode, or you used the serial COM path (serial has no IQ). The log prints a warning if no IQ arrives.',
+      'Turn off the +14dB amp on strong local signals to avoid front-end overload and ghost spikes.',
+      'The HAM and rtl_433 Sensor tabs let you tune, but the digital decoders (FT8/PSK/RTTY/CW, weather/TPMS/pager) are not implemented over USB yet.',
+      'To enter DFU for firmware flashing, use the DFU control or hold DFU while plugging in USB.'
     ],
     shortcuts: 'PortaPack Mayhem & HackRF Suite'
   },
