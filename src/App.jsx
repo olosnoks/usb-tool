@@ -32,7 +32,6 @@ const JtagWorkbench = React.lazy(() => import('./components/tools/JtagWorkbench'
 const ModbusWorkbench = React.lazy(() => import('./components/tools/ModbusWorkbench'));
 const AvrIspWorkbench = React.lazy(() => import('./components/tools/AvrIspWorkbench'));
 const PortapackWorkbench = React.lazy(() => import('./components/tools/PortapackWorkbench'));
-const HackRfFlasherWorkbench = React.lazy(() => import('./components/tools/HackRfFlasherWorkbench'));
 const FlipperWorkbench = React.lazy(() => import('./components/tools/flipper/FlipperWorkbench'));
 const ProxmarkWorkbench = React.lazy(() => import('./components/tools/proxmark/ProxmarkWorkbench'));
 const CyberChefWorkbench = React.lazy(() => import('./components/tools/CyberChefWorkbench'));
@@ -483,12 +482,6 @@ function AppContent() {
             {activeTool === 'warhog-piglet' && (
               <div className="w-full min-w-0 max-w-full">
                 <WarhogPigletWorkbench />
-              </div>
-            )}
-
-            {activeTool === 'hackrf-flash' && (
-              <div className="w-full">
-                <HackRfFlasherWorkbench />
               </div>
             )}
 

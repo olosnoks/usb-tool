@@ -52,7 +52,7 @@ export default function CommandPalette({
     { id: 'tab-modbus', name: 'Open Industrial Modbus RTU & RS-485 Field Deck', category: 'Tools', icon: Activity, action: () => onSelectTab('modbus-rtu') },
     { id: 'tab-proxmark', name: 'Open Proxmark3 / PM5 RFID Suite & Flasher', category: 'Tools', icon: Radio, action: () => onSelectTab('proxmark') },
     { id: 'tab-mayhem', name: 'Open PortaPack Mayhem & HackRF Sub-GHz SDR Suite', category: 'Tools', icon: Radio, action: () => onSelectTab('mayhem') },
-    { id: 'tab-hackrf-flash', name: 'Open HackRF / PortaPack Flasher & First-Time Setup', category: 'Tools', icon: Radio, action: () => onSelectTab('hackrf-flash') },
+    { id: 'tab-hackrf-flash', name: 'Open PortaPack Mayhem SDR: Flash Firmware & First-Time Setup', category: 'Tools', icon: Radio, action: () => onSelectTab('mayhem') },
     { id: 'tab-logic-analyzer', name: 'Open 24MHz 8-Channel USB Logic Analyzer & Protocol Decoder', category: 'Tools', icon: Activity, action: () => onSelectTab('logic-analyzer') },
     { id: 'tab-can-bus', name: 'Open Automotive CAN Bus & OBD-II Diagnostic Deck', category: 'Tools', icon: Gauge, action: () => onSelectTab('can-bus') },
     { id: 'tab-ch341a', name: 'Open CH341A USB SPI/I2C BIOS & Flash Programmer', category: 'Tools', icon: HardDrive, action: () => onSelectTab('ch341a') },

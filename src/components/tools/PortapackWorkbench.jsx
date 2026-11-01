@@ -20,6 +20,7 @@ import {
 import { MayhemPortaPackDriver } from '../../utils/mayhemDriver';
 import TacticalMapDeck from './TacticalMapDeck';
 import ReceiverDeck from './hackrf/ReceiverDeck';
+import HackRfFlasherWorkbench from './HackRfFlasherWorkbench';
 import StatusBadge from '../common/StatusBadge';
 import FreqmanView from './portapack/FreqmanView';
 import CaptureView from './portapack/CaptureView';
@@ -453,6 +454,7 @@ export default function PortapackWorkbench() {
               { id: 'map', name: 'Tactical Map (ADS-B)', icon: MapPin },
               { id: 'freqman', name: 'FREQMAN (SD Cards)', icon: FileText },
               { id: 'capture', name: 'IQ Recorder', icon: Disc },
+              { id: 'flash', name: 'Flash & First-Time Setup', icon: Zap },
               { id: 'cli', name: 'Console & Log', icon: TerminalIcon }
             ].map(tab => {
               const Icon = tab.icon;
@@ -506,6 +508,10 @@ export default function PortapackWorkbench() {
 
           {activeTab === 'capture' && (
             <CaptureView driver={driver} state={state} />
+          )}
+
+          {activeTab === 'flash' && (
+            <HackRfFlasherWorkbench embedded receiverConnected={state.isConnected} onDisconnectReceiver={() => driver.disconnect()} />
           )}
 
           {activeTab === 'cli' && (

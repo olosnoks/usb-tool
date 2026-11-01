@@ -66,8 +66,7 @@ export const SIDEBAR_SECTIONS = [
       { id: 'alfa-wifi', name: 'Wi-Fi Monitor (Alfa / Panda PAU09)', icon: Wifi, accent: 'cyan', desc: 'WebUSB monitor mode & 802.11 frame capture for Alfa RTL8812AU & Panda PAU09 (RT5572)' },
       { id: 'flipper', name: 'Flipper Zero Suite', icon: Bot, accent: 'amber', desc: 'qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC & SD' },
       { id: 'proxmark', name: 'Proxmark3 / PM5 Suite', icon: Radio, accent: 'cyan', desc: '13.56MHz & 125kHz RFID cloner, raw NG framing & WebFlash' },
-      { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF receiver: zoomable spectrum & waterfall, audio, sweep, ADS-B, IQ recorder' },
-      { id: 'hackrf-flash', name: 'HackRF / PortaPack Flasher', icon: Zap, accent: 'purple', desc: 'First-time setup: flash Mayhem or stock firmware over WebUSB, DFU rescue, SD-card files' },
+      { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF receiver: zoomable spectrum & waterfall, audio, sweep, ADS-B, IQ recorder, firmware flasher & first-time setup' },
       { id: 'wardrive', name: 'GPS & Wardrive Suite', icon: Compass, accent: 'emerald', desc: 'Warhog CYD, Piglet, Panda PAU09, NMEA tracker & u-blox UBX' },
       { id: 'warhog-piglet', name: 'Warhog CYD & Piglet Suite', icon: Sparkles, accent: 'amber', desc: 'Warhog CYD (ESP32-2432S028R) & Piglet ESP32-C5/S3 wardriver deck' },
       { id: 'ble', name: 'Bluetooth LE Explorer', icon: Bluetooth, accent: 'cyan', desc: 'Web Bluetooth GATT client: services, notify, typed writes, Nordic DFU updates' }

@@ -19,7 +19,7 @@ import StatusBadge from '../common/StatusBadge';
 
 const fmtKb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(2)} MB` : `${(n / 1024).toFixed(0)} KB`);
 
-export default function HackRfFlasherWorkbench() {
+export default function HackRfFlasherWorkbench({ embedded = false, receiverConnected = false, onDisconnectReceiver = null }) {
   const [logs, setLogs] = useState([]);
   const logRef = useRef(null);
   const log = (text, type = 'info') => setLogs((p) => [...p.slice(-250), { time: new Date().toLocaleTimeString(), text, type }]);
@@ -149,6 +149,7 @@ export default function HackRfFlasherWorkbench() {
 
   const connect = async () => {
     if (!navigator.usb) { log('WebUSB is not available in this browser. Use Chrome or Edge.', 'error'); return; }
+    if (receiverConnected) { log('The receiver still holds the HackRF. Disconnect it first (button above), then connect here.', 'warning'); return; }
     try {
       const dev = await navigator.usb.requestDevice({ filters: [{ vendorId: 0x1d50 }, { vendorId: 0x1fc9, productId: 0x000c }] });
       const k = classifyUsbDevice(dev.vendorId, dev.productId);
@@ -220,11 +221,17 @@ export default function HackRfFlasherWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
+      {receiverConnected && (
+        <div className="bg-amber-950/50 border border-amber-500/40 rounded-xl px-4 py-2.5 text-amber-200 flex flex-wrap items-center justify-between gap-3">
+          <span><AlertTriangle className="w-4 h-4 inline mr-1" /> The receiver is connected to the HackRF. Flashing needs the device to itself: disconnect the receiver first.</span>
+          {onDisconnectReceiver && <button onClick={onDisconnectReceiver} className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold">Disconnect receiver</button>}
+        </div>
+      )}
       <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl px-4 py-2.5 shadow-xl flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="p-1.5 bg-purple-500/20 border border-purple-500/40 rounded-lg text-purple-400"><Zap className="w-4 h-4" /></div>
           <div>
-            <div className="text-sm font-bold text-white tracking-wide">HACKRF / PORTAPACK FLASHER &amp; FIRST-TIME SETUP</div>
+            <div className="text-sm font-bold text-white tracking-wide">{embedded ? 'FLASH FIRMWARE & FIRST-TIME SETUP' : 'HACKRF / PORTAPACK FLASHER & FIRST-TIME SETUP'}</div>
             <div className="text-[11px] text-slate-400">Writes the 1 MiB SPI flash over WebUSB exactly like hackrf_spiflash, boots a bricked board through the LPC43xx DFU ROM, and copies the Mayhem SD-card files.</div>
           </div>
         </div>
