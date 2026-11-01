@@ -20,7 +20,10 @@ import {
   UsbPdClient,
   FIXED_PDO_PROFILES,
   PPS_PROFILE,
-  SAMPLE_CABLE_EMARKERS
+  SAMPLE_CABLE_EMARKERS,
+  NVM_CURRENTS,
+  nvmToText,
+  nvmFromText
 } from '../../utils/usbPdDriver';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
@@ -416,6 +419,7 @@ function Stusb4500Panel({ client, onError }) {
   const rdo = status?.rdo;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <NvmPanel client={client} onError={onError} busyRef={busyRef} />
       <div className="lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
         <div className="flex items-center justify-between pb-2 border-b border-slate-800">
           <span className="font-bold text-slate-200 text-xs flex items-center gap-2">
@@ -483,6 +487,102 @@ function Stat({ label, value, tone }) {
     <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
       <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">{label}</span>
       <span className={`text-sm font-extrabold ${tone}`}>{value}</span>
+    </div>
+  );
+}
+
+// Read, back up and (only when the bit layout is proven on this chip) rewrite the STUSB4500's NVM.
+function NvmPanel({ client, onError, busyRef }) {
+  const [nvm, setNvm] = useState(null); // { sectors, decoded, match }
+  const [form, setForm] = useState(null);
+  const [working, setWorking] = useState('');
+  const fileRef = useRef(null);
+
+  const run = async (label, fn) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setWorking(label);
+    onError('');
+    try { await fn(); } catch (e) { onError(e.message); } finally { busyRef.current = false; setWorking(''); }
+  };
+
+  const read = () => run('read', async () => {
+    const r = await client.readNvm();
+    setNvm(r);
+    setForm({ pdoCount: r.decoded.pdoCount || 1, pdos: r.decoded.pdos.map((p) => ({ voltageV: p.voltageV, currentA: p.currentA ?? 1.5 })) });
+  });
+
+  const write = () => {
+    const f = form;
+    const summary = f.pdos.slice(0, f.pdoCount).map((p, i) => `PDO${i + 1}: ${p.voltageV} V / ${p.currentA} A`).join('\n');
+    if (!window.confirm(`Write these power-up PDOs to the STUSB4500 NVM?\n\n${summary}\n\nAfter the next power-up the board asks for the highest of these. Check its output with a meter before connecting anything, and keep the backup to restore.`)) return;
+    run('write', async () => { await client.writeNvmPdos(f); await new Promise((r) => setTimeout(r, 50)); setNvm(await client.readNvm()); });
+  };
+
+  const backup = () => {
+    const url = URL.createObjectURL(new Blob([nvmToText(nvm.sectors)], { type: 'text/plain' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `stusb4500-nvm-${Date.now()}.txt`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const restore = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    let sectors;
+    try { sectors = nvmFromText(await file.text()); } catch (err) { onError(err.message); return; }
+    if (!window.confirm(`Write the backup ${file.name} back into the NVM? It replaces all 40 bytes.`)) return;
+    run('restore', async () => { await client.restoreNvm(sectors); setNvm(await client.readNvm()); });
+  };
+
+  const setPdo = (i, key, value) => setForm((f) => ({ ...f, pdos: f.pdos.map((p, k) => (k === i ? { ...p, [key]: Number(value) } : p)) }));
+  const btn = 'px-2 py-1 rounded border font-bold disabled:opacity-40';
+
+  return (
+    <div className="lg:col-span-3 order-last bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+        <span className="font-bold text-slate-200">NVM: POWER-UP PDOs (SURVIVE POWER-OFF)</span>
+        <div className="flex flex-wrap gap-1.5">
+          <button onClick={read} disabled={!!working} className={`${btn} border-slate-700 text-slate-200`}>{working === 'read' ? 'READING...' : 'READ NVM'}</button>
+          <button onClick={backup} disabled={!nvm} className={`${btn} border-slate-700 text-slate-200`}>BACKUP</button>
+          <button onClick={() => fileRef.current?.click()} disabled={!!working} className={`${btn} border-amber-500/40 text-amber-300`}>RESTORE…</button>
+          <input ref={fileRef} type="file" accept=".txt" className="hidden" onChange={restore} />
+        </div>
+      </div>
+      <p className="text-slate-500">
+        Voltage requests above only change RAM and are lost at power-off. The NVM holds what the board asks for at power-up.
+        Writing is allowed only when the NVM decodes to exactly the PDOs the chip loaded at power-up, which proves the bit layout on this chip.
+      </p>
+      {nvm && (
+        <>
+          <div className="font-mono text-slate-400">{nvm.sectors.map((sct, i) => <div key={i}>sector {i}: {Array.from(sct, (b) => b.toString(16).padStart(2, '0')).join(' ')}</div>)}</div>
+          <div className={nvm.match.ok ? 'text-emerald-300' : 'text-amber-300'}>
+            {nvm.match.ok ? 'Layout verified: the NVM matches the power-up PDOs.' : `Layout not verified, writing disabled: ${nvm.match.reason} (Power-cycle the board and reconnect before reading, so RAM still holds the NVM values.)`}
+          </div>
+          {form && (
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-1 text-slate-400">PDOs
+                <select value={form.pdoCount} onChange={(e) => setForm({ ...form, pdoCount: Number(e.target.value) })} className="bg-slate-950 border border-slate-800 rounded px-1 py-1 text-slate-200">
+                  {[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+              {form.pdos.map((p, i) => (
+                <span key={i} className={`flex items-center gap-1 ${i < form.pdoCount ? 'text-slate-300' : 'text-slate-600'}`}>
+                  PDO{i + 1}
+                  {i === 0 ? <span className="text-slate-500">5 V</span> : (
+                    <input type="number" min="5" max="20" step="0.05" value={p.voltageV} onChange={(e) => setPdo(i, 'voltageV', e.target.value)} className="w-16 bg-slate-950 border border-slate-800 rounded px-1 py-1 text-slate-200" />
+                  )}
+                  <select value={p.currentA} onChange={(e) => setPdo(i, 'currentA', e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-1 py-1 text-slate-200">
+                    {NVM_CURRENTS.filter(Boolean).map((c) => <option key={c} value={c}>{c} A</option>)}
+                  </select>
+                </span>
+              ))}
+              <button onClick={write} disabled={!nvm.match.ok || !!working} className={`${btn} border-rose-500/40 text-rose-300`}>{working === 'write' ? 'WRITING...' : 'WRITE NVM'}</button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
