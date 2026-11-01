@@ -172,8 +172,9 @@ export default function PortapackWorkbench() {
   };
 
   return (
-    <div className="space-y-4">
-      {/* Super Condensed Single Header Bar (RocketGod Attribution + Status + Hardware + Connect) */}
+    <div className="h-full min-h-0 flex flex-col gap-2">
+      {/* Header bar (attribution, status, connect). Once connected it folds into the tab row below. */}
+      {!state.isConnected && (
       <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl px-4 py-2.5 shadow-xl backdrop-blur flex flex-wrap items-center justify-between gap-3">
         {/* Left: Title + RocketGod Credit & Link + Status */}
         <div className="flex items-center gap-3">
@@ -272,7 +273,7 @@ export default function PortapackWorkbench() {
           </button>
         </div>
       </div>
-
+      )}
 
       {connectError && (
         <div className="bg-rose-950/60 border border-rose-500/40 rounded-xl p-3 text-xs font-mono text-rose-300 flex items-start justify-between gap-3">
@@ -444,14 +445,14 @@ export default function PortapackWorkbench() {
       )}
 
       {/* Main Full-Width Operational Deck */}
-      <div className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-2xl flex flex-col">
+      <div className="w-full flex-1 min-h-0 bg-slate-900/90 border border-slate-800 rounded-xl p-2 shadow-2xl flex flex-col">
           {/* Workspace Subtabs */}
-          <div className="flex items-center gap-1.5 border-b border-slate-800 pb-3 mb-4 overflow-x-auto">
+          <div className="shrink-0 flex items-center gap-1.5 border-b border-slate-800 pb-2 mb-2 overflow-x-auto">
             {[
-              { id: 'receiver', name: 'Receiver: Spectrum, Audio & Sweep', icon: Flame },
+              { id: 'receiver', name: 'Receiver', icon: Flame },
               { id: 'map', name: 'Tactical Map (ADS-B)', icon: MapPin },
-              { id: 'freqman', name: 'FREQMAN (SD Cards)', icon: FileText },
-              { id: 'flash', name: 'Flash & First-Time Setup', icon: Zap },
+              { id: 'freqman', name: 'FREQMAN', icon: FileText },
+              { id: 'flash', name: 'Flash & Setup', icon: Zap },
               { id: 'cli', name: 'Console & Log', icon: TerminalIcon }
             ].map(tab => {
               const Icon = tab.icon;
@@ -471,14 +472,32 @@ export default function PortapackWorkbench() {
                 </button>
               );
             })}
+            {state.isConnected && (
+              <div className="ml-auto shrink-0 flex items-center gap-1.5 pl-2">
+                <span className="hidden md:flex items-center gap-1.5 px-2 py-0.5 bg-cyan-950/60 border border-cyan-500/30 rounded text-[11px] font-mono text-cyan-300" title={state.connectionType === 'serial' ? 'Mayhem serial console (1D50:6018)' : 'HackRF One (1D50:6089 WinUSB)'}>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  {state.connectionType === 'serial' ? 'Mayhem serial' : (state.boardId || 'HackRF One')}{state.firmwareVersion ? ` · ${state.firmwareVersion}` : ''}
+                </span>
+                <a href="https://github.com/RocketGod-git/mayhem-mobile" target="_blank" rel="noopener noreferrer" className="hidden lg:inline text-[10px] text-purple-300/80 hover:text-purple-200 underline decoration-purple-500/40" title="Based on RocketGod's mayhem-mobile">RocketGod</a>
+                <button onClick={() => driver.disconnect()} className="px-2 py-0.5 bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/30 text-rose-300 rounded text-xs font-mono flex items-center gap-1" title="Disconnect the HackRF">
+                  <RotateCcw className="w-3 h-3" /> Disconnect
+                </button>
+                <button onClick={() => setShowVirtualLcd((prev) => !prev)}
+                  className={`px-2 py-0.5 rounded text-xs font-mono flex items-center gap-1 ${showVirtualLcd ? 'bg-purple-600/40 border border-purple-400 text-purple-200 font-bold' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'}`}
+                  title="Toggle the virtual PortaPack 320x240 LCD & keypad">
+                  <Monitor className="w-3.5 h-3.5 text-purple-400" /> LCD
+                </button>
+              </div>
+            )}
           </div>
 
           {/* The receiver stays mounted so the waterfall history, audio and a
               running sweep survive a visit to another tab. */}
-          <div className={activeTab === 'receiver' ? 'flex-1' : 'hidden'}>
+          <div className={activeTab === 'receiver' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
             <ReceiverDeck driver={driver} state={state} />
           </div>
 
+          <div className={activeTab === 'receiver' ? 'hidden' : 'flex-1 min-h-0 overflow-auto'}>
           {activeTab === 'map' && (
             <div className="flex-1">
               <TacticalMapDeck
@@ -517,6 +536,7 @@ export default function PortapackWorkbench() {
               setCliInput={setCliInput}
             />
           )}
+          </div>
         </div>
       </div>
     );

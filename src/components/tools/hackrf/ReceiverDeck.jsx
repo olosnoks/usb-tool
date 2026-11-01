@@ -39,8 +39,10 @@ const QUICK_FREQS = [
 ];
 const TUNE_STEPS = [{ l: '5 kHz', v: 5000 }, { l: '12.5 kHz', v: 12500 }, { l: '25 kHz', v: 25000 }, { l: '100 kHz', v: 100000 }, { l: '1 MHz', v: 1000000 }];
 
-const W = 1200, SPEC_H = 150, WF_H = 240, H = SPEC_H + WF_H;
-const MAX_ROWS = WF_H;
+// The canvas is W logical pixels wide; its height follows the display box so the
+// waterfall gets every spare pixel of the window (see the ResizeObserver below).
+const W = 1200, SPEC_H = 140, WF_H_DEFAULT = 260;
+const MAX_ROWS = 1024;
 
 
 const clampHz = (hz) => Math.max(HACKRF_FREQ_MIN, Math.min(HACKRF_FREQ_MAX, Math.round(hz)));
@@ -131,6 +133,28 @@ export default function ReceiverDeck({ driver, state }) {
   const pushRow = (row) => { rowsRef.current.unshift(row); if (rowsRef.current.length > MAX_ROWS) rowsRef.current.pop(); rowsVerRef.current++; };
   const [viewInfo, setViewInfo] = useState({ lo: 0, hi: 0, zoomed: false });
   const wfCacheRef = useRef({ img: null, key: '' });
+  const displayRef = useRef(null);
+  const dimsRef = useRef({ wfH: WF_H_DEFAULT });
+
+  // Size the canvas to the display box, keeping square pixels: height in canvas
+  // units = box height scaled by W / box width. The waterfall is whatever is left
+  // under the spectrum strip.
+  useEffect(() => {
+    const el = displayRef.current, cvs = canvasRef.current;
+    if (!el || !cvs) return undefined;
+    const apply = () => {
+      const cw = el.clientWidth || W, ch = el.clientHeight || (SPEC_H + WF_H_DEFAULT);
+      const H = Math.max(SPEC_H + 80, Math.round(ch * W / cw));
+      if (cvs.height !== H) cvs.height = H;
+      dimsRef.current = { wfH: H - SPEC_H };
+      wfCacheRef.current = { img: null, key: '' };
+    };
+    apply();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const dragRef = useRef(null);
   const peaksRef = useRef([]);
   const audioOnRef = useRef(false);
@@ -353,6 +377,7 @@ export default function ReceiverDeck({ driver, state }) {
     const colStarts = new Float64Array(W + 1);
 
     const render = () => {
+      const wfH = dimsRef.current.wfH;
       const live = driver.connectionType === 'webusb';
       const mode = rxModeRef.current;
       const view = getView();
@@ -398,7 +423,7 @@ export default function ReceiverDeck({ driver, state }) {
       const dec = step >= 1e6 ? (step >= 10e6 ? 0 : 1) : step >= 1e5 ? 2 : step >= 1e4 ? 3 : step >= 1e3 ? 4 : 5;
       for (let fTick = Math.ceil(vlo / step) * step; fTick <= vhi; fTick += step) {
         const x = Math.round(((fTick - vlo) / vspan) * W) + 0.5;
-        ctx.strokeStyle = '#1e293b'; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        ctx.strokeStyle = '#1e293b'; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, SPEC_H + wfH); ctx.stroke();
         ctx.fillStyle = '#64748b';
         const label = `${(fTick / 1e6).toFixed(dec)}`;
         ctx.fillText(label, Math.min(W - 60, x + 3), SPEC_H - 4);
@@ -409,7 +434,7 @@ export default function ReceiverDeck({ driver, state }) {
         ctx.fillText(driver.connectionType === 'serial'
           ? 'The serial console has no IQ. Put the PortaPack in HackRF mode and click Connect WebUSB for the receiver.'
           : 'Connect a HackRF One (or a PortaPack in HackRF mode) over WebUSB to see the live spectrum.', 16, SPEC_H / 2);
-        ctx.fillStyle = '#0b1120'; ctx.fillRect(0, SPEC_H, W, WF_H);
+        ctx.fillStyle = '#0b1120'; ctx.fillRect(0, SPEC_H, W, wfH);
         anim = requestAnimationFrame(render);
         return;
       }
@@ -444,7 +469,7 @@ export default function ReceiverDeck({ driver, state }) {
         const xC = ((c - vlo) / vspan) * W;
         if (xC >= 0 && xC <= W) {
           ctx.strokeStyle = 'rgba(148,163,184,0.35)'; ctx.setLineDash([3, 3]);
-          ctx.beginPath(); ctx.moveTo(xC + 0.5, 0); ctx.lineTo(xC + 0.5, H); ctx.stroke(); ctx.setLineDash([]);
+          ctx.beginPath(); ctx.moveTo(xC + 0.5, 0); ctx.lineTo(xC + 0.5, SPEC_H + wfH); ctx.stroke(); ctx.setLineDash([]);
         }
         const lf = c + driver.channelOffsetHz;
         const bw = MODE_BANDWIDTH_HZ[driver.audioMode] || 12500;
@@ -483,15 +508,15 @@ export default function ReceiverDeck({ driver, state }) {
       // --- waterfall ---
       const rows = rowsRef.current;
       const LUT = lutRef.current;
-      const wfKey = `${vlo}:${vhi}:${rowsVerRef.current}:${Math.round(floor * 2)}:${themeIdRef.current}`;
+      const wfKey = `${vlo}:${vhi}:${rowsVerRef.current}:${Math.round(floor * 2)}:${themeIdRef.current}:${wfH}`;
       const cache = wfCacheRef.current;
       if (!cache.img || cache.key !== wfKey || newRow) {
-        const img = cache.img && cache.img.width === W ? cache.img : ctx.createImageData(W, WF_H);
+        const img = cache.img && cache.img.width === W && cache.img.height === wfH ? cache.img : ctx.createImageData(W, wfH);
         const px = img.data;
         px.fill(0);
         const mapCache = new Map();
         const scale = 255 / (dbHi - dbLo);
-        for (let r = 0; r < rows.length && r < WF_H; r++) {
+        for (let r = 0; r < rows.length && r < wfH; r++) {
           const row = rows[r];
           const mk = `${row.lo}:${row.hi}:${row.data.length}`;
           let map = mapCache.get(mk);
@@ -539,139 +564,116 @@ export default function ReceiverDeck({ driver, state }) {
   const chip = (active, extra = '') => `px-2 py-0.5 rounded transition ${active ? 'bg-purple-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'} ${extra}`;
 
   return (
-    <div className="space-y-3 font-mono text-xs">
-      {/* Tuner bar */}
-      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-2.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <Radio className="w-4 h-4 text-purple-400" />
-            <span className="font-bold text-slate-200">LO</span>
-            <input
-              type="text" value={freqInput} onChange={(e) => setFreqInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { const m = parseFloat(freqInput); if (!isNaN(m)) tuneTo(m * 1e6); } }}
-              className="w-28 bg-slate-900 border border-slate-700 text-cyan-300 px-2 py-1 rounded text-sm focus:outline-none focus:border-cyan-500"
-              title="Centre frequency in MHz (Enter to tune)"
-            />
-            <span className="text-slate-500">MHz</span>
-            <button onClick={() => { const m = parseFloat(freqInput); if (!isNaN(m)) tuneTo(m * 1e6); }}
-              className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded">TUNE</button>
-            <button onClick={() => tuneTo(state.frequency - stepHz)} className="px-2 py-1 bg-slate-800 border border-slate-700 text-slate-300 rounded hover:bg-slate-700" title="Step down">−</button>
-            <select value={stepHz} onChange={(e) => setStepHz(parseInt(e.target.value, 10))} className="bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-1">
-              {TUNE_STEPS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
-            </select>
-            <button onClick={() => tuneTo(state.frequency + stepHz)} className="px-2 py-1 bg-slate-800 border border-slate-700 text-slate-300 rounded hover:bg-slate-700" title="Step up">+</button>
-          </div>
-
-          <div className="flex items-center gap-1.5 ml-auto">
-            <span className="text-slate-400">SPAN</span>
-            <select value={state.sampleRate} onChange={(e) => driver.setSampleRate(parseInt(e.target.value, 10))}
-              className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1.5 py-1" title="HackRF sample rate = visible bandwidth">
-              {HACKRF_SAMPLE_RATES.map((r) => <option key={r} value={r}>{r / 1e6} MHz</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-slate-500 text-[10px] uppercase font-bold mr-1">Quick:</span>
-          {QUICK_FREQS.map((q) => (
-            <button key={q.hz} onClick={() => tuneTo(q.hz, q.mode)}
-              className={`px-2 py-0.5 rounded border text-[11px] ${state.frequency === q.hz ? 'bg-purple-600/30 border-purple-500/50 text-purple-200' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}`}>
-              {q.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1 border-t border-slate-800/80">
-          <label className="block">
-            <span className="flex justify-between text-slate-400 mb-0.5"><span>LNA (RF)</span><span className="text-emerald-400 font-bold">{state.lnaGain} dB</span></span>
-            <input type="range" min="0" max="40" step="8" value={state.lnaGain} disabled={!isLiveRf || state.agcEnabled}
-              onChange={(e) => driver.sendCommand(`lna ${e.target.value}`)} className="w-full accent-emerald-500 disabled:opacity-40" />
-          </label>
-          <label className="block">
-            <span className="flex justify-between text-slate-400 mb-0.5"><span>VGA (baseband)</span><span className="text-cyan-400 font-bold">{state.vgaGain} dB</span></span>
-            <input type="range" min="0" max="62" step="2" value={state.vgaGain} disabled={!isLiveRf || state.agcEnabled}
-              onChange={(e) => driver.sendCommand(`vga ${e.target.value}`)} className="w-full accent-cyan-500 disabled:opacity-40" />
-          </label>
-          <div className="flex items-end gap-2">
-            <button onClick={() => driver.sendCommand(`amp ${state.amp > 0 ? '0' : '1'}`)} disabled={!isLiveRf}
-              className={`flex-1 py-1 rounded border font-bold disabled:opacity-40 ${state.amp > 0 ? 'bg-rose-600/30 border-rose-500 text-rose-200' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
-              title="RF front-end amplifier (+14 dB). Keep off on strong signals.">
-              AMP {state.amp > 0 ? '+14 dB' : 'OFF'}
-            </button>
-            <button onClick={() => driver.setAgc(!state.agcEnabled)} disabled={!isLiveRf}
-              className={`flex-1 py-1 rounded border font-bold flex items-center justify-center gap-1 disabled:opacity-40 ${state.agcEnabled ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
-              title="Automatic gain: holds the IQ RMS between 7 and 22 ADC counts (VGA first, then LNA)">
-              <Activity className="w-3.5 h-3.5" /> AGC
-            </button>
-          </div>
-          <div className="text-[11px] text-slate-400 flex flex-col justify-end">
-            <span>Listening: <span className="text-purple-300 font-bold">{(listeningHz / 1e6).toFixed(4)} MHz</span>
-              {state.channelOffsetHz ? <span className="text-slate-500"> ({state.channelOffsetHz > 0 ? '+' : ''}{(state.channelOffsetHz / 1e3).toFixed(1)} kHz)</span> : null}
-              {state.channelOffsetHz ? <button onClick={() => tuneTo(listeningHz)} className="ml-1.5 px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px] text-slate-300 hover:text-white" title="Move the LO onto the channel"><Crosshair className="w-3 h-3 inline" /> centre</button> : null}
-            </span>
-            <span>{state.boardId || 'HackRF'}{state.firmwareVersion && isLiveRf ? ` · ${state.firmwareVersion}` : ''}{isLiveRf ? ` · level ${state.rssi} dBFS` : ''}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Mode + display toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center bg-slate-900 border border-slate-700 rounded p-0.5">
-          <button onClick={() => setRxMode('live')} className={chip(rxMode === 'live', 'flex items-center gap-1')}><Flame className="w-3.5 h-3.5" /> LIVE {fmtSpan(state.sampleRate)}</button>
-          <button onClick={() => { setRxMode('sweep'); setSweepRunning(true); }} className={chip(rxMode === 'sweep', 'flex items-center gap-1')}><Scan className="w-3.5 h-3.5" /> SWEEP (Looking Glass)</button>
-        </div>
-        {rxMode === 'sweep' && (
-          <>
-            <select value={preset.name} onChange={(e) => { setPreset(SWEEP_PRESETS.find((p) => p.name === e.target.value) || SWEEP_PRESETS[0]); setCustomStart(''); setCustomEnd(''); }}
-              className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1.5 py-1">
-              {SWEEP_PRESETS.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-            </select>
-            <input type="text" placeholder="start MHz" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-24 bg-slate-900 border border-slate-700 text-slate-200 rounded px-1.5 py-1" />
-            <input type="text" placeholder="end MHz" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-24 bg-slate-900 border border-slate-700 text-slate-200 rounded px-1.5 py-1" />
-            <button onClick={() => setSweepRunning((v) => !v)} disabled={!isLiveRf}
-              className={`px-3 py-1 rounded font-bold flex items-center gap-1 disabled:opacity-40 ${sweepRunning ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}>
-              {sweepRunning ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />} {sweepRunning ? 'PAUSE' : 'START SWEEP'}
-            </button>
-            <label className="flex items-center gap-1 text-rose-300">THRESHOLD
-              <input type="range" min="-90" max="-10" value={thresholdDb} onChange={(e) => setThresholdDb(parseInt(e.target.value, 10))} className="w-24 accent-rose-500" />
-              <span className="w-14">{thresholdDb} dB</span>
-            </label>
-            <span className="text-slate-500">pass {sweepPass} · {fmtSpan(state.sampleRate * 0.6)} per hop</span>
-          </>
-        )}
-        <div className="flex items-center gap-1 ml-auto">
-          <label className="flex items-center gap-1.5 mr-2" title="Waterfall colour theme">
-            <span className="inline-block w-10 h-3 rounded border border-slate-700" style={{ background: themeGradient(themeId) }} />
-            <select value={themeId} onChange={(e) => setThemeId(e.target.value)} className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1.5 py-1">
+    <div className="h-full min-h-0 flex flex-col gap-1.5 font-mono text-xs">
+      {/* Row A: tuner */}
+      <div className="shrink-0 flex flex-wrap items-center gap-1.5 bg-slate-950/80 border border-slate-800 rounded-lg px-2 py-1">
+        <Radio className="w-3.5 h-3.5 text-purple-400" />
+        <span className="font-bold text-slate-200">LO</span>
+        <input
+          type="text" value={freqInput} onChange={(e) => setFreqInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { const m = parseFloat(freqInput); if (!isNaN(m)) tuneTo(m * 1e6); } }}
+          className="w-24 bg-slate-900 border border-slate-700 text-cyan-300 px-1.5 py-0.5 rounded text-[13px] focus:outline-none focus:border-cyan-500"
+          title="Centre frequency in MHz (Enter to tune)"
+        />
+        <span className="text-slate-500">MHz</span>
+        <button onClick={() => { const m = parseFloat(freqInput); if (!isNaN(m)) tuneTo(m * 1e6); }}
+          className="px-2 py-0.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded">TUNE</button>
+        <button onClick={() => tuneTo(state.frequency - stepHz)} className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-slate-300 rounded hover:bg-slate-700" title="Step down">−</button>
+        <select value={stepHz} onChange={(e) => setStepHz(parseInt(e.target.value, 10))} className="bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5" title="Tuning step">
+          {TUNE_STEPS.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+        </select>
+        <button onClick={() => tuneTo(state.frequency + stepHz)} className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-slate-300 rounded hover:bg-slate-700" title="Step up">+</button>
+        <label className="flex items-center gap-1 text-slate-400">SPAN
+          <select value={state.sampleRate} onChange={(e) => driver.setSampleRate(parseInt(e.target.value, 10))}
+            className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1 py-0.5" title="HackRF sample rate = visible bandwidth">
+            {HACKRF_SAMPLE_RATES.map((r) => <option key={r} value={r}>{r / 1e6} MHz</option>)}
+          </select>
+        </label>
+        <select value={QUICK_FREQS.some((q) => q.hz === state.frequency) ? state.frequency : ''} onChange={(e) => { const q = QUICK_FREQS.find((x) => String(x.hz) === e.target.value); if (q) tuneTo(q.hz, q.mode); }}
+          className="bg-slate-900 border border-slate-700 text-slate-300 rounded px-1 py-0.5" title="Quick presets">
+          <option value="">QUICK ▾</option>
+          {QUICK_FREQS.map((q) => <option key={q.hz} value={q.hz}>{q.label} ({q.mode})</option>)}
+        </select>
+        <div className="ml-auto flex items-center gap-1">
+          <label className="flex items-center gap-1 mr-1" title="Waterfall colour theme">
+            <span className="inline-block w-6 h-3 rounded border border-slate-700" style={{ background: themeGradient(themeId) }} />
+            <select value={themeId} onChange={(e) => setThemeId(e.target.value)} className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1 py-0.5 max-w-[6.5rem]">
               {WATERFALL_THEMES.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </label>
-          <span className="text-slate-500">{fmtMHz(viewInfo.lo, vspan)} – {fmtMHz(viewInfo.hi, vspan)} ({fmtSpan(vspan || 0)})</span>
           <button onClick={() => zoomCenter(0.5)} className="p-1 bg-slate-800 border border-slate-700 rounded text-slate-300 hover:text-white" title="Zoom in (or mouse wheel on the display)"><ZoomIn className="w-3.5 h-3.5" /></button>
           <button onClick={() => zoomCenter(2)} className="p-1 bg-slate-800 border border-slate-700 rounded text-slate-300 hover:text-white" title="Zoom out"><ZoomOut className="w-3.5 h-3.5" /></button>
           <button onClick={resetView} className={`p-1 border rounded hover:text-white ${viewInfo.zoomed ? 'bg-purple-600/30 border-purple-500/50 text-purple-200' : 'bg-slate-800 border-slate-700 text-slate-300'}`} title="Fit the whole span"><Maximize2 className="w-3.5 h-3.5" /></button>
         </div>
       </div>
 
-      {/* Display */}
-      <div className="relative bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+      {/* Row B: mode, gains, display controls */}
+      <div className="shrink-0 flex flex-wrap items-center gap-1.5 px-0.5">
+        <div className="flex items-center bg-slate-900 border border-slate-700 rounded p-0.5">
+          <button onClick={() => setRxMode('live')} className={chip(rxMode === 'live', 'flex items-center gap-1')}><Flame className="w-3.5 h-3.5" /> LIVE {fmtSpan(state.sampleRate)}</button>
+          <button onClick={() => { setRxMode('sweep'); setSweepRunning(true); }} className={chip(rxMode === 'sweep', 'flex items-center gap-1')}><Scan className="w-3.5 h-3.5" /> SWEEP</button>
+        </div>
+        {rxMode === 'sweep' && (
+          <>
+            <select value={preset.name} onChange={(e) => { setPreset(SWEEP_PRESETS.find((p) => p.name === e.target.value) || SWEEP_PRESETS[0]); setCustomStart(''); setCustomEnd(''); }}
+              className="bg-slate-900 border border-slate-700 text-slate-200 rounded px-1 py-0.5">
+              {SWEEP_PRESETS.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+            </select>
+            <input type="text" placeholder="start MHz" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-20 bg-slate-900 border border-slate-700 text-slate-200 rounded px-1 py-0.5" />
+            <input type="text" placeholder="end MHz" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-20 bg-slate-900 border border-slate-700 text-slate-200 rounded px-1 py-0.5" />
+            <button onClick={() => setSweepRunning((v) => !v)} disabled={!isLiveRf}
+              className={`px-2 py-0.5 rounded font-bold flex items-center gap-1 disabled:opacity-40 ${sweepRunning ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}>
+              {sweepRunning ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />} {sweepRunning ? 'PAUSE' : 'START'}
+            </button>
+            <label className="flex items-center gap-1 text-rose-300">THR
+              <input type="range" min="-90" max="-10" value={thresholdDb} onChange={(e) => setThresholdDb(parseInt(e.target.value, 10))} className="w-20 accent-rose-500" />
+              <span className="w-12">{thresholdDb} dB</span>
+            </label>
+            <span className="text-slate-500">pass {sweepPass} · {fmtSpan(state.sampleRate * 0.6)}/hop</span>
+          </>
+        )}
+        <span className="w-px h-4 bg-slate-800" />
+        <label className="flex items-center gap-1 text-slate-400" title="LNA (RF) gain, 0–40 dB in 8 dB steps">LNA
+          <input type="range" min="0" max="40" step="8" value={state.lnaGain} disabled={!isLiveRf || state.agcEnabled}
+            onChange={(e) => driver.sendCommand(`lna ${e.target.value}`)} className="w-20 accent-emerald-500 disabled:opacity-40" />
+          <span className="w-7 text-right text-emerald-400 font-bold">{state.lnaGain}</span>
+        </label>
+        <label className="flex items-center gap-1 text-slate-400" title="VGA (baseband) gain, 0–62 dB in 2 dB steps">VGA
+          <input type="range" min="0" max="62" step="2" value={state.vgaGain} disabled={!isLiveRf || state.agcEnabled}
+            onChange={(e) => driver.sendCommand(`vga ${e.target.value}`)} className="w-20 accent-cyan-500 disabled:opacity-40" />
+          <span className="w-7 text-right text-cyan-400 font-bold">{state.vgaGain}</span>
+        </label>
+        <button onClick={() => driver.sendCommand(`amp ${state.amp > 0 ? '0' : '1'}`)} disabled={!isLiveRf}
+          className={`px-2 py-0.5 rounded border font-bold disabled:opacity-40 ${state.amp > 0 ? 'bg-rose-600/30 border-rose-500 text-rose-200' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
+          title="RF front-end amplifier (+14 dB). Keep off on strong signals.">
+          AMP {state.amp > 0 ? '+14' : 'OFF'}
+        </button>
+        <button onClick={() => driver.setAgc(!state.agcEnabled)} disabled={!isLiveRf}
+          className={`px-2 py-0.5 rounded border font-bold flex items-center gap-1 disabled:opacity-40 ${state.agcEnabled ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
+          title="Automatic gain: holds the IQ RMS between 7 and 22 ADC counts (VGA first, then LNA)">
+          <Activity className="w-3.5 h-3.5" /> AGC
+        </button>
+      </div>
+
+      {/* Display: takes every spare pixel of the window */}
+      <div ref={displayRef} className="relative flex-1 min-h-[160px] bg-slate-950 border border-slate-800 rounded-lg overflow-hidden shadow-2xl">
         <canvas
-          ref={canvasRef} width={W} height={H} className="w-full block select-none"
-          style={{ cursor: dragRef.current ? 'grabbing' : 'crosshair', aspectRatio: `${W} / ${H}` }}
+          ref={canvasRef} width={W} height={SPEC_H + WF_H_DEFAULT} className="absolute inset-0 w-full h-full block select-none"
+          style={{ cursor: dragRef.current ? 'grabbing' : 'crosshair' }}
           onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={() => { dragRef.current = null; }}
           onDoubleClick={onDoubleClick}
         />
         <div className="absolute bottom-1 right-2 text-[10px] text-slate-500 pointer-events-none">
-          wheel: zoom · drag: pan · click: {rxMode === 'sweep' ? 'tune & listen' : 'pick channel'} · double-click: centre LO
+          {fmtMHz(viewInfo.lo, vspan)} – {fmtMHz(viewInfo.hi, vspan)} · wheel: zoom · drag: pan · click: {rxMode === 'sweep' ? 'tune & listen' : 'pick channel'} · dbl-click: centre LO
         </div>
       </div>
 
-      {/* Audio row */}
-      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      {/* Row C: audio, recorder, status */}
+      <div className="shrink-0 bg-slate-950/80 border border-slate-800 rounded-lg px-2 py-1 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button onClick={() => setAudioOn(!audioOn)} disabled={!isLiveRf}
             title={isLiveRf ? 'Demodulate the channel to audio through your speakers' : 'Connect over WebUSB (HackRF mode) to listen'}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded font-bold transition disabled:opacity-40 ${audioOn ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-emerald-300 border border-emerald-500/40'}`}>
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded font-bold transition disabled:opacity-40 ${audioOn ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-emerald-300 border border-emerald-500/40'}`}>
             <Headphones className="w-3.5 h-3.5" /> {audioOn ? 'LISTENING' : 'LISTEN'}
           </button>
           <div className="flex items-center bg-slate-900 border border-slate-700 rounded p-0.5">
@@ -679,24 +681,30 @@ export default function ReceiverDeck({ driver, state }) {
               <button key={m} onClick={() => setAudioMode(m)} className={chip(audioMode === m)}>{m}</button>
             ))}
           </div>
-          <span className="text-slate-500 text-[11px]">{fmtSpan(MODE_BANDWIDTH_HZ[audioMode])} channel</span>
-          <span className="w-px h-5 bg-slate-800 mx-1" />
+          <span className="text-slate-500 text-[11px]">{fmtSpan(MODE_BANDWIDTH_HZ[audioMode])}</span>
+          <span className="text-slate-300 text-[11px]" title="The channel being demodulated">
+            <span className="text-purple-300 font-bold">{(listeningHz / 1e6).toFixed(4)} MHz</span>
+            {state.channelOffsetHz ? <span className="text-slate-500"> ({state.channelOffsetHz > 0 ? '+' : ''}{(state.channelOffsetHz / 1e3).toFixed(1)} kHz)</span> : null}
+            {state.channelOffsetHz ? <button onClick={() => tuneTo(listeningHz)} className="ml-1 px-1 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px] text-slate-300 hover:text-white" title="Move the LO onto the channel"><Crosshair className="w-3 h-3 inline" /> centre</button> : null}
+          </span>
+          <span className="w-px h-4 bg-slate-800 mx-0.5" />
           <RecordControls driver={driver} state={state} compact />
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {isLiveRf && <span className="text-slate-500 text-[11px]" title="IQ level (AGC target −31 to −21 dBFS)">lvl {state.rssi} dBFS</span>}
           <div className="flex items-center gap-1.5 text-slate-300" title="Channel power vs. the squelch">
             <span className={`w-2 h-2 rounded-full ${audioOn ? (squelchOpen ? 'bg-emerald-400' : 'bg-slate-600') : 'bg-slate-700'}`} />
-            <div className="w-24 h-1.5 bg-slate-800 rounded overflow-hidden">
+            <div className="w-20 h-1.5 bg-slate-800 rounded overflow-hidden">
               <div className={`h-full ${squelchOpen ? 'bg-emerald-500' : 'bg-slate-500'}`} style={{ width: `${channelDb == null ? 0 : Math.max(0, Math.min(100, ((channelDb + 100) / 100) * 100))}%` }} />
             </div>
-            <span className="w-16 text-right text-[11px]">{channelDb == null ? '—' : `${channelDb.toFixed(0)} dBFS`}</span>
+            <span className="w-14 text-right text-[11px]">{channelDb == null ? '—' : `${channelDb.toFixed(0)} dBFS`}</span>
           </div>
-          <label className="flex items-center gap-1.5 text-amber-300">SQL
-            <input type="range" min="-100" max="-10" value={Math.max(-100, squelchDb)} onChange={(e) => setSquelchDb(parseInt(e.target.value, 10) <= -100 ? -200 : parseInt(e.target.value, 10))} className="w-20 accent-amber-500" />
-            <span className="w-14 text-right">{squelchDb <= -100 ? 'open' : `${squelchDb} dB`}</span>
+          <label className="flex items-center gap-1 text-amber-300">SQL
+            <input type="range" min="-100" max="-10" value={Math.max(-100, squelchDb)} onChange={(e) => setSquelchDb(parseInt(e.target.value, 10) <= -100 ? -200 : parseInt(e.target.value, 10))} className="w-16 accent-amber-500" />
+            <span className="w-12 text-right">{squelchDb <= -100 ? 'open' : `${squelchDb} dB`}</span>
           </label>
-          <label className="flex items-center gap-1.5 text-cyan-300"><Volume2 className="w-3.5 h-3.5" />
-            <input type="range" min="0" max="100" value={volume} onChange={(e) => setVolume(parseInt(e.target.value, 10))} className="w-16 accent-cyan-500" />
+          <label className="flex items-center gap-1 text-cyan-300"><Volume2 className="w-3.5 h-3.5" />
+            <input type="range" min="0" max="100" value={volume} onChange={(e) => setVolume(parseInt(e.target.value, 10))} className="w-14 accent-cyan-500" />
             <span className="w-8 text-right">{volume}%</span>
           </label>
         </div>
@@ -706,7 +714,7 @@ export default function ReceiverDeck({ driver, state }) {
 
       {/* Sweep peaks */}
       {rxMode === 'sweep' && (
-        <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 space-y-1.5">
+        <div className="shrink-0 bg-slate-950/90 border border-slate-800 rounded-xl p-3 space-y-1.5">
           <div className="flex items-center justify-between text-slate-400 pb-1 border-b border-slate-800">
             <span className="font-bold text-slate-200 flex items-center gap-2"><Sliders className="w-3.5 h-3.5" /> PEAKS ABOVE THRESHOLD ({peaks.length})</span>
             <span className="text-[10px] text-slate-500">{band.name}: {(band.startHz / 1e6).toFixed(1)} – {(band.endHz / 1e6).toFixed(1)} MHz · from the last complete pass</span>
