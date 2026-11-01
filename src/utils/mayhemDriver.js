@@ -40,6 +40,10 @@ export function basebandFilterBwForRate(rateHz) {
 }
 
 /** Sample rates the receiver offers (HackRF: 2–20 Msps). */
+/** Largest IQ recording held in memory (int8 I/Q). 512 MB is ~67 s at 4 Msps. */
+export const HACKRF_CAPTURE_MAX_BYTES = 512 * 1024 * 1024;
+export const HACKRF_CAPTURE_DEFAULT_BYTES = 64 * 1024 * 1024;
+
 export const HACKRF_SAMPLE_RATES = [2000000, 4000000, 8000000, 10000000, 20000000];
 export const HACKRF_FREQ_MIN = 1000000;
 export const HACKRF_FREQ_MAX = 6000000000;
@@ -155,6 +159,8 @@ export class MayhemPortaPackDriver {
 
     // Raw IQ capture (WebUSB only)
     this._capture = null;
+    this.lastCapture = null;   // the most recent finished recording, shared by the receiver and recorder tabs
+    this.captureSeq = 0;       // bumps when a recording finishes so views re-read lastCapture
   }
 
   // ---- audio / channel ---------------------------------------------------
@@ -232,8 +238,10 @@ export class MayhemPortaPackDriver {
   // ---- IQ capture --------------------------------------------------------
 
   /** Record the raw int8 IQ stream (HackRF native .c8) until stopCapture(). */
-  startCapture({ maxBytes = 64 * 1024 * 1024 } = {}) {
+  startCapture({ maxBytes = HACKRF_CAPTURE_DEFAULT_BYTES } = {}) {
     if (this.connectionType !== 'webusb') throw new Error('IQ capture needs a WebUSB HackRF connection.');
+    if (this._capture) throw new Error('A recording is already running.');
+    maxBytes = Math.max(1, Math.min(HACKRF_CAPTURE_MAX_BYTES, Math.floor(maxBytes)));
     this._capture = { chunks: [], bytes: 0, maxBytes, startedAt: Date.now(), centerHz: this.frequency, sampleRate: this.sampleRate, full: false };
     this.log(`[Capture] Recording IQ at ${(this.frequency / 1e6).toFixed(4)} MHz, ${this.sampleRate / 1e6} Msps (up to ${Math.round(maxBytes / 1048576)} MB).`, 'info');
     this.notifyState();
@@ -246,25 +254,59 @@ export class MayhemPortaPackDriver {
     return { bytes: c.bytes, seconds: c.bytes / 2 / c.sampleRate, full: c.full, centerHz: c.centerHz, sampleRate: c.sampleRate };
   }
 
-  /** Stop and return { c8 (Int8Array), c16 (Int16Array builder), sidecar, ... }. */
+  /**
+   * Stop and return the recording. The IQ stays in its transfer-sized chunks
+   * (c8Parts) so a 512 MB capture is never copied into one giant buffer; hand
+   * the parts straight to a Blob. `c8` concatenates on demand for small
+   * captures and tests. The result is also kept as `lastCapture`.
+   */
   stopCapture() {
     const c = this._capture;
     this._capture = null;
-    this.notifyState();
-    if (!c) return null;
-    const c8 = new Int8Array(c.bytes);
-    let o = 0;
-    for (const ch of c.chunks) { c8.set(ch, o); o += ch.length; }
+    if (!c) { this.notifyState(); return null; }
     const seconds = c.bytes / 2 / c.sampleRate;
-    this.log(`[Capture] Stopped: ${(c.bytes / 1048576).toFixed(1)} MB, ${seconds.toFixed(2)} s of IQ.`, 'success');
-    return {
-      c8, bytes: c.bytes, seconds, centerHz: c.centerHz, sampleRate: c.sampleRate,
+    const parts = c.chunks;
+    let joined = null;
+    const result = {
+      bytes: c.bytes, seconds, centerHz: c.centerHz, sampleRate: c.sampleRate, full: c.full,
+      startedAt: c.startedAt, endedAt: Date.now(),
+      /** int8 I/Q in stream order, as Blob-ready parts (HackRF .c8 layout). */
+      c8Parts: parts,
+      get c8() {
+        if (!joined) {
+          joined = new Int8Array(c.bytes);
+          let o = 0;
+          for (const ch of parts) { joined.set(ch, o); o += ch.length; }
+        }
+        return joined;
+      },
       // Mayhem's capture metadata (.TXT next to the .C16), so Replay can play it.
       sidecar: `sample_rate=${c.sampleRate}\ncenter_frequency=${c.centerHz}\n`,
-      /** Mayhem .C16: signed 16-bit I/Q (int8 << 8). */
-      toC16() { const out = new Int16Array(c8.length); for (let i = 0; i < c8.length; i++) out[i] = c8[i] << 8; return out; }
+      /** Mayhem .C16 (int8 << 8) one chunk at a time, Blob-ready; never 2x the capture in RAM at once. */
+      *c16Parts() {
+        for (const ch of parts) {
+          const out = new Int16Array(ch.length);
+          for (let i = 0; i < ch.length; i++) out[i] = (ch[i] << 24) >> 16;   // int8 -> int16 sign-extended, << 8
+          yield out;
+        }
+      },
+      /** Whole Mayhem .C16 as one Int16Array (small captures / tests). */
+      toC16() {
+        const out = new Int16Array(c.bytes);
+        let o = 0;
+        for (const p of this.c16Parts()) { out.set(p, o); o += p.length; }
+        return out;
+      }
     };
+    this.lastCapture = result;
+    this.captureSeq++;
+    this.notifyState();
+    this.log(`[Capture] Stopped: ${(c.bytes / 1048576).toFixed(1)} MB, ${seconds.toFixed(2)} s of IQ.`, 'success');
+    return result;
   }
+
+  /** Forget the last finished recording (frees its memory). */
+  clearLastCapture() { this.lastCapture = null; this.captureSeq++; this.notifyState(); }
 
   // ---- logging / state ---------------------------------------------------
 
@@ -288,6 +330,7 @@ export class MayhemPortaPackDriver {
         agcEnabled: this.agcEnabled,
         sampleRate: this.sampleRate,
         capturing: !!this._capture,
+        captureSeq: this.captureSeq,
         activeApp: this.activeApp,
         selectedMenuIndex: this.selectedMenuIndex,
         firmwareVersion: this.firmwareVersion,

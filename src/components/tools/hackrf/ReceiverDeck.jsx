@@ -15,6 +15,7 @@ import { HACKRF_SAMPLE_RATES, HACKRF_FREQ_MIN, HACKRF_FREQ_MAX } from '../../../
 import { SPEC_RANGE_DB, SPEC_FLOOR_PAD_DB } from '../../../utils/hackrfDsp';
 import { createHackRfAudioPlayer } from '../../../utils/hackrfAudioPlayer';
 import { WATERFALL_THEMES, buildLut, getTheme, themeGradient, loadThemeId, saveThemeId } from '../../../utils/waterfallThemes';
+import { RecordControls, CaptureResultStrip } from '../portapack/IqRecorder';
 
 export const SWEEP_PRESETS = [
   { name: 'HF (1-30 MHz)', startHz: 1000000, endHz: 30000000 },
@@ -679,6 +680,8 @@ export default function ReceiverDeck({ driver, state }) {
             ))}
           </div>
           <span className="text-slate-500 text-[11px]">{fmtSpan(MODE_BANDWIDTH_HZ[audioMode])} channel</span>
+          <span className="w-px h-5 bg-slate-800 mx-1" />
+          <RecordControls driver={driver} state={state} compact />
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 text-slate-300" title="Channel power vs. the squelch">
@@ -698,6 +701,8 @@ export default function ReceiverDeck({ driver, state }) {
           </label>
         </div>
       </div>
+
+      <CaptureResultStrip driver={driver} state={state} />
 
       {/* Sweep peaks */}
       {rxMode === 'sweep' && (

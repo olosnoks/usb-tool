@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { MayhemPortaPackDriver, basebandFilterBwForRate } from '../src/utils/mayhemDriver';
+import { MayhemPortaPackDriver, basebandFilterBwForRate, HACKRF_CAPTURE_MAX_BYTES } from '../src/utils/mayhemDriver';
 import { _resetPortManager } from '../src/utils/portManager';
 
 const enc = new TextEncoder(), dec = new TextDecoder();
@@ -357,7 +357,32 @@ describe('PortaPack Mayhem WebUSB gains, AGC, capture (simulated HackRF)', () =>
       expect(cap.sidecar).toBe('sample_rate=2000000\ncenter_frequency=433920000\n');
       const c16 = cap.toC16();
       expect(c16[0]).toBe(cap.c8[0] << 8);
+      expect(c16.length).toBe(6000);
+      // Chunked, Blob-ready forms carry the same bytes without one big copy.
+      expect(cap.c8Parts.reduce((n, p) => n + p.length, 0)).toBe(6000);
+      const parts = Array.from(cap.c16Parts());
+      expect(parts.reduce((n, p) => n + p.length, 0)).toBe(6000);
+      expect(parts[0][0]).toBe(c16[0]);
+      // sign extension: every c16 sample is its c8 sample << 8
+      for (let i = 0; i < 64; i++) expect(c16[i]).toBe(cap.c8[i] << 8);
       expect(d.captureStatus()).toBe(null);
+      // The finished capture is kept on the driver for the receiver / recorder tabs.
+      expect(d.lastCapture).toBe(cap);
+      expect(d.captureSeq).toBe(1);
+      d.clearLastCapture();
+      expect(d.lastCapture).toBe(null);
+      expect(d.captureSeq).toBe(2);
+    } finally { await d.disconnect(); vi.unstubAllGlobals(); }
+  });
+
+  it('clamps the recording limit to 512 MB and refuses a second concurrent recording', async () => {
+    const { d } = await up();
+    try {
+      const cap = d.startCapture({ maxBytes: 4 * 1024 * 1024 * 1024 });
+      expect(cap.maxBytes).toBe(HACKRF_CAPTURE_MAX_BYTES);
+      expect(HACKRF_CAPTURE_MAX_BYTES).toBe(512 * 1024 * 1024);
+      expect(() => d.startCapture({ maxBytes: 1000 })).toThrow(/already running/);
+      d.stopCapture();
     } finally { await d.disconnect(); vi.unstubAllGlobals(); }
   });
 
