@@ -23,6 +23,7 @@ import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 import SensorFlashPanels from './bus/SensorFlashPanels';
 
+import { useSessionError } from '../../utils/sessionLog';
 export default function BusExplorerWorkbench() {
   const [client] = useState(() => new BusExplorerClient(console.log));
   const [isConnected, setIsConnected] = useState(false);
@@ -43,7 +44,7 @@ export default function BusExplorerWorkbench() {
   const [writeReg, setWriteReg] = useState('0x6B');
   const [writeVal, setWriteVal] = useState('0x00');
   const [regStart, setRegStart] = useState('0x00');
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('Bus Explorer');
   const [busy, setBusy] = useState('');
   const [scanAt, setScanAt] = useState(null);
   const [settings, setSettings] = useState(client.settings);

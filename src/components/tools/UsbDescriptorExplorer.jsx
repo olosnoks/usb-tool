@@ -20,6 +20,7 @@ import {
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { useSessionError } from '../../utils/sessionLog';
 // An illustrative device (a composite CDC + MSC dongle) for exploring the view
 // without hardware. Clearly labeled as an example, not a live read.
 const EXAMPLE_DEVICE = {
@@ -48,7 +49,7 @@ export default function UsbDescriptorExplorer() {
   const [info, setInfo] = useState(null);
   const [isExample, setIsExample] = useState(false);
   const [granted, setGranted] = useState([]);
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('USB Descriptors');
   const [copied, setCopied] = useState(false);
 
   const webUsbAvailable = typeof navigator !== 'undefined' && 'usb' in navigator;

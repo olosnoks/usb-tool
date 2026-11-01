@@ -30,6 +30,7 @@ import {
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { confirmAction, record } from '../../utils/sessionLog';
 const REBOOT_TARGETS = [
   { id: '', label: 'System (Android)' },
   { id: 'bootloader', label: 'Bootloader' },
@@ -65,6 +66,7 @@ export default function FastbootWorkbench() {
   const webUsbAvailable = typeof navigator !== 'undefined' && 'usb' in navigator;
 
   const addLog = useCallback((msg, kind = 'info') => {
+    record('Fastboot', kind, msg);
     const ts = new Date().toLocaleTimeString();
     setLog((prev) => [...prev.slice(-299), { ts, msg, kind }]);
   }, []);
@@ -135,7 +137,7 @@ export default function FastbootWorkbench() {
 
   const guard = async (label, fn, confirmMsg) => {
     if (!dev || busy) return;
-    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    if (confirmMsg && !confirmAction(confirmMsg)) return;
     setBusy(label);
     try {
       await fn();

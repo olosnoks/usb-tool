@@ -15,6 +15,7 @@ import { AvrIspClient, fuseHazards } from '../../utils/avrIspDriver';
 import { parseIntelHex } from '../../utils/firmwareParser';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { confirmAction } from '../../utils/sessionLog';
 const hex2 = (n) => (n ?? 0).toString(16).padStart(2, '0').toUpperCase();
 const bits = (n) => (n ?? 0).toString(2).padStart(8, '0');
 
@@ -99,9 +100,9 @@ export default function AvrIspWorkbench() {
     const hazards = fuseHazards(client.chip, next);
     let allowHazards = false;
     if (hazards.length) {
-      allowHazards = window.confirm(`These fuse values can lock you out of the chip:\n\n${hazards.join('\n\n')}\n\nWrite them anyway?`);
+      allowHazards = confirmAction(`These fuse values can lock you out of the chip:\n\n${hazards.join('\n\n')}\n\nWrite them anyway?`);
       if (!allowHazards) return;
-    } else if (!isSimulated && !window.confirm(`Write L=0x${hex2(next.lfuse)} H=0x${hex2(next.hfuse)} E=0x${hex2(next.efuse)} to the ${chipInfo?.name || 'chip'}?`)) {
+    } else if (!isSimulated && !confirmAction(`Write L=0x${hex2(next.lfuse)} H=0x${hex2(next.hfuse)} E=0x${hex2(next.efuse)} to the ${chipInfo?.name || 'chip'}?`)) {
       return;
     }
     const back = await client.writeFuses(next, { allowHazards });
@@ -128,7 +129,7 @@ export default function AvrIspWorkbench() {
   };
 
   const handleFlash = () => run('flash', async () => {
-    if (!isSimulated && !window.confirm(`Erase the ${chipInfo?.name || 'chip'} and write ${image.name}?`)) return;
+    if (!isSimulated && !confirmAction(`Erase the ${chipInfo?.name || 'chip'} and write ${image.name}?`)) return;
     setProgress(0);
     const r = await client.flashImage(image, { onProgress: setProgress });
     setResult(`SUCCESS: ${image.name} written and verified (${r.bytes} bytes).`);
@@ -137,7 +138,7 @@ export default function AvrIspWorkbench() {
   const handleBurn = () => run('burn', async () => {
     if (!isSimulated && !image) throw new Error('Load the bootloader .hex first (for example optiboot_atmega328.hex from the Arduino IDE).');
     const f = client.chip?.defaultFuses;
-    if (!isSimulated && !window.confirm(`Burn ${image.name} as the bootloader?\n\nThis erases the chip, sets fuses L=0x${hex2(f.lfuse)} H=0x${hex2(f.hfuse)} E=0x${hex2(f.efuse)} and lock 0x${hex2(f.lock)}.`)) return;
+    if (!isSimulated && !confirmAction(`Burn ${image.name} as the bootloader?\n\nThis erases the chip, sets fuses L=0x${hex2(f.lfuse)} H=0x${hex2(f.hfuse)} E=0x${hex2(f.efuse)} and lock 0x${hex2(f.lock)}.`)) return;
     setProgress(0);
     await client.burnBootloader(image || { data: new Uint8Array(512), startAddress: 0x7e00 }, setProgress);
     const back = await client.readFuses();
@@ -146,7 +147,7 @@ export default function AvrIspWorkbench() {
   });
 
   const handleErase = () => run('erase', async () => {
-    if (!isSimulated && !window.confirm('Erase all flash and EEPROM on the target?')) return;
+    if (!isSimulated && !confirmAction('Erase all flash and EEPROM on the target?')) return;
     await client.chipErase();
     setResult('SUCCESS: Chip erased.');
   });

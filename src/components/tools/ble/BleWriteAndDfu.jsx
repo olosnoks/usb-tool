@@ -3,6 +3,7 @@ import { Send, X, Upload, Cpu, Square } from 'lucide-react';
 import { bytesToHex } from '../../../utils/bleDriver';
 import { WRITE_FORMATS, encodeValue, DFU_UUIDS, NordicSecureDfu, readDfuPackage, enterBootloader } from '../../../utils/nordicDfu';
 
+import { confirmAction } from '../../../utils/sessionLog';
 const inp = 'bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 outline-none';
 const btn = 'flex items-center gap-1 px-2.5 py-1 rounded border font-bold disabled:opacity-40';
 
@@ -99,7 +100,7 @@ export function DfuPanel({ tree, addLog }) {
   const flash = async () => {
     const part = parts[0];
     const rest = parts.length - 1;
-    if (!window.confirm(`Update the device with ${fileName} (${part.type}, ${part.firmware.length} bytes)?\n\nKeep the device close and powered. If the link drops, reconnect to DfuTarg and start again: it resumes.`)) return;
+    if (!confirmAction(`Update the device with ${fileName} (${part.type}, ${part.firmware.length} bytes)?\n\nKeep the device close and powered. If the link drops, reconnect to DfuTarg and start again: it resumes.`)) return;
     setRunning(true);
     const dfu = new NordicSecureDfu(control._ref, packet._ref, { chunkSize: 20, log: (m) => addLog(m, 'info') });
     try {

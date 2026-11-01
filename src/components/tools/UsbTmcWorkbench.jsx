@@ -6,6 +6,7 @@ import {
 } from '../../utils/scpiTools';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
+import { record } from '../../utils/sessionLog';
 
 const CH_COLORS = ['#facc15', '#22d3ee', '#f472b6', '#60a5fa'];
 const TABS = [['console', 'CONSOLE', Terminal], ['scope', 'SCOPE', Activity], ['logger', 'DMM / PSU LOGGER', Gauge], ['script', 'SCRIPT', FileCode]];
@@ -102,6 +103,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
   const stopScript = useRef(false);
 
   const addLog = useCallback((dir, text) => {
+    record('USBTMC', dir === 'err' ? 'error' : 'info', dir === 'out' ? `> ${text}` : text);
     setLog((prev) => [...prev.slice(-499), { ts: new Date().toLocaleTimeString(), dir, text }]);
   }, []);
 

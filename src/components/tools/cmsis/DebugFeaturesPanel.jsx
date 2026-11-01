@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Terminal, Radio, HardDrive, Crosshair, Download, Play, Square, Upload, Trash2, Send } from 'lucide-react';
 import { parseFlm, readPack, flmSectors, loadFirmwareImage, itmText } from '../../../utils/cortexDebug';
 
+import { confirmAction } from '../../../utils/sessionLog';
 const parseHex = (s) => {
   const v = parseInt(String(s).trim().replace(/^0x/i, ''), 16);
   if (Number.isNaN(v)) throw new Error(`"${s}" is not a hex number.`);
@@ -212,7 +213,7 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, isSimulated
     const segments = loadFirmwareImage(image.name, image.bytes, parseHex(binBase));
     const total = segments.reduce((n, s) => n + s.data.length, 0);
     const ranges = segments.map((s) => `${h8(s.addr)}-${h8(s.addr + s.data.length - 1)}`).join(', ');
-    if (!window.confirm(`Program ${image.name} (${total} bytes at ${ranges}) into ${flm.name}?\n\n${chipErase ? 'The WHOLE chip is erased first.' : 'Only the sectors the image touches are erased.'}`)) return;
+    if (!confirmAction(`Program ${image.name} (${total} bytes at ${ranges}) into ${flm.name}?\n\n${chipErase ? 'The WHOLE chip is erased first.' : 'Only the sectors the image touches are erased.'}`)) return;
     setFlashResult('');
     setFlashProgress({ phase: 'load', frac: 0 });
     try {

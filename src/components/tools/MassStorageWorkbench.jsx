@@ -5,6 +5,7 @@ import { DiskReader, readPartitionTable, detectFilesystem, openVolume, Sha256 } 
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { confirmAction, useSessionError } from '../../utils/sessionLog';
 const fmtBytes = (n) => {
   const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n;
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
@@ -29,7 +30,7 @@ export default function MassStorageWorkbench() {
   const [lba, setLba] = useState('0');
   const [sector, setSector] = useState(null);
   const [busy, setBusy] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('Mass Storage');
   const [table, setTable] = useState(null); // { scheme, partitions: [{ ..., fs }] }
   const [browser, setBrowser] = useState(null); // { part, vol, path: [{ name, entry }], entries }
   const [showDeleted, setShowDeleted] = useState(true);
@@ -55,7 +56,7 @@ export default function MassStorageWorkbench() {
   };
 
   const connect = async (simulated) => {
-    if (!simulated && !window.confirm('Inspect a USB mass-storage device?\n\nThis CLAIMS the drive for this tab, taking it away from the operating system for the session. Use a drive that is NOT mounted/in use, and never one with data you cannot lose mounted elsewhere. This tool is read-only (no writes), but unmounting an in-use disk can still disrupt the OS.')) return;
+    if (!simulated && !confirmAction('Inspect a USB mass-storage device?\n\nThis CLAIMS the drive for this tab, taking it away from the operating system for the session. Use a drive that is NOT mounted/in use, and never one with data you cannot lose mounted elsewhere. This tool is read-only (no writes), but unmounting an in-use disk can still disrupt the OS.')) return;
     setBusy('connect'); setError('');
     try {
       const transport = simulated ? createSimulatedMassStorage() : await requestMassStorageDevice();

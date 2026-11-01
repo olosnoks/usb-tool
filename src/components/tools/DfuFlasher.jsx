@@ -21,6 +21,7 @@ import {
 } from '../../utils/dfuDriver';
 import StatusBadge from '../common/StatusBadge';
 
+import { confirmAction, record } from '../../utils/sessionLog';
 // Common STM32 flash base — the default target for raw .bin files.
 const DEFAULT_TARGET_ADDRESS = 0x08000000;
 
@@ -41,6 +42,7 @@ export default function DfuFlasher() {
   const fileInputRef = useRef(null);
 
   const addLog = useCallback((msg, kind = 'info') => {
+    record('DFU', kind, msg);
     const ts = new Date().toLocaleTimeString();
     setLog((prev) => [...prev.slice(-199), { ts, msg, kind }]);
   }, []);
@@ -165,7 +167,7 @@ export default function DfuFlasher() {
         (sfx.idVendor !== 0xffff && sfx.idVendor !== device.vendorId) ||
         (sfx.idProduct !== 0xffff && sfx.idProduct !== device.productId);
       if (mismatch) {
-        const ok = window.confirm(
+        const ok = confirmAction(
           `Firmware suffix targets ${sfx.idVendor.toString(16)}:${sfx.idProduct.toString(16)} ` +
             `but the connected device is ${device.vendorId.toString(16)}:${device.productId
               .toString(16)}.\n\nFlashing mismatched firmware can brick the device. Continue anyway?`

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { setCurrentTool } from '../../utils/sessionLog';
 import { Cpu, HardDrive, Layers, Zap, CheckCircle2 } from 'lucide-react';
 import Ch341aProgrammer from './Ch341aProgrammer';
 import CmsisDapDebugger from './CmsisDapDebugger';
@@ -20,6 +21,10 @@ export default function HardwareProgrammersSuite({ initialTab = 'ch341a' }) {
       }
     }
   }, [initialTab]);
+
+  useEffect(() => {
+    setCurrentTool({ ch341a: 'CH341A', 'cmsis-dap': 'CMSIS-DAP', jtag: 'JTAG', avr: 'AVR ISP' }[activeSubTab] || 'Programmers');
+  }, [activeSubTab]);
 
   return (
     <div className="w-full space-y-4">

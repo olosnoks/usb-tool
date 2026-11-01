@@ -23,6 +23,7 @@ import StatusBadge from '../common/StatusBadge';
 import DebugFeaturesPanel from './cmsis/DebugFeaturesPanel';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { useSessionError } from '../../utils/sessionLog';
 export default function CmsisDapDebugger() {
   const [client] = useState(() => new CmsisDapClient(console.log));
   const [isConnected, setIsConnected] = useState(false);
@@ -38,7 +39,7 @@ export default function CmsisDapDebugger() {
   const [writeVal, setWriteVal] = useState('0x12345678');
 
   const [info, setInfo] = useState(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('CMSIS-DAP');
   const [busy, setBusy] = useState('');
   const busyRef = useRef(false);
 

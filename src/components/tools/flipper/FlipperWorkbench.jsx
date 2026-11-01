@@ -25,6 +25,7 @@ import ScreenView from './views/ScreenView';
 import FilesView from './views/FilesView';
 import CliView from './views/CliView';
 
+import { confirmAction } from '../../../utils/sessionLog';
 /**
  * Renders real Flipper Zero 1024-byte framebuffer (128x64 ST7567 LCD) onto HTML5 Canvas
  */
@@ -288,7 +289,7 @@ export default function FlipperWorkbench() {
   // Delete file or folder
   const handleDeleteItem = async (item, e) => {
     if (e) e.stopPropagation();
-    if (!window.confirm(`Delete ${item.isDir ? 'folder' : 'file'} "${item.name}" from Flipper?`)) return;
+    if (!confirmAction(`Delete ${item.isDir ? 'folder' : 'file'} "${item.name}" from Flipper?`)) return;
     try {
       await driver.removeRealFile(item.path);
       if (selectedFile?.path === item.path) {

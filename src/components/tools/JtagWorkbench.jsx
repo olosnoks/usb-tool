@@ -19,6 +19,7 @@ import { parseBsdl, opcodeValue, idcodeMatches, pinStates, extestVector } from '
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { confirmAction, useSessionError } from '../../utils/sessionLog';
 const SAMPLE_SVF_TEXT = `// Sample SVF: Initialize TAP & Read IDCODE
 FREQUENCY 10000000 HZ;
 TRST OFF;
@@ -46,7 +47,7 @@ export default function JtagWorkbench() {
 
   const fileInputRef = useRef(null);
 
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('JTAG');
   const [busy, setBusy] = useState('');
   const [probeInfo, setProbeInfo] = useState(null);
   const [probePins, setProbePins] = useState(null);
@@ -145,7 +146,7 @@ export default function JtagWorkbench() {
   };
 
   const handleExtest = (port, level) => {
-    if (!extestOk && !window.confirm('EXTEST takes the pins away from the chip\'s own logic and drives them from here.\n\nDriving a pin that something else also drives can damage hardware. Only drive pins you know are free (LEDs, test points). RESET TAP returns the chip to normal.')) return;
+    if (!extestOk && !confirmAction('EXTEST takes the pins away from the chip\'s own logic and drives them from here.\n\nDriving a pin that something else also drives can damage hardware. Only drive pins you know are free (LEDs, test points). RESET TAP returns the chip to normal.')) return;
     setExtestOk(true);
     const next = { ...drive };
     if (level === null) delete next[port]; else next[port] = level;

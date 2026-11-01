@@ -20,6 +20,7 @@ import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 import HidReportTools from './hid/HidReportTools';
 
+import { useSessionError } from '../../utils/sessionLog';
 // A simulated mouse, so the live view can be explored with no device.
 const DEMO_COLLECTIONS = [{
   usagePage: 0x01, usage: 0x02,
@@ -37,7 +38,7 @@ export default function HidInspectorWorkbench() {
   const [info, setInfo] = useState(null); // described collections
   const [meta, setMeta] = useState(null); // { vendorId, productId, productName }
   const [granted, setGranted] = useState([]);
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('HID');
   const [lastReport, setLastReport] = useState(null); // { reportId, hex, fields }
   const reportMapRef = useRef({}); // reportId -> describedReport
   const demoTimer = useRef(null);

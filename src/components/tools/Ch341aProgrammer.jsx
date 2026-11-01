@@ -25,6 +25,7 @@ import HexViewer from '../common/HexViewer';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { confirmAction, useSessionError } from '../../utils/sessionLog';
 const hex = (v, w = 6) => `0x${v.toString(16).toUpperCase().padStart(w, '0')}`;
 
 export default function Ch341aProgrammer() {
@@ -47,7 +48,7 @@ export default function Ch341aProgrammer() {
   const [diff, setDiff] = useState(null); // { name, bytes, ranges, sizeDiffers }
   const [eepromType, setEepromType] = useState('24C02');
   const [eepromAddr, setEepromAddr] = useState('50');
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('CH341A');
 
   const showBuffer = (data, type) => {
     setLoadedBuffer(data);
@@ -169,7 +170,7 @@ export default function Ch341aProgrammer() {
       alert(`The buffer (${loadedBuffer.length} bytes) is larger than the chip (${chipInfo.sizeBytes} bytes).`);
       return;
     }
-    if (!isSimulated && !window.confirm(`Write ${loadedBuffer.length} bytes to the ${chipInfo?.model || 'SPI flash'} from address 0?\n\nSectors that differ are erased and reprogrammed, then verified. Keep a backup dump of the original contents.`)) return;
+    if (!isSimulated && !confirmAction(`Write ${loadedBuffer.length} bytes to the ${chipInfo?.model || 'SPI flash'} from address 0?\n\nSectors that differ are erased and reprogrammed, then verified. Keep a backup dump of the original contents.`)) return;
     try {
       setIsBusy(true);
       setBusyAction(`Programming ${loadedBuffer.length} bytes to SPI flash...`);
@@ -406,7 +407,7 @@ export default function Ch341aProgrammer() {
                 onClick={() => {
                   const v = parseInt(srInput, 16);
                   if (Number.isNaN(v) || v > 0xff) { setError('SR1 is one hex byte.'); return; }
-                  if (!isSimulated && !window.confirm(`Write status register 1 = ${hex(v, 2)}? Setting SRP0 with WP# low can lock the register until power-off.`)) return;
+                  if (!isSimulated && !confirmAction(`Write status register 1 = ${hex(v, 2)}? Setting SRP0 with WP# low can lock the register until power-off.`)) return;
                   job('Writing status register...', async () => setStatus(await client.writeStatus(v)));
                 }}
                 disabled={isBusy}
@@ -417,7 +418,7 @@ export default function Ch341aProgrammer() {
             </div>
             <button
               onClick={() => {
-                if (!isSimulated && !window.confirm(`Erase the WHOLE ${chipInfo?.model || 'chip'}? Every byte becomes FF. Save a dump first.`)) return;
+                if (!isSimulated && !confirmAction(`Erase the WHOLE ${chipInfo?.model || 'chip'}? Every byte becomes FF. Save a dump first.`)) return;
                 job('Chip erase (this can take a minute)...', async () => { await client.eraseChip(); setStatus(await client.readStatus()); });
               }}
               disabled={isBusy}
@@ -492,7 +493,7 @@ export default function Ch341aProgrammer() {
               <button
                 onClick={() => {
                   if (!loadedBuffer) { setError('Load or read a buffer first.'); return; }
-                  if (!isSimulated && !window.confirm(`Write ${loadedBuffer.length} bytes to the ${eepromType}?`)) return;
+                  if (!isSimulated && !confirmAction(`Write ${loadedBuffer.length} bytes to the ${eepromType}?`)) return;
                   job(`Writing ${eepromType}...`, async () => {
                     const ee = client.eeprom(eepromType, parseInt(eepromAddr, 16) || 0x50);
                     await ee.write(loadedBuffer.subarray(0, Math.min(loadedBuffer.length, ee.size)), (f) => setProgress({ percent: Math.round(f * 100), current: 0, total: ee.size }));

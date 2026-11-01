@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SerialProvider, useSerial } from './context/SerialContext';
 import Header from './components/layout/Header';
-import Sidebar from './components/layout/Sidebar';
+import Sidebar, { SIDEBAR_SECTIONS } from './components/layout/Sidebar';
+import { setCurrentTool, record } from './utils/sessionLog';
 import TerminalDrawer from './components/layout/TerminalDrawer';
 import WorkspacePresets, { WORKSPACE_PRESETS } from './components/layout/WorkspacePresets';
 
@@ -58,6 +59,7 @@ const UsbTmcWorkbench = React.lazy(() => import('./components/tools/UsbTmcWorkbe
 const MassStorageWorkbench = React.lazy(() => import('./components/tools/MassStorageWorkbench'));
 const PtpWorkbench = React.lazy(() => import('./components/tools/PtpWorkbench'));
 const Fido2Workbench = React.lazy(() => import('./components/tools/Fido2Workbench'));
+const SessionLogPanel = React.lazy(() => import('./components/tools/SessionLogPanel'));
 const BleExplorer = React.lazy(() => import('./components/tools/BleExplorer'));
 
 // Modals
@@ -123,6 +125,17 @@ function AppContent() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isHardwareIntelOpen, setIsHardwareIntelOpen] = useState(false);
   const [isPinoutModalOpen, setIsPinoutModalOpen] = useState(false);
+
+  // Attribute session-log entries (device picks, confirmations) to the open tool
+  const lastOpened = useRef(null);
+  useEffect(() => {
+    if (activeTool === 'session-log' || lastOpened.current === activeTool) return;
+    lastOpened.current = activeTool;
+    const item = SIDEBAR_SECTIONS.flatMap((s) => s.items || []).find((i) => i.id === activeTool);
+    const name = item?.name || activeTool;
+    if (!['programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp'].includes(activeTool)) setCurrentTool(name);
+    record(name, 'info', `Opened ${name}`);
+  }, [activeTool]);
 
   // Check URL params for modal triggers
   useEffect(() => {
@@ -433,6 +446,12 @@ function AppContent() {
             {activeTool === 'fido2' && (
               <div className="w-full">
                 <Fido2Workbench />
+              </div>
+            )}
+
+            {activeTool === 'session-log' && (
+              <div className="w-full">
+                <SessionLogPanel />
               </div>
             )}
 

@@ -34,6 +34,7 @@ import { SerialLink } from '../../utils/serialLink';
 import { parseIntelHex } from '../../utils/firmwareParser';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { useSessionError } from '../../utils/sessionLog';
 const CHANNEL_DEFAULTS = [
   { id: 0, name: 'D0', color: '#22d3ee' },
   { id: 1, name: 'D1', color: '#38bdf8' },
@@ -87,7 +88,7 @@ export default function LogicAnalyzerWorkbench() {
   // Where captures come from: null (nothing connected), 'sump', 'fx2', 'demo' or 'file'.
   const [source, setSource] = useState(null);
   const [deviceLabel, setDeviceLabel] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('Logic Analyzer');
   const [notice, setNotice] = useState('');
   const [progress, setProgress] = useState(0);
   const [triggerMask, setTriggerMask] = useState('00');

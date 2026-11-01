@@ -4,6 +4,7 @@ import {
   parseHexBytes, hexDump, ledBits, ledReportBytes, LED_USAGES, reportRateStats, serializeRecording, parseRecording
 } from '../../../utils/hidInspector';
 
+import { confirmAction } from '../../../utils/sessionLog';
 const btn = 'flex items-center gap-1 px-2.5 py-1 rounded border font-bold disabled:opacity-40';
 const inp = 'bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 outline-none';
 
@@ -161,7 +162,7 @@ export default function HidReportTools({ device, isSimulated, info, meta, addTap
             <input value={featHex} onChange={(e) => setFeatHex(e.target.value)} placeholder="bytes to SET" className={`${inp} flex-1 min-w-[8rem]`} />
             <button
               onClick={() => {
-                if (!isSimulated && !window.confirm(`Send feature report ${featId}? Vendor feature reports can change device settings or firmware state.`)) return;
+                if (!isSimulated && !confirmAction(`Send feature report ${featId}? Vendor feature reports can change device settings or firmware state.`)) return;
                 try { send('feature', featId, parseHexBytes(featHex)); } catch (e) { note(e.message, 'err'); }
               }}
               className={`${btn} border-amber-500/40 text-amber-300`}

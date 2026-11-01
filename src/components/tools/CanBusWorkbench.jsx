@@ -43,6 +43,7 @@ import {
 } from '../../utils/canTools';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { confirmAction } from '../../utils/sessionLog';
 // Signals for the simulation's frames, so DBC decoding can be tried without a car.
 const DEMO_DBC = `BO_ 476 ENGINE_STATUS: 8 ECM
  SG_ EngineRPM : 7|16@0+ (1,0) [0|8000] "rpm" DASH
@@ -366,7 +367,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   };
 
   const handleClearDtcs = async () => {
-    if (!isSimulated && !window.confirm('Send OBD-II mode 04 to clear stored trouble codes and freeze-frame data on this vehicle?')) return;
+    if (!isSimulated && !confirmAction('Send OBD-II mode 04 to clear stored trouble codes and freeze-frame data on this vehicle?')) return;
     setIsScanningDtcs(true);
     try {
       const { confirmed, refused } = await obdRef.current.clearDtcs();
@@ -466,12 +467,12 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   });
 
   const udsClear = () => {
-    if (!isSimulated && !window.confirm('Send UDS ClearDiagnosticInformation (0x14 FFFFFF) to this ECU?')) return;
+    if (!isSimulated && !confirmAction('Send UDS ClearDiagnosticInformation (0x14 FFFFFF) to this ECU?')) return;
     runUds('clear', async (uds) => { await uds.clearDtcs(); logUds('<', 'DTCs cleared.', 'ok'); });
   };
 
   const udsReset = () => {
-    if (!isSimulated && !window.confirm('Send UDS ECUReset (hard reset) to this ECU? It restarts immediately.')) return;
+    if (!isSimulated && !confirmAction('Send UDS ECUReset (hard reset) to this ECU? It restarts immediately.')) return;
     runUds('reset', async (uds) => { await uds.ecuReset(0x01); logUds('<', 'ECU accepted the hard reset.', 'ok'); });
   };
 
@@ -526,7 +527,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
     const frames = currentLogFrames().filter((f) => !f.tx);
     if (!frames.length) { setNotice('Record or load a log first.'); return; }
     if (!isSimulated && !isConnected) { setNotice('Connect the SLCAN adapter to replay onto a bus.'); return; }
-    if (!isSimulated && !window.confirm(`Transmit ${frames.length} recorded frames onto the CAN bus? Replaying traffic into a vehicle can trigger real actions.`)) return;
+    if (!isSimulated && !confirmAction(`Transmit ${frames.length} recorded frames onto the CAN bus? Replaying traffic into a vehicle can trigger real actions.`)) return;
     ensureBus().then((ok) => {
       if (!ok) return;
       setReplay({ done: 0, total: frames.length });

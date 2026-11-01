@@ -11,6 +11,7 @@ import {
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { confirmAction, record } from '../../utils/sessionLog';
 const REBOOT_TARGETS = [
   { id: '', label: 'System' },
   { id: 'bootloader', label: 'Bootloader' },
@@ -83,6 +84,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   const webUsbAvailable = typeof navigator !== 'undefined' && 'usb' in navigator;
 
   const addLog = useCallback((msg, kind = 'info') => {
+    record('ADB', kind, msg);
     const ts = new Date().toLocaleTimeString();
     setLog((prev) => [...prev.slice(-299), { ts, msg, kind }]);
   }, []);
@@ -169,7 +171,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   });
 
   const deleteFile = (e) => {
-    if (!window.confirm(`Delete ${cwd}${e.name} on the device?`)) return;
+    if (!confirmAction(`Delete ${cwd}${e.name} on the device?`)) return;
     guard('rm', async () => {
       await adb.shell(`rm ${e.isDir ? '-r ' : ''}${quote(cwd + e.name)}`);
       setEntries(await adb.list(cwd));
@@ -203,7 +205,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
       uninstall: `Uninstall ${name} from the device? Its data is deleted.`,
       clear: `Clear all data of ${name} (accounts, settings, files)?`
     };
-    if (confirms[action] && !window.confirm(confirms[action])) return;
+    if (confirms[action] && !confirmAction(confirms[action])) return;
     guard(action, async () => {
       if (action === 'uninstall') { addLog(await uninstallPackage(adb, name), 'ok'); setPackages((p) => p.filter((x) => x.name !== name)); }
       if (action === 'launch') { await adb.shell(`monkey -p ${name} -c android.intent.category.LAUNCHER 1`); addLog(`Launched ${name}.`, 'ok'); }

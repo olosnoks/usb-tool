@@ -2,6 +2,9 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import './index.css';
+import { installDeviceCapture, record } from './utils/sessionLog';
+
+installDeviceCapture();
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -15,6 +18,7 @@ class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('Skon\'s USB Tool caught runtime crash:', error, errorInfo);
+    record(undefined, 'error', `UI crash: ${error?.message || error}`);
   }
 
   handleReset = () => {

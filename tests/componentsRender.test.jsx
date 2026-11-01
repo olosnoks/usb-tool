@@ -18,6 +18,7 @@ import UsbTmcWorkbench from '../src/components/tools/UsbTmcWorkbench';
 import MassStorageWorkbench from '../src/components/tools/MassStorageWorkbench';
 import PtpWorkbench from '../src/components/tools/PtpWorkbench';
 import Fido2Workbench from '../src/components/tools/Fido2Workbench';
+import SessionLogPanel from '../src/components/tools/SessionLogPanel';
 import BusExplorerWorkbench from '../src/components/tools/BusExplorerWorkbench';
 import JtagWorkbench from '../src/components/tools/JtagWorkbench';
 import ModbusWorkbench from '../src/components/tools/ModbusWorkbench';
@@ -80,6 +81,7 @@ describe('UI Workbench Render Sanity Check', () => {
     { name: 'MassStorageWorkbench', comp: <MassStorageWorkbench /> },
     { name: 'PtpWorkbench', comp: <PtpWorkbench /> },
     { name: 'Fido2Workbench', comp: <Fido2Workbench /> },
+    { name: 'SessionLogPanel', comp: <SessionLogPanel /> },
     { name: 'BusExplorerWorkbench', comp: <BusExplorerWorkbench /> },
     { name: 'JtagWorkbench', comp: <JtagWorkbench /> },
     { name: 'ModbusWorkbench', comp: <ModbusWorkbench /> },

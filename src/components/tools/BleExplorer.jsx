@@ -32,6 +32,7 @@ import { BleSerialPort, BLE_UART_SERVICE_UUIDS, looksLikeUart, uartProfileFor } 
 import { useSerial } from '../../context/SerialContext';
 import StatusBadge from '../common/StatusBadge';
 import { WriteComposer, DfuPanel } from './ble/BleWriteAndDfu';
+import { record } from '../../utils/sessionLog';
 
 const PROP_LABELS = [
   ['read', 'Read'],
@@ -104,6 +105,7 @@ export default function BleExplorer() {
   const bleAvailable = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
 
   const addLog = useCallback((msg, kind = 'info') => {
+    record('BLE', kind, msg);
     const ts = new Date().toLocaleTimeString();
     setLog((prev) => [...prev.slice(-199), { ts, msg, kind }]);
   }, []);

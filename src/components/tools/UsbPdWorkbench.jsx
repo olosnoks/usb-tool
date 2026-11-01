@@ -28,6 +28,7 @@ import {
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { confirmAction, useSessionError } from '../../utils/sessionLog';
 export default function UsbPdWorkbench() {
   const [client] = useState(() => new UsbPdClient(console.log));
   const [isConnected, setIsConnected] = useState(false);
@@ -74,7 +75,7 @@ export default function UsbPdWorkbench() {
     setCable(SAMPLE_CABLE_EMARKERS[0]);
   };
 
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('USB-PD');
   const [connecting, setConnecting] = useState(false);
 
   const handleConnectHardware = async () => {
@@ -400,7 +401,7 @@ function Stusb4500Panel({ client, onError }) {
   const request = async (v) => {
     const volts = Number(v);
     const amps = Number(current);
-    if (!window.confirm(`Ask the charger for ${volts} V at up to ${amps} A? Whatever is connected to the board's output will get that voltage.`)) return;
+    if (!confirmAction(`Ask the charger for ${volts} V at up to ${amps} A? Whatever is connected to the board's output will get that voltage.`)) return;
     setBusy(true);
     busyRef.current = true;
     onError('');
@@ -515,7 +516,7 @@ function NvmPanel({ client, onError, busyRef }) {
   const write = () => {
     const f = form;
     const summary = f.pdos.slice(0, f.pdoCount).map((p, i) => `PDO${i + 1}: ${p.voltageV} V / ${p.currentA} A`).join('\n');
-    if (!window.confirm(`Write these power-up PDOs to the STUSB4500 NVM?\n\n${summary}\n\nAfter the next power-up the board asks for the highest of these. Check its output with a meter before connecting anything, and keep the backup to restore.`)) return;
+    if (!confirmAction(`Write these power-up PDOs to the STUSB4500 NVM?\n\n${summary}\n\nAfter the next power-up the board asks for the highest of these. Check its output with a meter before connecting anything, and keep the backup to restore.`)) return;
     run('write', async () => { await client.writeNvmPdos(f); await new Promise((r) => setTimeout(r, 50)); setNvm(await client.readNvm()); });
   };
 
@@ -532,7 +533,7 @@ function NvmPanel({ client, onError, busyRef }) {
     if (!file) return;
     let sectors;
     try { sectors = nvmFromText(await file.text()); } catch (err) { onError(err.message); return; }
-    if (!window.confirm(`Write the backup ${file.name} back into the NVM? It replaces all 40 bytes.`)) return;
+    if (!confirmAction(`Write the backup ${file.name} back into the NVM? It replaces all 40 bytes.`)) return;
     run('restore', async () => { await client.restoreNvm(sectors); setNvm(await client.readNvm()); });
   };
 

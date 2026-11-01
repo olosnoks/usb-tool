@@ -6,6 +6,7 @@ import { imageMime } from '../../utils/scpiTools';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { confirmAction, useSessionError } from '../../utils/sessionLog';
 const fmtBytes = (n) => {
   const u = ['B', 'KB', 'MB', 'GB']; let i = 0; let v = n;
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
@@ -19,7 +20,7 @@ export default function PtpWorkbench() {
   const [info, setInfo] = useState(null);
   const [objects, setObjects] = useState([]); // { handle, info }
   const [busy, setBusy] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('PTP');
   const [storage, setStorage] = useState([]);
   const [battery, setBattery] = useState(null);
   const [thumbs, setThumbs] = useState({}); // handle -> object URL
@@ -113,7 +114,7 @@ export default function PtpWorkbench() {
 
   const deleteSelected = async () => {
     const list = objects.filter((o) => selected.has(o.handle));
-    if (!list.length || !window.confirm(`Delete ${list.length} file(s) from the camera? This cannot be undone.`)) return;
+    if (!list.length || !confirmAction(`Delete ${list.length} file(s) from the camera? This cannot be undone.`)) return;
     setBusy('delete'); setError('');
     try {
       for (const o of list) await ptp.deleteObject(o.handle);

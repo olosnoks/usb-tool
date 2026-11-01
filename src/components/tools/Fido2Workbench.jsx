@@ -4,6 +4,7 @@ import { Fido2Device, requestFido2Device, createSimulatedFido2 } from '../../uti
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
 
+import { useSessionError } from '../../utils/sessionLog';
 export default function Fido2Workbench() {
   const [dev, setDev] = useState(null);
   const [isSimulated, setIsSimulated] = useState(false);
@@ -12,7 +13,7 @@ export default function Fido2Workbench() {
   const [info, setInfo] = useState(null); // getInfo
   const [ping, setPing] = useState(null);
   const [busy, setBusy] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useSessionError('FIDO2');
   const webHidAvailable = typeof navigator !== 'undefined' && 'hid' in navigator;
 
   const connect = async (simulated) => {
