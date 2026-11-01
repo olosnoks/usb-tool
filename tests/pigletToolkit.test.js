@@ -19,7 +19,7 @@ const dec = new TextDecoder();
 
 // A fake SerialPort backed by a tiny model of SerialTool.cpp.
 function makeFakePiglet({ files = {}, bootDelayHellos = 0, garbleFirstGet = false, busyPath = null, legacy = false, homeSsid = 'Home', wifiOk = true } = {}) {
-  const dev = { session: false, scanning: true, uploads: [], rebooted: false };
+  const dev = { session: false, scanning: true, uploads: [], rebooted: false, screen: false, touches: [], ident: [], groups: [] };
   const fs = new Map(Object.entries(files).map(([p, v]) => [p, typeof v === 'string' ? enc.encode(v) : v]));
   let controller;
   let hellosIgnored = 0;
@@ -98,6 +98,23 @@ function makeFakePiglet({ files = {}, bootDelayHellos = 0, garbleFirstGet = fals
       else if (!wifiOk) emit('WT ERR nowifi');
       else { dev.uploads.push(line.slice(10) || 'all'); emit('[UPLOAD] working'); emit('WT OK 2 3 WiGLE: 2 uploaded, 1 failed'); }
     } else if (line === 'WT REBOOT') { dev.rebooted = true; emit('WT OK reboot'); }
+    else if (line.startsWith('WT SCREEN ')) {
+      const sub = line.slice(10).split(' ')[0];
+      if (sub === 'ON') { dev.screen = true; emit('WT OK screen on 240 320'); }
+      else if (sub === 'OFF') { dev.screen = false; emit('WT OK screen off'); }
+      else if (sub === 'PING') emit(dev.screen ? 'WT OK screen on' : 'WT OK screen off');
+      else if (sub === 'KEY') emit('WT OK screen key');
+      else emit('WT ERR screensub');
+    } else if (line.startsWith('WT TOUCH ')) {
+      dev.touches.push(line.slice(9));   // silent on the device
+    } else if (line.startsWith('WT MESH ')) {
+      const sub = line.slice(8).split(' ')[0];
+      if (sub === 'IDENT') { dev.ident.push(line.split(' ')[3]); emit('WT OK mesh ident ' + line.split(' ')[3]); }
+      else if (sub === 'GROUP') { dev.groups.push(line.slice(8)); emit('WT OK mesh group'); }
+      else if (sub === 'DEFAULT') emit('WT OK mesh default');
+      else emit('WT ERR meshsub');
+    } else if (line.startsWith('WT VERBOSE')) { emit('WT OK verbose on'); }
+    else if (line === 'FRAME!') { emit('WT FBH 1 240 320 16 1 565be'); emit('WT FBE 1 0 0 0'); }
     else if (line === 'TIMEOUT!') { dev.session = false; emit('WT TIMEOUT'); }
   };
 
@@ -332,6 +349,40 @@ describe('PigletToolkitClient over a simulated Piglet', () => {
     const c = new PigletToolkitClient({ serial: {} });
     await c.connect(d.port);
     await expect(c.stat()).rejects.toThrow(/unknown STAT/);
+    await c.disconnect();
+  });
+
+  it('drives the screen mirror, routes frame lines separately, and sends touch / mesh commands', async () => {
+    const d = makeFakePiglet();
+    const frames = [], lines = [];
+    const c = new PigletToolkitClient({ serial: {} });
+    const offFrame = c.onFrameLine((l) => frames.push(l));
+    const offLine = c.onLine((l) => lines.push(l));
+    await c.connect(d.port);
+
+    expect(await c.screenOn(6)).toBe('OK screen on 240 320');
+    expect(d.dev.screen).toBe(true);
+    // a frame goes to frame listeners, not line listeners
+    await c.writeLine('FRAME!');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(frames).toContain('WT FBH 1 240 320 16 1 565be');
+    expect(frames).toContain('WT FBE 1 0 0 0');
+    expect(lines.some((l) => l.startsWith('WT FB'))).toBe(false);
+
+    // touch is fire-and-forget (silent device), reaches the firmware
+    await c.touch('DOWN', 12, 34);
+    await c.touch('UP');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(d.dev.touches).toContain('DOWN 12 34');
+    expect(d.dev.touches).toContain('UP');
+
+    expect(await c.meshIdent('06FC')).toContain('mesh ident');
+    expect(d.dev.ident).toContain('06FC');
+    await c.meshGroup('06FC', 2);
+    expect(d.dev.groups.some((g) => g.includes('06FC 2'))).toBe(true);
+    expect(await c.screenOff()).toBe('OK screen off');
+
+    offFrame(); offLine();
     await c.disconnect();
   });
 });

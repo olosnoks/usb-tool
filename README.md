@@ -18,7 +18,7 @@ Beyond serial it covers 802.11 monitor-mode capture for Alfa / RTL8812AU and Pan
 
 **Analysis & Protocol Lab** — Packet & Protocol Lab (802.11 dissector, PCAP, hex stream) · CAN Bus & OBD-II Scanner · Modbus RTU & RS-485 · Oscilloscope Plotter · MitM Serial Bridge · CyberChef Workbench (Web Worker pipeline) · 24 MHz Logic Analyzer (SUMP / fx2lafw) · I²C & SPI Bus Explorer (Bus Pirate) · USBTMC Instruments (SCPI)
 
-**RF, Wireless & Badges** — Wi-Fi Monitor (Alfa RTL8812AU / Panda PAU09 over WebUSB) · Flipper Zero Suite · Proxmark3 / PM5 · PortaPack Mayhem SDR (HackRF receiver plus a Flash & First-Time Setup tab: Mayhem or stock firmware over WebUSB, DFU rescue, SD-card files) · GPS & Wardrive Suite · Warhog & Piglet Suite
+**RF, Wireless & Badges** — Wi-Fi Monitor (Alfa RTL8812AU / Panda PAU09 over WebUSB) · Flipper Zero Suite · Proxmark3 / PM5 · PortaPack Mayhem SDR (HackRF receiver plus a Flash & First-Time Setup tab: Mayhem or stock firmware over WebUSB, DFU rescue, SD-card files) · GPS & Wardrive Suite · Warhog & Piglet Suite (SD explorer, wardriver.cfg editor, device control, serial console, live Core monitor dashboard, and a screen mirror with remote touch over the WT protocol)
 
 **Hardware & Payloads** — BadUSB & Payload Studio (DuckyScript) · Hardware Programmers: CH341A SPI flash, plus CMSIS-DAP SWD debugger, JTAG / SVF and AVR ISP · USB-PD (STUSB4500) · Android Fastboot (bootloader unlock & partition flashing) · Android ADB (shell, file transfer, wireless)
 

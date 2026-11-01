@@ -87,6 +87,10 @@ export class PigletToolkitClient {
     this.buf = '';             // text accumulator for line framing
     this.info = '';
     this.sessionActive = false; // firmware tool mode (scanning paused) is on
+    // Listeners for firmware output (console, monitor) and for the screen
+    // mirror's frame lines, which never reach an operation's handler.
+    this._lineListeners = new Set();
+    this._frameListeners = new Set();
     this._queue = Promise.resolve();
     this._pending = 0;
     // Port ownership: another tool taking this device makes us disconnect cleanly.
@@ -97,6 +101,11 @@ export class PigletToolkitClient {
   static isSupported() {
     return typeof navigator !== 'undefined' && 'serial' in navigator;
   }
+
+  /** Subscribe to firmware output lines (not consumed by an operation). Returns an unsubscribe. */
+  onLine(fn) { this._lineListeners.add(fn); return () => this._lineListeners.delete(fn); }
+  /** Subscribe to screen-mirror frame lines ("WT FB*"). Returns an unsubscribe. */
+  onFrameLine(fn) { this._frameListeners.add(fn); return () => this._frameListeners.delete(fn); }
 
   // One reader for the session. On end/error it EXITS — it never re-acquires a
   // reader in a tight loop (a failing read that rejects instantly would otherwise
@@ -116,12 +125,19 @@ export class PigletToolkitClient {
           const line = this.buf.slice(0, nl).replace(/\r$/, '');
           this.buf = this.buf.slice(nl + 1);
           if (line === 'WT TIMEOUT') this.sessionActive = false;   // firmware ended the idle session
+          if (line.startsWith('WT FB')) {
+            // Screen mirror stream: routed before any op handler (ScreenMirror.cpp
+            // can emit a frame in the middle of another command's reply).
+            for (const f of this._frameListeners) { try { f(line); } catch (e) { /* listener must not kill the reader */ } }
+            continue;
+          }
           if ((line.startsWith('WT ') || line === 'WT') && this.lineHandler) {
             this.lineHandler(line);
           } else {
             // Firmware debug output, or a WT reply nobody is waiting for (a command
             // typed in the console): hand it to the console view.
             try { this.onDebugLine(line); } catch (e) { /* UI callback must not kill the reader */ }
+            for (const f of this._lineListeners) { try { f(line); } catch (e) { /* ignore */ } }
           }
         }
         if (this.buf.length > 65536) this.buf = this.buf.slice(-4096);   // newline-less flood guard
@@ -336,6 +352,38 @@ export class PigletToolkitClient {
   put(path, bytes, onProgress) { return this.putBytes('WT PUT ' + path, bytes, onProgress); }
   cfgPut(bytes, onProgress) { return this.putBytes('WT CFG PUT', bytes, onProgress); }
   cfgGet() { return this.get('/wardriver.cfg'); }
+
+  // A plain "WT OK ... | WT ERR ..." command that needs no toolkit session.
+  _okCmd(cmd, timeoutMs = 5000) {
+    return this._exclusive(() => this.op(() => this.writeLine(cmd), (done, fail) => (line) => {
+      if (line.startsWith('WT OK')) done(line.slice(3).trim());
+      else if (line.startsWith('WT ERR')) fail(line.slice(3).trim());
+    }, timeoutMs), false);
+  }
+
+  // ---- screen mirror (firmware ScreenMirror.cpp). Not toolkit-session
+  // activity: an idle session still times out and scanning resumes while the
+  // screen streams. Frame lines arrive via onFrameLine(); these just start /
+  // stop / keep it alive. WT SCREEN ON replies "WT OK screen on <w> <h>".
+  screenOn(fps = 4) { return this._okCmd('WT SCREEN ON ' + fps); }
+  screenOff() { return this._okCmd('WT SCREEN OFF'); }
+  screenPing() { return this._okCmd('WT SCREEN PING'); }
+  screenKey() { return this._okCmd('WT SCREEN KEY'); }
+
+  // Remote touch injected into the real UI (canvas-space coordinates). Silent
+  // on the device, so fire-and-forget — don't wait for a reply.
+  touch(sub, x, y) {
+    if (!this.connected || !this.writer) return Promise.resolve();
+    const body = sub === 'UP' ? 'WT TOUCH UP' : `WT TOUCH ${sub} ${x} ${y}`;
+    return this.writeLine(body).catch(() => {});
+  }
+
+  // ---- mesh sub-cluster control (Core only). Each resolves "WT OK ..." or
+  // rejects on "WT ERR ...".
+  meshIdent(mac) { return this._okCmd('WT MESH IDENT ' + mac); }        // blink a node's LED
+  meshGroup(mac, group) { return this._okCmd(`WT MESH GROUP ${mac} ${group}`); }
+  meshDefault() { return this._okCmd('WT MESH DEFAULT'); }
+  verbose(on) { return this._okCmd('WT VERBOSE ' + (on ? 'ON' : 'OFF')); }
 
   _rm(path) {
     return this.op(() => this.writeLine('WT RM ' + path), (done, fail) => (line) => {

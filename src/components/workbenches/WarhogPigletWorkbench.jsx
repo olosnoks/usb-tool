@@ -12,12 +12,16 @@ import {
   ExternalLink,
   Flame,
   Cable,
-  Activity
+  Activity,
+  Monitor,
+  Gauge
 } from 'lucide-react';
 import { PigletToolkitClient } from '../../utils/pigletToolkit';
 import PigletFileBrowser from './piglet/PigletFileBrowser';
 import PigletConfigEditor from './piglet/PigletConfigEditor';
 import PigletDeviceControl from './piglet/PigletDeviceControl';
+import PigletMonitor from './piglet/PigletMonitor';
+import PigletScreenMirror from './piglet/PigletScreenMirror';
 
 export const DEFAULT_WARDRIVER_CFG = {
   // WiGLE & Upload Services
@@ -373,7 +377,7 @@ const HARDWARE_PINOUTS = [
 const FLASHER_URL = 'https://olosnoks.github.io/warhog/';
 
 export default function WarhogPigletWorkbench() {
-  const [activeTab, setActiveTab] = useState('sd'); // 'sd' | 'config' | 'device' | 'serial' | 'flasher' | 'pinouts'
+  const [activeTab, setActiveTab] = useState('sd'); // 'sd' | 'config' | 'device' | 'serial' | 'monitor' | 'screen' | 'flasher' | 'pinouts'
 
   // Piglet Toolkit (WT protocol over USB): same client as the web flasher
   const [tkConnected, setTkConnected] = useState(false);
@@ -579,6 +583,32 @@ export default function WarhogPigletWorkbench() {
 
           <button
             type="button"
+            onClick={() => setActiveTab('monitor')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+              activeTab === 'monitor'
+                ? 'bg-amber-500 text-slate-950 shadow-md'
+                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <Gauge className="w-3.5 h-3.5" />
+            <span>Core Monitor</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('screen')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+              activeTab === 'screen'
+                ? 'bg-amber-500 text-slate-950 shadow-md'
+                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+            }`}
+          >
+            <Monitor className="w-3.5 h-3.5" />
+            <span>Screen Mirror</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('flasher')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
               activeTab === 'flasher'
@@ -606,7 +636,7 @@ export default function WarhogPigletWorkbench() {
       </div>
 
       {/* Piglet Toolkit connection bar (shared by the SD, config and console tabs) */}
-      {(activeTab === 'sd' || activeTab === 'config' || activeTab === 'device' || activeTab === 'serial') && (
+      {(activeTab === 'sd' || activeTab === 'config' || activeTab === 'device' || activeTab === 'serial' || activeTab === 'monitor' || activeTab === 'screen') && (
         <div className="bg-[#12151c] border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -767,6 +797,23 @@ export default function WarhogPigletWorkbench() {
             </button>
           </form>
         </div>
+      )}
+
+      {/* TAB: CORE MONITOR (live telemetry from the serial stream) */}
+      {activeTab === 'monitor' && (
+        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5">
+          <div className="flex items-center gap-2 pb-3 mb-3 border-b border-slate-800">
+            <Gauge className="w-4 h-4 text-amber-400" />
+            <h2 className="font-bold text-slate-100 text-sm">WarHog Core Monitor</h2>
+            <span className="text-[11px] text-slate-500">live dashboard from the Core&apos;s debug telemetry</span>
+          </div>
+          <PigletMonitor client={client} connected={tkConnected} info={tkInfo} />
+        </div>
+      )}
+
+      {/* TAB: SCREEN MIRROR + remote touch (CYD / W550) */}
+      {activeTab === 'screen' && (
+        <PigletScreenMirror client={client} connected={tkConnected} log={log} />
       )}
 
       {/* TAB 5: WEB FLASHER */}
