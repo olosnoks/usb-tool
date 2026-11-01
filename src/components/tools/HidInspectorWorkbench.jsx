@@ -18,6 +18,7 @@ import {
 } from '../../utils/hidInspector';
 import StatusBadge from '../common/StatusBadge';
 import { DemoBanner } from '../common/DemoNotice';
+import HidReportTools from './hid/HidReportTools';
 
 // A simulated mouse, so the live view can be explored with no device.
 const DEMO_COLLECTIONS = [{
@@ -41,6 +42,9 @@ export default function HidInspectorWorkbench() {
   const reportMapRef = useRef({}); // reportId -> describedReport
   const demoTimer = useRef(null);
   const listenerRef = useRef(null);
+  const tapsRef = useRef(new Set());
+  // Subscribe to every input report (reportId, bytes, timestamp ms); returns the unsubscribe.
+  const addTap = useCallback((fn) => { tapsRef.current.add(fn); return () => tapsRef.current.delete(fn); }, []);
 
   const webHidAvailable = typeof navigator !== 'undefined' && 'hid' in navigator;
 
@@ -62,6 +66,8 @@ export default function HidInspectorWorkbench() {
   const onInputReport = (reportId, dataView) => {
     const described = reportMapRef.current[reportId] || reportMapRef.current[0];
     const bytes = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
+    const t = performance.now();
+    for (const tap of tapsRef.current) tap(reportId, bytes, t);
     let fields = [];
     try { if (described) fields = decodeReport(described, dataView); } catch (e) { /* undecodable */ }
     setLastReport({ reportId, hex: hexDump(bytes), fields });
@@ -129,7 +135,8 @@ export default function HidInspectorWorkbench() {
             </h2>
             <p className="text-[11px] text-slate-400 max-w-3xl">
               Inspect any HID device — keyboard, mouse, game controller, or a vendor gadget — and watch its input reports decode
-              live into named fields (buttons, axes, keys). Read-only unless you explicitly send an output report.
+              live into named fields (buttons, axes, keys). Measure its report rate, record and play back reports, and send output
+              or feature reports (keyboard LEDs, vendor settings) when you choose to.
             </p>
           </div>
           <StatusBadge status={device && !isSimulated ? 'online' : isSimulated ? 'warning' : 'offline'} label="HID" value={device ? (isSimulated ? 'Demo' : 'Live') : 'Idle'} pulse={!!device} />
@@ -191,6 +198,15 @@ export default function HidInspectorWorkbench() {
               </>
             )}
           </div>
+
+          <HidReportTools
+            device={device}
+            isSimulated={isSimulated}
+            info={info}
+            meta={meta}
+            addTap={addTap}
+            inject={(reportId, bytes) => onInputReport(reportId, new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength))}
+          />
 
           {/* Report descriptor */}
           <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">

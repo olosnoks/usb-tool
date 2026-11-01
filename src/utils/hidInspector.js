@@ -27,7 +27,7 @@ const GENERIC_DESKTOP = {
   0x80: 'System Control', 0x81: 'System Power Down', 0x82: 'System Sleep', 0x83: 'System Wake Up'
 };
 
-const LED_USAGES = { 0x01: 'Num Lock', 0x02: 'Caps Lock', 0x03: 'Scroll Lock', 0x04: 'Compose', 0x05: 'Kana' };
+export const LED_USAGES = { 0x01: 'Num Lock', 0x02: 'Caps Lock', 0x03: 'Scroll Lock', 0x04: 'Compose', 0x05: 'Kana' };
 
 export function usagePageName(page) {
   if (page >= 0xff00) return 'Vendor-defined';
@@ -145,4 +145,69 @@ export async function requestHidDevice() {
 export async function listGrantedHidDevices() {
   if (typeof navigator === 'undefined' || !navigator.hid) return [];
   try { return await navigator.hid.getDevices(); } catch (e) { return []; }
+}
+
+// ---------------------------------------------------------------------------
+// Sending reports, keyboard LEDs, report rate and recordings
+// ---------------------------------------------------------------------------
+
+/** "01 ff 0x10,7" -> Uint8Array; throws on anything that isn't a byte. */
+export function parseHexBytes(text) {
+  const parts = String(text).trim().split(/[\s,]+/).filter(Boolean);
+  return Uint8Array.from(parts.map((p) => {
+    const v = parseInt(p.replace(/^0x/i, ''), 16);
+    if (Number.isNaN(v) || v < 0 || v > 255) throw new Error(`"${p}" is not a hex byte.`);
+    return v;
+  }));
+}
+
+
+/** Bit offsets of the LED usages (page 0x08) in a described output report: { usage: bitOffset }. */
+export function ledBits(describedReport) {
+  const out = {};
+  let bit = 0;
+  for (const f of describedReport.fields) {
+    if (f.usagePage === 0x08 && !f.isConstant && f.bitSize === 1) {
+      f.usages.forEach((u, i) => { if (i < f.count && LED_USAGES[u.usage]) out[u.usage] = bit + i; });
+    }
+    bit += f.totalBits;
+  }
+  return out;
+}
+
+/** Bytes of an LED output report with the given LEDs on ({ 1: true, 2: false, ... }). */
+export function ledReportBytes(describedReport, on) {
+  const bytes = new Uint8Array(describedReport.byteLength);
+  for (const [usage, bit] of Object.entries(ledBits(describedReport))) {
+    if (on[usage]) bytes[bit >> 3] |= 1 << (bit & 7);
+  }
+  return bytes;
+}
+
+/** Report timing from timestamps (ms): rate, mean / min / max interval and jitter. */
+export function reportRateStats(times) {
+  if (times.length < 3) return null;
+  const gaps = [];
+  for (let i = 1; i < times.length; i++) gaps.push(times[i] - times[i - 1]);
+  const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+  const sd = Math.sqrt(gaps.reduce((a, g) => a + (g - mean) ** 2, 0) / gaps.length);
+  return { rateHz: 1000 / mean, meanMs: mean, minMs: Math.min(...gaps), maxMs: Math.max(...gaps), jitterMs: sd, samples: times.length };
+}
+
+/** Recording <-> JSON: { device, reports: [{ t, reportId, hex }] } */
+export function serializeRecording(meta, reports) {
+  return JSON.stringify({
+    format: 'skons-hid-recording/1',
+    device: meta,
+    reports: reports.map((r) => ({ t: Math.round(r.t * 1000) / 1000, reportId: r.reportId, hex: Array.from(r.bytes, (b) => b.toString(16).padStart(2, '0')).join('') }))
+  }, null, 1);
+}
+
+export function parseRecording(text) {
+  const j = JSON.parse(text);
+  if (j.format !== 'skons-hid-recording/1' || !Array.isArray(j.reports)) throw new Error('Not a HID recording made by this tool.');
+  return {
+    device: j.device || null,
+    reports: j.reports.map((r) => ({ t: r.t, reportId: r.reportId, bytes: Uint8Array.from((r.hex.match(/../g) || []).map((h) => parseInt(h, 16))) }))
+  };
 }
