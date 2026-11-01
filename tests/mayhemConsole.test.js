@@ -216,3 +216,29 @@ describe('PortaPack Mayhem over WebUSB (simulated HackRF)', () => {
     }
   });
 });
+
+describe('PortaPack Mayhem WebUSB streaming concurrency', () => {
+  it('keeps several IQ transfers in flight at once (RocketGod pump model)', async () => {
+    const { dev } = makeFakeHackRf();
+    let inFlight = 0, maxInFlight = 0;
+    const tone = new Int8Array(2048);
+    for (let k = 0; k < 1024; k++) { tone[2 * k] = Math.round(90 * Math.cos(k / 3)); tone[2 * k + 1] = Math.round(90 * Math.sin(k / 3)); }
+    dev.transferIn = async () => {
+      inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return { status: 'ok', data: new DataView(tone.buffer.slice(0)) };
+    };
+    vi.stubGlobal('navigator', { usb: { requestDevice: async () => dev, getDevices: async () => [] } });
+    try {
+      const d = new MayhemPortaPackDriver();
+      await d.connectWebUsb();
+      await new Promise((r) => setTimeout(r, 40)); // let the pumps overlap
+      expect(maxInFlight).toBeGreaterThan(1);       // not a single serial reader
+      await d.disconnect();
+      expect(inFlight).toBe(0);                     // every transfer unwound
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

@@ -384,43 +384,71 @@ export class MayhemPortaPackDriver {
     }
   }
 
-  async startWebUsbBulkReading() {
-    this.log(`[HackRF WebUSB] Async IQ receiver stream active on bulk endpoint 0x${(0x80 | this.rxEndpoint).toString(16)}.`, 'info');
-    let allZeroWarned = false;
-    while (this.isConnected && this.connectionType === 'webusb') {
-      try {
-        if (!this.usbDevice || !this.usbDevice.opened) break;
-        const result = await this.usbDevice.transferIn(this.rxEndpoint, 65536);
-        // One-time hint if the radio streams only zeros (wrong mode / no bring-up).
-        if (!allZeroWarned && result?.data?.byteLength) {
-          let nonZero = false;
-          for (let i = 0; i < Math.min(512, result.data.byteLength); i++) { if (result.data.getUint8(i) !== 0) { nonZero = true; break; } }
-          if (!nonZero) { allZeroWarned = true; this.log('[HackRF WebUSB] IQ stream is all zeros — is the PortaPack in HackRF mode? (RX bring-up may not have taken.)', 'warning'); }
-        }
-        if (result && result.data && result.data.buffer) {
-          // Real FFT spectrum from the IQ, throttled to ~25 fps.
-          const now = performance.now();
-          if (now - this._lastSpectrumTs >= 40 && result.data.byteLength >= this.spectrumFftSize * 2) {
-            this._lastSpectrumTs = now;
-            const spec = powerSpectrumFromIQ(result.data, this.spectrumFftSize);
-            this.latestSpectrum = spec;
-            let peak = -200;
-            for (let i = 0; i < spec.length; i++) if (spec[i] > peak) peak = spec[i];
-            this.latestLevelDbfs = peak;
-            this.rssi = Math.round(peak); // real relative level (dBFS)
-            if (this.onSpectrumCallback) {
-              this.onSpectrumCallback(spec, peak, this.frequency, this.sampleRate);
-            }
+  // HackRF One streams ~4 MB/s of IQ; one transfer at a time leaves gaps in
+  // which the device's FIFO overflows and the firmware halts the stream (the
+  // "connects but reads nothing" symptom). RocketGod's driver keeps several
+  // transfers in flight at once — so do we: INFLIGHT independent pump loops,
+  // each always holding a transferIn, drain the endpoint continuously.
+  startWebUsbBulkReading() {
+    const ep = this.rxEndpoint;
+    const INFLIGHT = 8;
+    const SIZE = 65536;
+    this.log(`[HackRF WebUSB] IQ stream active on bulk endpoint 0x${(0x80 | ep).toString(16)} (${INFLIGHT} transfers in flight).`, 'info');
+    this._allZeroWarned = false;
+    this._gotIq = false;
+    this._iqStartTs = performance.now();
+
+    const pump = async () => {
+      while (this.isConnected && this.connectionType === 'webusb' && this.usbDevice && this.usbDevice.opened) {
+        try {
+          const result = await this.usbDevice.transferIn(ep, SIZE);
+          if (result.status === 'stall') {
+            try { await this.usbDevice.clearHalt('in', ep); } catch (_) {}
+            continue;
           }
-          // If receiver is on or near 1090 MHz (ADS-B), decode real Mode-S packets!
-          if (Math.abs(this.frequency - 1090000000) < 6000000) {
-            globalAdsbDecoder.processRawIq(result.data.buffer);
-          }
+          if (result.data && result.data.byteLength) this._processIqBuffer(result.data);
+        } catch (err) {
+          if (!this.isConnected) break;
+          await sleep(20);
         }
-      } catch (err) {
-        if (!this.isConnected) break;
-        await new Promise(r => setTimeout(r, 60));
       }
+    };
+
+    this._iqPumps = [];
+    for (let i = 0; i < INFLIGHT; i++) this._iqPumps.push(pump());
+
+    // If nothing arrives in the first ~1.5 s, the PortaPack is probably not in
+    // HackRF mode (or the bring-up did not take). Say so once.
+    setTimeout(() => {
+      if (this.connectionType === 'webusb' && !this._gotIq) {
+        this.log('[HackRF WebUSB] No IQ received. On a PortaPack, switch the device to "HackRF" mode on its screen; a bare HackRF One should just stream.', 'warning');
+      }
+    }, 1500);
+  }
+
+  _processIqBuffer(data) {
+    this._gotIq = true;
+    // One-time hint if the radio streams only zeros (wrong mode / no bring-up).
+    if (!this._allZeroWarned) {
+      let nonZero = false;
+      for (let i = 0; i < Math.min(512, data.byteLength); i++) { if (data.getUint8(i) !== 0) { nonZero = true; break; } }
+      if (!nonZero) { this._allZeroWarned = true; this.log('[HackRF WebUSB] IQ stream is all zeros — is the PortaPack in HackRF mode? (RX bring-up may not have taken.)', 'warning'); }
+    }
+    // Real FFT spectrum from the IQ, throttled to ~25 fps.
+    const now = performance.now();
+    if (now - this._lastSpectrumTs >= 40 && data.byteLength >= this.spectrumFftSize * 2) {
+      this._lastSpectrumTs = now;
+      const spec = powerSpectrumFromIQ(data, this.spectrumFftSize);
+      this.latestSpectrum = spec;
+      let peak = -200;
+      for (let i = 0; i < spec.length; i++) if (spec[i] > peak) peak = spec[i];
+      this.latestLevelDbfs = peak;
+      this.rssi = Math.round(peak); // real relative level (dBFS)
+      if (this.onSpectrumCallback) this.onSpectrumCallback(spec, peak, this.frequency, this.sampleRate);
+    }
+    // Near 1090 MHz, decode real Mode-S (ADS-B) packets from the raw IQ.
+    if (Math.abs(this.frequency - 1090000000) < 6000000) {
+      globalAdsbDecoder.processRawIq(data.buffer);
     }
   }
 
@@ -846,6 +874,8 @@ export class MayhemPortaPackDriver {
       try { await this.usbDevice.close(); } catch (_) {}
       this.usbDevice = null;
     }
+    // Let the IQ pump loops unwind (their in-flight transfers reject on close).
+    if (this._iqPumps) { try { await Promise.allSettled(this._iqPumps); } catch (_) {} this._iqPumps = null; }
     if (this.consoleWaiter) { clearTimeout(this.consoleWaiter.timer); this.consoleWaiter.resolve(this.consoleWaiter.buffer); this.consoleWaiter = null; }
     this.rxBuffer = '';
     const port = this.port, reader = this.reader, readLoop = this._readLoop, pipe = this._pipe;
