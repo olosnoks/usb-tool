@@ -1,0 +1,71 @@
+/*
+ * Device-screen demos ported from the WarHog web flasher (olosnoks/warhog
+ * web-flasher/index.html + screens.js). Each board card shows a little preview
+ * of what the firmware actually draws, so these keep the device's own Dracula
+ * palette rather than the suite's amber theme. Everything is namespaced under
+ * .whd so it never collides with the rest of the app.
+ */
+.whd {
+  --accent: #bd93f9;
+  --blue: #8be9fd;
+  --text: #f8f8f2;
+  --muted: #6272a4;
+  --warn: #f1fa8c;
+  --border: #44475a;
+}
+
+/* device screen frame */
+.whd .screen { border: 1px solid var(--border); border-radius: 8px; background: #000; padding: 5px; overflow: hidden; }
+.whd .screen canvas { border-radius: 3px; display: block; }
+
+/* CYD / Guition — CORE main screen */
+.whd .cyd { background: #0a0d11; border-radius: 4px; padding: 6px 7px 7px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 7px; line-height: 1.3; color: var(--text); display: flex; flex-direction: column; gap: 5px; }
+.whd .cyd-hd { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 4px; border-bottom: 1px solid #44475a; padding-bottom: 4px; position: relative; }
+.whd .cyd-pig { font-size: 12px; line-height: 1; }
+.whd .cyd-ttl { color: var(--accent); font-weight: 700; font-size: 8px; letter-spacing: .5px; display: flex; flex-direction: column; line-height: 1.05; }
+.whd .cyd-ttl b { font-weight: 700; font-size: 7px; }
+.whd .cyd-bat { display: flex; align-items: center; gap: 3px; color: var(--accent); font-size: 7px; justify-self: end; }
+.whd .cyd-bat i { width: 11px; height: 6px; border: 1px solid var(--accent); border-radius: 1px; background: linear-gradient(90deg, var(--accent) 70%, transparent 70%); }
+.whd .cyd-dots { grid-column: 1/-1; display: flex; gap: 7px; color: var(--muted); font-size: 6.5px; align-items: center; }
+.whd .cyd-dots u { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); display: inline-block; margin-right: 2px; }
+.whd .cyd-dots u.y { background: var(--warn); }
+.whd .cyd-sec { color: var(--muted); font-size: 6px; letter-spacing: .8px; margin-top: 1px; }
+.whd .cyd-seg { display: flex; gap: 3px; }
+.whd .cyd-seg s { flex: 1; text-align: center; text-decoration: none; background: #141a20; border: 1px solid #223; border-radius: 3px; padding: 3px 0; color: var(--muted); font-size: 6.5px; }
+.whd .cyd-seg s.on { background: var(--accent); color: #282a36; border-color: var(--accent); font-weight: 700; }
+.whd .cyd-stat { background: #0e141a; border: 1px solid #1b2530; border-radius: 3px; padding: 4px 6px; color: var(--text); font-size: 7px; }
+.whd .cyd-stat em { color: var(--accent); font-style: normal; font-weight: 700; }
+.whd .cyd-cap { display: flex; gap: 4px; }
+.whd .cyd-cap s { flex: 1; text-align: center; background: var(--accent); color: #282a36; border-radius: 3px; padding: 3px 0; font-size: 6.5px; font-weight: 700; }
+.whd .cyd-cards, .whd .cyd-cards2 { display: grid; gap: 4px; }
+.whd .cyd-cards { grid-template-columns: 1fr 1fr 1fr; }
+.whd .cyd-cards2 { grid-template-columns: 1fr 1fr; }
+.whd .cc { background: #0e141a; border: 1px solid #1b2530; border-left-width: 2px; border-radius: 3px; padding: 3px 5px; display: flex; flex-direction: column; gap: 1px; }
+.whd .cc label { color: var(--muted); font-size: 5.5px; letter-spacing: .4px; }
+.whd .cc b { font-size: 11px; font-weight: 700; }
+.whd .cc.a { border-left-color: var(--accent); } .whd .cc.a b { color: var(--accent); }
+.whd .cc.b { border-left-color: var(--blue); } .whd .cc.b b { color: var(--blue); }
+.whd .cc.p { border-left-color: #c084fc; } .whd .cc.p b { color: #c084fc; }
+.whd .cyd-nav { display: flex; gap: 3px; margin-top: 2px; }
+.whd .cyd-nav u { flex: 1; text-align: center; color: var(--muted); font-size: 6.5px; font-weight: 700; padding: 3px 0; }
+.whd .cyd-nav u.on { background: var(--accent); color: #282a36; border-radius: 3px; }
+
+/* Waveshare ST7789 status (white on black, portrait) */
+.whd .wave { background: #000; border-radius: 4px; padding: 8px 9px; font-family: ui-monospace, Menlo, Consolas, monospace; color: #fff; font-size: 9px; line-height: 1.5; aspect-ratio: 172/320; display: flex; flex-direction: column; }
+.whd .wv-hd { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.whd .wv-ttl { font-size: 16px; font-weight: 700; letter-spacing: .5px; }
+.whd .wv-ic { display: flex; gap: 6px; margin-top: 3px; }
+.whd .wv-ic b { width: 11px; height: 11px; display: inline-block; }
+.whd .wv-ic .gps { border: 1.5px solid #fff; border-radius: 50%; position: relative; }
+.whd .wv-ic .gps::after { content: ""; position: absolute; inset: 3px; background: #fff; border-radius: 50%; }
+.whd .wv-ic .sd { border: 1.5px solid #fff; border-radius: 50%; }
+.whd .wv-ic .arr { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 11px solid #ff2a2a; }
+.whd .wv-l { font-size: 10px; }
+.whd .wv-l span { color: #fff; }
+.whd .wv-l em { font-style: normal; }
+.whd .wv-wig { margin-top: 10px; font-size: 9px; color: #fff; }
+.whd .wv-wig span { color: #bbb; }
+.whd .wv-big { margin-top: auto; font-size: 15px; font-weight: 700; }
+.whd .wv-nav { display: flex; flex-direction: column; align-items: center; gap: 3px; margin-top: 8px; }
+.whd .wv-tri { width: 0; height: 0; border-left: 11px solid transparent; border-right: 11px solid transparent; border-bottom: 20px solid #ff2a2a; }
+.whd .wv-nav em { font-style: normal; font-size: 10px; }

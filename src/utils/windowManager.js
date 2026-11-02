@@ -28,7 +28,9 @@ export const TOOL_GROUPS = {
   cyberchef: 'ducky',
   ch341a: 'programmers', 'cmsis-dap': 'programmers', 'jtag-programmer': 'programmers', 'avr-isp': 'programmers',
   'rfid-nfc': 'proxmark',
-  'wifi-scanner': 'alfa-wifi'
+  'wifi-scanner': 'alfa-wifi',
+  'warhog-sd': 'warhog-piglet', 'warhog-config': 'warhog-piglet', 'warhog-console': 'warhog-piglet',
+  'warhog-flasher': 'warhog-piglet', 'warhog-pinouts': 'warhog-piglet'
 };
 
 export const windowKeyFor = (toolId) => TOOL_GROUPS[toolId] || toolId;

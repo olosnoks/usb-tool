@@ -75,6 +75,14 @@ export default function CommandPalette({
     { id: 'tab-macros', name: 'Open Macro Decks & Custom Keypads', category: 'Tools', icon: Command, action: () => onSelectTab('macros') },
     { id: 'tab-autopsy', name: 'Open USB Autopsy & Bootloader Forcer (Vapes / Mystery Chips)', category: 'Tools', icon: Usb, action: () => onSelectTab('autopsy') },
 
+    // WarHog & Piglet Suite (opens the suite, deep-linking its inner tabs)
+    { id: 'tab-warhog', name: 'Open WarHog CYD & Piglet Suite', category: 'WarHog Suite', icon: Radar, action: () => onSelectTab('warhog-piglet') },
+    { id: 'tab-warhog-flasher', name: 'Open WarHog Web Flasher (Board Carousel)', category: 'WarHog Suite', icon: Zap, action: () => onSelectTab('warhog-flasher') },
+    { id: 'tab-warhog-sd', name: 'Open WarHog Piglet SD Card File Explorer (USB)', category: 'WarHog Suite', icon: HardDrive, action: () => onSelectTab('warhog-sd') },
+    { id: 'tab-warhog-config', name: 'Open WarHog wardriver.cfg Editor', category: 'WarHog Suite', icon: Sliders, action: () => onSelectTab('warhog-config') },
+    { id: 'tab-warhog-console', name: 'Open WarHog Piglet Live Console & Screen Mirror', category: 'WarHog Suite', icon: Terminal, action: () => onSelectTab('warhog-console') },
+    { id: 'tab-warhog-pinouts', name: 'Open WarHog Hardware Pinouts', category: 'WarHog Suite', icon: Cpu, action: () => onSelectTab('warhog-pinouts') },
+
     // Actions
     { id: 'act-connect', name: isConnected ? 'Disconnect Active Serial Port' : 'Connect New USB / Serial Port', category: 'Actions', icon: Usb, action: () => isConnected ? onDisconnect() : onConnect() },
     { id: 'act-clear', name: 'Clear Active Terminal Buffer', category: 'Actions', icon: Trash2, action: () => onClearLogs() },

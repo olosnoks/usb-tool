@@ -75,8 +75,15 @@ export const KNOWN_TOOL_IDS = [
   'programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp', 'can-bus', 'logic-analyzer', 'usb-pd', 'dfu',
   'fastboot', 'adb', 'usb-descriptors', 'hid', 'usbtmc', 'mass-storage', 'ptp', 'fido2', 'session-log', 'ble',
   'bus-explorer', 'modbus-rtu', 'alfa-wifi', 'wifi-scanner', 'warhog-piglet', 'mayhem', 'flipper', 'proxmark', 'rfid-nfc',
-  'ducky', 'cyberchef'
+  'ducky', 'cyberchef',
+  'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
+
+// Sub-tab aliases that deep-link into the WarHog & Piglet suite's inner tabs.
+const WARHOG_SUBTABS = {
+  'warhog-sd': 'sd', 'warhog-config': 'config', 'warhog-console': 'live',
+  'warhog-flasher': 'flasher', 'warhog-pinouts': 'pinouts'
+};
 
 /**
  * Render a tool. `serial` is the SerialContext value (shared serial port
@@ -134,7 +141,9 @@ export function renderTool(toolId, serial) {
     case 'bus-explorer': return <BusExplorerWorkbench />;
     case 'modbus-rtu': return <ModbusWorkbench />;
     case 'alfa-wifi': case 'wifi-scanner': return <div className="w-full min-w-0 max-w-full"><AlfaWifiWorkbench /></div>;
-    case 'warhog-piglet': return <div className="w-full min-w-0 max-w-full"><WarhogPigletWorkbench /></div>;
+    case 'warhog-piglet':
+    case 'warhog-sd': case 'warhog-config': case 'warhog-console': case 'warhog-flasher': case 'warhog-pinouts':
+      return <div className="w-full min-w-0 max-w-full"><WarhogPigletWorkbench initialTab={WARHOG_SUBTABS[toolId] || 'sd'} /></div>;
     case 'mayhem': return <PortapackWorkbench />;
     case 'flipper': return <FlipperWorkbench />;
     case 'proxmark': case 'rfid-nfc': return <ProxmarkWorkbench />;

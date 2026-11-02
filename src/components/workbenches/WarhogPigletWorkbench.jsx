@@ -20,6 +20,7 @@ import PigletFileBrowser from './piglet/PigletFileBrowser';
 import PigletConfigEditor from './piglet/PigletConfigEditor';
 import PigletMonitor from './piglet/PigletMonitor';
 import PigletScreenMirror from './piglet/PigletScreenMirror';
+import WarhogBoardCarousel from './piglet/WarhogBoardCarousel';
 
 export const DEFAULT_WARDRIVER_CFG = {
   // WiGLE & Upload Services
@@ -83,6 +84,7 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-S3',
     board: 's3',
     manifest: 'freenove-s3-cyd-ham-ui4.json',
+    screen: 'cyd',
     patch: {
       board: 's3',
       battPin: 9,
@@ -102,6 +104,7 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-S3',
     board: 's3',
     manifest: 'guition-jc8048w550.json',
+    screen: 'cyd',
     patch: {
       board: 's3',
       battPin: -1,
@@ -121,6 +124,11 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-C5',
     board: 'c5',
     manifest: 'xiao_c5.json',
+    screen: 'warhog',
+    firmware: {
+      fork: { label: "skon's fork", manifest: 'xiao_c5.json', bin: 'xiao_c5.bin' },
+      ham: { label: 'official', manifest: 'xiao_c5-ham.json', bin: 'Piglet.ino.merged.bin' }
+    },
     patch: {
       board: 'c5',
       battPin: -1,
@@ -141,6 +149,10 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-C5',
     board: 'c5',
     manifest: 'warhognode_c5.json',
+    firmware: {
+      fork: { label: "skon's fork", manifest: 'warhognode_c5.json', bin: 'warhognode_c5.bin' },
+      ham: { label: 'official', manifest: 'pigletnode_c5-ham.json', bin: 'PigletNode.ino.merged.bin' }
+    },
     patch: {
       board: 'c5',
       scan24: true,
@@ -157,6 +169,7 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-C3',
     board: 'c3',
     manifest: 'esp32c3_oled.json',
+    screen: 'c3',
     patch: {
       board: 'c3',
       scan24: true,
@@ -207,6 +220,7 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-C6',
     board: 'c6',
     manifest: 'waveshare_c6.json',
+    screen: 'wave',
     patch: {
       board: 'c6',
       scan24: true,
@@ -374,8 +388,8 @@ const HARDWARE_PINOUTS = [
 
 const FLASHER_URL = 'https://olosnoks.github.io/warhog/';
 
-export default function WarhogPigletWorkbench() {
-  const [activeTab, setActiveTab] = useState('sd'); // 'sd' | 'config' | 'live' | 'flasher' | 'pinouts'
+export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
+  const [activeTab, setActiveTab] = useState(initialTab); // 'sd' | 'config' | 'live' | 'flasher' | 'pinouts'
 
   // Piglet Toolkit (WT protocol over USB): same client as the web flasher
   const [tkConnected, setTkConnected] = useState(false);
@@ -784,50 +798,7 @@ export default function WarhogPigletWorkbench() {
             </a>
           </div>
 
-          <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-4 gap-3">
-            {Object.entries(HARDWARE_PRESETS).map(([k, p]) => (
-              <div
-                key={k}
-                className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl flex flex-col justify-between space-y-3"
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs text-slate-100">{p.label.split('—')[0]}</span>
-                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300">
-                      {p.chipFamily}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-1">{p.description}</p>
-                </div>
-
-                <div className="space-y-1.5 pt-2 border-t border-slate-800/80">
-                  {p.manifest ? (
-                    <>
-                      <a
-                        href={FLASHER_URL}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs transition"
-                      >
-                        <Flame className="w-3 h-3" />
-                        <span>Flash in browser</span>
-                      </a>
-                      <a
-                        href={`${FLASHER_URL}manifests/${p.manifest}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block text-[10px] text-slate-500 hover:text-slate-300 text-center font-mono"
-                      >
-                        manifest: {p.manifest}
-                      </a>
-                    </>
-                  ) : (
-                    <div className="text-[10px] text-slate-500 text-center">Not in the web flasher. Build it with PlatformIO.</div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+          <WarhogBoardCarousel presets={HARDWARE_PRESETS} flasherUrl={FLASHER_URL} />
 
           <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
             <h3 className="font-bold text-xs text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
