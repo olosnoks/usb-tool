@@ -1,7 +1,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { Flame, ChevronLeft, ChevronRight, Terminal } from 'lucide-react';
 import DeviceScreen from './DeviceScreen';
-import { flashFromManifest, isWebSerialSupported } from './warhogFlash';
+import { flashBoardFirmware, isWebSerialSupported } from './warhogFlash';
 
 const FW_NOTE = {
   fork: "Flashing skon's fork — built from olosnoks/warhog.",
@@ -44,11 +44,11 @@ function BoardCard({ preset: p, flasherUrl, isSelected, innerRef }) {
   const webSerial = isWebSerialSupported();
 
   const handleInstall = async () => {
-    if (flashing) return;
+    if (flashing || !bin) return;
     setFlashing(true);
     try {
-      await flashFromManifest({
-        manifestUrl: `${flasherUrl}manifests/${manifest}`,
+      await flashBoardFirmware({
+        binUrl: `${flasherUrl}firmware/${bin}`,
         expectChip: p.chipFamily,
         report: (st) => setFlashSt(st)
       });
@@ -56,9 +56,10 @@ function BoardCard({ preset: p, flasherUrl, isSelected, innerRef }) {
       const m = (err && err.message) ? err.message : String(err);
       const portBusy = /failed to open|already open|in use/i.test(m);
       const hint = portBusy
-        ? 'The port is in use: close other serial apps or flasher tabs, unplug and replug the board, then retry.'
+        ? 'The port is in use: close other serial apps or flasher tabs, unplug and replug the board, reload this page, then retry.'
         : 'If the board didn’t enter download mode, hold BOOT, tap RESET, release BOOT, and click Install again.';
-      setFlashSt({ stage: 'Failed', kind: 'err', sub: `${m}. ${hint}` });
+      const where = err && err.lastPct != null && err.lastPct < 100 ? ` at ${Math.round(err.lastPct)}%` : '';
+      setFlashSt({ stage: `Failed${where}`, pct: err && err.lastPct != null ? err.lastPct : null, kind: 'err', sub: `${m}. ${hint}` });
     } finally {
       setFlashing(false);
     }
