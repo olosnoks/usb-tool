@@ -1,19 +1,68 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { Flame, ChevronLeft, ChevronRight, Terminal } from 'lucide-react';
 import DeviceScreen from './DeviceScreen';
+import { flashFromManifest, isWebSerialSupported } from './warhogFlash';
 
 const FW_NOTE = {
   fork: "Flashing skon's fork — built from olosnoks/warhog.",
   ham: 'Flashing the official firmware — Hamspiced/piglet latest release.'
 };
 
+// Inline flash-progress block (percentage, stage, bar, detail) shown under the
+// Install button, mirroring the web flasher's c5prog block in the suite's theme.
+function FlashProgress({ st }) {
+  if (!st) return null;
+  const barColor = st.kind === 'ok' ? 'bg-emerald-400' : st.kind === 'err' ? 'bg-rose-500' : 'bg-amber-500';
+  const stageColor = st.kind === 'ok' ? 'text-emerald-400' : st.kind === 'err' ? 'text-rose-400' : 'text-slate-200';
+  const showPct = st.pct != null && !st.busy;
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950 p-2.5 space-y-1.5" role="status" aria-live="polite">
+      <div className="flex items-baseline gap-2 flex-wrap">
+        {showPct && <span className="text-xl font-bold tabular-nums text-slate-100 leading-none">{Math.round(st.pct)}%</span>}
+        <span className={`text-xs font-bold ${stageColor}`}>{st.stage}</span>
+      </div>
+      <div className="h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+        <div
+          className={`h-full rounded-full ${barColor} ${st.busy ? 'w-1/3 animate-pulse' : 'transition-all duration-200'}`}
+          style={st.busy ? undefined : { width: `${st.pct == null ? 0 : Math.max(0, Math.min(100, st.pct))}%` }}
+        />
+      </div>
+      {st.sub && <p className={`text-[11px] break-words ${st.kind === 'err' ? 'text-rose-300' : 'text-slate-500'}`}>{st.sub}</p>}
+    </div>
+  );
+}
+
 // One board card. Holds its own fork/official firmware-source state when the
-// board ships both (data-fw-dual in the web flasher).
+// board ships both (data-fw-dual in the web flasher), plus its flash progress.
 function BoardCard({ preset: p, flasherUrl, isSelected, innerRef }) {
   const [source, setSource] = useState('fork');
+  const [flashSt, setFlashSt] = useState(null);
+  const [flashing, setFlashing] = useState(false);
   const fw = p.firmware ? p.firmware[source] : null;
   const manifest = fw ? fw.manifest : p.manifest;
-  const bin = fw ? fw.bin : null;
+  const bin = fw ? fw.bin : p.bin;
+  const webSerial = isWebSerialSupported();
+
+  const handleInstall = async () => {
+    if (flashing) return;
+    setFlashing(true);
+    try {
+      await flashFromManifest({
+        manifestUrl: `${flasherUrl}manifests/${manifest}`,
+        expectChip: p.chipFamily,
+        report: (st) => setFlashSt(st)
+      });
+    } catch (err) {
+      const m = (err && err.message) ? err.message : String(err);
+      const portBusy = /failed to open|already open|in use/i.test(m);
+      const hint = portBusy
+        ? 'The port is in use: close other serial apps or flasher tabs, unplug and replug the board, then retry.'
+        : 'If the board didn’t enter download mode, hold BOOT, tap RESET, release BOOT, and click Install again.';
+      setFlashSt({ stage: 'Failed', kind: 'err', sub: `${m}. ${hint}` });
+    } finally {
+      setFlashing(false);
+    }
+  };
 
   return (
     <div
@@ -66,15 +115,31 @@ function BoardCard({ preset: p, flasherUrl, isSelected, innerRef }) {
       <div className="space-y-1.5 pt-2 border-t border-slate-800/80">
         {manifest ? (
           <>
-            <a
-              href={flasherUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
-            >
-              <Flame className="w-3.5 h-3.5" />
-              <span>Install — flash in browser</span>
-            </a>
+            {webSerial ? (
+              <button
+                type="button"
+                onClick={handleInstall}
+                disabled={flashing}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 font-bold text-xs transition"
+              >
+                <Flame className={`w-3.5 h-3.5 ${flashing ? 'animate-pulse' : ''}`} />
+                <span>{flashing ? 'Installing…' : 'Install — flash in browser'}</span>
+              </button>
+            ) : (
+              <a
+                href={flasherUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition"
+                title="Web Serial isn’t available here — opens the hosted flasher"
+              >
+                <Flame className="w-3.5 h-3.5" />
+                <span>Open the web flasher</span>
+              </a>
+            )}
+
+            <FlashProgress st={flashSt} />
+
             <div className="flex items-center justify-center gap-3 text-[10px] font-mono text-slate-500">
               {bin && (
                 <a

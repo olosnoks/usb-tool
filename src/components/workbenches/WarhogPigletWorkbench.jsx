@@ -84,6 +84,7 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-S3',
     board: 's3',
     manifest: 'freenove-s3-cyd-ham-ui4.json',
+    bin: 'freenove-s3-cyd-ham-ui4.bin',
     screen: 'cyd',
     patch: {
       board: 's3',
@@ -104,6 +105,7 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-S3',
     board: 's3',
     manifest: 'guition-jc8048w550.json',
+    bin: 'guition-jc8048w550.bin',
     screen: 'cyd',
     patch: {
       board: 's3',
@@ -169,6 +171,7 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-C3',
     board: 'c3',
     manifest: 'esp32c3_oled.json',
+    bin: 'esp32c3_oled.bin',
     screen: 'c3',
     patch: {
       board: 'c3',
@@ -203,6 +206,7 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-C5',
     board: 'c5',
     manifest: 'tdongle_c5-ham.json',
+    bin: 'TDongleC5_Piglet.ino.merged.bin',
     patch: {
       board: 'c5',
       scan24: true,
@@ -220,6 +224,7 @@ export const HARDWARE_PRESETS = {
     chipFamily: 'ESP32-C6',
     board: 'c6',
     manifest: 'waveshare_c6.json',
+    bin: 'waveshare_c6.bin',
     screen: 'wave',
     patch: {
       board: 'c6',
