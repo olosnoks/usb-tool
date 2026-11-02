@@ -248,6 +248,9 @@ export default function AlfaWifiWorkbench() {
 
   // Action Bar Export Dropdown State
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
+  const [isSessionDropdownOpen, setIsSessionDropdownOpen] = useState(false);
+  const [isSettingsDropdownOpen, setIsSettingsDropdownOpen] = useState(false);
+  const [isViewsDropdownOpen, setIsViewsDropdownOpen] = useState(false);
 
   // Windows Driver Onboarding Guide State
   const [isSetupGuideOpen, setIsSetupGuideOpen] = useState(false);
@@ -3042,192 +3045,178 @@ export default function AlfaWifiWorkbench() {
           </div>
 
           {/* Secondary toggles (GPS / Alerts / Simulation) grouped into one segment */}
-          {/* Hardware Adapter Profile Toggle (Alfa RTL8812AU vs Panda Wireless PAU09 RT5572) */}
-          <div
-            className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/80 p-1"
-            role="group"
-            aria-label="Wi-Fi Adapter Hardware Toggle"
-          >
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 flex items-center gap-1">
-              <Usb className="w-3 h-3 text-cyan-400" />
-              Adapter:
-            </span>
-            <button
-              type="button"
-              onClick={() => handleSelectAdapterPreset('alfa')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
-                adapterPreset === 'alfa'
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 border border-transparent'
-              }`}
-              title="Target Alfa AWUS036ACH / Realtek RTL8812AU / RTL8187 WebUSB filters"
+          {/* Sleek Hardware Adapter Profile Dropdown */}
+          <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-1.5 shadow-sm">
+            <Usb className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Adapter:</span>
+            <select
+              value={adapterPreset}
+              onChange={(e) => handleSelectAdapterPreset(e.target.value)}
+              className="bg-transparent text-xs font-bold text-cyan-300 outline-none cursor-pointer"
             >
-              Alfa RTL8812AU
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectAdapterPreset('pau09')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition flex items-center gap-1.5 ${
-                adapterPreset === 'pau09'
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 border border-transparent'
-              }`}
-              title="Target Panda Wireless PAU09 (Ralink / MediaTek RT5572 148f:5572 Dual-Band 2.4/5GHz)"
-            >
-              <span>Panda PAU09</span>
-              <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-500/30">
-                RT5572
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectAdapterPreset('auto')}
-              className={`px-2 py-1 rounded-md text-xs font-semibold transition ${
-                adapterPreset === 'auto'
-                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
-                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 border border-transparent'
-              }`}
-              title="Show all supported Monitor Mode USB adapters (Realtek, Ralink, MediaTek, Atheros)"
-            >
-              All USB
-            </button>
+              <option value="pau09" className="bg-slate-900 text-slate-100">Panda PAU09 (RT5572)</option>
+              <option value="alfa" className="bg-slate-900 text-slate-100">Alfa RTL8812AU</option>
+              <option value="auto" className="bg-slate-900 text-slate-100">All Supported USB</option>
+            </select>
           </div>
 
-          <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-slate-800 bg-slate-900/50 p-1">
-          {/* Quick Wardriving Mode Toggle (enables GPS Tagging + Auto Channel Hopping) */}
+          {/* Quick Wardriving Mode Toggle Button */}
           <button
             type="button"
             onClick={() => {
-              const nextWardrive = !(isGpsTagging && isAutoHop);
-              setIsGpsTagging(nextWardrive);
-              setIsAutoHop(nextWardrive);
-              try {
-                localStorage.setItem('alfa_wifi_gps_tagging', String(nextWardrive));
-              } catch {}
-              setStatusMessage(
-                nextWardrive
-                  ? `Wardriving Mode active (${adapterPreset === 'pau09' ? 'Panda PAU09 RT5572' : 'Alfa RTL8812AU'}): GPS Tagging + Channel Hopping enabled.`
-                  : 'Wardriving Mode paused.'
-              );
+              const next = !(isGpsTagging && isAutoHop);
+              setIsGpsTagging(next);
+              setIsAutoHop(next);
+              try { localStorage.setItem('alfa_wifi_gps_tagging', String(next)); } catch {}
+              setStatusMessage(next ? 'Wardriving Mode active: GPS + Channel Hopping enabled.' : 'Wardriving Mode paused.');
             }}
-            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
               isGpsTagging && isAutoHop
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-300 border border-transparent'
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm'
+                : 'bg-slate-900/90 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
             }`}
-            title="Toggle Wardriving Mode (simultaneous GPS coordinate tagging + 2.4/5GHz channel hopping)"
+            title="Toggle Wardriving Mode (GPS coordinate tagging + dual-band auto-hop)"
           >
             <Navigation className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="font-semibold">Wardriving Mode</span>
+            <span>Wardriving Mode</span>
+            {isGpsTagging && isAutoHop && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5" />}
           </button>
-          {/* GPS Tagging Toggle */}
-          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none px-2.5 py-1 rounded-md hover:bg-slate-800/60">
-            <input
-              type="checkbox"
-              checked={isGpsTagging}
-              onChange={(e) => {
-                const checked = e.target.checked;
-                setIsGpsTagging(checked);
-                try {
-                  localStorage.setItem('alfa_wifi_gps_tagging', String(checked));
-                } catch {}
-              }}
-              className="accent-cyan-500 w-3.5 h-3.5 rounded"
-            />
-            <Compass className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="font-semibold text-slate-300">GPS Tagging</span>
-            {isGpsTagging && currentGps?.latitude != null && (
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-0.5" title="GPS Locked" />
+
+          {/* Sleek RF Modes, Simulation, Gain & Guides Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsSettingsDropdownOpen(prev => !prev)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                (isSimulateRf || isDesktopAlerts)
+                  ? 'bg-slate-900 text-cyan-300 border-cyan-500/40 shadow-sm'
+                  : 'bg-slate-900/90 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
+              }`}
+              title="Configure GPS tagging, RX gain, simulation, and driver guide"
+            >
+              <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+              <span>RF Options</span>
+              {(isSimulateRf || isDesktopAlerts) && (
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+              )}
+              <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${isSettingsDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isSettingsDropdownOpen && (
+              <div
+                style={{ backgroundColor: '#0a0f1d' }}
+                className="absolute right-0 mt-2 w-72 rounded-xl border border-slate-700 shadow-2xl p-3 z-50 text-xs space-y-2.5 font-mono text-slate-200"
+                onMouseLeave={() => setIsSettingsDropdownOpen(false)}
+              >
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-800 text-[11px] font-bold text-slate-300">
+                  <span>RF MODES & CONFIG</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsSettingsDropdownOpen(false)}
+                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* GPS Tagging */}
+                <label className="flex items-center justify-between px-2.5 py-1.5 rounded-lg border border-slate-700/60 cursor-pointer select-none" style={{ backgroundColor: '#131c31' }}>
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <Compass className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>GPS Coordinate Tagging</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={isGpsTagging}
+                    onChange={(e) => {
+                      setIsGpsTagging(e.target.checked);
+                      try { localStorage.setItem('alfa_wifi_gps_tagging', String(e.target.checked)); } catch {}
+                    }}
+                    className="accent-cyan-500 w-3.5 h-3.5 rounded"
+                  />
+                </label>
+
+                {/* Desktop Alerts */}
+                <label className="flex items-center justify-between px-2.5 py-1.5 rounded-lg border border-slate-700/60 cursor-pointer select-none" style={{ backgroundColor: '#131c31' }}>
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <Bell className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Desktop Alerts (WIDS)</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={isDesktopAlerts}
+                    onChange={handleToggleDesktopAlerts}
+                    className="accent-amber-500 w-3.5 h-3.5 rounded"
+                  />
+                </label>
+
+                {/* Simulate RF Traffic */}
+                <label className="flex items-center justify-between px-2.5 py-1.5 rounded-lg border border-slate-700/60 cursor-pointer select-none" style={{ backgroundColor: '#131c31' }}>
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <Radio className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Simulate RF Telemetry</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={isSimulateRf}
+                    onChange={(e) => {
+                      setIsSimulateRf(e.target.checked);
+                      if (e.target.checked && !isMonitoring) {
+                        setIsMonitoring(true);
+                        isCapturingRef.current = true;
+                      }
+                    }}
+                    className="accent-cyan-500 w-3.5 h-3.5 rounded"
+                  />
+                </label>
+
+                {/* RX Gain Slider */}
+                <div className="p-2.5 rounded-lg border border-slate-700/60 space-y-1.5" style={{ backgroundColor: '#131c31' }}>
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="font-semibold text-slate-300">Physical RX Gain:</span>
+                    <span className="font-bold text-cyan-300 px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700">{rxGain}/10</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    step="1"
+                    value={rxGain}
+                    onChange={(e) => handleRxGainChange(e.target.value)}
+                    className="w-full accent-cyan-500 cursor-pointer"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSetupGuideError(null);
+                      setIsSetupGuideOpen(true);
+                      setIsSettingsDropdownOpen(false);
+                    }}
+                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:brightness-125 text-xs font-semibold"
+                    style={{ backgroundColor: '#162238' }}
+                  >
+                    <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Driver Guide</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsHardwarePanelOpen(!isHardwarePanelOpen);
+                      setIsSettingsDropdownOpen(false);
+                    }}
+                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:brightness-125 text-xs font-semibold"
+                    style={{ backgroundColor: '#162238' }}
+                  >
+                    <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>HW Status</span>
+                  </button>
+                </div>
+              </div>
             )}
-          </label>
-
-          {/* Desktop Alerts Toggle */}
-          <button
-            type="button"
-            onClick={handleToggleDesktopAlerts}
-            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition ${
-              isDesktopAlerts
-                ? 'bg-amber-500/20 text-amber-300 shadow-sm'
-                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-300'
-            }`}
-            title={isDesktopAlerts ? 'Desktop Alerts Active (1 per min limit)' : 'Enable Desktop Alerts (Notification API)'}
-          >
-            {isDesktopAlerts ? (
-              <Bell className="w-3.5 h-3.5 text-amber-400" />
-            ) : (
-              <BellOff className="w-3.5 h-3.5 text-slate-500" />
-            )}
-            <span className="font-semibold">{isDesktopAlerts ? 'Alerts On' : 'Enable Desktop Alerts'}</span>
-          </button>
-
-          {/* Simulation Toggle */}
-          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none px-2.5 py-1 rounded-md hover:bg-slate-800/60">
-            <input
-              type="checkbox"
-              checked={isSimulateRf}
-              onChange={(e) => {
-                setIsSimulateRf(e.target.checked);
-                if (e.target.checked && !isMonitoring) {
-                  setIsMonitoring(true);
-                  isCapturingRef.current = true;
-                }
-              }}
-              className="accent-cyan-500 w-3.5 h-3.5 rounded"
-            />
-            <span className="font-semibold text-slate-300">Simulate RF</span>
-          </label>
           </div>
-
-          {/* Hardware RX Sensitivity / Gain Slider */}
-          <div 
-            className="flex items-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-lg border border-slate-800"
-            title={`Hardware Receiver (RX) Gain: ${rxGain}/10\nAdjusts physical baseband AGC / LNA sensitivity on the radio adapter.`}
-          >
-            <Radio className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span className="text-xs font-semibold text-slate-300 whitespace-nowrap">RX Gain:</span>
-            <input 
-              type="range"
-              min="1"
-              max="10"
-              step="1"
-              value={rxGain}
-              onChange={(e) => handleRxGainChange(e.target.value)}
-              className="w-16 @sm:w-20 accent-cyan-500 cursor-pointer"
-            />
-            <span className="text-xs font-mono font-bold text-cyan-300 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">
-              {rxGain}/10
-            </span>
-          </div>
-
-          {/* Windows Driver Setup Guide Button */}
-          <button
-            type="button"
-            onClick={() => {
-              setSetupGuideError(null);
-              setIsSetupGuideOpen(true);
-            }}
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-900/80 text-slate-300 hover:border-slate-700 hover:text-white transition"
-            title="Open Windows WebUSB WinUSB driver configuration guide"
-          >
-            <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
-            <span className="font-semibold hidden @sm:inline">Driver Guide</span>
-          </button>
-
-          {/* Hardware Status Introspection Toggle */}
-          <button
-            type="button"
-            onClick={() => setIsHardwarePanelOpen(!isHardwarePanelOpen)}
-            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition ${
-              isHardwarePanelOpen
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 shadow-sm'
-                : 'bg-slate-900/80 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
-            }`}
-            title="Inspect physical adapter MAC, firmware, and chipset properties"
-          >
-            <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="font-semibold">Hardware Status</span>
-            <span className={`w-1.5 h-1.5 rounded-full ${isConnected || isSimulateRf ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
-          </button>
 
           <div className="h-6 w-px bg-slate-800 mx-0.5 hidden @sm:block" />
 
@@ -3828,235 +3817,159 @@ export default function AlfaWifiWorkbench() {
           </div>
         </div>
 
-        {/* Right: Forensic & Session Controls */}
+        {/* Right: Sleek Forensic & Session Dropdown Menus */}
         <div className="flex flex-wrap items-center gap-2 min-w-0">
-          {/* Save Session to IndexedDB */}
-          <button
-            onClick={handleSaveSession}
-            disabled={isSavingSession || Object.keys(devices).length === 0}
-            title="Save capture session to local IndexedDB store"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs transition disabled:opacity-50 disabled:cursor-not-allowed font-bold"
-          >
-            <Save className="w-3.5 h-3.5" />
-            <span className="hidden @sm:inline">{isSavingSession ? 'Saving...' : 'Save Session'}</span>
-          </button>
-
-          {/* Load Session from IndexedDB */}
-          <button
-            onClick={handleOpenSessionModal}
-            title="Open IndexedDB saved sessions"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-xs transition font-bold"
-          >
-            <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden @sm:inline">Load Session</span>
-          </button>
-
-          {/* Timeline Replay Toggle Button */}
-          <button
-            onClick={() => {
-              if (isTimelineActive) {
-                setIsTimelineActive(false);
-                setIsTimelinePlaying(false);
-              } else {
-                const allLoaded = [...Object.values(devices), ...Object.values(clients)];
-                if (allLoaded.length === 0) {
-                  setStatusMessage('No device timestamps available for timeline replay.');
-                  setStatusLevel('info');
-                  return;
-                }
-                let globalStart = Infinity;
-                let globalEnd = -Infinity;
-                for (const entity of allLoaded) {
-                  const { start, end } = getDeviceTimeRange(entity);
-                  if (start < globalStart) globalStart = start;
-                  if (end > globalEnd) globalEnd = end;
-                }
-                if (globalStart !== Infinity && globalEnd !== -Infinity) {
-                  if (globalEnd <= globalStart) globalEnd = globalStart + 10000;
-                  setTimelineRange({ start: globalStart, end: globalEnd });
-                  setCurrentSliderTime(globalEnd);
-                  setIsTimelineActive(true);
-                  setIsTimelinePlaying(false);
-                }
-              }
-            }}
-            title={isTimelineActive ? "Exit Timeline Replay" : "Open Timeline Replay Scrubber"}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition font-bold ${
-              isTimelineActive
-                ? 'bg-cyan-500/30 text-cyan-200 border-cyan-400 shadow-cyan-glow'
-                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700'
-            }`}
-          >
-            <Clock className={`w-3.5 h-3.5 ${isTimelineActive ? 'text-cyan-300 animate-pulse' : 'text-cyan-400'}`} />
-            <span className="hidden @sm:inline">Timeline Replay</span>
-          </button>
-
-          {/* Baseline Reference & Diffing Controls */}
-          <div className="flex items-center gap-1.5 bg-slate-900/90 px-2 py-1 rounded-lg border border-slate-800">
-            <button
-              onClick={handleSaveBaseline}
-              disabled={Object.keys(devices).length === 0 && Object.keys(clients).length === 0}
-              title="Save current scan as reference baseline snapshot"
-              className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-bold transition bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <GitCompare className="w-3.5 h-3.5" />
-              <span>Save Baseline</span>
-            </button>
-
-            {baselineSnapshot && (
-              <>
-                <label 
-                  className="flex items-center gap-1.5 text-xs text-purple-300 cursor-pointer select-none px-1.5 py-0.5 hover:text-purple-200"
-                  title={`Baseline saved at ${baselineSnapshot.savedAt} (${baselineSnapshot.deviceCount} APs, ${baselineSnapshot.clientCount} STAs)`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={showNewSinceBaseline}
-                    onChange={(e) => {
-                      setShowNewSinceBaseline(e.target.checked);
-                      setTablePage(1);
-                    }}
-                    className="accent-purple-500 w-3.5 h-3.5 rounded"
-                  />
-                  <span className="font-semibold text-[11px]">Show New Since Baseline</span>
-                </label>
-
-                <button
-                  onClick={handleClearBaseline}
-                  title="Clear saved baseline"
-                  className="p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-rose-400 text-xs transition"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Stream to Disk Toggle (File System Access API) */}
-          <button
-            onClick={handleToggleStreamToDisk}
-            title={isStreamingToDisk ? `Streaming active to ${diskStreamStats.fileName}. Click to stop.` : "Stream live raw 802.11 packets directly to local disk (bypasses memory buffer for unlimited capture)"}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition font-bold ${
-              isStreamingToDisk
-                ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-sm animate-pulse'
-                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700'
-            }`}
-          >
-            <HardDrive className={`w-3.5 h-3.5 ${isStreamingToDisk ? 'text-rose-400' : 'text-cyan-400'}`} />
-            <span>{isStreamingToDisk ? 'Streaming to Disk' : 'Stream to Disk'}</span>
-            {isStreamingToDisk && (
-              <span className="px-1.5 py-0.2 rounded bg-rose-950 text-rose-300 text-[10px] font-mono border border-rose-800/60">
-                {diskStreamStats.packetCount} pkts
-              </span>
-            )}
-          </button>
-
-          {/* Multi-Format Export Dropdown Menu */}
+          {/* Session & Forensics Actions Dropdown Menu */}
           <div className="relative">
             <button
-              onClick={() => setIsExportDropdownOpen(prev => !prev)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs transition font-bold"
-              title="Export captured telemetry in standard forensic and geographic formats"
+              onClick={() => setIsSessionDropdownOpen(prev => !prev)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs transition font-bold"
+              title="Forensic captures, IndexedDB session storage, timeline replay, and PCAP replay"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Export</span>
-              <ChevronDown className={`w-3 h-3 transition-transform ${isExportDropdownOpen ? 'rotate-180' : ''}`} />
+              <Database className="w-3.5 h-3.5" />
+              <span>Session & Actions</span>
+              <ChevronDown className={`w-3 h-3 transition-transform ${isSessionDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
 
-            {isExportDropdownOpen && (
-              <div 
-                className="absolute right-0 mt-2 w-52 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-1.5 z-50 text-xs backdrop-blur-md space-y-1"
-                onMouseLeave={() => setIsExportDropdownOpen(false)}
+            {isSessionDropdownOpen && (
+              <div
+                style={{ backgroundColor: '#0a0f1d' }}
+                className="absolute right-0 mt-2 w-64 rounded-xl border border-slate-700 shadow-2xl p-2 z-50 text-xs font-mono space-y-1 text-slate-200"
+                onMouseLeave={() => setIsSessionDropdownOpen(false)}
               >
+                {/* Save Session */}
                 <button
                   onClick={() => {
-                    setIsExportDropdownOpen(false);
-                    handleExportPcap();
+                    setIsSessionDropdownOpen(false);
+                    handleSaveSession();
                   }}
-                  disabled={rawPacketsRef.current.length === 0}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/80 flex items-center gap-2 text-slate-200 hover:text-emerald-300 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={isSavingSession || Object.keys(devices).length === 0}
+                  className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-slate-800/80 flex items-center gap-2.5 text-slate-200 hover:text-cyan-300 transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <FileCode className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <Save className="w-4 h-4 text-cyan-400 shrink-0" />
                   <div>
-                    <div className="font-semibold">Export PCAP</div>
-                    <div className="text-[10px] text-slate-500">Wireshark (.pcap)</div>
+                    <div className="font-semibold">{isSavingSession ? 'Saving Session...' : 'Save Current Session'}</div>
+                    <div className="text-[10px] text-slate-500">Persist to local IndexedDB</div>
                   </div>
                 </button>
 
+                {/* Load Session */}
                 <button
                   onClick={() => {
-                    setIsExportDropdownOpen(false);
-                    handleExportWigle();
+                    setIsSessionDropdownOpen(false);
+                    handleOpenSessionModal();
                   }}
-                  disabled={Object.keys(devices).length === 0}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/80 flex items-center gap-2 text-slate-200 hover:text-cyan-300 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-slate-800/80 flex items-center gap-2.5 text-slate-200 hover:text-cyan-300 transition"
                 >
-                  <Compass className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <FolderOpen className="w-4 h-4 text-cyan-400 shrink-0" />
                   <div>
-                    <div className="font-semibold">Export Wigle CSV</div>
-                    <div className="text-[10px] text-slate-500">Wardriving (.csv)</div>
+                    <div className="font-semibold">Load Saved Session</div>
+                    <div className="text-[10px] text-slate-500">Browse historical captures</div>
                   </div>
                 </button>
 
+                <div className="border-t border-slate-800 my-1" />
+
+                {/* Timeline Replay Toggle */}
                 <button
                   onClick={() => {
-                    setIsExportDropdownOpen(false);
-                    handleExportGeoJson();
+                    setIsSessionDropdownOpen(false);
+                    if (isTimelineActive) {
+                      setIsTimelineActive(false);
+                      setIsTimelinePlaying(false);
+                    } else {
+                      const allLoaded = [...Object.values(devices), ...Object.values(clients)];
+                      if (allLoaded.length === 0) {
+                        setStatusMessage('No device timestamps available for timeline replay.');
+                        setStatusLevel('info');
+                        return;
+                      }
+                      let globalStart = Infinity;
+                      let globalEnd = -Infinity;
+                      for (const entity of allLoaded) {
+                        const { start, end } = getDeviceTimeRange(entity);
+                        if (start < globalStart) globalStart = start;
+                        if (end > globalEnd) globalEnd = end;
+                      }
+                      if (globalStart !== Infinity && globalEnd !== -Infinity) {
+                        if (globalEnd <= globalStart) globalEnd = globalStart + 10000;
+                        setTimelineRange({ start: globalStart, end: globalEnd });
+                        setCurrentSliderTime(globalEnd);
+                        setIsTimelineActive(true);
+                        setIsTimelinePlaying(false);
+                      }
+                    }
+                  }}
+                  className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-slate-800/80 flex items-center gap-2.5 text-slate-200 hover:text-cyan-300 transition"
+                >
+                  <Clock className={`w-4 h-4 shrink-0 ${isTimelineActive ? 'text-cyan-300 animate-pulse' : 'text-cyan-400'}`} />
+                  <div>
+                    <div className="font-semibold">{isTimelineActive ? 'Exit Timeline Replay' : 'Timeline Replay Scrubber'}</div>
+                    <div className="text-[10px] text-slate-500">{isTimelineActive ? 'Scrubber is active' : 'Rewind RF telemetry'}</div>
+                  </div>
+                </button>
+
+                {/* Save Baseline Snapshot */}
+                <button
+                  onClick={() => {
+                    setIsSessionDropdownOpen(false);
+                    handleSaveBaseline();
                   }}
                   disabled={Object.keys(devices).length === 0 && Object.keys(clients).length === 0}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/80 flex items-center gap-2 text-slate-200 hover:text-purple-300 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-slate-800/80 flex items-center gap-2.5 text-slate-200 hover:text-purple-300 transition disabled:opacity-40"
                 >
-                  <MapPin className="w-4 h-4 text-purple-400 shrink-0" />
+                  <GitCompare className="w-4 h-4 text-purple-400 shrink-0" />
                   <div>
-                    <div className="font-semibold">Export GeoJSON</div>
-                    <div className="text-[10px] text-slate-500">GIS Features (.geojson)</div>
+                    <div className="font-semibold">Save Baseline Snapshot</div>
+                    <div className="text-[10px] text-slate-500">{baselineSnapshot ? `Saved (${baselineSnapshot.deviceCount} APs)` : 'Diff against future scans'}</div>
                   </div>
                 </button>
 
+                {/* Stream to Disk Toggle */}
                 <button
                   onClick={() => {
-                    setIsExportDropdownOpen(false);
-                    handleExportKml();
+                    setIsSessionDropdownOpen(false);
+                    handleToggleStreamToDisk();
                   }}
-                  disabled={Object.keys(devices).length === 0 && Object.keys(clients).length === 0}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/80 flex items-center gap-2 text-slate-200 hover:text-amber-300 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-slate-800/80 flex items-center gap-2.5 text-slate-200 hover:text-rose-300 transition"
                 >
-                  <Globe className="w-4 h-4 text-amber-400 shrink-0" />
+                  <HardDrive className={`w-4 h-4 shrink-0 ${isStreamingToDisk ? 'text-rose-400 animate-pulse' : 'text-cyan-400'}`} />
                   <div>
-                    <div className="font-semibold">Export KML</div>
-                    <div className="text-[10px] text-slate-500">Google Earth (.kml)</div>
+                    <div className="font-semibold">{isStreamingToDisk ? 'Stop Disk Stream' : 'Stream Live to Disk'}</div>
+                    <div className="text-[10px] text-slate-500">{isStreamingToDisk ? `${diskStreamStats.packetCount} pkts captured` : 'File System Access API'}</div>
                   </div>
                 </button>
 
-                <div className="border-t border-slate-800/80 my-1" />
-
+                {/* Upload PCAP File */}
                 <button
                   onClick={() => {
-                    setIsExportDropdownOpen(false);
-                    handleExportExecutiveReport();
+                    setIsSessionDropdownOpen(false);
+                    pcapFileInputRef.current?.click();
                   }}
-                  disabled={Object.keys(devices).length === 0 && Object.keys(clients).length === 0}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/80 flex items-center gap-2 text-slate-200 hover:text-emerald-300 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={Boolean(replayingPcapState?.active)}
+                  className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-slate-800/80 flex items-center gap-2.5 text-slate-200 hover:text-blue-300 transition disabled:opacity-40"
                 >
-                  <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <Upload className="w-4 h-4 text-blue-400 shrink-0" />
                   <div>
-                    <div className="font-semibold">Export HTML Report</div>
-                    <div className="text-[10px] text-slate-500">Executive Summary (.html)</div>
+                    <div className="font-semibold">Upload .pcap File</div>
+                    <div className="text-[10px] text-slate-500">Offline forensic analysis</div>
                   </div>
                 </button>
 
+                <div className="border-t border-slate-800 my-1" />
+
+                {/* Clear Buffer */}
                 <button
                   onClick={() => {
-                    setIsExportDropdownOpen(false);
-                    handleExportJson();
+                    setIsSessionDropdownOpen(false);
+                    handleClear();
                   }}
-                  disabled={Object.keys(devices).length === 0 && Object.keys(clients).length === 0}
-                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800/80 flex items-center gap-2 text-slate-200 hover:text-cyan-300 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-slate-800/80 flex items-center gap-2.5 text-rose-300 hover:text-rose-200 transition"
                 >
-                  <Database className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
                   <div>
-                    <div className="font-semibold">Export JSON Dump</div>
-                    <div className="text-[10px] text-slate-500">Raw Objects (.json)</div>
+                    <div className="font-semibold">Clear Telemetry Buffer</div>
+                    <div className="text-[10px] text-slate-500">Reset devices, clients & packets</div>
                   </div>
                 </button>
               </div>

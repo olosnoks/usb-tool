@@ -701,83 +701,33 @@ export default function GpsWardriverDeck({
       {/* Wardriver Wi-Fi Adapter Toggle & WebUSB / GPS Control Bar */}
       <div className="bg-[#030712] border border-slate-800 rounded-lg p-2.5 flex flex-wrap items-center justify-between gap-2">
         <div
-          className="flex flex-wrap items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-1"
+          className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-1.5 shadow-sm"
           role="group"
           aria-label="Wardriver Wi-Fi Adapter Source Toggle"
         >
-          <span className="text-[10px] uppercase font-bold text-slate-400 px-2 flex items-center gap-1">
-            <Usb className="w-3 h-3 text-cyber-emerald" />
-            Radio Adapter:
-          </span>
-          <button
-            type="button"
-            onClick={() => handleSelectWardriveSource('pau09')}
-            className={`px-2.5 py-1 rounded text-[11px] font-bold transition flex items-center gap-1.5 ${
-              wardriveSource === 'pau09'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 border border-transparent'
-            }`}
-            title="Use Panda Wireless PAU09 (Ralink RT5572 148f:5572 Dual-Band 2.4GHz/5GHz) via WebUSB"
+          <Usb className="w-3.5 h-3.5 text-cyber-emerald shrink-0" />
+          <span className="text-[10px] uppercase font-bold text-slate-400">Radio:</span>
+          <select
+            value={wardriveSource}
+            onChange={(e) => handleSelectWardriveSource(e.target.value)}
+            className="bg-transparent text-xs font-bold text-emerald-400 outline-none cursor-pointer"
           >
-            <span>Panda PAU09</span>
-            <span className="text-[9px] px-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30">
-              RT5572
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSelectWardriveSource('alfa')}
-            className={`px-2.5 py-1 rounded text-[11px] font-bold transition ${
-              wardriveSource === 'alfa'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 border border-transparent'
-            }`}
-            title="Use Alfa AWUS036ACH (Realtek RTL8812AU) via WebUSB"
-          >
-            Alfa RTL8812AU
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSelectWardriveSource('warhog-cyd')}
-            className={`px-2.5 py-1 rounded text-[11px] font-bold transition flex items-center gap-1.5 ${
-              wardriveSource === 'warhog-cyd'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 border border-transparent'
-            }`}
-            title="Use Warhog CYD (ESP32-2432S028R Cheap Yellow Display) via WebSerial / SD WiGLE v1.6"
-          >
-            <span>Warhog CYD</span>
-            <span className="text-[9px] px-1 rounded bg-amber-950 text-amber-400 border border-amber-500/30">
-              2432S028R
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSelectWardriveSource('piglet')}
-            className={`px-2.5 py-1 rounded text-[11px] font-bold transition flex items-center gap-1.5 ${
-              wardriveSource === 'piglet'
-                ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 border border-transparent'
-            }`}
-            title="Use Piglet Wardriver (Seeed XIAO ESP32-C5 / S3 Dual-Band 2.4/5GHz + ATGM336H GPS) via WebSerial / SD CSV"
-          >
-            <span>Piglet</span>
-            <span className="text-[9px] px-1 rounded bg-pink-950 text-pink-400 border border-pink-500/30">
-              ESP32-C5
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSelectWardriveSource('serial')}
-            className={`px-2.5 py-1 rounded text-[11px] font-bold transition ${
-              wardriveSource === 'serial'
-                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 border border-transparent'
-            }`}
-            title="Parse NMEA + Wi-Fi lines from generic Serial UART stream (ESP32 / Marauder / Flipper)"
-          >
-            Serial UART
-          </button>
+            <option value="pau09" className="bg-slate-900 text-slate-100">
+              Panda PAU09 (RT5572)
+            </option>
+            <option value="alfa" className="bg-slate-900 text-slate-100">
+              Alfa RTL8812AU
+            </option>
+            <option value="warhog-cyd" className="bg-slate-900 text-slate-100">
+              Warhog CYD (2432S028R)
+            </option>
+            <option value="piglet" className="bg-slate-900 text-slate-100">
+              Piglet (ESP32-C5/S3)
+            </option>
+            <option value="serial" className="bg-slate-900 text-slate-100">
+              Serial UART Rig
+            </option>
+          </select>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

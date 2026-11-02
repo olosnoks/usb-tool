@@ -217,32 +217,24 @@ export default function ImprovWifiDeck({
           </div>
         </div>
 
-        {/* Provision Mode Pills */}
-        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-          <button
-            onClick={() => setProvisionMode('improv')}
-            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-              provisionMode === 'improv' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'
-            }`}
+        {/* Provision Mode Selector */}
+        <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-1.5 shadow-sm">
+          <span className="text-[10px] uppercase font-bold text-slate-400">Mode:</span>
+          <select
+            value={provisionMode}
+            onChange={(e) => setProvisionMode(e.target.value)}
+            className="bg-transparent text-xs font-bold text-emerald-400 outline-none cursor-pointer"
           >
-            IMPROV RPC
-          </button>
-          <button
-            onClick={() => setProvisionMode('micropython')}
-            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-              provisionMode === 'micropython' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            MICROPYTHON
-          </button>
-          <button
-            onClick={() => setProvisionMode('at')}
-            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-              provisionMode === 'at' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            ESP-AT CMD
-          </button>
+            <option value="improv" className="bg-slate-900 text-slate-100">
+              IMPROV RPC (Standard)
+            </option>
+            <option value="micropython" className="bg-slate-900 text-slate-100">
+              MICROPYTHON REPL
+            </option>
+            <option value="at" className="bg-slate-900 text-slate-100">
+              ESP-AT CMD
+            </option>
+          </select>
         </div>
       </div>
 
