@@ -4,6 +4,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { LayoutGrid, Layers, X, AppWindow } from 'lucide-react';
 import ToolWindow from './ToolWindow';
+import CircuitBoardBackground from './CircuitBoardBackground';
 import { displayTitle, snapZoneFor, snapGeometry } from '../../utils/windowManager';
 
 // Below this width (phones, narrow split screens) every window fills the desktop.
@@ -57,6 +58,7 @@ export default function Desktop({
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0">
       <div ref={ref} data-testid="desktop" className="relative flex-1 min-h-0 min-w-0 overflow-hidden">
+        <CircuitBoardBackground />
         {!anyOpen && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-slate-500 font-mono text-xs space-y-2 pointer-events-none px-6">
             <AppWindow className="w-8 h-8 text-slate-700" />
