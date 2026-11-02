@@ -10,7 +10,7 @@ import { renderTool, toolMeta } from './components/ToolRegistry';
 import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize,
   moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, loadState, saveState, zoomStep, toggleFit,
-  duplicateWindow, baseIdOf, applySnap
+  duplicateWindow, baseIdOf, applySnap, setZoom
 } from './utils/windowManager';
 
 // Modals
@@ -84,6 +84,7 @@ function AppContent() {
   const onCloseAll = useCallback(() => setWm((s) => closeAll(s)), []);
   const onZoomStep = useCallback((id, dir, currentZoom) => setWm((s) => zoomStep(s, id, dir, currentZoom)), []);
   const onToggleFit = useCallback((id) => setWm((s) => toggleFit(s, id)), []);
+  const onResetZoom = useCallback((id) => setWm((s) => setZoom(s, id, 1)), []);
 
   const focused = focusedWindow(wm);
   const focusedIdRef = useRef(null);
@@ -212,7 +213,7 @@ function AppContent() {
             onFocus={onFocus} onMove={onMove} onResize={onResize} onMinimize={onMinimize}
             onToggleMaximize={onToggleMaximize} onClose={onClose}
             onTile={onTile} onCascade={onCascade} onCloseAll={onCloseAll}
-            onZoomStep={onZoomStep} onToggleFit={onToggleFit} onDuplicate={onDuplicate} onSnap={onSnap}
+            onZoomStep={onZoomStep} onToggleFit={onToggleFit} onResetZoom={onResetZoom} onDuplicate={onDuplicate} onSnap={onSnap}
           />
 
           <TerminalDrawer

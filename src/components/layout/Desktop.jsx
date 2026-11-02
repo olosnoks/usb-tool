@@ -12,7 +12,7 @@ export const FORCE_MAXIMIZE_BELOW_PX = 768;
 export default function Desktop({
   state, viewport, onViewport, renderTool, metaFor,
   onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onTile, onCascade, onCloseAll,
-  onZoomStep, onToggleFit, onDuplicate, onSnap
+  onZoomStep, onToggleFit, onDuplicate, onSnap, onResetZoom
 }) {
   const ref = useRef(null);
   const rectRef = useRef({ left: 0, top: 0 });
@@ -80,7 +80,7 @@ export default function Desktop({
             key={win.id} win={win} focused={state.focusedId === win.id} forceMaximized={forceMax}
             icon={metaFor?.(win.toolId)?.icon} naturalWidth={metaFor?.(win.toolId)?.naturalWidth}
             onFocus={onFocus} onMove={onMove} onResize={onResize} onMinimize={onMinimize} onToggleMaximize={onToggleMaximize} onClose={onClose}
-            onZoomStep={onZoomStep} onToggleFit={onToggleFit} onDuplicate={onDuplicate}
+            onZoomStep={onZoomStep} onToggleFit={onToggleFit} onResetZoom={onResetZoom} onDuplicate={onDuplicate}
             onDragMove={onDragMove} onDragEnd={onDragEnd}
           >
             <React.Suspense fallback={
