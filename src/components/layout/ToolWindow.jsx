@@ -174,7 +174,7 @@ export default function ToolWindow({
       data-window={win.id}
       role="dialog" aria-label={win.title}
       onPointerDownCapture={() => onFocus?.(win.id)}
-      className={`absolute flex flex-col bg-cyber-dark border rounded-xl overflow-hidden font-mono transition-shadow duration-150 ${
+      className={`absolute flex flex-col bg-cyber-dark border rounded-xl font-mono transition-shadow duration-150 ${
         focused ? ACCENT[win.accent] || ACCENT.cyan : 'border-slate-800 shadow-xl shadow-black/60'
       } ${win.minimized ? 'hidden' : ''} ${maximized ? 'rounded-none' : ''}`}
       style={style}
@@ -271,7 +271,8 @@ export default function ToolWindow({
                 onClick={() => onToggleFit?.(win.id)}
                 data-zoom-pct
                 title={win.fit ? 'Fit to width active. Click for manual zoom.' : `Tool zoom: ${pct}%. Click to fit to window.`}
-                className="px-2 py-0.5 rounded-full text-[10px] font-semibold tabular-nums border transition-all bg-cyan-950/70 border-cyan-500/40 text-cyan-300 hover:bg-cyan-900/80 hover:border-cyan-400"
+                style={{ backgroundColor: '#082f49' }}
+                className="px-2 py-0.5 rounded-full text-[10px] font-semibold tabular-nums border transition-all border-cyan-500/50 text-cyan-300 hover:brightness-125 hover:border-cyan-400"
               >
                 {win.fit ? `FIT ${pct}%` : `${pct}%`}
               </button>
@@ -281,7 +282,7 @@ export default function ToolWindow({
                 onClick={() => onToggleFit?.(win.id)}
                 data-zoom-pct
                 title="Fit tool to window width (or Ctrl+wheel to zoom)"
-                className="opacity-0 hover:opacity-100 focus:opacity-100 px-1.5 py-0.5 rounded text-[10px] text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-opacity tabular-nums"
+                className="opacity-0 hover:opacity-100 focus:opacity-100 px-1.5 py-0.5 rounded text-[10px] text-slate-400 hover:text-white hover:bg-slate-800 transition-opacity tabular-nums"
               >
                 100%
               </button>
@@ -303,117 +304,157 @@ export default function ToolWindow({
               <MoreHorizontal className="w-3.5 h-3.5" />
             </button>
 
-            {/* Window Options Popover */}
+            {/* Window Options Popover (100% SOLID OPAQUE DARK SLATE) */}
             {isMenuOpen && (
               <div
                 ref={menuRef}
                 data-no-drag
-                className="absolute right-0 top-full mt-1.5 z-50 w-64 rounded-xl border border-slate-700/80 bg-slate-900/98 p-2.5 shadow-2xl backdrop-blur-xl text-xs font-mono text-slate-200 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-800/80"
+                style={{ backgroundColor: '#0a0f1d' }}
+                className="absolute right-0 top-full mt-2 z-[99999] w-72 rounded-xl border border-slate-700 shadow-[0_20px_60px_rgba(0,0,0,0.95)] p-3 text-xs font-mono text-slate-100 animate-in fade-in zoom-in-95 duration-100"
               >
+                {/* Header */}
+                <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-[11px] font-bold tracking-wider text-slate-200">
+                  <span>WINDOW OPTIONS</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsMenuOpen(false)}
+                    className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    title="Close menu"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
                 {/* Zoom Controls */}
-                <div className="pb-2 space-y-1.5">
-                  <div className="flex items-center justify-between text-slate-400 text-[11px] font-semibold">
-                    <span>TOOL CONTENT ZOOM</span>
-                    <span className="text-cyan-400 font-bold tabular-nums">{pct}%</span>
+                <div className="py-2.5 space-y-2 border-b border-slate-800">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-slate-300">CONTENT ZOOM</span>
+                    <span
+                      className="text-cyan-300 font-bold tabular-nums px-2 py-0.5 rounded border border-slate-700"
+                      style={{ backgroundColor: '#131c31' }}
+                    >
+                      {pct}%
+                    </span>
                   </div>
-                  <div className="flex items-center justify-between gap-1 pt-1">
+                  <div className="grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
                       onClick={() => onZoomStep?.(win.id, -1, zoom)}
-                      className="flex-1 flex items-center justify-center gap-1 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+                      style={{ backgroundColor: '#162238' }}
+                      className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded hover:brightness-125 text-slate-100 font-semibold border border-slate-700 transition-all text-xs"
                       title="Zoom out"
                     >
-                      <ZoomOut className="w-3.5 h-3.5" />
+                      <ZoomOut className="w-3.5 h-3.5 text-slate-300" />
                       <span>Zoom -</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => onZoomStep?.(win.id, 1, zoom)}
-                      className="flex-1 flex items-center justify-center gap-1 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+                      style={{ backgroundColor: '#162238' }}
+                      className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded hover:brightness-125 text-slate-100 font-semibold border border-slate-700 transition-all text-xs"
                       title="Zoom in"
                     >
-                      <ZoomIn className="w-3.5 h-3.5" />
+                      <ZoomIn className="w-3.5 h-3.5 text-slate-300" />
                       <span>Zoom +</span>
                     </button>
                   </div>
-                  <div className="flex items-center justify-between gap-1 pt-1">
+                  <div className="grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
                       onClick={() => { onToggleFit?.(win.id); setIsMenuOpen(false); }}
-                      className={`flex-1 flex items-center justify-center gap-1 py-1 rounded border text-[11px] transition-colors ${
+                      style={win.fit ? { backgroundColor: '#082f49' } : { backgroundColor: '#162238' }}
+                      className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-semibold border transition-all ${
                         win.fit
-                          ? 'bg-cyan-950/70 border-cyan-500/50 text-cyan-300 font-bold'
-                          : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
+                          ? 'border-cyan-400 text-cyan-200'
+                          : 'border-slate-700 text-slate-200 hover:brightness-125'
                       }`}
                     >
-                      {win.fit && <Check className="w-3 h-3 text-cyan-400" />}
+                      {win.fit && <Check className="w-3.5 h-3.5 text-cyan-300" />}
                       <span>Fit to Width</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => { onResetZoom ? onResetZoom(win.id) : onZoomStep?.(win.id, 0, 1); setIsMenuOpen(false); }}
-                      className="flex items-center justify-center gap-1 px-2 py-1 rounded bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/60 text-[11px] transition-colors"
+                      style={{ backgroundColor: '#162238' }}
+                      className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded hover:brightness-125 text-slate-300 hover:text-white border border-slate-700 text-[11px] font-semibold transition-all"
                       title="Reset zoom to 100%"
                     >
-                      <RotateCcw className="w-3 h-3" />
-                      <span>Reset</span>
+                      <RotateCcw className="w-3 h-3 text-slate-400" />
+                      <span>Reset 100%</span>
                     </button>
                   </div>
                 </div>
 
                 {/* Instance Duplication */}
                 {onDuplicate && (
-                  <div className="py-2">
+                  <div className="py-2.5 border-b border-slate-800">
                     <button
                       type="button"
                       onClick={() => { onDuplicate(win.id); setIsMenuOpen(false); }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors text-left"
+                      style={{ backgroundColor: '#131c31' }}
+                      className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:brightness-125 border border-slate-700 text-left transition-all group"
                     >
-                      <CopyPlus className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <div
+                        className="p-1.5 rounded border border-cyan-500/40 text-cyan-300 group-hover:border-cyan-400 shrink-0"
+                        style={{ backgroundColor: '#082f49' }}
+                      >
+                        <CopyPlus className="w-4 h-4" />
+                      </div>
                       <div className="min-w-0">
-                        <div className="font-semibold text-slate-200">Duplicate Window</div>
-                        <div className="text-[10px] text-slate-500 truncate">Run another board concurrently</div>
+                        <div className="font-bold text-slate-100 text-xs">Duplicate Window</div>
+                        <div className="text-[10px] text-slate-400 truncate">Run another board concurrently</div>
                       </div>
                     </button>
                   </div>
                 )}
 
                 {/* Window Control Style Switcher */}
-                <div className="py-2 space-y-1">
-                  <div className="text-[10px] text-slate-400 font-semibold px-2">WINDOW CONTROLS STYLE</div>
-                  <div className="grid grid-cols-2 gap-1 pt-0.5">
+                <div className="py-2.5 border-b border-slate-800 space-y-1.5">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">WINDOW CONTROLS STYLE</div>
+                  <div className="grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
                       onClick={() => setGlobalControlStyle('traffic-lights')}
-                      className={`flex items-center gap-1.5 px-2 py-1 rounded text-[11px] border transition-colors ${
+                      style={controlStyle === 'traffic-lights' ? { backgroundColor: '#082f49' } : { backgroundColor: '#162238' }}
+                      className={`flex items-center justify-center gap-2 py-1.5 px-2 rounded text-[11px] font-semibold border transition-all ${
                         controlStyle === 'traffic-lights'
-                          ? 'bg-cyan-950/60 border-cyan-500/50 text-cyan-300 font-semibold'
-                          : 'bg-slate-800/40 border-slate-700/40 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                          ? 'border-cyan-400 text-cyan-200'
+                          : 'border-slate-700 text-slate-300 hover:brightness-125'
                       }`}
                     >
-                      <span className="w-2 h-2 rounded-full bg-rose-500 inline-block shrink-0" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500 border border-rose-600 inline-block shrink-0" />
                       <span>macOS</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setGlobalControlStyle('native-windows')}
-                      className={`flex items-center gap-1.5 px-2 py-1 rounded text-[11px] border transition-colors ${
+                      style={controlStyle === 'native-windows' ? { backgroundColor: '#082f49' } : { backgroundColor: '#162238' }}
+                      className={`flex items-center justify-center gap-2 py-1.5 px-2 rounded text-[11px] font-semibold border transition-all ${
                         controlStyle === 'native-windows'
-                          ? 'bg-cyan-950/60 border-cyan-500/50 text-cyan-300 font-semibold'
-                          : 'bg-slate-800/40 border-slate-700/40 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                          ? 'border-cyan-400 text-cyan-200'
+                          : 'border-slate-700 text-slate-300 hover:brightness-125'
                       }`}
                     >
-                      <Square className="w-2.5 h-2.5 text-slate-400 inline-block shrink-0" />
+                      <Square className="w-3 h-3 text-slate-300 inline-block shrink-0" />
                       <span>Windows</span>
                     </button>
                   </div>
                 </div>
 
                 {/* Pro-Tips / Hotkeys */}
-                <div className="pt-2 text-[10px] text-slate-500 space-y-0.5 px-1">
-                  <div>• <span className="text-slate-400">Ctrl + Wheel</span> zooms tool content</div>
-                  <div>• <span className="text-slate-400">Double-click</span> header maximizes</div>
-                  <div>• <span className="text-slate-400">Drag to edges</span> snaps & tiles</div>
+                <div className="pt-2 text-[10px] text-slate-400 space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-cyan-400 font-bold">•</span>
+                    <span><strong className="text-slate-200">Ctrl + Wheel</strong> zooms tool content</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-cyan-400 font-bold">•</span>
+                    <span><strong className="text-slate-200">Double-click</strong> header maximizes</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-cyan-400 font-bold">•</span>
+                    <span><strong className="text-slate-200">Drag to edges</strong> snaps & tiles</span>
+                  </div>
                 </div>
               </div>
             )}
