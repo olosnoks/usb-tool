@@ -13,7 +13,8 @@ import {
   ShieldCheck,
   FileText
 } from 'lucide-react';
-import { inspectEspSilicon, dumpFlashRange, parseFlashCapacity, FLASH_MANUFACTURERS } from '../utils/espMemoryTool';
+import { inspectEspSilicon, parseFlashCapacity, FLASH_MANUFACTURERS } from '../utils/espMemoryTool';
+import { dumpFlashViaStub, isWebSerialSupported } from '../utils/espFlashDump';
 import { useSerial } from '../context/SerialContext';
 
 const DUMP_PRESETS = [
@@ -58,6 +59,8 @@ export default function EspMemoryInspector({
   const [targetOffset, setTargetOffset] = useState('0x00009000');
   const [dumpLength, setDumpLength] = useState(20480);
   const [progress, setProgress] = useState({ percent: 0, bytesRead: 0, totalBytes: 0 });
+  const [dumpStage, setDumpStage] = useState('');
+  const webSerial = isWebSerialSupported();
 
   const handleInspectSilicon = async () => {
     if (!isConnected || !port) {
@@ -76,25 +79,44 @@ export default function EspMemoryInspector({
   };
 
   const handleStartDump = async () => {
-    if (!isConnected || !port) {
-      alert('Please connect to an ESP32 serial port first.');
+    if (!webSerial) {
+      alert('Web Serial isn’t available in this browser. Use desktop Chrome, Edge or Brave.');
       return;
     }
     try {
       setIsDumping(true);
+      setDumpStage('');
+      setProgress({ percent: 0, bytesRead: 0, totalBytes: 0 });
       const offsetNum = parseInt(targetOffset, 16);
-      await withPort((p) => dumpFlashRange(
-        p,
-        offsetNum,
-        Number(dumpLength),
-        (percent, bytesRead, totalBytes) => {
-          setProgress({ percent, bytesRead, totalBytes });
+      // Self-contained: esptool-js requests and owns its own port, uploads the
+      // RAM stub, and reads flash — so this works on every modern ESP, not just
+      // the ROM-readable ESP8266/ESP32.
+      const result = await dumpFlashViaStub({
+        startOffset: offsetNum,
+        length: Number(dumpLength),
+        report: ({ stage, pct, bytesRead, totalBytes }) => {
+          if (stage != null) setDumpStage(stage);
+          if (pct != null) {
+            setProgress({
+              percent: Math.round(pct),
+              bytesRead: bytesRead || 0,
+              totalBytes: totalBytes || Number(dumpLength)
+            });
+          }
         },
-        onLogMessage
-      ));
+        onLog: onLogMessage
+      });
+      if (result?.cancelled) {
+        onLogMessage?.('[DUMP] Cancelled — no port selected.', 'sys');
+      }
     } catch (err) {
-      onLogMessage?.(`[DUMP ERROR] Failed: ${err.message}`, 'sys');
-      alert(`Dump Error: ${err.message}`);
+      const msg = err && err.message ? err.message : String(err);
+      const portBusy = /failed to open|already open|in use/i.test(msg);
+      const hint = portBusy
+        ? ' The port is in use — disconnect it in the Terminal (and close other serial tabs), then try again.'
+        : '';
+      onLogMessage?.(`[DUMP ERROR] ${msg}`, 'sys');
+      alert(`Dump Error: ${msg}${hint}`);
     } finally {
       setIsDumping(false);
     }
@@ -196,7 +218,8 @@ export default function EspMemoryInspector({
 
         <button
           onClick={handleStartDump}
-          disabled={!isConnected || isDumping}
+          disabled={isDumping || !webSerial}
+          title={webSerial ? 'Uploads esptool’s stub and reads flash — works on any modern ESP' : 'Web Serial isn’t available in this browser'}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold hover:brightness-110 shadow-amber-glow transition-all disabled:opacity-40"
         >
           <Download className="w-4 h-4" />
@@ -208,7 +231,7 @@ export default function EspMemoryInspector({
       {isDumping && (
         <div className="space-y-1">
           <div className="flex justify-between text-[10px] text-slate-400">
-            <span>Reading ROM sectors...</span>
+            <span>{dumpStage || 'Reading flash...'}</span>
             <span>{progress.bytesRead} / {progress.totalBytes} Bytes ({progress.percent}%)</span>
           </div>
           <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
