@@ -483,9 +483,24 @@ export class MayhemPortaPackDriver {
       this.notifyState();
       return true;
     } catch (err) {
-      this.log(`WebUSB Connection Error: ${err.message}`, 'error');
       if (this.usbDevice) { try { await this.usbDevice.close(); } catch (_) {} this.usbDevice = null; }
       this.isConnected = false; this.connectionType = null;
+      // An empty picker (no HackRF listed) rejects requestDevice with
+      // NotFoundError. That's almost never the app: in HackRF mode Windows must
+      // expose the device under the WinUSB driver for WebUSB to see it, and the
+      // generic "No device selected" hides that. Say what to actually check.
+      if (err && err.name === 'NotFoundError') {
+        this.log('[HackRF WebUSB] Device picker was empty — no WinUSB HackRF found.', 'warning');
+        const friendly = new Error(
+          'No HackRF in the picker. Check: (1) the PortaPack is on the blue HackRF screen, ' +
+          'not normal mode (normal mode is a COM port — use the COM Port button); ' +
+          '(2) in Windows Device Manager the HackRF uses the WinUSB driver (re-run Zadig → WinUSB if SDR#/SDR++/another tool rebound it); ' +
+          '(3) try another cable/USB port. If it shows nowhere in Device Manager, it is the cable/port/power, not the browser.'
+        );
+        friendly.name = 'NotFoundError';
+        throw friendly;
+      }
+      this.log(`WebUSB Connection Error: ${err.message}`, 'error');
       throw err;
     }
   }
