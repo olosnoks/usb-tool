@@ -13,7 +13,10 @@ import {
   Flame,
   Cable,
   Monitor,
-  Gauge
+  Gauge,
+  Copy,
+  Download,
+  Check
 } from 'lucide-react';
 import { PigletToolkitClient } from '../../utils/pigletToolkit';
 import PigletFileBrowser from './piglet/PigletFileBrowser';
@@ -413,6 +416,50 @@ export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
   const [serialInput, setSerialInput] = useState('');
   const logContainerRef = useRef(null);
 
+  // Copy / save helpers for the log panels. `copied` tracks which button just
+  // copied so it can flash a check mark for a moment.
+  const [copied, setCopied] = useState(null);
+  const copiedTimer = useRef(null);
+  useEffect(() => () => clearTimeout(copiedTimer.current), []);
+
+  const copyLog = useCallback(async (text, key) => {
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback for non-secure contexts without the async clipboard API.
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      setCopied(key);
+      clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(null), 1500);
+    } catch (err) {
+      console.error('Clipboard copy failed:', err);
+    }
+  }, []);
+
+  const saveLog = useCallback((text, prefix) => {
+    if (!text) return;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${prefix}-${stamp}.log`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, []);
+
   // Targets Captured
   const [capturedTargets, setCapturedTargets] = useState([]);
   const [bandFilter, setBandFilter] = useState('ALL');
@@ -667,7 +714,29 @@ export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
         <div className="bg-[#12151c] border border-slate-800 rounded-xl p-3 space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Toolkit log</span>
-            <button type="button" onClick={() => setTkLog('')} className="text-[11px] text-slate-500 hover:text-slate-300">Clear</button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => copyLog(tkLog, 'toolkit')}
+                disabled={!tkLog}
+                title="Copy the toolkit log to the clipboard"
+                className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-300 disabled:opacity-40 disabled:hover:text-slate-500"
+              >
+                {copied === 'toolkit' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                <span>{copied === 'toolkit' ? 'Copied' : 'Copy'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => saveLog(tkLog, 'warhog-toolkit')}
+                disabled={!tkLog}
+                title="Save the toolkit log to a .log file"
+                className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-300 disabled:opacity-40 disabled:hover:text-slate-500"
+              >
+                <Download className="w-3 h-3" />
+                <span>Save</span>
+              </button>
+              <button type="button" onClick={() => setTkLog('')} className="text-[11px] text-slate-500 hover:text-slate-300">Clear</button>
+            </div>
           </div>
           <pre ref={tkLogRef} className="h-28 overflow-y-auto bg-slate-950 border border-slate-800 rounded p-2 text-[11px] font-mono text-slate-400 whitespace-pre-wrap">{tkLog}</pre>
         </div>
@@ -718,13 +787,35 @@ export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
                   Firmware debug output from the toolkit&apos;s USB session. Lines you send go straight to the Piglet; WT replies that no file operation is waiting for show up here.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setSerialLogs([])}
-                className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-400 hover:text-slate-200 border border-slate-800"
-              >
-                Clear Logs
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => copyLog(serialLogs.join('\n'), 'serial')}
+                  disabled={serialLogs.length === 0}
+                  title="Copy the console to the clipboard"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-400 hover:text-slate-200 border border-slate-800 disabled:opacity-40 disabled:hover:bg-slate-900 disabled:hover:text-slate-400"
+                >
+                  {copied === 'serial' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copied === 'serial' ? 'Copied' : 'Copy'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => saveLog(serialLogs.join('\n'), 'warhog-serial')}
+                  disabled={serialLogs.length === 0}
+                  title="Save the console to a .log file"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-400 hover:text-slate-200 border border-slate-800 disabled:opacity-40 disabled:hover:bg-slate-900 disabled:hover:text-slate-400"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Save</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSerialLogs([])}
+                  className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-xs text-slate-400 hover:text-slate-200 border border-slate-800"
+                >
+                  Clear Logs
+                </button>
+              </div>
             </div>
 
             <div
