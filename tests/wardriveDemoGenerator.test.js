@@ -5,7 +5,12 @@ import {
   generateTestCsv,
   interpolateSegment,
   formatTimestamp,
+  dateToLocalDatetimeString,
+  localDatetimeStringToDate,
+  parseSvgToNormalizedStrokes,
+  parseSvgPathToStrokes,
   exportPythonScriptSource,
+  SVG_PRESETS,
   VECTOR_FONTS
 } from '../src/utils/wardriveDemoGenerator';
 
@@ -59,13 +64,50 @@ describe('Wardrive Demo Generator', () => {
     expect(firstByte & 0x02).toBe(0); // Locally administered bit 0
   });
 
-  it('controls the target amount of APs accurately', () => {
+  it('controls AP density per km and per mile', () => {
+    const resKm = generateDemoAps({
+      text: 'TEST',
+      densityUnit: 'km',
+      apsPerUnit: 100, // 100 APs per km
+      seed: 42
+    });
+
+    // Total path length in km multiplied by density
+    const expectedFromLength = resKm.totalPathLengthKm * 100;
+    expect(resKm.aps.length).toBeGreaterThanOrEqual(expectedFromLength * 0.95);
+    expect(resKm.aps.length).toBeLessThanOrEqual(expectedFromLength * 1.05);
+
+    // 100 APs per mile means fewer APs per km (~62.1 APs/km)
+    const resMile = generateDemoAps({
+      text: 'TEST',
+      densityUnit: 'mile',
+      apsPerUnit: 100, // 100 APs per mile
+      seed: 42
+    });
+
+    expect(resKm.aps.length).toBeGreaterThan(resMile.aps.length * 1.4);
+  });
+
+  it('scales to high densities per km cleanly', () => {
+    const highDensity = generateDemoAps({
+      text: 'KEPLER',
+      densityUnit: 'km',
+      apsPerUnit: 1000, // 1,000 APs per km
+      seed: 42
+    });
+
+    expect(highDensity.aps.length).toBeGreaterThan(20000);
+    // Spot check a point in the middle
+    const midPoint = highDensity.aps[Math.floor(highDensity.aps.length / 2)];
+    expect(midPoint.mac).toMatch(/^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/);
+  });
+
+  it('controls the target amount of APs accurately when targetApCount is set', () => {
     const res100 = generateDemoAps({
       text: 'TEST',
       targetApCount: 100,
       seed: 42
     });
-    // Should be within +/- 5% of 100
     expect(res100.aps.length).toBeGreaterThanOrEqual(95);
     expect(res100.aps.length).toBeLessThanOrEqual(105);
 
@@ -96,25 +138,6 @@ describe('Wardrive Demo Generator', () => {
     expect(largeSpanLat).toBeGreaterThan(smallSpanLat * 3.5);
   });
 
-  it('controls the wardriving speed', () => {
-    // Slower speed at fixed interval means smaller distance steps = more APs
-    const slowDrive = generateDemoAps({
-      text: 'TEST',
-      speedKmh: 20, // 20 km/h
-      stepIntervalSeconds: 3,
-      seed: 42
-    });
-
-    const fastDrive = generateDemoAps({
-      text: 'TEST',
-      speedKmh: 100, // 100 km/h
-      stepIntervalSeconds: 3,
-      seed: 42
-    });
-
-    expect(slowDrive.aps.length).toBeGreaterThan(fastDrive.aps.length * 3);
-  });
-
   it('handles empty text gracefully', () => {
     const res = generateDemoAps({ text: '' });
     expect(res.aps).toEqual([]);
@@ -141,7 +164,7 @@ describe('Wardrive Demo Generator', () => {
     expect(lines.length).toBe(res.aps.length + 1);
   });
 
-  it('exports standalone Python script source with user settings and configurable controls', () => {
+  it('exports standalone Python script source with APs per km/mile controls', () => {
     const py = exportPythonScriptSource({
       text: 'DEFCON',
       latCenter: 36.11,
@@ -149,16 +172,124 @@ describe('Wardrive Demo Generator', () => {
       letterW: 0.05,
       letterH: 0.08,
       gap: 0.03,
-      speedKmh: 65.0,
-      targetApCount: 750
+      densityUnit: 'mile',
+      apsPerUnit: 250,
+      speedKmh: 65.0
     });
 
     expect(py).toContain('LAT_CENTER = 36.11');
     expect(py).toContain('LON_CENTER = -115.17');
     expect(py).toContain('LETTER_W = 0.05');
     expect(py).toContain('LETTER_H = 0.08');
+    expect(py).toContain('DENSITY_UNIT = "mile"');
+    expect(py).toContain('APS_PER_UNIT = 250');
     expect(py).toContain('SPEED_KMH = 65');
-    expect(py).toContain('TARGET_AP_COUNT = 750');
     expect(py).toContain('DEFCON');
+  });
+
+  it('starts wardrive at a custom specified startTime', () => {
+    const customStart = new Date(2026, 5, 15, 10, 0, 0); // 2026-06-15 10:00:00
+    const res = generateDemoAps({
+      text: 'NOW',
+      startTime: customStart,
+      speedKmh: 60,
+      seed: 42
+    });
+
+    expect(res.aps.length).toBeGreaterThan(0);
+    expect(res.startTime).toEqual(customStart);
+    expect(res.aps[0].first_seen).toBe('2026-06-15 10:00:00');
+    expect(res.endTime.getTime()).toBeGreaterThan(customStart.getTime());
+    // Subsequent AP has advanced timestamp
+    const lastAp = res.aps[res.aps.length - 1];
+    expect(lastAp.first_seen > '2026-06-15 10:00:00').toBe(true);
+  });
+
+  it('formats dateToLocalDatetimeString and parses localDatetimeStringToDate', () => {
+    const d = new Date(2026, 10, 6, 8, 45, 0);
+    const localStr = dateToLocalDatetimeString(d);
+    expect(localStr).toBe('2026-11-06T08:45');
+
+    const parsed = localDatetimeStringToDate(localStr);
+    expect(parsed.getFullYear()).toBe(2026);
+    expect(parsed.getMonth()).toBe(10);
+    expect(parsed.getDate()).toBe(6);
+    expect(parsed.getHours()).toBe(8);
+    expect(parsed.getMinutes()).toBe(45);
+  });
+
+  it('scales letters up to 100x without degrading performance', () => {
+    const startT = Date.now();
+    const giant = generateDemoAps({
+      text: 'BIG',
+      letterScale: 100.0, // ~600 km wide
+      apsPerUnit: 20,
+      seed: 42
+    });
+    const elapsed = Date.now() - startT;
+
+    expect(giant.aps.length).toBeGreaterThan(100);
+    expect(giant.bounds.maxLon - giant.bounds.minLon).toBeGreaterThan(5.0); // Spans >5 degrees lon
+    expect(elapsed).toBeLessThan(2000); // Finishes in < 2 seconds
+  });
+
+  it('parses SVG paths and shapes into normalized strokes', () => {
+    const sampleSvg = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path d="M 10 10 L 90 90 Z" />
+      <line x1="0" y1="50" x2="100" y2="50" />
+      <polygon points="20,20 80,20 50,80" />
+    </svg>`;
+
+    const parsed = parseSvgToNormalizedStrokes(sampleSvg);
+    expect(parsed.strokes.length).toBeGreaterThanOrEqual(3);
+    expect(parsed.width).toBeGreaterThan(0);
+    expect(parsed.height).toBeGreaterThan(0);
+
+    // Verify coordinates are normalized within [0, 1]
+    for (const stroke of parsed.strokes) {
+      for (const [x, y] of stroke) {
+        expect(x).toBeGreaterThanOrEqual(-0.01);
+        expect(x).toBeLessThanOrEqual(1.01);
+        expect(y).toBeGreaterThanOrEqual(-0.01);
+        expect(y).toBeLessThanOrEqual(1.01);
+      }
+    }
+  });
+
+  it('generates demo APs in SVG mode from parsed strokes', () => {
+    const defaultWifi = SVG_PRESETS.find(p => p.id === 'wifi');
+    expect(defaultWifi).toBeDefined();
+
+    const parsed = parseSvgToNormalizedStrokes(defaultWifi.svg);
+    const res = generateDemoAps({
+      text: 'WIFI_DEMO',
+      mode: 'svg',
+      svgStrokes: parsed.strokes,
+      latCenter: 37.77,
+      lonCenter: -122.41,
+      apsPerUnit: 50,
+      seed: 42
+    });
+
+    expect(res.aps.length).toBeGreaterThan(50);
+    expect(res.aps[0].ssid).toMatch(/^WIFI_DEMO-000001$/);
+    expect(res.bounds).not.toBeNull();
+    expect(res.bounds.minLat).toBeLessThanOrEqual(37.77);
+  });
+
+  it('exports standalone Python script with SVG mode and custom startTime', () => {
+    const py = exportPythonScriptSource({
+      text: 'SKULL_AP',
+      mode: 'svg',
+      svgStrokes: [[[0, 0], [1, 1]], [[1, 0], [0, 1]]],
+      latCenter: 32.25,
+      lonCenter: -90.13,
+      startTime: '2026-11-06 12:30:00'
+    });
+
+    expect(py).toContain('MODE = "svg"');
+    expect(py).toContain('SVG_STROKES = [');
+    expect(py).toContain('START_TIME_ISO = "2026-11-06 12:30:00"');
+    expect(py).toContain('svg_span_lon');
   });
 });

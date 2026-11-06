@@ -1,7 +1,15 @@
 /**
  * Wardrive Demo & Map Art Data Generator
- * Generates synthetic Wi-Fi Access Point trails forming readable vector text on geolocation maps (Kepler.gl / WiGLE).
+ * Generates synthetic Wi-Fi Access Point trails forming readable vector text or SVG images
+ * on geolocation maps (Kepler.gl / WiGLE).
  */
+
+export {
+  parseSvgToNormalizedStrokes,
+  parseSvgPathToStrokes,
+  extractAllSvgStrokes,
+  SVG_PRESETS
+} from './svgPathParser.js';
 
 export const VECTOR_FONTS = {
   "A": [
@@ -223,45 +231,65 @@ export function formatTimestamp(date) {
 }
 
 /**
- * Convert km/h speed to approximate degrees of latitude/longitude per second.
- * 1 degree latitude ~ 111 km.
+ * Format a Date object to HTML datetime-local format: YYYY-MM-DDTHH:mm
  */
-export function speedKmhToDegPerSec(speedKmh = 50.0) {
-  return (Number(speedKmh) / 3600.0) / 111.0;
+export function dateToLocalDatetimeString(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
 }
 
 /**
- * Convert degrees per second back to approximate km/h.
+ * Parse a datetime-local or ISO string into a valid local Date object.
  */
-export function degPerSecToSpeedKmh(degPerSec = 0.00015) {
-  return degPerSec * 111.0 * 3600.0;
+export function localDatetimeStringToDate(str) {
+  if (!str) return new Date();
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? new Date() : d;
 }
 
 /**
  * Generate synthetic Access Points tracing text along a vector font path.
- * Supports configurable letter dimensions, scale factor, wardrive vehicle speed, and target AP count.
+ * Supports density in APs per km or APs per mile (with totals up to 500k+),
+ * configurable letter dimensions & scale, vehicle speed, and custom start clock/date.
  */
 export function generateDemoAps(options = {}) {
   const {
     text = 'KEPLER',
+    mode = 'text',             // 'text' | 'svg'
+    svgStrokes = null,         // Array of normalized strokes [[[x, y], ...], ...]
     latCenter = 32.25,
     lonCenter = -90.13,
     letterW = 0.04,
     letterH = 0.06,
     letterScale = 1.0,
     gap = 0.02,
+    densityUnit = 'km',        // 'km' or 'mile'
+    apsPerUnit = 100.0,        // APs per km or mile (e.g. 50, 500, 5000)
+    targetApCount = null,      // Optional explicit total AP count override
     speedKmh = 50.0,
-    speedDegPerSec = null,
-    stepIntervalSeconds = 3,
-    targetApCount = null,
     stepSize = null,
+    startTime = null,          // Custom start clock/date (Date, ISO string, or ms timestamp)
     endTime = null,
     seed = 42
   } = options;
 
+  const isSvgMode = mode === 'svg' && Array.isArray(svgStrokes) && svgStrokes.length > 0;
   const cleanText = String(text || '').trim();
-  if (!cleanText) {
-    return { aps: [], masterPath: [], bounds: null, totalPathLength: 0, durationSeconds: 0 };
+
+  if (!isSvgMode && !cleanText) {
+    return { 
+      aps: [], 
+      masterPath: [], 
+      bounds: null, 
+      totalPathLengthKm: 0, 
+      durationSeconds: 0,
+      apsPerUnit: Number(apsPerUnit) || 100
+    };
   }
 
   const effectiveScale = Number(letterScale) > 0 ? Number(letterScale) : 1.0;
@@ -269,125 +297,190 @@ export function generateDemoAps(options = {}) {
   const effectiveLetterH = (Number(letterH) || 0.06) * effectiveScale;
   const effectiveGap = (Number(gap) || 0.02) * effectiveScale;
 
-  const effectiveSpeedDegPerSec = speedDegPerSec !== null && speedDegPerSec !== undefined
-    ? Number(speedDegPerSec)
-    : speedKmhToDegPerSec(speedKmh !== null && speedKmh !== undefined ? speedKmh : 50.0);
+  // Local metric conversions at given latitude
+  const latRad = (Number(latCenter) * Math.PI) / 180.0;
+  const kmPerLonDeg = 111.0 * Math.cos(latRad);
+  const kmPerLatDeg = 111.0;
 
-  const effectiveStepInterval = Number(stepIntervalSeconds) || 3;
-
-  // Fine interpolation step so curves look smooth
+  // Fine stroke interpolation step, scaled so huge letters calculate smoothly
   const effectiveStepSize = stepSize !== null && stepSize !== undefined
     ? Number(stepSize)
-    : Math.min(0.0008 * effectiveScale, 0.0008);
+    : Math.max(0.0008, 0.0008 * Math.min(effectiveScale, 8.0));
 
   const masterPath = [];
-  let currentX = Number(lonCenter);
+  const x0 = Number(lonCenter);
   const y0 = Number(latCenter);
 
-  for (const ch of cleanText.toUpperCase()) {
-    const strokes = VECTOR_FONTS[ch] || VECTOR_FONTS[" "];
-    const letterLocalPath = [];
+  if (isSvgMode) {
+    // In SVG mode: normalized coordinates (0 to 1) are scaled across the geographic span
+    const svgSpanLon = effectiveLetterW * 6.0;
+    const svgSpanLat = effectiveLetterH * 4.0;
 
-    for (const stroke of strokes) {
+    for (const stroke of svgStrokes) {
+      if (!stroke || stroke.length < 2) continue;
+      const strokeLocalPath = [];
       for (let i = 0; i < stroke.length - 1; i++) {
-        const p1Rel = stroke[i];
-        const p2Rel = stroke[i + 1];
+        const p1 = stroke[i];
+        const p2 = stroke[i + 1];
 
-        const lon1 = currentX + p1Rel[0] * effectiveLetterW;
-        const lat1 = y0 - p1Rel[1] * effectiveLetterH;
-        const lon2 = currentX + p2Rel[0] * effectiveLetterW;
-        const lat2 = y0 - p2Rel[1] * effectiveLetterH;
+        const lon1 = x0 + p1[0] * svgSpanLon;
+        const lat1 = y0 - p1[1] * svgSpanLat;
+        const lon2 = x0 + p2[0] * svgSpanLon;
+        const lat2 = y0 - p2[1] * svgSpanLat;
 
         const pts = interpolateSegment([lon1, lat1], [lon2, lat2], effectiveStepSize);
-        if (letterLocalPath.length > 0) {
-          letterLocalPath.push(...pts.slice(1));
+        if (strokeLocalPath.length > 0) {
+          strokeLocalPath.push(...pts.slice(1));
         } else {
-          letterLocalPath.push(...pts);
+          strokeLocalPath.push(...pts);
         }
       }
-    }
 
-    if (letterLocalPath.length > 0) {
-      if (masterPath.length > 0) {
-        const endPt = masterPath[masterPath.length - 1];
-        const startPt = letterLocalPath[0];
-        const bridgePts = interpolateSegment(endPt, startPt, effectiveStepSize);
-        masterPath.push(...bridgePts.slice(1));
+      if (strokeLocalPath.length > 0) {
+        if (masterPath.length > 0) {
+          const endPt = masterPath[masterPath.length - 1];
+          const startPt = strokeLocalPath[0];
+          const bridgePts = interpolateSegment(endPt, startPt, effectiveStepSize);
+          masterPath.push(...bridgePts.slice(1));
+        }
+        masterPath.push(...strokeLocalPath);
       }
-      masterPath.push(...letterLocalPath);
     }
+  } else {
+    let currentX = x0;
 
-    currentX += effectiveLetterW + effectiveGap;
+    for (const ch of cleanText.toUpperCase()) {
+      const strokes = VECTOR_FONTS[ch] || VECTOR_FONTS[" "];
+      const letterLocalPath = [];
+
+      for (const stroke of strokes) {
+        for (let i = 0; i < stroke.length - 1; i++) {
+          const p1Rel = stroke[i];
+          const p2Rel = stroke[i + 1];
+
+          const lon1 = currentX + p1Rel[0] * effectiveLetterW;
+          const lat1 = y0 - p1Rel[1] * effectiveLetterH;
+          const lon2 = currentX + p2Rel[0] * effectiveLetterW;
+          const lat2 = y0 - p2Rel[1] * effectiveLetterH;
+
+          const pts = interpolateSegment([lon1, lat1], [lon2, lat2], effectiveStepSize);
+          if (letterLocalPath.length > 0) {
+            letterLocalPath.push(...pts.slice(1));
+          } else {
+            letterLocalPath.push(...pts);
+          }
+        }
+      }
+
+      if (letterLocalPath.length > 0) {
+        if (masterPath.length > 0) {
+          const endPt = masterPath[masterPath.length - 1];
+          const startPt = letterLocalPath[0];
+          const bridgePts = interpolateSegment(endPt, startPt, effectiveStepSize);
+          masterPath.push(...bridgePts.slice(1));
+        }
+        masterPath.push(...letterLocalPath);
+      }
+
+      currentX += effectiveLetterW + effectiveGap;
+    }
   }
 
   const aps = [];
   if (masterPath.length === 0) {
-    return { aps, masterPath, bounds: null, totalPathLength: 0, durationSeconds: 0 };
+    return { 
+      aps, 
+      masterPath, 
+      bounds: null, 
+      totalPathLengthKm: 0, 
+      durationSeconds: 0,
+      apsPerUnit: Number(apsPerUnit) || 100
+    };
   }
 
-  // Calculate total path distance in degrees
-  let totalPathLength = 0;
+  // Calculate total path distance in km
+  let totalPathLengthKm = 0;
   for (let i = 0; i < masterPath.length - 1; i++) {
     const p1 = masterPath[i];
     const p2 = masterPath[i + 1];
-    const dx = p2[0] - p1[0];
-    const dy = p2[1] - p1[1];
-    totalPathLength += Math.sqrt(dx * dx + dy * dy);
+    const dxKm = (p2[0] - p1[0]) * kmPerLonDeg;
+    const dyKm = (p2[1] - p1[1]) * kmPerLatDeg;
+    totalPathLengthKm += Math.sqrt(dxKm * dxKm + dyKm * dyKm);
   }
 
-  // Determine step distance: either fixed target AP count or speed * interval
-  let stepDist;
-  if (targetApCount && Number(targetApCount) > 1 && totalPathLength > 0) {
-    stepDist = totalPathLength / Number(targetApCount);
+  // Determine step distance in km based on APs per km/mile
+  const kmPerUnit = densityUnit === 'mile' ? 1.609344 : 1.0;
+  const effectiveApsPerKm = (Number(apsPerUnit) || 100.0) / kmPerUnit;
+
+  let stepDistKm;
+  if (targetApCount && Number(targetApCount) > 1 && totalPathLengthKm > 0) {
+    stepDistKm = totalPathLengthKm / Number(targetApCount);
   } else {
-    stepDist = Math.max(0.00001, effectiveSpeedDegPerSec * effectiveStepInterval);
+    stepDistKm = 1.0 / Math.max(0.0001, effectiveApsPerKm);
   }
 
-  const baseEndTime = endTime instanceof Date ? new Date(endTime.getTime()) : new Date(Date.now() - 24 * 3600 * 1000);
-  let currentTime = new Date(baseEndTime.getTime() - 2 * 3600 * 1000);
+  const effectiveSpeedKmh = Math.max(0.1, Number(speedKmh) || 50.0);
+  const totalDriveSeconds = (totalPathLengthKm / effectiveSpeedKmh) * 3600.0;
+  const expectedTotalAps = Math.max(1, Math.round(totalPathLengthKm / stepDistKm));
+  const timeStepSeconds = totalDriveSeconds / expectedTotalAps;
+
+  const baseEndTime = endTime instanceof Date ? new Date(endTime.getTime()) : (endTime ? new Date(endTime) : null);
+  let currentTime;
+  if (startTime) {
+    const parsedStart = startTime instanceof Date ? new Date(startTime.getTime()) : new Date(startTime);
+    currentTime = isNaN(parsedStart.getTime()) ? new Date(Date.now() - 24 * 3600 * 1000) : parsedStart;
+  } else if (baseEndTime && !isNaN(baseEndTime.getTime())) {
+    currentTime = new Date(baseEndTime.getTime() - totalDriveSeconds * 1000);
+  } else {
+    currentTime = new Date(Date.now() - 24 * 3600 * 1000);
+  }
+
+  const driveStartTime = new Date(currentTime.getTime());
 
   let pointCounter = 1;
   const rng = createPrng(seed);
   const seen = new Set();
-  const ssidPrefix = cleanText.replace(/\s+/g, '_').toUpperCase();
+  const ssidPrefix = (cleanText ? cleanText.replace(/\s+/g, '_') : 'SVG_ART').toUpperCase();
 
   let minLat = Infinity;
   let maxLat = -Infinity;
   let minLon = Infinity;
   let maxLon = -Infinity;
 
-  // Path traversing walker: advances along vertices by exact stepDist
+  // Polyline walker using metric distance stepDistKm
   let currentSegmentIdx = 0;
   let currentPt = masterPath[0];
-  let distanceToNextAp = stepDist;
+  let distanceToNextApKm = stepDistKm;
 
   while (currentSegmentIdx < masterPath.length - 1) {
     const nextVertex = masterPath[currentSegmentIdx + 1];
-    const dx = nextVertex[0] - currentPt[0];
-    const dy = nextVertex[1] - currentPt[1];
-    const segDist = Math.sqrt(dx * dx + dy * dy);
+    const dxLon = nextVertex[0] - currentPt[0];
+    const dyLat = nextVertex[1] - currentPt[1];
+    const dxKm = dxLon * kmPerLonDeg;
+    const dyKm = dyLat * kmPerLatDeg;
+    const segDistKm = Math.sqrt(dxKm * dxKm + dyKm * dyKm);
 
-    if (segDist === 0) {
+    if (segDistKm === 0) {
       currentSegmentIdx++;
       currentPt = nextVertex;
       continue;
     }
 
-    if (segDist < distanceToNextAp) {
-      // Advance to the end of this vertex segment
+    if (segDistKm < distanceToNextApKm) {
       currentPt = nextVertex;
-      distanceToNextAp -= segDist;
+      distanceToNextApKm -= segDistKm;
       currentSegmentIdx++;
     } else {
-      // Step to the exact location of the next AP on this segment
-      const fraction = distanceToNextAp / segDist;
+      const fraction = distanceToNextApKm / segDistKm;
       currentPt = [
-        currentPt[0] + dx * fraction,
-        currentPt[1] + dy * fraction
+        currentPt[0] + dxLon * fraction,
+        currentPt[1] + dyLat * fraction
       ];
-      distanceToNextAp = stepDist;
+      distanceToNextApKm = stepDistKm;
 
-      currentTime = new Date(currentTime.getTime() + effectiveStepInterval * 1000);
+      if (pointCounter > 1) {
+        currentTime = new Date(currentTime.getTime() + timeStepSeconds * 1000);
+      }
 
       // Generate globally unique, unicast MAC address
       const genMac = () => {
@@ -400,6 +493,8 @@ export function generateDemoAps(options = {}) {
       };
 
       let mac = genMac();
+      // Keep seen bounded to prevent memory blowup on 500k+ items
+      if (seen.size > 200000) seen.clear();
       while (seen.has(mac)) {
         mac = genMac();
       }
@@ -437,56 +532,55 @@ export function generateDemoAps(options = {}) {
     aps,
     masterPath,
     bounds,
-    totalPathLength,
-    durationSeconds: aps.length * effectiveStepInterval
+    totalPathLengthKm,
+    durationSeconds: totalDriveSeconds,
+    startTime: driveStartTime,
+    endTime: new Date(currentTime.getTime()),
+    apsPerUnit: Number(apsPerUnit) || 100,
+    densityUnit
   };
 }
 
 /**
  * Generate standard WiGLE Wifi 1.4 CSV format.
+ * High-performance chunked generation handles 500k+ rows easily.
  */
 export function generateWigleCsv(aps, includePreheader = true) {
-  const lines = [];
-  if (includePreheader) {
-    lines.push("WigleWifi-1.4,appRelease=1.0,model=Simulator,release=1.0,device=simulator,display=sim,board=sim,brand=Synthetic");
+  const chunks = [];
+  let buffer = includePreheader
+    ? "WigleWifi-1.4,appRelease=1.0,model=Simulator,release=1.0,device=simulator,display=sim,board=sim,brand=Synthetic\n"
+    : "";
+  buffer += "MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n";
+
+  for (let i = 0; i < aps.length; i++) {
+    const ap = aps[i];
+    buffer += `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.rssi},${ap.lat},${ap.lon},${ap.alt},${ap.accuracy},WIFI\n`;
+    if (buffer.length > 131072) {
+      chunks.push(buffer);
+      buffer = '';
+    }
   }
-  lines.push("MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type");
-  for (const ap of aps) {
-    lines.push([
-      ap.mac,
-      ap.ssid,
-      ap.auth,
-      ap.first_seen,
-      ap.channel,
-      ap.rssi,
-      ap.lat,
-      ap.lon,
-      ap.alt,
-      ap.accuracy,
-      "WIFI"
-    ].join(","));
-  }
-  return lines.join("\n") + "\n";
+  if (buffer.length > 0) chunks.push(buffer);
+  return chunks.join('');
 }
 
 /**
  * Generate Kepler.gl / generic test CSV format.
  */
 export function generateTestCsv(aps) {
-  const lines = ["mac,ssid,auth,first_seen,channel,rssi,lat,lon"];
-  for (const ap of aps) {
-    lines.push([
-      ap.mac,
-      ap.ssid,
-      ap.auth,
-      ap.first_seen,
-      ap.channel,
-      ap.rssi,
-      ap.lat,
-      ap.lon
-    ].join(","));
+  const chunks = [];
+  let buffer = "mac,ssid,auth,first_seen,channel,rssi,lat,lon\n";
+
+  for (let i = 0; i < aps.length; i++) {
+    const ap = aps[i];
+    buffer += `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.rssi},${ap.lat},${ap.lon}\n`;
+    if (buffer.length > 131072) {
+      chunks.push(buffer);
+      buffer = '';
+    }
   }
-  return lines.join("\n") + "\n";
+  if (buffer.length > 0) chunks.push(buffer);
+  return chunks.join('');
 }
 
 /**
@@ -494,23 +588,27 @@ export function generateTestCsv(aps) {
  */
 export function exportPythonScriptSource({
   text = 'KEPLER',
+  mode = 'text',
+  svgStrokes = null,
   latCenter = 32.25,
   lonCenter = -90.13,
   letterW = 0.04,
   letterH = 0.06,
   letterScale = 1.0,
   gap = 0.02,
+  densityUnit = 'km',
+  apsPerUnit = 100.0,
   speedKmh = 50.0,
-  stepIntervalSeconds = 3,
-  targetApCount = null,
+  startTime = null,
   includePreheader = true
 } = {}) {
   const scale = Number(letterScale) || 1.0;
   const scaledW = Number((letterW * scale).toFixed(6));
   const scaledH = Number((letterH * scale).toFixed(6));
   const scaledGap = Number((gap * scale).toFixed(6));
-  const targetApsLiteral = targetApCount ? Number(targetApCount) : 'None';
   const preheaderLiteral = includePreheader ? 'True' : 'False';
+  const startTimeStr = startTime ? (startTime instanceof Date ? formatTimestamp(startTime) : String(startTime).replace('T', ' ')) : '';
+  const isSvg = mode === 'svg' && Array.isArray(svgStrokes) && svgStrokes.length > 0;
 
   return `import csv
 import random
@@ -519,37 +617,48 @@ from datetime import datetime, timedelta
 
 # ==============================================================================
 # WARDRIVING VECTOR ART GENERATOR
-# Creates words made from generated APs to test or visualize on wardriving maps
+# Creates words or SVG art made from generated APs to test or visualize on wardriving maps
 # View your results here: https://kepler.gl/demo
 # ==============================================================================
+
+# Generation Mode: "text" or "svg"
+MODE = "${isSvg ? 'svg' : 'text'}"
 
 # 1. Location Coordinates
 LAT_CENTER = ${latCenter}   # Origin Latitude (click map or edit here)
 LON_CENTER = ${lonCenter}  # Origin Longitude
 
-# 2. Letter Size & Spacing
-# Adjust LETTER_SCALE to scale the whole word up or down (e.g. 0.5 = small, 2.0 = giant)
+# 2. Letter / Vector Scale & Spacing
 LETTER_SCALE = ${scale}
 LETTER_W = ${scaledW}        # Letter width in degrees (~${(scaledW * 111).toFixed(1)} km)
 LETTER_H = ${scaledH}        # Letter height in degrees (~${(scaledH * 111).toFixed(1)} km)
 GAP = ${scaledGap}                 # Spacing between letters
 
-# 3. Wardrive Vehicle Speed & Sampling Rate
-SPEED_KMH = ${speedKmh}            # Simulated driving speed in km/h (e.g. 15 = bike, 45 = city, 90 = highway)
-STEP_INTERVAL_SEC = ${stepIntervalSeconds}    # Seconds between AP sightings
-# 1 degree of latitude is ~111 km. Compute degrees/second:
-SPEED_DEG_PER_SEC = (SPEED_KMH / 3600.0) / 111.0
+# 3. AP Density per KM or Mile (Can produce totals from 1,000 to 500,000+)
+DENSITY_UNIT = "${densityUnit}"    # "km" or "mile"
+APS_PER_UNIT = ${apsPerUnit}       # Number of APs per km (or per mile)
+# e.g., 50/km = sparse, 500/km = dense, 5000/km = ultra-high density (totals ~500k)
 
-# 4. Amount of APs (Density / Count Control)
-# Set TARGET_AP_COUNT to an integer (e.g. 100, 500, 1000) to lock an exact AP count,
-# or set to None to automatically calculate AP count from SPEED_KMH and STEP_INTERVAL_SEC.
-TARGET_AP_COUNT = ${targetApsLiteral}
+# 4. Wardrive Vehicle Speed
+SPEED_KMH = ${speedKmh}            # Simulated driving speed in km/h
+
+# 5. Wardrive Start Clock & Date
+START_TIME_ISO = "${startTimeStr}"  # e.g., "2026-11-05 14:00:00" or empty to default to 24h ago
+if START_TIME_ISO.strip():
+    try:
+        START_TIME = datetime.fromisoformat(START_TIME_ISO.strip().replace(" ", "T"))
+    except Exception:
+        START_TIME = datetime.now() - timedelta(days=1)
+else:
+    START_TIME = datetime.now() - timedelta(days=1)
 
 INCLUDE_PREHEADER = ${preheaderLiteral}           
-END_TIME = datetime.now() - timedelta(days=1)    
 
 # Clean, ordered vector strokes for letters and numbers (Relative coordinates 0.0 to 1.0)
 VECTOR_FONTS = ${JSON.stringify(VECTOR_FONTS, null, 4)}
+
+# Normalized SVG Strokes (when MODE == "svg")
+SVG_STROKES = ${JSON.stringify(isSvg ? svgStrokes : [], null, 4)}
 
 AUTH_MODES = ["[WPA2-PSK-CCMP][ESS]", "[RSN-SAE-CCMP][ESS]", "[WPA2-PSK-CCMP][RSN-SAE-CCMP][ESS]", "[ESS]"]
 CHANNELS = [1, 6, 11, 36, 40, 44, 48, 149, 153, 157, 161]
@@ -572,55 +681,89 @@ def generate_aps(text):
     master_path = []
     current_x = LON_CENTER
     y0 = LAT_CENTER
+    effective_step = max(0.0008, 0.0008 * min(LETTER_SCALE, 8.0))
 
-    for ch in text.upper():
-        strokes = VECTOR_FONTS.get(ch, VECTOR_FONTS.get(" ", []))
-        letter_local_path = []
-        
-        for stroke in strokes:
+    if MODE == "svg" and SVG_STROKES:
+        svg_span_lon = LETTER_W * 6.0
+        svg_span_lat = LETTER_H * 4.0
+        for stroke in SVG_STROKES:
+            if len(stroke) < 2:
+                continue
+            stroke_local_path = []
             for i in range(len(stroke) - 1):
-                p1_rel = stroke[i]
-                p2_rel = stroke[i+1]
-                
-                lon1 = current_x + p1_rel[0] * LETTER_W
-                lat1 = y0 - p1_rel[1] * LETTER_H
-                lon2 = current_x + p2_rel[0] * LETTER_W
-                lat2 = y0 - p2_rel[1] * LETTER_H
-                
-                pts = interpolate_segment((lon1, lat1), (lon2, lat2), step_size=0.0008)
-                if letter_local_path:
-                    letter_local_path.extend(pts[1:])  
+                p1 = stroke[i]
+                p2 = stroke[i + 1]
+                lon1 = current_x + p1[0] * svg_span_lon
+                lat1 = y0 - p1[1] * svg_span_lat
+                lon2 = current_x + p2[0] * svg_span_lon
+                lat2 = y0 - p2[1] * svg_span_lat
+                pts = interpolate_segment((lon1, lat1), (lon2, lat2), step_size=effective_step)
+                if stroke_local_path:
+                    stroke_local_path.extend(pts[1:])
                 else:
-                    letter_local_path.extend(pts)
-        
-        if letter_local_path:
-            if master_path:
-                end_pt = master_path[-1]
-                start_pt = letter_local_path[0]
-                bridge_pts = interpolate_segment(end_pt, start_pt, step_size=0.0008)
-                master_path.extend(bridge_pts[1:])
-            master_path.extend(letter_local_path)
+                    stroke_local_path.extend(pts)
+            if stroke_local_path:
+                if master_path:
+                    bridge_pts = interpolate_segment(master_path[-1], stroke_local_path[0], step_size=effective_step)
+                    master_path.extend(bridge_pts[1:])
+                master_path.extend(stroke_local_path)
+    else:
+        for ch in text.upper():
+            strokes = VECTOR_FONTS.get(ch, VECTOR_FONTS.get(" ", []))
+            letter_local_path = []
             
-        current_x += LETTER_W + GAP
+            for stroke in strokes:
+                for i in range(len(stroke) - 1):
+                    p1_rel = stroke[i]
+                    p2_rel = stroke[i+1]
+                    
+                    lon1 = current_x + p1_rel[0] * LETTER_W
+                    lat1 = y0 - p1_rel[1] * LETTER_H
+                    lon2 = current_x + p2_rel[0] * LETTER_W
+                    lat2 = y0 - p2_rel[1] * LETTER_H
+                    
+                    pts = interpolate_segment((lon1, lat1), (lon2, lat2), step_size=effective_step)
+                    if letter_local_path:
+                        letter_local_path.extend(pts[1:])  
+                    else:
+                        letter_local_path.extend(pts)
+            
+            if letter_local_path:
+                if master_path:
+                    end_pt = master_path[-1]
+                    start_pt = letter_local_path[0]
+                    bridge_pts = interpolate_segment(end_pt, start_pt, step_size=effective_step)
+                    master_path.extend(bridge_pts[1:])
+                master_path.extend(letter_local_path)
+                
+            current_x += LETTER_W + GAP
 
     aps = []
     if not master_path:
         return aps
 
-    # Calculate total stroke distance
-    total_len = 0.0
+    # Local metric scale at LAT_CENTER
+    lat_rad = math.radians(LAT_CENTER)
+    km_per_lon = 111.0 * math.cos(lat_rad)
+    km_per_lat = 111.0
+
+    # Calculate total stroke distance in km
+    total_km = 0.0
     for i in range(len(master_path) - 1):
-        dx = master_path[i+1][0] - master_path[i][0]
-        dy = master_path[i+1][1] - master_path[i][1]
-        total_len += math.sqrt(dx*dx + dy*dy)
+        dx_km = (master_path[i+1][0] - master_path[i][0]) * km_per_lon
+        dy_km = (master_path[i+1][1] - master_path[i][1]) * km_per_lat
+        total_km += math.sqrt(dx_km*dx_km + dy_km*dy_km)
 
-    # Determine step distance: either fixed target AP count or speed * interval
-    if TARGET_AP_COUNT is not None and TARGET_AP_COUNT > 1:
-        step_dist = total_len / float(TARGET_AP_COUNT)
-    else:
-        step_dist = SPEED_DEG_PER_SEC * STEP_INTERVAL_SEC
+    # Determine step distance in km from APs per unit
+    unit_km = 1.609344 if DENSITY_UNIT.lower() == "mile" else 1.0
+    effective_aps_per_km = APS_PER_UNIT / unit_km
+    step_dist_km = 1.0 / max(0.0001, effective_aps_per_km)
 
-    current_time = END_TIME - timedelta(hours=2)
+    total_seconds = (total_km / max(0.1, SPEED_KMH)) * 3600.0
+    expected_aps = max(1, round(total_km / step_dist_km))
+    time_step_sec = total_seconds / float(expected_aps)
+
+    current_time = START_TIME
     point_counter = 1
     random.seed(42)
     seen = set()
@@ -628,32 +771,35 @@ def generate_aps(text):
 
     current_segment_idx = 0
     current_pt = master_path[0]
-    dist_to_next = step_dist
+    dist_to_next_km = step_dist_km
 
     while current_segment_idx < len(master_path) - 1:
         next_v = master_path[current_segment_idx + 1]
-        dx = next_v[0] - current_pt[0]
-        dy = next_v[1] - current_pt[1]
-        seg_dist = math.sqrt(dx*dx + dy*dy)
+        dx_lon = next_v[0] - current_pt[0]
+        dy_lat = next_v[1] - current_pt[1]
+        dx_km = dx_lon * km_per_lon
+        dy_km = dy_lat * km_per_lat
+        seg_dist_km = math.sqrt(dx_km*dx_km + dy_km*dy_km)
 
-        if seg_dist == 0:
+        if seg_dist_km == 0:
             current_segment_idx += 1
             current_pt = next_v
             continue
 
-        if seg_dist < dist_to_next:
+        if seg_dist_km < dist_to_next_km:
             current_pt = next_v
-            dist_to_next -= seg_dist
+            dist_to_next_km -= seg_dist_km
             current_segment_idx += 1
         else:
-            fraction = dist_to_next / seg_dist
+            fraction = dist_to_next_km / seg_dist_km
             current_pt = (
-                current_pt[0] + dx * fraction,
-                current_pt[1] + dy * fraction
+                current_pt[0] + dx_lon * fraction,
+                current_pt[1] + dy_lat * fraction
             )
-            dist_to_next = step_dist
+            dist_to_next_km = step_dist_km
 
-            current_time += timedelta(seconds=STEP_INTERVAL_SEC)
+            if point_counter > 1:
+                current_time += timedelta(seconds=time_step_sec)
 
             # Generate globally unique, unicast MAC address
             first_octet = random.randrange(256) & 0xFE
@@ -662,6 +808,8 @@ def generate_aps(text):
             first_hex = f"{(first_octet & 0xF0) | second_nibble:02X}"
             mac = first_hex + ":" + ":".join(f"{random.randrange(256):02X}" for _ in range(5))
             
+            if len(seen) > 200000:
+                seen.clear()
             while mac in seen:
                 first_octet = random.randrange(256) & 0xFE
                 first_octet &= 0xFD

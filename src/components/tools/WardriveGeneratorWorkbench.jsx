@@ -29,13 +29,20 @@ import {
   Gauge,
   Maximize2,
   Hash,
-  Move
+  Ruler,
+  Upload,
+  Image,
+  Type,
+  Calendar
 } from 'lucide-react';
 import { 
   generateDemoAps, 
   generateWigleCsv, 
   generateTestCsv, 
   exportPythonScriptSource,
+  parseSvgToNormalizedStrokes,
+  dateToLocalDatetimeString,
+  SVG_PRESETS,
   VECTOR_FONTS,
   AUTH_MODES,
   CHANNELS
@@ -82,32 +89,47 @@ const SPEED_PRESETS = [
 ];
 
 const SCALE_PRESETS = [
-  { label: '0.25x (~1km)', scale: 0.25 },
   { label: '0.5x (~3km)', scale: 0.5 },
   { label: '1.0x (~6km)', scale: 1.0 },
-  { label: '1.5x (~10km)', scale: 1.5 },
-  { label: '2.5x (~16km)', scale: 2.5 }
+  { label: '5.0x (~30km)', scale: 5.0 },
+  { label: '10.0x (~60km)', scale: 10.0 },
+  { label: '25.0x (~160km)', scale: 25.0 },
+  { label: '50.0x (~330km)', scale: 50.0 },
+  { label: '100.0x (~660km)', scale: 100.0 }
 ];
 
-const AP_COUNT_PRESETS = [
-  { label: '100', count: 100 },
-  { label: '250', count: 250 },
-  { label: '500', count: 500 },
-  { label: '1k', count: 1000 },
-  { label: '2.5k', count: 2500 }
+const DENSITY_PRESETS = [
+  { label: '10', value: 10 },
+  { label: '50', value: 50 },
+  { label: '200', value: 200 },
+  { label: '500', value: 500 },
+  { label: '1,000', value: 1000 },
+  { label: '5,000 (~500k)', value: 5000 }
 ];
 
 export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) {
-  // Input parameters
+  // Input parameters & mode
+  const [artMode, setArtMode] = useState('text'); // 'text' | 'svg'
   const [text, setText] = useState('KEPLER');
   const [latCenter, setLatCenter] = useState(32.25);
   const [lonCenter, setLonCenter] = useState(-90.13);
 
-  // 1. Amount of APs Controls
-  const [densityMode, setDensityMode] = useState('target'); // 'target' | 'auto'
-  const [targetApCount, setTargetApCount] = useState(500);
+  // SVG mode state
+  const [selectedSvgPreset, setSelectedSvgPreset] = useState('wifi');
+  const [customSvgCode, setCustomSvgCode] = useState('');
+  const [showSvgPasteModal, setShowSvgPasteModal] = useState(false);
+  const [svgFileName, setSvgFileName] = useState(null);
+  const [parsedSvgStrokes, setParsedSvgStrokes] = useState(() => {
+    const p = SVG_PRESETS.find(item => item.id === 'wifi') || SVG_PRESETS[0];
+    return parseSvgToNormalizedStrokes(p.svg).strokes;
+  });
+  const fileInputRef = useRef(null);
 
-  // 2. Letter Size & Scale Controls
+  // 1. Density Control: APs per KM or Mile (allows scaling to 500k+)
+  const [densityUnit, setDensityUnit] = useState('km'); // 'km' | 'mile'
+  const [apsPerUnit, setApsPerUnit] = useState(100);
+
+  // 2. Letter Size & Scale Controls (expandable to 100x+ for giant footprints)
   const [letterScale, setLetterScale] = useState(1.0);
   const [letterW, setLetterW] = useState(0.04);
   const [letterH, setLetterH] = useState(0.06);
@@ -115,7 +137,12 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
   // 3. Wardrive Simulation Speed Controls
   const [speedKmh, setSpeedKmh] = useState(50.0);
-  const [stepIntervalSeconds, setStepIntervalSeconds] = useState(3);
+
+  // 4. Wardrive Start Clock & Date
+  const [startTimeLocal, setStartTimeLocal] = useState(() => {
+    const d = new Date(Date.now() - 24 * 3600 * 1000);
+    return dateToLocalDatetimeString(d);
+  });
 
   // Advanced & Simulation flags
   const [includePreheader, setIncludePreheader] = useState(true);
@@ -158,20 +185,111 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     const kmPerLonDeg = 111.0 * Math.cos(latRad);
     const kmPerLatDeg = 111.0;
 
-    const totalWidthDeg = count * (effW + effGap);
-    const totalHeightDeg = effH;
+    let widthKmNum, heightKmNum;
+    if (artMode === 'svg') {
+      widthKmNum = effW * 6.0 * kmPerLonDeg;
+      heightKmNum = effH * 4.0 * kmPerLatDeg;
+    } else {
+      const totalWidthDeg = count * (effW + effGap);
+      const totalHeightDeg = effH;
+      widthKmNum = totalWidthDeg * kmPerLonDeg;
+      heightKmNum = totalHeightDeg * kmPerLatDeg;
+    }
 
-    const widthKm = (totalWidthDeg * kmPerLonDeg).toFixed(2);
-    const heightKm = (totalHeightDeg * kmPerLatDeg).toFixed(2);
+    const widthKm = widthKmNum.toFixed(1);
+    const heightKm = heightKmNum.toFixed(1);
+    const widthMi = (widthKmNum * 0.621371).toFixed(1);
+    const heightMi = (heightKmNum * 0.621371).toFixed(1);
+
+    const unitFactor = densityUnit === 'mile' ? 1.609344 : 1.0;
+    const effApsPerKm = (Number(apsPerUnit) || 100) / unitFactor;
+    const spacingMeters = (1000.0 / Math.max(0.001, effApsPerKm)).toFixed(1);
 
     return {
       effW,
       effH,
       effGap,
       widthKm,
-      heightKm
+      heightKm,
+      widthMi,
+      heightMi,
+      spacingMeters
     };
-  }, [text, latCenter, letterW, letterH, letterScale, gap]);
+  }, [text, latCenter, letterW, letterH, letterScale, gap, densityUnit, apsPerUnit, artMode]);
+
+  // Clock / Start Date Quick Action Handlers
+  const handleSetClockNow = () => {
+    const str = dateToLocalDatetimeString(new Date());
+    setStartTimeLocal(str);
+    onLogMessage(`[CLOCK] Set wardrive start time to NOW (${str.replace('T', ' ')})`);
+  };
+
+  const handleSetClockMinus1Hour = () => {
+    const str = dateToLocalDatetimeString(new Date(Date.now() - 3600 * 1000));
+    setStartTimeLocal(str);
+    onLogMessage(`[CLOCK] Set wardrive start time to 1 hour ago (${str.replace('T', ' ')})`);
+  };
+
+  const handleSetClockYesterday = () => {
+    const str = dateToLocalDatetimeString(new Date(Date.now() - 24 * 3600 * 1000));
+    setStartTimeLocal(str);
+    onLogMessage(`[CLOCK] Set wardrive start time to yesterday (${str.replace('T', ' ')})`);
+  };
+
+  const handleSetClockMinus7Days = () => {
+    const str = dateToLocalDatetimeString(new Date(Date.now() - 7 * 24 * 3600 * 1000));
+    setStartTimeLocal(str);
+    onLogMessage(`[CLOCK] Set wardrive start time to 7 days ago (${str.replace('T', ' ')})`);
+  };
+
+  // SVG Preset and Upload Handlers
+  const handleSelectSvgPreset = (preset) => {
+    setSelectedSvgPreset(preset.id);
+    setSvgFileName(null);
+    setCustomSvgCode(preset.svg);
+    const res = parseSvgToNormalizedStrokes(preset.svg);
+    setParsedSvgStrokes(res.strokes);
+    if (!text || text === 'KEPLER' || text.startsWith('SVG_')) {
+      setText(preset.name.replace(/\s+/g, '_').toUpperCase());
+    }
+    onLogMessage(`[SVG] Loaded preset "${preset.name}" (${res.strokes.length} paths)`);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const svgText = evt.target.result;
+      setCustomSvgCode(svgText);
+      setSvgFileName(file.name);
+      setSelectedSvgPreset('custom');
+      const res = parseSvgToNormalizedStrokes(svgText);
+      if (res.strokes.length === 0) {
+        alert('Could not find any readable vector strokes (<path>, <polyline>, <polygon>, <circle>, <line>) in the uploaded SVG.');
+        return;
+      }
+      setParsedSvgStrokes(res.strokes);
+      const cleanName = file.name.replace(/\.svg$/i, '').replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
+      setText(cleanName);
+      onLogMessage(`[SVG] Imported "${file.name}" with ${res.strokes.length} vector strokes`);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleApplyCustomSvgPaste = () => {
+    if (!customSvgCode.trim()) return;
+    const res = parseSvgToNormalizedStrokes(customSvgCode);
+    if (res.strokes.length === 0) {
+      alert('Could not parse any vector paths from the provided SVG markup.');
+      return;
+    }
+    setParsedSvgStrokes(res.strokes);
+    setSelectedSvgPreset('custom');
+    setSvgFileName('custom_pasted.svg');
+    setShowSvgPasteModal(false);
+    onLogMessage(`[SVG] Applied custom SVG markup with ${res.strokes.length} paths`);
+  };
 
   // 1. Initial Leaflet Map Setup
   useEffect(() => {
@@ -303,15 +421,21 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     previewBoxLayerRef.current.clearLayers();
 
     const clean = String(text || '').trim();
-    if (!clean) return;
+    if (artMode === 'text' && !clean) return;
 
     const scale = Number(letterScale) || 1.0;
     const effW = (Number(letterW) || 0.04) * scale;
     const effH = (Number(letterH) || 0.06) * scale;
     const effGap = (Number(gap) || 0.02) * scale;
 
-    const totalWidth = clean.length * (effW + effGap);
-    const totalHeight = effH;
+    let totalWidth, totalHeight;
+    if (artMode === 'svg') {
+      totalWidth = effW * 6.0;
+      totalHeight = effH * 4.0;
+    } else {
+      totalWidth = clean.length * (effW + effGap);
+      totalHeight = effH;
+    }
 
     const corner1 = [latCenter - totalHeight, lonCenter];
     const corner2 = [latCenter, lonCenter + totalWidth];
@@ -328,49 +452,58 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     } catch (e) {
       // Ignored in headless/test environments
     }
-  }, [text, latCenter, lonCenter, letterW, letterH, letterScale, gap, isLeafletAvailable]);
+  }, [text, latCenter, lonCenter, letterW, letterH, letterScale, gap, artMode, isLeafletAvailable]);
 
   // 5. Run Generation Algorithm
   const handleGenerate = useCallback(() => {
     setIsGenerating(true);
     try {
+      const parsedStart = startTimeLocal ? new Date(startTimeLocal) : new Date(Date.now() - 24 * 3600 * 1000);
       const result = generateDemoAps({
         text,
+        mode: artMode,
+        svgStrokes: artMode === 'svg' ? parsedSvgStrokes : null,
         latCenter: Number(latCenter),
         lonCenter: Number(lonCenter),
         letterW: Number(letterW),
         letterH: Number(letterH),
         letterScale: Number(letterScale),
         gap: Number(gap),
+        densityUnit,
+        apsPerUnit: Number(apsPerUnit) || 100,
         speedKmh: Number(speedKmh),
-        stepIntervalSeconds: Number(stepIntervalSeconds),
-        targetApCount: densityMode === 'target' ? Number(targetApCount) : null,
+        startTime: parsedStart,
         seed: useFixedSeed ? Number(seed) : Math.floor(Math.random() * 100000)
       });
 
       setGeneratedResult(result);
-      onLogMessage(`[DEMO WARDRIVE] Generated ${result.aps.length} synthetic APs for text "${text}" at (${latCenter}, ${lonCenter})`);
+      const modeDesc = artMode === 'svg' ? `SVG art (${parsedSvgStrokes.length} paths)` : `text "${text}"`;
+      onLogMessage(`[DEMO WARDRIVE] Generated ${result.aps.length.toLocaleString()} synthetic APs (${apsPerUnit}/${densityUnit}) for ${modeDesc}`);
 
-      // Plot onto map
+      // Plot onto map with sampling protection for 500k+ points
       if (mapInstanceRef.current && isLeafletAvailable) {
         if (pathLayerRef.current) pathLayerRef.current.clearLayers();
         if (apMarkersLayerRef.current) apMarkersLayerRef.current.clearLayers();
 
-        // 1. Draw Flight / Master Vector Path
+        // 1. Draw Full Flight / Master Vector Path (always complete)
         if (result.masterPath.length > 1) {
           const latLngs = result.masterPath.map(pt => [pt[1], pt[0]]);
           const polyline = L.polyline(latLngs, {
             color: '#38bdf8',
             weight: 2,
-            opacity: 0.5,
+            opacity: 0.6,
             dashArray: '3, 4'
           });
           pathLayerRef.current.addLayer(polyline);
         }
 
-        // 2. Draw AP Points
+        // 2. Draw Sampled AP Markers (renders up to 1,500 points to keep map at 60 FPS)
+        const maxMarkers = 1500;
+        const stride = Math.max(1, Math.floor(result.aps.length / maxMarkers));
+
         const markerGroup = L.featureGroup();
-        result.aps.forEach((ap) => {
+        for (let i = 0; i < result.aps.length; i += stride) {
+          const ap = result.aps[i];
           let markerColor = '#10b981'; // Strong
           if (ap.rssi < -75) markerColor = '#f59e0b'; // Moderate
           if (ap.rssi < -85) markerColor = '#f43f5e'; // Weak
@@ -403,7 +536,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
           circle.on('click', () => setSelectedAp(ap));
           markerGroup.addLayer(circle);
-        });
+        }
 
         apMarkersLayerRef.current.addLayer(markerGroup);
 
@@ -420,7 +553,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     } finally {
       setIsGenerating(false);
     }
-  }, [text, latCenter, lonCenter, letterW, letterH, letterScale, gap, speedKmh, stepIntervalSeconds, densityMode, targetApCount, useFixedSeed, seed, isLeafletAvailable, onLogMessage]);
+  }, [text, artMode, parsedSvgStrokes, startTimeLocal, latCenter, lonCenter, letterW, letterH, letterScale, gap, densityUnit, apsPerUnit, speedKmh, useFixedSeed, seed, isLeafletAvailable, onLogMessage]);
 
   // Auto-generate on mount
   useEffect(() => {
@@ -468,7 +601,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
   // Export File Helpers
   const downloadFile = (filename, content, mimeType) => {
-    const blob = new Blob([content], { type: mimeType });
+    const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -499,15 +632,18 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
   const handleDownloadPython = () => {
     const py = exportPythonScriptSource({
       text,
+      mode: artMode,
+      svgStrokes: artMode === 'svg' ? parsedSvgStrokes : null,
       latCenter,
       lonCenter,
       letterW,
       letterH,
       letterScale,
       gap,
+      densityUnit,
+      apsPerUnit,
       speedKmh,
-      stepIntervalSeconds,
-      targetApCount: densityMode === 'target' ? targetApCount : null,
+      startTime: startTimeLocal,
       includePreheader
     });
     downloadFile(`${getCleanBaseFilename()}_generator.py`, py, 'text/x-python');
@@ -523,15 +659,18 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     } else if (type === 'python') {
       content = exportPythonScriptSource({
         text,
+        mode: artMode,
+        svgStrokes: artMode === 'svg' ? parsedSvgStrokes : null,
         latCenter,
         lonCenter,
         letterW,
         letterH,
         letterScale,
         gap,
+        densityUnit,
+        apsPerUnit,
         speedKmh,
-        stepIntervalSeconds,
-        targetApCount: densityMode === 'target' ? targetApCount : null,
+        startTime: startTimeLocal,
         includePreheader
       });
     }
@@ -542,16 +681,20 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     });
   };
 
-  // Filtered Table Records
+  // Filtered Table Records (shows first 500 for high performance)
   const filteredAps = useMemo(() => {
     if (!generatedResult?.aps) return [];
-    if (!tableSearch) return generatedResult.aps;
+    if (!tableSearch) return generatedResult.aps.slice(0, 500);
     const q = tableSearch.toLowerCase();
-    return generatedResult.aps.filter(
-      ap => ap.ssid.toLowerCase().includes(q) || 
-            ap.mac.toLowerCase().includes(q) || 
-            ap.auth.toLowerCase().includes(q)
-    );
+    const matched = [];
+    for (let i = 0; i < generatedResult.aps.length; i++) {
+      const ap = generatedResult.aps[i];
+      if (ap.ssid.toLowerCase().includes(q) || ap.mac.toLowerCase().includes(q) || ap.auth.toLowerCase().includes(q)) {
+        matched.push(ap);
+        if (matched.length >= 500) break;
+      }
+    }
+    return matched;
   }, [generatedResult, tableSearch]);
 
   return (
@@ -570,7 +713,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               </span>
             </h2>
             <p className="text-xs text-slate-400">
-              Pick coordinates on the map, customize AP count, letter size & vehicle speed, and synthesize Wi-Fi wardriving trails
+              Pick coordinates on the map, customize AP density per km/mile (up to 500k+), letter size & vehicle speed
             </p>
           </div>
         </div>
@@ -597,7 +740,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             }`}
           >
             <Table className="w-3.5 h-3.5" />
-            <span>AP Table ({generatedResult?.aps?.length || 0})</span>
+            <span>AP Table ({generatedResult?.aps?.length?.toLocaleString() || 0})</span>
           </button>
           <button
             onClick={() => setActiveTab('python')}
@@ -626,20 +769,137 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
       {/* Main Control Card */}
       <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-4">
-        {/* Row 1: Word & Coordinates */}
+        {/* Mode Switcher Header: Text vs SVG Image */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
+          <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
+            <button
+              onClick={() => setArtMode('text')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition ${
+                artMode === 'text'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Type className="w-3.5 h-3.5" />
+              <span>Text / Phrase</span>
+            </button>
+            <button
+              onClick={() => setArtMode('svg')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition ${
+                artMode === 'svg'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Image className="w-3.5 h-3.5" />
+              <span>SVG Vector Art</span>
+            </button>
+          </div>
+
+          {artMode === 'svg' && (
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".svg,image/svg+xml"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 rounded text-xs font-semibold transition"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>{svgFileName ? `Replace SVG (${svgFileName.slice(0, 14)}...)` : 'Upload .SVG File'}</span>
+              </button>
+              <button
+                onClick={() => setShowSvgPasteModal(!showSvgPasteModal)}
+                className="flex items-center gap-1 px-2.5 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 rounded text-xs transition"
+              >
+                <FileCode className="w-3.5 h-3.5 text-amber-400" />
+                <span>Paste SVG XML</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* SVG Preset Selection Strip (when in SVG mode) */}
+        {artMode === 'svg' && (
+          <div className="p-3 bg-slate-950/70 border border-slate-800/90 rounded-lg space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-cyan-400" />
+                <span>Sample Vector Presets:</span>
+              </span>
+              <span className="text-[10px] font-mono text-cyan-400">
+                {parsedSvgStrokes.length} vector {parsedSvgStrokes.length === 1 ? 'stroke' : 'strokes'} ready
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {SVG_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => handleSelectSvgPreset(p)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition border ${
+                    selectedSvgPreset === p.id && !svgFileName
+                      ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-200 font-bold'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+
+            {/* Paste SVG XML Box */}
+            {showSvgPasteModal && (
+              <div className="mt-2 p-2.5 bg-slate-900 border border-slate-700 rounded-lg space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+                  <span>Paste Raw SVG XML Markup</span>
+                  <button onClick={() => setShowSvgPasteModal(false)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+                <textarea
+                  rows={4}
+                  value={customSvgCode}
+                  onChange={(e) => setCustomSvgCode(e.target.value)}
+                  placeholder="<svg ...><path d='M...' /></svg>"
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono text-cyan-300 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setShowSvgPasteModal(false)}
+                    className="px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleApplyCustomSvgPaste}
+                    className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs font-bold transition"
+                  >
+                    Parse & Apply SVG
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Row 1: Target Word / Prefix & Origin Coordinates */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-          {/* Word / Text Input */}
+          {/* Word / SSID Prefix Input */}
           <div className="md:col-span-5 space-y-1">
             <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
-              <span>Text / Phrase to Map</span>
-              <span className="text-[10px] text-slate-500 font-mono">A-Z, 0-9, space</span>
+              <span>{artMode === 'svg' ? 'SSID Prefix / Identifier' : 'Text / Phrase to Map'}</span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {artMode === 'svg' ? 'Prefix for AP SSIDs' : 'A-Z, 0-9, space'}
+              </span>
             </label>
             <div className="relative">
               <input
                 type="text"
                 value={text}
                 onChange={(e) => setText(e.target.value.toUpperCase())}
-                placeholder="Enter word (e.g. KEPLER)"
+                placeholder={artMode === 'svg' ? 'e.g. WIFI_MAP' : 'Enter word (e.g. KEPLER)'}
                 className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg px-3 py-2 text-sm font-mono text-emerald-400 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-500 tracking-wider"
               />
               <span className="absolute right-2.5 top-2.5 text-[10px] font-mono text-slate-500">
@@ -676,11 +936,20 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             />
           </div>
 
-          {/* Action Button: Run Generator */}
+          {/* Action Buttons: Set Clock Now & Start Wardrive */}
           <div className="md:col-span-3 flex items-center gap-2">
             <button
+              onClick={handleSetClockNow}
+              title="Set Wardrive Start Clock to Current Time"
+              className="px-2.5 py-2 bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-purple-500/50 rounded-lg text-purple-400 text-xs font-mono flex items-center gap-1.5 transition"
+            >
+              <Clock className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden sm:inline">Now</span>
+            </button>
+
+            <button
               onClick={handleGenerate}
-              disabled={isGenerating || !text.trim()}
+              disabled={isGenerating || (artMode === 'text' && !text.trim())}
               className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition shadow-lg shadow-emerald-950/40"
             >
               {isGenerating ? (
@@ -691,10 +960,11 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-current" />
-                  <span>Generate APs</span>
+                  <span>Start Wardrive</span>
                 </>
               )}
             </button>
+
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
               title="Advanced Vector & Geometry Settings"
@@ -709,109 +979,123 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </div>
         </div>
 
-        {/* Row 2: 3 Interactive Sliders & Presets (Amount of APs, Letter Size, Speed) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3 border-t border-slate-800">
-          {/* Parameter 1: Amount of APs */}
+        {/* Row 2: 4 Interactive Tuning Cards (AP Density, Vector Scale/Size, Speed, Start Clock/Date) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 pt-3 border-t border-slate-800">
+          {/* Card 1: AP Density per KM / Mile (Scale to 500k+) */}
           <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                <Hash className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Amount of APs</span>
+                <Ruler className="w-3.5 h-3.5 text-cyan-400" />
+                <span>AP Density</span>
               </label>
-              <div className="flex items-center gap-1 text-[10px]">
+              <div className="flex items-center bg-slate-900 border border-slate-800 rounded p-0.5 text-[10px]">
                 <button
-                  onClick={() => setDensityMode('target')}
-                  className={`px-1.5 py-0.5 rounded ${
-                    densityMode === 'target' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40' : 'text-slate-500 hover:text-slate-300'
+                  onClick={() => setDensityUnit('km')}
+                  className={`px-2 py-0.5 rounded transition ${
+                    densityUnit === 'km' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Fixed Count
+                  Per KM
                 </button>
                 <button
-                  onClick={() => setDensityMode('auto')}
-                  className={`px-1.5 py-0.5 rounded ${
-                    densityMode === 'auto' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40' : 'text-slate-500 hover:text-slate-300'
+                  onClick={() => setDensityUnit('mile')}
+                  className={`px-2 py-0.5 rounded transition ${
+                    densityUnit === 'mile' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  From Speed
+                  Per Mile
                 </button>
               </div>
             </div>
 
-            {densityMode === 'target' ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="text-slate-400 text-[10px]">Density Slider</span>
-                  <span className="text-cyan-400 font-bold">{targetApCount.toLocaleString()} APs</span>
-                </div>
-                <input
-                  type="range"
-                  min="50"
-                  max="3000"
-                  step="50"
-                  value={targetApCount}
-                  onChange={(e) => setTargetApCount(parseInt(e.target.value))}
-                  className="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
-                />
-                <div className="flex items-center justify-between gap-1 pt-1">
-                  {AP_COUNT_PRESETS.map((p) => (
-                    <button
-                      key={p.count}
-                      onClick={() => setTargetApCount(p.count)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-mono transition border ${
-                        targetApCount === p.count
-                          ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300 font-bold'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="text-[11px] text-slate-400 py-2 space-y-1">
-                <div>AP density determined automatically by vehicle speed ({speedKmh} km/h) and sighting interval ({stepIntervalSeconds}s).</div>
-                <div className="text-cyan-400 font-mono text-[10px]">Natural drive trail sampling</div>
-              </div>
-            )}
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-slate-400 text-[10px]">Spacing</span>
+              <span className="text-cyan-400 font-bold">
+                {apsPerUnit.toLocaleString()} APs / {densityUnit} (~{physicalMetrics.spacingMeters}m)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min="5"
+                max="5000"
+                step="25"
+                value={Math.min(5000, apsPerUnit)}
+                onChange={(e) => setApsPerUnit(parseInt(e.target.value))}
+                className="flex-1 accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+              />
+              <input
+                type="number"
+                min="1"
+                max="50000"
+                value={apsPerUnit}
+                onChange={(e) => setApsPerUnit(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-16 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] font-mono text-cyan-300 text-right"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-1 pt-1">
+              {DENSITY_PRESETS.map((p) => (
+                <button
+                  key={p.value}
+                  onClick={() => setApsPerUnit(p.value)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition border ${
+                    apsPerUnit === p.value
+                      ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300 font-bold'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Parameter 2: Letter Size & Scale */}
+          {/* Card 2: Letter Size & Scale (Scales up to 100x+ for massive statewide maps) */}
           <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
                 <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Letter Size & Scale</span>
+                <span>Size & Scale</span>
               </label>
-              <span className="text-[10px] font-mono text-emerald-400 font-bold">
-                {letterScale.toFixed(2)}x
-              </span>
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0.1"
+                  max="200"
+                  value={letterScale}
+                  onChange={(e) => setLetterScale(Math.max(0.05, parseFloat(e.target.value) || 1.0))}
+                  className="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] font-mono text-emerald-300 text-right font-bold"
+                />
+                <span className="text-[11px] font-mono text-emerald-400 font-bold">x</span>
+              </div>
             </div>
 
             <div className="flex items-center justify-between text-xs font-mono">
               <span className="text-slate-400 text-[10px]">Real Footprint</span>
-              <span className="text-slate-300 text-[10px] font-mono">
-                ~{physicalMetrics.widthKm} km × ~{physicalMetrics.heightKm} km
+              <span className="text-slate-200 text-[10px] font-mono">
+                ~{physicalMetrics.widthKm} × ~{physicalMetrics.heightKm} km (~{physicalMetrics.widthMi} × ~{physicalMetrics.heightMi} mi)
               </span>
             </div>
 
             <input
               type="range"
               min="0.1"
-              max="3.0"
-              step="0.05"
-              value={letterScale}
+              max="50.0"
+              step="0.5"
+              value={Math.min(50, letterScale)}
               onChange={(e) => setLetterScale(parseFloat(e.target.value))}
               className="w-full accent-emerald-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
             />
 
-            <div className="flex items-center justify-between gap-1 pt-1">
+            <div className="flex items-center justify-between gap-1 pt-1 overflow-x-auto">
               {SCALE_PRESETS.map((p) => (
                 <button
                   key={p.scale}
                   onClick={() => setLetterScale(p.scale)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition border ${
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition border whitespace-nowrap ${
                     Math.abs(letterScale - p.scale) < 0.01
                       ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-bold'
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -823,7 +1107,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             </div>
           </div>
 
-          {/* Parameter 3: Wardrive Vehicle Speed */}
+          {/* Card 3: Wardrive Vehicle Speed */}
           <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
@@ -836,8 +1120,8 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             </div>
 
             <div className="flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-400 text-[10px]">Vehicle Velocity</span>
-              <span className="text-slate-400 text-[10px]">Step: {stepIntervalSeconds}s</span>
+              <span className="text-slate-400 text-[10px]">Velocity</span>
+              <span className="text-slate-400 text-[10px]">Simulated drive</span>
             </div>
 
             <input
@@ -864,6 +1148,64 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                   {p.label.split(' ')[0]}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Card 4: Wardrive Start Clock & Date */}
+          <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-purple-400" />
+                <span>Start Clock / Date</span>
+              </label>
+              <button
+                onClick={handleSetClockNow}
+                title="Set to Current Time"
+                className="text-[10px] font-mono text-purple-400 hover:text-purple-300 font-bold px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 transition"
+              >
+                Set Now
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-slate-400 text-[10px]">Simulated Timestamp</span>
+              <span className="text-purple-300 text-[10px] font-mono">
+                {startTimeLocal ? startTimeLocal.replace('T', ' ') : 'Now'}
+              </span>
+            </div>
+
+            <input
+              type="datetime-local"
+              value={startTimeLocal}
+              onChange={(e) => setStartTimeLocal(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 focus:border-purple-500 rounded px-2 py-1 text-xs font-mono text-purple-300 focus:outline-none"
+            />
+
+            <div className="flex items-center justify-between gap-1 pt-1">
+              <button
+                onClick={handleSetClockNow}
+                className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-900 border-slate-800 text-purple-300 hover:text-white"
+              >
+                Now
+              </button>
+              <button
+                onClick={handleSetClockMinus1Hour}
+                className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+              >
+                -1h
+              </button>
+              <button
+                onClick={handleSetClockYesterday}
+                className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+              >
+                -24h
+              </button>
+              <button
+                onClick={handleSetClockMinus7Days}
+                className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+              >
+                -7d
+              </button>
             </div>
           </div>
         </div>
@@ -903,10 +1245,10 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           <div className="mt-3 p-3 bg-slate-950/70 border border-slate-800 rounded-lg space-y-3 animate-fadeIn">
             <div className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
               <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Base Font Geometry & Simulation PRNG</span>
+              <span>Base Font Geometry & PRNG</span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3 text-xs">
               <div className="space-y-1">
                 <label className="text-[10px] text-slate-400 font-mono">Base Width (°)</label>
                 <input
@@ -936,18 +1278,6 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                   step="0.005"
                   value={gap}
                   onChange={(e) => setGap(parseFloat(e.target.value) || 0.02)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-slate-200"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] text-slate-400 font-mono">Sighting Interval (s)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="60"
-                  value={stepIntervalSeconds}
-                  onChange={(e) => setStepIntervalSeconds(parseInt(e.target.value) || 3)}
                   className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-slate-200"
                 />
               </div>
@@ -993,7 +1323,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Synthesized APs</div>
+              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Total Synthesized APs</div>
               <div className="text-xl font-bold font-mono text-emerald-400">
                 {generatedResult.aps.length.toLocaleString()}
               </div>
@@ -1003,17 +1333,17 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
           <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Simulated Drive</div>
+              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Stroke Distance</div>
               <div className="text-xl font-bold font-mono text-cyan-400">
-                {Math.round(generatedResult.durationSeconds / 60)} min
+                {generatedResult.totalPathLengthKm ? generatedResult.totalPathLengthKm.toFixed(1) : 0} km
               </div>
             </div>
-            <Clock className="w-5 h-5 text-cyan-500/50" />
+            <Ruler className="w-5 h-5 text-cyan-500/50" />
           </div>
 
           <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Letter Span</div>
+              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Letter Footprint</div>
               <div className="text-sm font-bold font-mono text-purple-400">
                 {physicalMetrics.widthKm} × {physicalMetrics.heightKm} km
               </div>
@@ -1023,12 +1353,17 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
           <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Simulated Velocity</div>
-              <div className="text-sm font-bold font-mono text-amber-400">
-                {speedKmh} km/h
+              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Drive Timeline</div>
+              <div className="text-xs font-bold font-mono text-purple-400">
+                {generatedResult.startTime ? (generatedResult.startTime instanceof Date ? generatedResult.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : ''}
+                {' → '}
+                {generatedResult.endTime ? (generatedResult.endTime instanceof Date ? generatedResult.endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : ''}
+              </div>
+              <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                {Math.round(generatedResult.durationSeconds / 60)} min ({speedKmh} km/h)
               </div>
             </div>
-            <Gauge className="w-5 h-5 text-amber-500/50" />
+            <Clock className="w-5 h-5 text-purple-500/50" />
           </div>
         </div>
       )}
@@ -1066,7 +1401,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded text-xs font-semibold transition"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>WiGLE CSV</span>
+                <span>WiGLE CSV ({generatedResult?.aps?.length > 1000 ? `${(generatedResult.aps.length/1000).toFixed(0)}k` : generatedResult?.aps?.length || 0})</span>
               </button>
 
               <button
@@ -1094,11 +1429,15 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           <div className="relative w-full h-[540px] rounded-xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
             <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-            {/* Floating Map Legend & Overlay */}
+            {/* Floating Map Legend & Overlay with Performance Notice */}
             <div className="absolute top-3 right-3 z-[1000] bg-slate-950/90 border border-slate-800 p-2.5 rounded-lg backdrop-blur shadow-xl text-[11px] space-y-1.5 pointer-events-auto">
               <div className="font-bold text-slate-200 flex items-center justify-between gap-4">
                 <span>Signal Strength (RSSI)</span>
-                <span className="text-[10px] text-slate-400 font-mono">{generatedResult?.aps?.length || 0} APs</span>
+                <span className="text-[10px] text-cyan-400 font-mono">
+                  {generatedResult?.aps?.length > 1500 
+                    ? `Showing 1,500 preview markers (${generatedResult.aps.length.toLocaleString()} in CSV)` 
+                    : `${generatedResult?.aps?.length || 0} APs`}
+                </span>
               </div>
               <div className="flex items-center gap-3">
                 <span className="flex items-center gap-1 text-slate-300">
@@ -1155,6 +1494,9 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             </div>
 
             <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400 font-mono">
+                Showing top {filteredAps.length.toLocaleString()} of {generatedResult?.aps?.length?.toLocaleString() || 0} APs
+              </span>
               <button
                 onClick={() => handleCopyClipboard('wigle')}
                 className="flex items-center gap-1 px-3 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg text-xs font-semibold text-slate-300 transition"
@@ -1222,7 +1564,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 Standalone Python Script Source
               </h3>
               <p className="text-[11px] text-slate-400">
-                Self-contained Python script with your configured AP count, letter size, speed, and coordinates
+                Self-contained Python script with your configured AP density ({apsPerUnit}/{densityUnit}), letter size, speed, and coordinates
               </p>
             </div>
 
@@ -1248,15 +1590,18 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           <pre className="p-4 bg-slate-950 rounded-lg border border-slate-800 text-xs font-mono text-emerald-400/90 overflow-x-auto max-h-[500px] leading-relaxed">
             {exportPythonScriptSource({
               text,
+              mode: artMode,
+              svgStrokes: artMode === 'svg' ? parsedSvgStrokes : null,
               latCenter,
               lonCenter,
               letterW,
               letterH,
               letterScale,
               gap,
+              densityUnit,
+              apsPerUnit,
               speedKmh,
-              stepIntervalSeconds,
-              targetApCount: densityMode === 'target' ? targetApCount : null,
+              startTime: startTimeLocal,
               includePreheader
             })}
           </pre>
