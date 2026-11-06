@@ -67,6 +67,9 @@ export const TOOL_NATURAL_WIDTH = {
 
 /** Title, icon and accent for a tool id (aliases resolve to their group's entry). */
 export function toolMeta(toolId) {
+  if (!toolId || toolId === 'workspace') {
+    return { title: 'Workspace', icon: null, accent: 'indigo', id: 'workspace', naturalWidth: DEFAULT_NATURAL_WIDTH };
+  }
   const item = ALL_ITEMS.find((i) => i.id === toolId) || ALL_ITEMS.find((i) => i.id === windowKeyFor(toolId));
   const key = windowKeyFor(toolId);
   return { title: item?.name || toolId, icon: item?.icon || null, accent: item?.accent || 'cyan', id: toolId, naturalWidth: TOOL_NATURAL_WIDTH[key] || DEFAULT_NATURAL_WIDTH };

@@ -53,6 +53,8 @@ import DebugFeaturesPanel from '../src/components/tools/cmsis/DebugFeaturesPanel
 import { CmsisDapClient } from '../src/utils/cmsisDapDriver';
 
 // Layout & Core Tabs
+import Header from '../src/components/layout/Header';
+import Desktop from '../src/components/layout/Desktop';
 import TerminalDeck from '../src/components/tabs/TerminalTab';
 import FlasherTab from '../src/components/tabs/FlasherTab';
 import HardwareControlsTab from '../src/components/tabs/HardwareControlsTab';
@@ -235,5 +237,43 @@ describe('UI Workbench Render Sanity Check', () => {
     expect(chefEl).toBeDefined();
     expect(duckyEl).toBeDefined();
     expect(chefEl.type).not.toBe(duckyEl.type);
+  });
+
+  it('renders Header with Workspace wiki link when activeTool is null', () => {
+    const html = renderToString(
+      <SerialProvider>
+        <Header activeTool={null} />
+      </SerialProvider>
+    );
+
+    expect(html).toContain('href="./wiki/?article=workspace"');
+    expect(html).toContain('(Workspace)');
+  });
+
+  it('renders Header with tool-specific wiki link when activeTool is provided', () => {
+    const html = renderToString(
+      <SerialProvider>
+        <Header activeTool="flasher" />
+      </SerialProvider>
+    );
+
+    expect(html).toContain('href="./wiki/?tool=flasher"');
+    expect(html).toContain('(Firmware Flasher)');
+  });
+
+  it('renders Desktop empty state with direct link to Workspace wiki article', () => {
+    const emptyState = { windows: [], focusedId: null, nextZ: 1 };
+    const html = renderToString(
+      <Desktop
+        state={emptyState}
+        viewport={{ width: 1200, height: 800 }}
+        renderTool={() => null}
+        metaFor={() => ({ title: 'Test' })}
+      />
+    );
+
+    expect(html).toContain('WORKSPACE EMPTY');
+    expect(html).toContain('href="./wiki/?article=workspace"');
+    expect(html).toContain('Open Workspace Guide &amp; Wiki');
   });
 });

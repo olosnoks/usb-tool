@@ -2,7 +2,7 @@
 // so windows stay reachable, and shows a taskbar with one button per window
 // (click to focus or restore) plus tile / cascade / close-all.
 import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
-import { LayoutGrid, Layers, X, AppWindow } from 'lucide-react';
+import { LayoutGrid, Layers, X, AppWindow, BookOpen } from 'lucide-react';
 import ToolWindow from './ToolWindow';
 import CircuitBoardBackground from './CircuitBoardBackground';
 import { displayTitle, snapZoneFor, snapGeometry } from '../../utils/windowManager';
@@ -60,14 +60,25 @@ export default function Desktop({
       <div ref={ref} data-testid="desktop" className="relative flex-1 min-h-0 min-w-0 overflow-hidden">
         <CircuitBoardBackground />
         {!anyOpen && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-slate-500 font-mono text-xs space-y-2 pointer-events-none px-6">
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-slate-500 font-mono text-xs space-y-3 pointer-events-none px-6">
             <AppWindow className="w-8 h-8 text-slate-700" />
             <div className="text-slate-400 font-bold tracking-wide">{state.windows.length ? 'ALL WINDOWS MINIMIZED' : 'WORKSPACE EMPTY'}</div>
-            <div>
+            <div className="max-w-md">
               {state.windows.length
                 ? 'Click a window in the taskbar below to bring it back.'
                 : 'Pick a tool from the sidebar. Open several at once, each in its own window, to watch different devices side by side.'}
             </div>
+            {!state.windows.length && (
+              <a
+                href="./wiki/?article=workspace"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="pointer-events-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold transition-all active:scale-95 shadow-sm shadow-indigo-500/10 mt-1"
+              >
+                <BookOpen className="w-4 h-4 text-indigo-400" />
+                <span>Open Workspace Guide & Wiki</span>
+              </a>
+            )}
           </div>
         )}
         {/* Snap-tiling preview: where the dragged window would land */}

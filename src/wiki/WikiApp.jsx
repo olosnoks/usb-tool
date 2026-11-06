@@ -49,6 +49,7 @@ const CATEGORY_ICONS = {
 
 export const TOOL_TO_ARTICLE_MAP = {
   // Core
+  workspace: 'workspace',
   terminal: 'terminal',
   flasher: 'flasher',
   hardware: 'hardware',
@@ -89,6 +90,7 @@ export const TOOL_TO_ARTICLE_MAP = {
 
   // Hardware & Programmers
   ducky: 'ducky',
+  'payload-studio': 'ducky',
   programmers: 'programmers',
   ch341a: 'programmers',
   'cmsis-dap': 'programmers',
@@ -127,7 +129,9 @@ export const TOOL_TO_ARTICLE_MAP = {
 };
 
 export function resolveArticleForTool(target) {
-  if (!target) return WIKI_ARTICLES[0];
+  if (!target || target === 'workspace') {
+    return WIKI_ARTICLES.find(a => a.id === 'workspace') || WIKI_ARTICLES[0];
+  }
   const q = String(target).trim().toLowerCase();
 
   // 1. Explicit tool map
@@ -147,7 +151,7 @@ export function resolveArticleForTool(target) {
     if (found) return found;
   }
 
-  return WIKI_ARTICLES[0];
+  return WIKI_ARTICLES.find(a => a.id === 'workspace') || WIKI_ARTICLES[0];
 }
 
 function parseTargetFromUrl() {

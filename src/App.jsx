@@ -9,7 +9,7 @@ import { WORKSPACE_PRESETS } from './components/layout/WorkspacePresets';
 import { renderTool, toolMeta } from './components/ToolRegistry';
 import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize,
-  moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, loadState, saveState, zoomStep, toggleFit,
+  moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, saveState, zoomStep, toggleFit,
   duplicateWindow, baseIdOf, applySnap, setZoom
 } from './utils/windowManager';
 
@@ -45,14 +45,18 @@ function AppContent() {
   const [viewport, setViewportState] = useState(viewportRef.current);
   const [wm, setWm] = useState(() => {
     const vp = viewportRef.current;
-    const saved = loadState(vp);
     const urlTool = toolFromUrl();
-    // Fresh visit: an empty desktop. A ?tool= link opens that tool; a saved
-    // layout from the last visit comes back as it was.
-    let s = saved || createInitialState();
+    // Fresh visit / hard refresh: start with an empty workspace (no tools open).
+    // An explicit ?tool= or #tool= link opens that specific tool.
+    let s = createInitialState();
     if (urlTool) s = openWindow(s, urlTool, toolMeta(urlTool), vp);
     return s;
   });
+
+  // Clear any legacy saved layout so fresh loads / hard refreshes always start with no tools open
+  useEffect(() => {
+    try { localStorage.removeItem('skon-workspace-windows-v1'); } catch (e) { /* ignore */ }
+  }, []);
 
   const onViewport = useCallback((vp) => {
     if (!vp || vp.width <= 0 || vp.height <= 0) return;
@@ -64,9 +68,15 @@ function AppContent() {
     setWm((s) => ({ ...s, windows: s.windows.map((w) => (w.maximized ? w : clampToViewport(w, vp))) }));
   }, []);
 
-  // Persist the layout (a short debounce so dragging doesn't hammer storage).
+  // Persist the layout during active sessions (cleans storage when empty).
   useEffect(() => {
-    const t = setTimeout(() => saveState(wm), 150);
+    const t = setTimeout(() => {
+      if (wm.windows.length > 0) {
+        saveState(wm);
+      } else {
+        try { localStorage.removeItem('skon-workspace-windows-v1'); } catch (e) { /* ignore */ }
+      }
+    }, 150);
     return () => clearTimeout(t);
   }, [wm]);
 
@@ -74,14 +84,34 @@ function AppContent() {
   const onDuplicate = useCallback((id) => setWm((s) => duplicateWindow(s, id, viewportRef.current)), []);
   const onSnap = useCallback((id, zone) => setWm((s) => applySnap(s, id, zone, viewportRef.current)), []);
   const onFocus = useCallback((id) => setWm((s) => focusWindow(s, id)), []);
-  const onClose = useCallback((id) => setWm((s) => closeWindow(s, id)), []);
+  const onClose = useCallback((id) => {
+    setWm((s) => {
+      const closingWin = s.windows.find((w) => w.id === id);
+      if (closingWin) {
+        const name = toolMeta(closingWin.toolId)?.title || closingWin.title || closingWin.toolId;
+        record(name, 'info', `Closed ${name}`);
+      }
+      const next = closeWindow(s, id);
+      if (!next.windows.length) {
+        setCurrentTool(null);
+        if (lastOpened.current) lastOpened.current = null;
+      }
+      return next;
+    });
+  }, []);
   const onMinimize = useCallback((id) => setWm((s) => minimizeWindow(s, id)), []);
   const onToggleMaximize = useCallback((id) => setWm((s) => toggleMaximize(s, id, viewportRef.current)), []);
   const onMove = useCallback((id, x, y) => setWm((s) => moveWindow(s, id, x, y, viewportRef.current)), []);
   const onResize = useCallback((id, geo) => setWm((s) => resizeWindow(s, id, geo, viewportRef.current)), []);
   const onTile = useCallback(() => setWm((s) => tileWindows(s, viewportRef.current)), []);
   const onCascade = useCallback(() => setWm((s) => cascadeWindows(s, viewportRef.current)), []);
-  const onCloseAll = useCallback(() => setWm((s) => closeAll(s)), []);
+  const onCloseAll = useCallback(() => {
+    record('Workspace', 'info', 'Closed all windows');
+    setCurrentTool(null);
+    if (lastOpened.current) lastOpened.current = null;
+    try { localStorage.removeItem('skon-workspace-windows-v1'); } catch (e) { /* ignore */ }
+    setWm((s) => closeAll(s));
+  }, []);
   const onZoomStep = useCallback((id, dir, currentZoom) => setWm((s) => zoomStep(s, id, dir, currentZoom)), []);
   const onToggleFit = useCallback((id) => setWm((s) => toggleFit(s, id)), []);
   const onResetZoom = useCallback((id) => setWm((s) => setZoom(s, id, 1)), []);
@@ -114,7 +144,12 @@ function AppContent() {
   // Attribute session-log entries (device picks, confirmations) to the focused tool
   const lastOpened = useRef(null);
   useEffect(() => {
-    if (!activeTool || activeTool === 'session-log' || lastOpened.current === activeTool) return;
+    if (!activeTool) {
+      setCurrentTool(null);
+      lastOpened.current = null;
+      return;
+    }
+    if (activeTool === 'session-log' || lastOpened.current === activeTool) return;
     lastOpened.current = activeTool;
     const name = toolMeta(activeTool).title;
     if (!['programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp'].includes(activeTool)) setCurrentTool(name);
@@ -179,7 +214,7 @@ function AppContent() {
     <div className="h-screen bg-cyber-darkest text-slate-200 flex flex-col font-mono selection:bg-cyan-500/30 selection:text-cyan-300 overflow-hidden">
       {/* 1. Global Persistent Header */}
       <Header
-        activeTool={activeTool || 'flasher'}
+        activeTool={activeTool}
         activePreset={currentActivePreset}
         onSelectPreset={handleSelectPreset}
         isDrawerOpen={isDrawerOpen}

@@ -74,6 +74,31 @@ describe('Wiki Article Index & Tool Deep-Linking', () => {
     expect(generator.id).toBe('wardrive-generator');
     expect(generator.title).toContain('Wardrive');
   });
+
+  it('resolves workspace, null, empty, or undefined targets to the workspace article', () => {
+    const ws1 = resolveArticleForTool('workspace');
+    expect(ws1.id).toBe('workspace');
+    expect(ws1.title).toContain('Workspace');
+
+    const wsNull = resolveArticleForTool(null);
+    expect(wsNull.id).toBe('workspace');
+
+    const wsEmpty = resolveArticleForTool('');
+    expect(wsEmpty.id).toBe('workspace');
+
+    const wsUndef = resolveArticleForTool(undefined);
+    expect(wsUndef.id).toBe('workspace');
+  });
+
+  it('provides fallback meta for workspace and null tools in toolMeta', () => {
+    const metaNull = toolMeta(null);
+    expect(metaNull.title).toBe('Workspace');
+    expect(metaNull.id).toBe('workspace');
+
+    const metaWs = toolMeta('workspace');
+    expect(metaWs.title).toBe('Workspace');
+    expect(metaWs.id).toBe('workspace');
+  });
 });
 
 describe('Sidebar & Search Filter Index', () => {

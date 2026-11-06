@@ -236,18 +236,18 @@ export default function Header({
             </select>
           </div>
 
-          {/* Standalone Wiki Link (Deep-linked to current active tool) */}
+          {/* Standalone Wiki Link (Deep-linked to current active tool or Workspace) */}
           <a
-            href={`./wiki/?tool=${activeTool || 'flasher'}`}
+            href={activeTool ? `./wiki/?tool=${activeTool}` : './wiki/?article=workspace'}
             target="_blank"
             rel="noopener noreferrer"
-            title={`Open Wiki Documentation for ${toolMeta(activeTool || 'flasher').title}`}
+            title={`Open Wiki Documentation for ${activeTool ? toolMeta(activeTool).title : 'Workspace'}`}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold font-mono transition-all active:scale-95 shadow-sm shadow-indigo-500/10"
           >
             <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
             <span className="hidden md:inline">WIKI</span>
             <span className="text-[10px] text-indigo-200/80 max-w-[8rem] truncate hidden xl:inline">
-              ({toolMeta(activeTool || 'flasher').title})
+              {`(${activeTool ? toolMeta(activeTool).title : 'Workspace'})`}
             </span>
           </a>
 

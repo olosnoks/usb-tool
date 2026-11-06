@@ -134,7 +134,7 @@ export default function Sidebar({
   const handleItemClick = (item, ev) => {
     if (item.id === 'wiki-external' || item.href) {
       const targetUrl = item.id === 'wiki-external'
-        ? `./wiki/?tool=${activeTool || 'flasher'}`
+        ? (activeTool ? `./wiki/?tool=${activeTool}` : './wiki/?article=workspace')
         : item.href;
       window.open(targetUrl, '_blank', 'noopener,noreferrer');
       return;

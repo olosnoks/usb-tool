@@ -63,7 +63,7 @@ export default function CommandPalette({
       section.items.map((item) => {
         let action;
         if (item.id === 'wiki-external') {
-          action = () => window.open(`./wiki/?tool=${activeTool || 'flasher'}`, '_blank', 'noopener,noreferrer');
+          action = () => window.open(activeTool ? `./wiki/?tool=${activeTool}` : './wiki/?article=workspace', '_blank', 'noopener,noreferrer');
         } else if (item.id === 'pinouts-modal') {
           action = () => onOpenPinouts?.();
         } else if (item.id === 'intel-modal') {
@@ -288,12 +288,12 @@ export default function CommandPalette({
       },
       {
         id: 'act-wiki-current',
-        name: `Open Wiki Manual for ${toolMeta(activeTool || 'flasher').title}`,
+        name: `Open Wiki Manual for ${activeTool ? toolMeta(activeTool).title : 'Workspace'}`,
         category: 'DOCUMENTATION & MANUAL',
         icon: BookOpen,
-        desc: `Jump directly to the technical knowledge base article for ${toolMeta(activeTool || 'flasher').title}`,
-        keywords: ['wiki', 'docs', 'manual', 'help', 'guide', 'documentation', activeTool || ''],
-        action: () => window.open(`./wiki/?tool=${activeTool || 'flasher'}`, '_blank', 'noopener,noreferrer')
+        desc: `Jump directly to the technical knowledge base article for ${activeTool ? toolMeta(activeTool).title : 'Workspace'}`,
+        keywords: ['wiki', 'docs', 'manual', 'help', 'guide', 'documentation', activeTool || 'workspace'],
+        action: () => window.open(activeTool ? `./wiki/?tool=${activeTool}` : './wiki/?article=workspace', '_blank', 'noopener,noreferrer')
       },
       {
         id: 'act-wiki-all',
