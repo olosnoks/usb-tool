@@ -59,7 +59,8 @@ export const SIDEBAR_SECTIONS = [
       { id: 'modbus-rtu', name: 'Modbus RTU & RS-485', icon: Activity, accent: 'amber', desc: 'Industrial holding registers & inverter telemetry' },
       { id: 'plotter', name: 'Oscilloscope Plotter', icon: Activity, accent: 'rose', desc: 'Multi-channel live waveforms' },
       { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer' },
-      { id: 'usbtmc', name: 'USBTMC Instrument', icon: Gauge, accent: 'cyan', desc: 'SCPI console, scope waveforms & screenshots, DMM logging and scripts over WebUSB' }
+      { id: 'usbtmc', name: 'USBTMC Instrument', icon: Gauge, accent: 'cyan', desc: 'SCPI console, scope waveforms & screenshots, DMM logging and scripts over WebUSB' },
+      { id: 'cyberchef', name: 'CyberChef Workbench', icon: Sparkles, accent: 'purple', desc: 'Cyber Swiss Army Knife: 200+ crypto, encoding, compression & parsing operations' }
     ]
   },
   {
@@ -80,7 +81,7 @@ export const SIDEBAR_SECTIONS = [
     id: 'programmers',
     title: 'HARDWARE & PAYLOADS',
     items: [
-      { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript compiler, simulator & CyberChef obfuscator' },
+      { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript keystroke compiler, syntax validator & live simulator' },
       { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash, CMSIS-DAP debugger (RTT, SWO, flash), JTAG / SVF and AVR ISP' },
       { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'STUSB4500 sink: contract readout, voltage requests and verified NVM (power-up PDOs)' },
       { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more' },
@@ -233,7 +234,6 @@ export default function Sidebar({
                     activeTool === item.id ||
                     (item.id === 'alfa-wifi' && ['alfa-wifi', 'wifi-scanner'].includes(activeTool)) ||
                     (item.id === 'packet-analyzer' && ['packet-analyzer', 'hex', 'packets', 'kismet'].includes(activeTool)) ||
-                    (item.id === 'ducky' && ['ducky', 'cyberchef'].includes(activeTool)) ||
                     (item.id === 'wardrive' && ['wardrive', 'ubx'].includes(activeTool)) ||
                     (item.id === 'programmers' && ['programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp'].includes(activeTool));
                   const isOpen = !item.isModal && !item.href && openTools.includes(windowKeyFor(item.id));

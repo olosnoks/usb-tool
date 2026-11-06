@@ -190,4 +190,50 @@ describe('UI Workbench Render Sanity Check', () => {
     expect(parsed.autoStartAfterUpload).toBe(true);
     expect(parsed.uploadOnNetworkSeen).toBe(false);
   });
+
+  it('verifies CyberChef and DuckyScript BadUSB are decoupled into independent tools', async () => {
+    const { windowKeyFor } = await import('../src/utils/windowManager.js');
+    const { toolMeta, renderTool } = await import('../src/components/ToolRegistry.jsx');
+
+    // Both have independent window manager keys (neither is aliased to the other)
+    expect(windowKeyFor('cyberchef')).toBe('cyberchef');
+    expect(windowKeyFor('ducky')).toBe('ducky');
+
+    // Independent tool metadata
+    const chefMeta = toolMeta('cyberchef');
+    expect(chefMeta.title).toBe('CyberChef Workbench');
+    expect(chefMeta.accent).toBe('purple');
+    expect(chefMeta.naturalWidth).toBe(1200);
+
+    const duckyMeta = toolMeta('ducky');
+    expect(duckyMeta.title).toBe('BadUSB & Payload Studio');
+    expect(duckyMeta.accent).toBe('amber');
+    expect(duckyMeta.naturalWidth).toBe(1000);
+
+    // renderTool renders distinct elements for each
+    const fakeSerial = {
+      isConnected: false,
+      port: null,
+      latestRxText: '',
+      hexByteStream: [],
+      clearHexStream: vi.fn(),
+      sendString: vi.fn(),
+      sendRawBytes: vi.fn(),
+      toggleSignal: vi.fn(),
+      setBaudRate: vi.fn(),
+      baudRate: 115200,
+      addLog: vi.fn(),
+      boards: [],
+      activeBoardId: null,
+      setActiveBoardId: vi.fn(),
+      setConsolePaused: vi.fn()
+    };
+
+    const chefEl = renderTool('cyberchef', fakeSerial);
+    const duckyEl = renderTool('ducky', fakeSerial);
+
+    expect(chefEl).toBeDefined();
+    expect(duckyEl).toBeDefined();
+    expect(chefEl.type).not.toBe(duckyEl.type);
+  });
 });

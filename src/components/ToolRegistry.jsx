@@ -33,6 +33,8 @@ const UsbReconDeck = React.lazy(() => import('./UsbReconDeck'));
 const EspMemoryInspector = React.lazy(() => import('./EspMemoryInspector'));
 const AlfaWifiWorkbench = React.lazy(() => import('./workbenches/AlfaWifiWorkbench'));
 const WarhogPigletWorkbench = React.lazy(() => import('./workbenches/WarhogPigletWorkbench'));
+const DuckyScriptStudio = React.lazy(() => import('./tools/DuckyScriptStudio'));
+const CyberChefWorkbench = React.lazy(() => import('./tools/CyberChefWorkbench'));
 const BadUsbPayloadSuite = React.lazy(() => import('./tools/BadUsbPayloadSuite'));
 const ProtocolPacketLab = React.lazy(() => import('./tools/ProtocolPacketLab'));
 const GpsNavigationSuite = React.lazy(() => import('./tools/GpsNavigationSuite'));
@@ -59,7 +61,8 @@ const ALL_ITEMS = SIDEBAR_SECTIONS.flatMap((s) => s.items || []);
 export const DEFAULT_NATURAL_WIDTH = 1100;
 export const TOOL_NATURAL_WIDTH = {
   mayhem: 1180, 'alfa-wifi': 1280, 'warhog-piglet': 1200, 'logic-analyzer': 1200, 'packet-analyzer': 1200,
-  terminal: 900, flasher: 1000, hardware: 900, setup: 900, 'session-log': 900
+  terminal: 900, flasher: 1000, hardware: 900, setup: 900, 'session-log': 900,
+  cyberchef: 1200, ducky: 1000
 };
 
 /** Title, icon and accent for a tool id (aliases resolve to their group's entry). */
@@ -148,7 +151,8 @@ export function renderTool(toolId, serial) {
     case 'mayhem': return <PortapackWorkbench />;
     case 'flipper': return <FlipperWorkbench />;
     case 'proxmark': case 'rfid-nfc': return <ProxmarkWorkbench />;
-    case 'ducky': case 'cyberchef': return <BadUsbPayloadSuite initialTab={toolId === 'cyberchef' ? 'cyberchef' : 'ducky'} />;
+    case 'ducky': return <DuckyScriptStudio onLogMessage={addLog} />;
+    case 'cyberchef': return <CyberChefWorkbench onLogMessage={addLog} />;
     case 'wardrive-generator': return <WardriveGeneratorWorkbench onLogMessage={addLog} />;
     default:
       return (

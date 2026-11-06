@@ -25,7 +25,6 @@ export const ZOOM_STEPS = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5];
 export const TOOL_GROUPS = {
   hex: 'packet-analyzer', packets: 'packet-analyzer', kismet: 'packet-analyzer',
   ubx: 'wardrive',
-  cyberchef: 'ducky',
   ch341a: 'programmers', 'cmsis-dap': 'programmers', 'jtag-programmer': 'programmers', 'avr-isp': 'programmers',
   'rfid-nfc': 'proxmark',
   'wifi-scanner': 'alfa-wifi',
