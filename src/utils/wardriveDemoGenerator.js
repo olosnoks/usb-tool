@@ -223,7 +223,23 @@ export function formatTimestamp(date) {
 }
 
 /**
+ * Convert km/h speed to approximate degrees of latitude/longitude per second.
+ * 1 degree latitude ~ 111 km.
+ */
+export function speedKmhToDegPerSec(speedKmh = 50.0) {
+  return (Number(speedKmh) / 3600.0) / 111.0;
+}
+
+/**
+ * Convert degrees per second back to approximate km/h.
+ */
+export function degPerSecToSpeedKmh(degPerSec = 0.00015) {
+  return degPerSec * 111.0 * 3600.0;
+}
+
+/**
  * Generate synthetic Access Points tracing text along a vector font path.
+ * Supports configurable letter dimensions, scale factor, wardrive vehicle speed, and target AP count.
  */
 export function generateDemoAps(options = {}) {
   const {
@@ -232,18 +248,37 @@ export function generateDemoAps(options = {}) {
     lonCenter = -90.13,
     letterW = 0.04,
     letterH = 0.06,
+    letterScale = 1.0,
     gap = 0.02,
-    stepSize = 0.0008,
-    speedDegPerSec = 0.00015,
+    speedKmh = 50.0,
+    speedDegPerSec = null,
     stepIntervalSeconds = 3,
+    targetApCount = null,
+    stepSize = null,
     endTime = null,
     seed = 42
   } = options;
 
   const cleanText = String(text || '').trim();
   if (!cleanText) {
-    return { aps: [], masterPath: [], bounds: null };
+    return { aps: [], masterPath: [], bounds: null, totalPathLength: 0, durationSeconds: 0 };
   }
+
+  const effectiveScale = Number(letterScale) > 0 ? Number(letterScale) : 1.0;
+  const effectiveLetterW = (Number(letterW) || 0.04) * effectiveScale;
+  const effectiveLetterH = (Number(letterH) || 0.06) * effectiveScale;
+  const effectiveGap = (Number(gap) || 0.02) * effectiveScale;
+
+  const effectiveSpeedDegPerSec = speedDegPerSec !== null && speedDegPerSec !== undefined
+    ? Number(speedDegPerSec)
+    : speedKmhToDegPerSec(speedKmh !== null && speedKmh !== undefined ? speedKmh : 50.0);
+
+  const effectiveStepInterval = Number(stepIntervalSeconds) || 3;
+
+  // Fine interpolation step so curves look smooth
+  const effectiveStepSize = stepSize !== null && stepSize !== undefined
+    ? Number(stepSize)
+    : Math.min(0.0008 * effectiveScale, 0.0008);
 
   const masterPath = [];
   let currentX = Number(lonCenter);
@@ -258,12 +293,12 @@ export function generateDemoAps(options = {}) {
         const p1Rel = stroke[i];
         const p2Rel = stroke[i + 1];
 
-        const lon1 = currentX + p1Rel[0] * letterW;
-        const lat1 = y0 - p1Rel[1] * letterH;
-        const lon2 = currentX + p2Rel[0] * letterW;
-        const lat2 = y0 - p2Rel[1] * letterH;
+        const lon1 = currentX + p1Rel[0] * effectiveLetterW;
+        const lat1 = y0 - p1Rel[1] * effectiveLetterH;
+        const lon2 = currentX + p2Rel[0] * effectiveLetterW;
+        const lat2 = y0 - p2Rel[1] * effectiveLetterH;
 
-        const pts = interpolateSegment([lon1, lat1], [lon2, lat2], stepSize);
+        const pts = interpolateSegment([lon1, lat1], [lon2, lat2], effectiveStepSize);
         if (letterLocalPath.length > 0) {
           letterLocalPath.push(...pts.slice(1));
         } else {
@@ -276,100 +311,124 @@ export function generateDemoAps(options = {}) {
       if (masterPath.length > 0) {
         const endPt = masterPath[masterPath.length - 1];
         const startPt = letterLocalPath[0];
-        const bridgePts = interpolateSegment(endPt, startPt, stepSize);
+        const bridgePts = interpolateSegment(endPt, startPt, effectiveStepSize);
         masterPath.push(...bridgePts.slice(1));
       }
       masterPath.push(...letterLocalPath);
     }
 
-    currentX += letterW + gap;
+    currentX += effectiveLetterW + effectiveGap;
   }
 
   const aps = [];
   if (masterPath.length === 0) {
-    return { aps, masterPath, bounds: null };
+    return { aps, masterPath, bounds: null, totalPathLength: 0, durationSeconds: 0 };
+  }
+
+  // Calculate total path distance in degrees
+  let totalPathLength = 0;
+  for (let i = 0; i < masterPath.length - 1; i++) {
+    const p1 = masterPath[i];
+    const p2 = masterPath[i + 1];
+    const dx = p2[0] - p1[0];
+    const dy = p2[1] - p1[1];
+    totalPathLength += Math.sqrt(dx * dx + dy * dy);
+  }
+
+  // Determine step distance: either fixed target AP count or speed * interval
+  let stepDist;
+  if (targetApCount && Number(targetApCount) > 1 && totalPathLength > 0) {
+    stepDist = totalPathLength / Number(targetApCount);
+  } else {
+    stepDist = Math.max(0.00001, effectiveSpeedDegPerSec * effectiveStepInterval);
   }
 
   const baseEndTime = endTime instanceof Date ? new Date(endTime.getTime()) : new Date(Date.now() - 24 * 3600 * 1000);
   let currentTime = new Date(baseEndTime.getTime() - 2 * 3600 * 1000);
 
-  let currentPt = masterPath[0];
-  let pathIdx = 0;
   let pointCounter = 1;
   const rng = createPrng(seed);
   const seen = new Set();
   const ssidPrefix = cleanText.replace(/\s+/g, '_').toUpperCase();
-
-  const stepDist = speedDegPerSec * stepIntervalSeconds;
 
   let minLat = Infinity;
   let maxLat = -Infinity;
   let minLon = Infinity;
   let maxLon = -Infinity;
 
-  while (pathIdx < masterPath.length - 1) {
-    const targetPt = masterPath[pathIdx + 1];
-    const dx = targetPt[0] - currentPt[0];
-    const dy = targetPt[1] - currentPt[1];
+  // Path traversing walker: advances along vertices by exact stepDist
+  let currentSegmentIdx = 0;
+  let currentPt = masterPath[0];
+  let distanceToNextAp = stepDist;
+
+  while (currentSegmentIdx < masterPath.length - 1) {
+    const nextVertex = masterPath[currentSegmentIdx + 1];
+    const dx = nextVertex[0] - currentPt[0];
+    const dy = nextVertex[1] - currentPt[1];
     const segDist = Math.sqrt(dx * dx + dy * dy);
 
     if (segDist === 0) {
-      pathIdx += 1;
+      currentSegmentIdx++;
+      currentPt = nextVertex;
       continue;
     }
 
-    if (segDist <= stepDist) {
-      currentPt = targetPt;
-      pathIdx += 1;
+    if (segDist < distanceToNextAp) {
+      // Advance to the end of this vertex segment
+      currentPt = nextVertex;
+      distanceToNextAp -= segDist;
+      currentSegmentIdx++;
     } else {
-      const fraction = stepDist / segDist;
+      // Step to the exact location of the next AP on this segment
+      const fraction = distanceToNextAp / segDist;
       currentPt = [
         currentPt[0] + dx * fraction,
         currentPt[1] + dy * fraction
       ];
+      distanceToNextAp = stepDist;
+
+      currentTime = new Date(currentTime.getTime() + effectiveStepInterval * 1000);
+
+      // Generate globally unique, unicast MAC address
+      const genMac = () => {
+        let firstOctet = rng.randrange(256) & 0xFE; // Clear multicast bit
+        firstOctet &= 0xFD;                        // Clear local/private bit
+        const secondNibble = rng.choice([0, 4, 8, 12]);
+        const firstHex = (((firstOctet & 0xF0) | secondNibble) >>> 0).toString(16).padStart(2, '0').toUpperCase();
+        const rest = Array.from({ length: 5 }, () => rng.randrange(256).toString(16).padStart(2, '0').toUpperCase()).join(':');
+        return `${firstHex}:${rest}`;
+      };
+
+      let mac = genMac();
+      while (seen.has(mac)) {
+        mac = genMac();
+      }
+      seen.add(mac);
+
+      const latJitter = rng.uniform(-0.000001, 0.000001);
+      const lonJitter = rng.uniform(-0.000001, 0.000001);
+      const lat = Number((currentPt[1] + latJitter).toFixed(6));
+      const lon = Number((currentPt[0] + lonJitter).toFixed(6));
+
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+
+      aps.push({
+        mac,
+        ssid: `${ssidPrefix}-${String(pointCounter).padStart(6, '0')}`,
+        auth: rng.choice(AUTH_MODES),
+        first_seen: formatTimestamp(currentTime),
+        channel: rng.choice(CHANNELS),
+        rssi: rng.randint(-90, -45),
+        lat,
+        lon,
+        alt: 15,
+        accuracy: Number(rng.uniform(3, 8).toFixed(1))
+      });
+      pointCounter += 1;
     }
-
-    currentTime = new Date(currentTime.getTime() + stepIntervalSeconds * 1000);
-
-    // Generate a globally unique, unicast MAC address
-    const genMac = () => {
-      let firstOctet = rng.randrange(256) & 0xFE; // Clear multicast bit
-      firstOctet &= 0xFD;                        // Clear local/private bit
-      const secondNibble = rng.choice([0, 4, 8, 12]);
-      const firstHex = (((firstOctet & 0xF0) | secondNibble) >>> 0).toString(16).padStart(2, '0').toUpperCase();
-      const rest = Array.from({ length: 5 }, () => rng.randrange(256).toString(16).padStart(2, '0').toUpperCase()).join(':');
-      return `${firstHex}:${rest}`;
-    };
-
-    let mac = genMac();
-    while (seen.has(mac)) {
-      mac = genMac();
-    }
-    seen.add(mac);
-
-    const latJitter = rng.uniform(-0.000001, 0.000001);
-    const lonJitter = rng.uniform(-0.000001, 0.000001);
-    const lat = Number((currentPt[1] + latJitter).toFixed(6));
-    const lon = Number((currentPt[0] + lonJitter).toFixed(6));
-
-    if (lat < minLat) minLat = lat;
-    if (lat > maxLat) maxLat = lat;
-    if (lon < minLon) minLon = lon;
-    if (lon > maxLon) maxLon = lon;
-
-    aps.push({
-      mac,
-      ssid: `${ssidPrefix}-${String(pointCounter).padStart(6, '0')}`,
-      auth: rng.choice(AUTH_MODES),
-      first_seen: formatTimestamp(currentTime),
-      channel: rng.choice(CHANNELS),
-      rssi: rng.randint(-90, -45),
-      lat,
-      lon,
-      alt: 15,
-      accuracy: Number(rng.uniform(3, 8).toFixed(1))
-    });
-    pointCounter += 1;
   }
 
   const bounds = isFinite(minLat) ? { minLat, maxLat, minLon, maxLon } : null;
@@ -378,7 +437,8 @@ export function generateDemoAps(options = {}) {
     aps,
     masterPath,
     bounds,
-    durationSeconds: aps.length * stepIntervalSeconds
+    totalPathLength,
+    durationSeconds: aps.length * effectiveStepInterval
   };
 }
 
@@ -438,20 +498,54 @@ export function exportPythonScriptSource({
   lonCenter = -90.13,
   letterW = 0.04,
   letterH = 0.06,
-  gap = 0.02
+  letterScale = 1.0,
+  gap = 0.02,
+  speedKmh = 50.0,
+  stepIntervalSeconds = 3,
+  targetApCount = null,
+  includePreheader = true
 } = {}) {
+  const scale = Number(letterScale) || 1.0;
+  const scaledW = Number((letterW * scale).toFixed(6));
+  const scaledH = Number((letterH * scale).toFixed(6));
+  const scaledGap = Number((gap * scale).toFixed(6));
+  const targetApsLiteral = targetApCount ? Number(targetApCount) : 'None';
+  const preheaderLiteral = includePreheader ? 'True' : 'False';
+
   return `import csv
 import random
 import math
 from datetime import datetime, timedelta
 
-# Creates words made from generated APs to poison or decorate war driving maps
-# Test Here: kepler.gl/demo
+# ==============================================================================
+# WARDRIVING VECTOR ART GENERATOR
+# Creates words made from generated APs to test or visualize on wardriving maps
+# View your results here: https://kepler.gl/demo
+# ==============================================================================
 
-LAT_CENTER, LON_CENTER = ${latCenter}, ${lonCenter}  # Selected origin coordinates
-LETTER_W, LETTER_H = ${letterW}, ${letterH}        # Physical size in degrees
-GAP = ${gap}                             # Clean spacing between letters
-INCLUDE_PREHEADER = True           
+# 1. Location Coordinates
+LAT_CENTER = ${latCenter}   # Origin Latitude (click map or edit here)
+LON_CENTER = ${lonCenter}  # Origin Longitude
+
+# 2. Letter Size & Spacing
+# Adjust LETTER_SCALE to scale the whole word up or down (e.g. 0.5 = small, 2.0 = giant)
+LETTER_SCALE = ${scale}
+LETTER_W = ${scaledW}        # Letter width in degrees (~${(scaledW * 111).toFixed(1)} km)
+LETTER_H = ${scaledH}        # Letter height in degrees (~${(scaledH * 111).toFixed(1)} km)
+GAP = ${scaledGap}                 # Spacing between letters
+
+# 3. Wardrive Vehicle Speed & Sampling Rate
+SPEED_KMH = ${speedKmh}            # Simulated driving speed in km/h (e.g. 15 = bike, 45 = city, 90 = highway)
+STEP_INTERVAL_SEC = ${stepIntervalSeconds}    # Seconds between AP sightings
+# 1 degree of latitude is ~111 km. Compute degrees/second:
+SPEED_DEG_PER_SEC = (SPEED_KMH / 3600.0) / 111.0
+
+# 4. Amount of APs (Density / Count Control)
+# Set TARGET_AP_COUNT to an integer (e.g. 100, 500, 1000) to lock an exact AP count,
+# or set to None to automatically calculate AP count from SPEED_KMH and STEP_INTERVAL_SEC.
+TARGET_AP_COUNT = ${targetApsLiteral}
+
+INCLUDE_PREHEADER = ${preheaderLiteral}           
 END_TIME = datetime.now() - timedelta(days=1)    
 
 # Clean, ordered vector strokes for letters and numbers (Relative coordinates 0.0 to 1.0)
@@ -510,73 +604,87 @@ def generate_aps(text):
         current_x += LETTER_W + GAP
 
     aps = []
-    current_time = END_TIME - timedelta(hours=2)
-    speed_deg_per_sec = 0.00015  
-    
     if not master_path:
         return aps
 
-    current_pt = master_path[0]
-    path_idx = 0
+    # Calculate total stroke distance
+    total_len = 0.0
+    for i in range(len(master_path) - 1):
+        dx = master_path[i+1][0] - master_path[i][0]
+        dy = master_path[i+1][1] - master_path[i][1]
+        total_len += math.sqrt(dx*dx + dy*dy)
+
+    # Determine step distance: either fixed target AP count or speed * interval
+    if TARGET_AP_COUNT is not None and TARGET_AP_COUNT > 1:
+        step_dist = total_len / float(TARGET_AP_COUNT)
+    else:
+        step_dist = SPEED_DEG_PER_SEC * STEP_INTERVAL_SEC
+
+    current_time = END_TIME - timedelta(hours=2)
     point_counter = 1
     random.seed(42)
     seen = set()
-
     ssid_prefix = text.replace(" ", "_").upper()
 
-    while path_idx < len(master_path) - 1:
-        target_pt = master_path[path_idx + 1]
-        
-        dx = target_pt[0] - current_pt[0]
-        dy = target_pt[1] - current_pt[1]
+    current_segment_idx = 0
+    current_pt = master_path[0]
+    dist_to_next = step_dist
+
+    while current_segment_idx < len(master_path) - 1:
+        next_v = master_path[current_segment_idx + 1]
+        dx = next_v[0] - current_pt[0]
+        dy = next_v[1] - current_pt[1]
         seg_dist = math.sqrt(dx*dx + dy*dy)
-        
+
         if seg_dist == 0:
-            path_idx += 1
+            current_segment_idx += 1
+            current_pt = next_v
             continue
 
-        step_dist = speed_deg_per_sec * 3  
-        if seg_dist <= step_dist:
-            current_pt = target_pt
-            path_idx += 1
+        if seg_dist < dist_to_next:
+            current_pt = next_v
+            dist_to_next -= seg_dist
+            current_segment_idx += 1
         else:
-            fraction = step_dist / seg_dist
+            fraction = dist_to_next / seg_dist
             current_pt = (
                 current_pt[0] + dx * fraction,
                 current_pt[1] + dy * fraction
             )
+            dist_to_next = step_dist
 
-        current_time += timedelta(seconds=3)
+            current_time += timedelta(seconds=STEP_INTERVAL_SEC)
 
-        first_octet = random.randrange(256) & 0xFE
-        first_octet &= 0xFD
-        second_nibble = random.choice([0, 4, 8, 12])
-        first_hex = f"{(first_octet & 0xF0) | second_nibble:02X}"
-        mac = first_hex + ":" + ":".join(f"{random.randrange(256):02X}" for _ in range(5))
-        
-        while mac in seen:
+            # Generate globally unique, unicast MAC address
             first_octet = random.randrange(256) & 0xFE
             first_octet &= 0xFD
+            second_nibble = random.choice([0, 4, 8, 12])
             first_hex = f"{(first_octet & 0xF0) | second_nibble:02X}"
             mac = first_hex + ":" + ":".join(f"{random.randrange(256):02X}" for _ in range(5))
-        seen.add(mac)
+            
+            while mac in seen:
+                first_octet = random.randrange(256) & 0xFE
+                first_octet &= 0xFD
+                first_hex = f"{(first_octet & 0xF0) | second_nibble:02X}"
+                mac = first_hex + ":" + ":".join(f"{random.randrange(256):02X}" for _ in range(5))
+            seen.add(mac)
 
-        lat = current_pt[1] + random.uniform(-0.000001, 0.000001)
-        lon = current_pt[0] + random.uniform(-0.000001, 0.000001)
+            lat = current_pt[1] + random.uniform(-0.000001, 0.000001)
+            lon = current_pt[0] + random.uniform(-0.000001, 0.000001)
 
-        aps.append({
-            "mac": mac,
-            "ssid": f"{ssid_prefix}-{point_counter:06d}",
-            "auth": random.choice(AUTH_MODES),
-            "first_seen": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-            "channel": random.choice(CHANNELS),
-            "rssi": random.randint(-90, -45),
-            "lat": round(lat, 6),
-            "lon": round(lon, 6),
-            "alt": 15,
-            "accuracy": round(random.uniform(3, 8), 1),
-        })
-        point_counter += 1
+            aps.append({
+                "mac": mac,
+                "ssid": f"{ssid_prefix}-{point_counter:06d}",
+                "auth": random.choice(AUTH_MODES),
+                "first_seen": current_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "channel": random.choice(CHANNELS),
+                "rssi": random.randint(-90, -45),
+                "lat": round(lat, 6),
+                "lon": round(lon, 6),
+                "alt": 15,
+                "accuracy": round(random.uniform(3, 8), 1),
+            })
+            point_counter += 1
 
     return aps
 

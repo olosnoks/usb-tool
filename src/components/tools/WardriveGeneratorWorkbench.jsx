@@ -25,7 +25,11 @@ import {
   Eye,
   Clock,
   Radio,
-  FileText
+  FileText,
+  Gauge,
+  Maximize2,
+  Hash,
+  Move
 } from 'lucide-react';
 import { 
   generateDemoAps, 
@@ -69,16 +73,51 @@ const TILE_PROVIDERS = {
   }
 };
 
+const SPEED_PRESETS = [
+  { label: 'Walk (5 km/h)', speed: 5 },
+  { label: 'Bike (15 km/h)', speed: 15 },
+  { label: 'City (45 km/h)', speed: 45 },
+  { label: 'Hwy (90 km/h)', speed: 90 },
+  { label: 'Air (250 km/h)', speed: 250 }
+];
+
+const SCALE_PRESETS = [
+  { label: '0.25x (~1km)', scale: 0.25 },
+  { label: '0.5x (~3km)', scale: 0.5 },
+  { label: '1.0x (~6km)', scale: 1.0 },
+  { label: '1.5x (~10km)', scale: 1.5 },
+  { label: '2.5x (~16km)', scale: 2.5 }
+];
+
+const AP_COUNT_PRESETS = [
+  { label: '100', count: 100 },
+  { label: '250', count: 250 },
+  { label: '500', count: 500 },
+  { label: '1k', count: 1000 },
+  { label: '2.5k', count: 2500 }
+];
+
 export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) {
   // Input parameters
   const [text, setText] = useState('KEPLER');
   const [latCenter, setLatCenter] = useState(32.25);
   const [lonCenter, setLonCenter] = useState(-90.13);
 
-  // Advanced styling / stroke parameters
+  // 1. Amount of APs Controls
+  const [densityMode, setDensityMode] = useState('target'); // 'target' | 'auto'
+  const [targetApCount, setTargetApCount] = useState(500);
+
+  // 2. Letter Size & Scale Controls
+  const [letterScale, setLetterScale] = useState(1.0);
   const [letterW, setLetterW] = useState(0.04);
   const [letterH, setLetterH] = useState(0.06);
   const [gap, setGap] = useState(0.02);
+
+  // 3. Wardrive Simulation Speed Controls
+  const [speedKmh, setSpeedKmh] = useState(50.0);
+  const [stepIntervalSeconds, setStepIntervalSeconds] = useState(3);
+
+  // Advanced & Simulation flags
   const [includePreheader, setIncludePreheader] = useState(true);
   const [useFixedSeed, setUseFixedSeed] = useState(true);
   const [seed, setSeed] = useState(42);
@@ -105,6 +144,34 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
   const previewBoxLayerRef = useRef(null);
 
   const isLeafletAvailable = typeof window !== 'undefined' && L && typeof L.map === 'function';
+
+  // Physical Size Calculation
+  const physicalMetrics = useMemo(() => {
+    const scale = Number(letterScale) || 1.0;
+    const effW = (Number(letterW) || 0.04) * scale;
+    const effH = (Number(letterH) || 0.06) * scale;
+    const effGap = (Number(gap) || 0.02) * scale;
+    const clean = String(text || '').trim();
+    const count = Math.max(1, clean.length);
+
+    const latRad = (Number(latCenter) * Math.PI) / 180;
+    const kmPerLonDeg = 111.0 * Math.cos(latRad);
+    const kmPerLatDeg = 111.0;
+
+    const totalWidthDeg = count * (effW + effGap);
+    const totalHeightDeg = effH;
+
+    const widthKm = (totalWidthDeg * kmPerLonDeg).toFixed(2);
+    const heightKm = (totalHeightDeg * kmPerLatDeg).toFixed(2);
+
+    return {
+      effW,
+      effH,
+      effGap,
+      widthKm,
+      heightKm
+    };
+  }, [text, latCenter, letterW, letterH, letterScale, gap]);
 
   // 1. Initial Leaflet Map Setup
   useEffect(() => {
@@ -230,7 +297,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     }
   }, [latCenter, lonCenter]);
 
-  // 4. Update Ghost Bounding Box Preview
+  // 4. Update Ghost Bounding Box Preview on map
   useEffect(() => {
     if (!mapInstanceRef.current || !previewBoxLayerRef.current || !isLeafletAvailable) return;
     previewBoxLayerRef.current.clearLayers();
@@ -238,8 +305,13 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     const clean = String(text || '').trim();
     if (!clean) return;
 
-    const totalWidth = clean.length * (Number(letterW) + Number(gap));
-    const totalHeight = Number(letterH);
+    const scale = Number(letterScale) || 1.0;
+    const effW = (Number(letterW) || 0.04) * scale;
+    const effH = (Number(letterH) || 0.06) * scale;
+    const effGap = (Number(gap) || 0.02) * scale;
+
+    const totalWidth = clean.length * (effW + effGap);
+    const totalHeight = effH;
 
     const corner1 = [latCenter - totalHeight, lonCenter];
     const corner2 = [latCenter, lonCenter + totalWidth];
@@ -247,16 +319,16 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     try {
       const box = L.rectangle([corner1, corner2], {
         color: '#10b981',
-        weight: 1,
+        weight: 1.5,
         dashArray: '4, 6',
         fillColor: '#10b981',
-        fillOpacity: 0.06
+        fillOpacity: 0.07
       });
       previewBoxLayerRef.current.addLayer(box);
     } catch (e) {
       // Ignored in headless/test environments
     }
-  }, [text, latCenter, lonCenter, letterW, letterH, gap, isLeafletAvailable]);
+  }, [text, latCenter, lonCenter, letterW, letterH, letterScale, gap, isLeafletAvailable]);
 
   // 5. Run Generation Algorithm
   const handleGenerate = useCallback(() => {
@@ -268,8 +340,11 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
         lonCenter: Number(lonCenter),
         letterW: Number(letterW),
         letterH: Number(letterH),
+        letterScale: Number(letterScale),
         gap: Number(gap),
-        stepSize: 0.0008,
+        speedKmh: Number(speedKmh),
+        stepIntervalSeconds: Number(stepIntervalSeconds),
+        targetApCount: densityMode === 'target' ? Number(targetApCount) : null,
         seed: useFixedSeed ? Number(seed) : Math.floor(Math.random() * 100000)
       });
 
@@ -295,8 +370,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
         // 2. Draw AP Points
         const markerGroup = L.featureGroup();
-        result.aps.forEach((ap, idx) => {
-          // Color code by RSSI
+        result.aps.forEach((ap) => {
           let markerColor = '#10b981'; // Strong
           if (ap.rssi < -75) markerColor = '#f59e0b'; // Moderate
           if (ap.rssi < -85) markerColor = '#f43f5e'; // Weak
@@ -346,9 +420,9 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     } finally {
       setIsGenerating(false);
     }
-  }, [text, latCenter, lonCenter, letterW, letterH, gap, useFixedSeed, seed, isLeafletAvailable, onLogMessage]);
+  }, [text, latCenter, lonCenter, letterW, letterH, letterScale, gap, speedKmh, stepIntervalSeconds, densityMode, targetApCount, useFixedSeed, seed, isLeafletAvailable, onLogMessage]);
 
-  // Auto-generate on first mount with defaults if nothing generated
+  // Auto-generate on mount
   useEffect(() => {
     if (!generatedResult) {
       handleGenerate();
@@ -429,7 +503,12 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
       lonCenter,
       letterW,
       letterH,
-      gap
+      letterScale,
+      gap,
+      speedKmh,
+      stepIntervalSeconds,
+      targetApCount: densityMode === 'target' ? targetApCount : null,
+      includePreheader
     });
     downloadFile(`${getCleanBaseFilename()}_generator.py`, py, 'text/x-python');
   };
@@ -448,7 +527,12 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
         lonCenter,
         letterW,
         letterH,
-        gap
+        letterScale,
+        gap,
+        speedKmh,
+        stepIntervalSeconds,
+        targetApCount: densityMode === 'target' ? targetApCount : null,
+        includePreheader
       });
     }
 
@@ -486,7 +570,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               </span>
             </h2>
             <p className="text-xs text-slate-400">
-              Pick coordinates on the map, enter a phrase, and synthesize real-looking Wi-Fi wardriving trails
+              Pick coordinates on the map, customize AP count, letter size & vehicle speed, and synthesize Wi-Fi wardriving trails
             </p>
           </div>
         </div>
@@ -513,7 +597,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             }`}
           >
             <Table className="w-3.5 h-3.5" />
-            <span>AP Data Table ({generatedResult?.aps?.length || 0})</span>
+            <span>AP Table ({generatedResult?.aps?.length || 0})</span>
           </button>
           <button
             onClick={() => setActiveTab('python')}
@@ -542,11 +626,12 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
       {/* Main Control Card */}
       <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-4">
+        {/* Row 1: Word & Coordinates */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
           {/* Word / Text Input */}
           <div className="md:col-span-5 space-y-1">
             <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
-              <span>Text / Word to Map</span>
+              <span>Text / Phrase to Map</span>
               <span className="text-[10px] text-slate-500 font-mono">A-Z, 0-9, space</span>
             </label>
             <div className="relative">
@@ -565,7 +650,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
           {/* Latitude Input */}
           <div className="md:col-span-2 space-y-1">
-            <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+            <label className="text-[11px] font-semibold text-slate-300">
               <span>Latitude (Y)</span>
             </label>
             <input
@@ -579,7 +664,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
           {/* Longitude Input */}
           <div className="md:col-span-2 space-y-1">
-            <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+            <label className="text-[11px] font-semibold text-slate-300">
               <span>Longitude (X)</span>
             </label>
             <input
@@ -612,7 +697,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             </button>
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
-              title="Advanced Vector & Simulation Settings"
+              title="Advanced Vector & Geometry Settings"
               className={`p-2 rounded-lg border text-xs transition ${
                 showAdvanced 
                   ? 'bg-slate-800 border-slate-600 text-slate-200' 
@@ -624,14 +709,173 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </div>
         </div>
 
-        {/* Quick Presets & Helpers */}
+        {/* Row 2: 3 Interactive Sliders & Presets (Amount of APs, Letter Size, Speed) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3 border-t border-slate-800">
+          {/* Parameter 1: Amount of APs */}
+          <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                <Hash className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Amount of APs</span>
+              </label>
+              <div className="flex items-center gap-1 text-[10px]">
+                <button
+                  onClick={() => setDensityMode('target')}
+                  className={`px-1.5 py-0.5 rounded ${
+                    densityMode === 'target' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40' : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Fixed Count
+                </button>
+                <button
+                  onClick={() => setDensityMode('auto')}
+                  className={`px-1.5 py-0.5 rounded ${
+                    densityMode === 'auto' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40' : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  From Speed
+                </button>
+              </div>
+            </div>
+
+            {densityMode === 'target' ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-400 text-[10px]">Density Slider</span>
+                  <span className="text-cyan-400 font-bold">{targetApCount.toLocaleString()} APs</span>
+                </div>
+                <input
+                  type="range"
+                  min="50"
+                  max="3000"
+                  step="50"
+                  value={targetApCount}
+                  onChange={(e) => setTargetApCount(parseInt(e.target.value))}
+                  className="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+                <div className="flex items-center justify-between gap-1 pt-1">
+                  {AP_COUNT_PRESETS.map((p) => (
+                    <button
+                      key={p.count}
+                      onClick={() => setTargetApCount(p.count)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono transition border ${
+                        targetApCount === p.count
+                          ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300 font-bold'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="text-[11px] text-slate-400 py-2 space-y-1">
+                <div>AP density determined automatically by vehicle speed ({speedKmh} km/h) and sighting interval ({stepIntervalSeconds}s).</div>
+                <div className="text-cyan-400 font-mono text-[10px]">Natural drive trail sampling</div>
+              </div>
+            )}
+          </div>
+
+          {/* Parameter 2: Letter Size & Scale */}
+          <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Letter Size & Scale</span>
+              </label>
+              <span className="text-[10px] font-mono text-emerald-400 font-bold">
+                {letterScale.toFixed(2)}x
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-slate-400 text-[10px]">Real Footprint</span>
+              <span className="text-slate-300 text-[10px] font-mono">
+                ~{physicalMetrics.widthKm} km × ~{physicalMetrics.heightKm} km
+              </span>
+            </div>
+
+            <input
+              type="range"
+              min="0.1"
+              max="3.0"
+              step="0.05"
+              value={letterScale}
+              onChange={(e) => setLetterScale(parseFloat(e.target.value))}
+              className="w-full accent-emerald-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+            />
+
+            <div className="flex items-center justify-between gap-1 pt-1">
+              {SCALE_PRESETS.map((p) => (
+                <button
+                  key={p.scale}
+                  onClick={() => setLetterScale(p.scale)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition border ${
+                    Math.abs(letterScale - p.scale) < 0.01
+                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-bold'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {p.label.split(' ')[0]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Parameter 3: Wardrive Vehicle Speed */}
+          <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                <Gauge className="w-3.5 h-3.5 text-amber-400" />
+                <span>Wardrive Speed</span>
+              </label>
+              <span className="text-[10px] font-mono text-amber-400 font-bold">
+                {speedKmh} km/h ({(speedKmh * 0.621371).toFixed(0)} mph)
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-slate-400 text-[10px]">Vehicle Velocity</span>
+              <span className="text-slate-400 text-[10px]">Step: {stepIntervalSeconds}s</span>
+            </div>
+
+            <input
+              type="range"
+              min="5"
+              max="250"
+              step="5"
+              value={speedKmh}
+              onChange={(e) => setSpeedKmh(parseFloat(e.target.value))}
+              className="w-full accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+            />
+
+            <div className="flex items-center justify-between gap-1 pt-1">
+              {SPEED_PRESETS.map((p) => (
+                <button
+                  key={p.speed}
+                  onClick={() => setSpeedKmh(p.speed)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition border ${
+                    speedKmh === p.speed
+                      ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 font-bold'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {p.label.split(' ')[0]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Location Presets & Coordinate Helpers */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[11px] text-slate-500 font-semibold flex items-center gap-1">
               <Crosshair className="w-3 h-3 text-emerald-400" />
-              Presets:
+              Locations:
             </span>
-            {LOCATION_PRESETS.slice(0, 4).map((p) => (
+            {LOCATION_PRESETS.slice(0, 5).map((p) => (
               <button
                 key={p.name}
                 onClick={() => handleSelectPreset(p)}
@@ -650,7 +894,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </div>
 
           <div className="text-[11px] text-slate-400">
-            Tip: Click anywhere on the map or drag the green crosshair to reposition.
+            Click map or drag the green crosshair to reposition starting point.
           </div>
         </div>
 
@@ -659,12 +903,12 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           <div className="mt-3 p-3 bg-slate-950/70 border border-slate-800 rounded-lg space-y-3 animate-fadeIn">
             <div className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
               <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Physical Vector Scaling & Simulation Settings</span>
+              <span>Base Font Geometry & Simulation PRNG</span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 text-xs">
               <div className="space-y-1">
-                <label className="text-[10px] text-slate-400 font-mono">Letter Width (°)</label>
+                <label className="text-[10px] text-slate-400 font-mono">Base Width (°)</label>
                 <input
                   type="number"
                   step="0.005"
@@ -675,7 +919,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] text-slate-400 font-mono">Letter Height (°)</label>
+                <label className="text-[10px] text-slate-400 font-mono">Base Height (°)</label>
                 <input
                   type="number"
                   step="0.005"
@@ -697,6 +941,18 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               </div>
 
               <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 font-mono">Sighting Interval (s)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="60"
+                  value={stepIntervalSeconds}
+                  onChange={(e) => setStepIntervalSeconds(parseInt(e.target.value) || 3)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-slate-200"
+                />
+              </div>
+
+              <div className="space-y-1">
                 <label className="text-[10px] text-slate-400 font-mono">Random Seed</label>
                 <input
                   type="number"
@@ -707,7 +963,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 />
               </div>
 
-              <div className="space-y-1 col-span-2 flex flex-col justify-end">
+              <div className="space-y-1 flex flex-col justify-end">
                 <label className="flex items-center gap-2 cursor-pointer text-[11px] text-slate-300">
                   <input
                     type="checkbox"
@@ -715,7 +971,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                     onChange={(e) => setIncludePreheader(e.target.checked)}
                     className="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0"
                   />
-                  <span>Include WiGLE-1.4 Preheader</span>
+                  <span>WiGLE Header</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer text-[11px] text-slate-300 mt-1">
                   <input
@@ -724,7 +980,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                     onChange={(e) => setUseFixedSeed(e.target.checked)}
                     className="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0"
                   />
-                  <span>Deterministic PRNG (Seed 42)</span>
+                  <span>Fixed Seed (42)</span>
                 </label>
               </div>
             </div>
@@ -757,22 +1013,22 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
           <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">WiGLE Auth Modes</div>
-              <div className="text-sm font-bold font-mono text-purple-400 truncate max-w-[120px]">
-                WPA2 / WPA3
+              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Letter Span</div>
+              <div className="text-sm font-bold font-mono text-purple-400">
+                {physicalMetrics.widthKm} × {physicalMetrics.heightKm} km
               </div>
             </div>
-            <Sparkles className="w-5 h-5 text-purple-500/50" />
+            <Maximize2 className="w-5 h-5 text-purple-500/50" />
           </div>
 
           <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Kepler Compatibility</div>
+              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Simulated Velocity</div>
               <div className="text-sm font-bold font-mono text-amber-400">
-                Verified
+                {speedKmh} km/h
               </div>
             </div>
-            <ExternalLink className="w-5 h-5 text-amber-500/50" />
+            <Gauge className="w-5 h-5 text-amber-500/50" />
           </div>
         </div>
       )}
@@ -966,7 +1222,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 Standalone Python Script Source
               </h3>
               <p className="text-[11px] text-slate-400">
-                Self-contained Python script with your selected word and coordinates already configured
+                Self-contained Python script with your configured AP count, letter size, speed, and coordinates
               </p>
             </div>
 
@@ -996,7 +1252,12 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               lonCenter,
               letterW,
               letterH,
-              gap
+              letterScale,
+              gap,
+              speedKmh,
+              stepIntervalSeconds,
+              targetApCount: densityMode === 'target' ? targetApCount : null,
+              includePreheader
             })}
           </pre>
         </div>
@@ -1063,4 +1324,3 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     </div>
   );
 }
-

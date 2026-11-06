@@ -59,6 +59,62 @@ describe('Wardrive Demo Generator', () => {
     expect(firstByte & 0x02).toBe(0); // Locally administered bit 0
   });
 
+  it('controls the target amount of APs accurately', () => {
+    const res100 = generateDemoAps({
+      text: 'TEST',
+      targetApCount: 100,
+      seed: 42
+    });
+    // Should be within +/- 5% of 100
+    expect(res100.aps.length).toBeGreaterThanOrEqual(95);
+    expect(res100.aps.length).toBeLessThanOrEqual(105);
+
+    const res300 = generateDemoAps({
+      text: 'TEST',
+      targetApCount: 300,
+      seed: 42
+    });
+    expect(res300.aps.length).toBeGreaterThanOrEqual(285);
+    expect(res300.aps.length).toBeLessThanOrEqual(315);
+  });
+
+  it('controls the letter size and scale factor', () => {
+    const small = generateDemoAps({
+      text: 'A',
+      letterScale: 0.5,
+      seed: 42
+    });
+
+    const large = generateDemoAps({
+      text: 'A',
+      letterScale: 2.0,
+      seed: 42
+    });
+
+    const smallSpanLat = small.bounds.maxLat - small.bounds.minLat;
+    const largeSpanLat = large.bounds.maxLat - large.bounds.minLat;
+    expect(largeSpanLat).toBeGreaterThan(smallSpanLat * 3.5);
+  });
+
+  it('controls the wardriving speed', () => {
+    // Slower speed at fixed interval means smaller distance steps = more APs
+    const slowDrive = generateDemoAps({
+      text: 'TEST',
+      speedKmh: 20, // 20 km/h
+      stepIntervalSeconds: 3,
+      seed: 42
+    });
+
+    const fastDrive = generateDemoAps({
+      text: 'TEST',
+      speedKmh: 100, // 100 km/h
+      stepIntervalSeconds: 3,
+      seed: 42
+    });
+
+    expect(slowDrive.aps.length).toBeGreaterThan(fastDrive.aps.length * 3);
+  });
+
   it('handles empty text gracefully', () => {
     const res = generateDemoAps({ text: '' });
     expect(res.aps).toEqual([]);
@@ -85,20 +141,24 @@ describe('Wardrive Demo Generator', () => {
     expect(lines.length).toBe(res.aps.length + 1);
   });
 
-  it('exports standalone Python script source with user settings', () => {
+  it('exports standalone Python script source with user settings and configurable controls', () => {
     const py = exportPythonScriptSource({
       text: 'DEFCON',
       latCenter: 36.11,
       lonCenter: -115.17,
       letterW: 0.05,
       letterH: 0.08,
-      gap: 0.03
+      gap: 0.03,
+      speedKmh: 65.0,
+      targetApCount: 750
     });
 
-    expect(py).toContain('LAT_CENTER, LON_CENTER = 36.11, -115.17');
-    expect(py).toContain('LETTER_W, LETTER_H = 0.05, 0.08');
-    expect(py).toContain('GAP = 0.03');
+    expect(py).toContain('LAT_CENTER = 36.11');
+    expect(py).toContain('LON_CENTER = -115.17');
+    expect(py).toContain('LETTER_W = 0.05');
+    expect(py).toContain('LETTER_H = 0.08');
+    expect(py).toContain('SPEED_KMH = 65');
+    expect(py).toContain('TARGET_AP_COUNT = 750');
     expect(py).toContain('DEFCON');
   });
 });
-
