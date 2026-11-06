@@ -642,6 +642,7 @@ from datetime import datetime, timedelta
 
 # ==============================================================================
 # WARDRIVING VECTOR ART GENERATOR
+# Inspired by OSINTIAL
 # Creates words or SVG art made from generated APs to test or visualize on wardriving maps
 # View your results here: https://kepler.gl/demo
 # ==============================================================================

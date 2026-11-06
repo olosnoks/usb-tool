@@ -757,31 +757,36 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
   }, [generatedResult, tableSearch]);
 
   return (
-    <div className="w-full space-y-4">
+    <div className="w-full space-y-2.5">
       {/* Top Banner / Tool Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/80 p-3.5 rounded-xl border border-slate-800 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400">
-            <MapPin className="w-5 h-5" />
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 px-3 py-2 rounded-xl border border-slate-800 backdrop-blur-sm">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400">
+            <MapPin className="w-4 h-4" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              DEMO WARDRIVE VECTOR GENERATOR
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                Kepler.gl & WiGLE Map Art
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-xs font-bold text-slate-100 uppercase tracking-wide">
+                Demo Wardrive Vector Generator
+              </h2>
+              <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                Kepler.gl & WiGLE
               </span>
-            </h2>
-            <p className="text-xs text-slate-400">
-              Pick coordinates on the map, customize AP density per km/mile (up to 500k+), letter size & vehicle speed
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                Inspired by OSINTIAL
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-tight">
+              Synthetic wardriving vector art, AP density (up to 500k+), customizable scale & start timestamp
             </p>
           </div>
         </div>
 
         {/* View Switcher Tabs */}
-        <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
+        <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800">
           <button
             onClick={() => setActiveTab('map')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition ${
               activeTab === 'map'
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -792,18 +797,18 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </button>
           <button
             onClick={() => setActiveTab('table')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition ${
               activeTab === 'table'
                 ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Table className="w-3.5 h-3.5" />
-            <span>AP Table ({generatedResult?.aps?.length?.toLocaleString() || 0})</span>
+            <span>AP Table ({generatedResult?.aps?.length ? (generatedResult.aps.length > 999 ? `${(generatedResult.aps.length/1000).toFixed(0)}k` : generatedResult.aps.length) : 0})</span>
           </button>
           <button
             onClick={() => setActiveTab('python')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition ${
               activeTab === 'python'
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -814,7 +819,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </button>
           <button
             onClick={() => setActiveTab('guide')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition ${
               activeTab === 'guide'
                 ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -827,13 +832,13 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
       </div>
 
       {/* Main Control Card */}
-      <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-4">
+      <div className="bg-slate-900/60 p-2.5 sm:p-3 rounded-xl border border-slate-800 space-y-2.5">
         {/* Mode Switcher Header: Text vs SVG Image */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
-          <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800/70">
+          <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
             <button
               onClick={() => setArtMode('text')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold transition ${
                 artMode === 'text'
                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -844,7 +849,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             </button>
             <button
               onClick={() => setArtMode('svg')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold transition ${
                 artMode === 'svg'
                   ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -856,7 +861,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </div>
 
           {artMode === 'svg' && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -866,17 +871,17 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-2.5 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 rounded text-xs font-semibold transition"
+                className="flex items-center gap-1.5 px-2 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 rounded text-xs font-semibold transition"
               >
                 <Upload className="w-3.5 h-3.5" />
-                <span>{svgFileName ? `Replace SVG (${svgFileName.slice(0, 14)}...)` : 'Upload .SVG File'}</span>
+                <span>{svgFileName ? `Replace SVG (${svgFileName.slice(0, 12)}...)` : 'Upload .SVG'}</span>
               </button>
               <button
                 onClick={() => setShowSvgPasteModal(!showSvgPasteModal)}
-                className="flex items-center gap-1 px-2.5 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 rounded text-xs transition"
+                className="flex items-center gap-1 px-2 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 rounded text-xs transition"
               >
                 <FileCode className="w-3.5 h-3.5 text-amber-400" />
-                <span>Paste SVG XML</span>
+                <span>Paste XML</span>
               </button>
             </div>
           )}
@@ -884,22 +889,22 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
         {/* SVG Preset Selection Strip (when in SVG mode) */}
         {artMode === 'svg' && (
-          <div className="p-3 bg-slate-950/70 border border-slate-800/90 rounded-lg space-y-2">
+          <div className="p-2 bg-slate-950/70 border border-slate-800/90 rounded-lg space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1">
                 <Sparkles className="w-3 h-3 text-cyan-400" />
-                <span>Sample Vector Presets:</span>
+                <span>Vector Presets:</span>
               </span>
               <span className="text-[10px] font-mono text-cyan-400">
                 {parsedSvgStrokes.length} vector {parsedSvgStrokes.length === 1 ? 'stroke' : 'strokes'} ready
               </span>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1">
               {SVG_PRESETS.map((p) => (
                 <button
                   key={p.id}
                   onClick={() => handleSelectSvgPreset(p)}
-                  className={`px-2.5 py-1 rounded text-xs font-medium transition border ${
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition border ${
                     selectedSvgPreset === p.id && !svgFileName
                       ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-200 font-bold'
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -912,52 +917,52 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
             {/* Paste SVG XML Box */}
             {showSvgPasteModal && (
-              <div className="mt-2 p-2.5 bg-slate-900 border border-slate-700 rounded-lg space-y-2">
+              <div className="mt-2 p-2 bg-slate-900 border border-slate-700 rounded-lg space-y-2">
                 <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
                   <span>Paste Raw SVG XML Markup</span>
                   <button onClick={() => setShowSvgPasteModal(false)} className="text-slate-400 hover:text-white">✕</button>
                 </div>
                 <textarea
-                  rows={4}
+                  rows={3}
                   value={customSvgCode}
                   onChange={(e) => setCustomSvgCode(e.target.value)}
                   placeholder="<svg ...><path d='M...' /></svg>"
-                  className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono text-cyan-300 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-xs font-mono text-cyan-300 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
                 />
-                <div className="flex justify-end gap-2">
+                <div className="flex justify-end gap-1.5">
                   <button
                     onClick={() => setShowSvgPasteModal(false)}
-                    className="px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200"
+                    className="px-2 py-0.5 text-xs text-slate-400 hover:text-slate-200"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleApplyCustomSvgPaste}
-                    className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs font-bold transition"
+                    className="px-2.5 py-0.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs font-bold transition"
                   >
-                    Parse & Apply SVG
+                    Parse & Apply
                   </button>
                 </div>
               </div>
             )}
 
             {/* SVG Transformation Controls: Rotation, Scale & Flip */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-2.5 bg-slate-900/90 border border-slate-800 rounded-lg">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-2 bg-slate-900/90 border border-slate-800 rounded-lg">
               {/* 1. Rotation */}
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="font-semibold text-slate-300 flex items-center gap-1">
+                    <RotateCw className="w-3 h-3 text-cyan-400" />
                     <span>Rotation</span>
                   </span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-0.5">
                     <input
                       type="number"
                       min="0"
                       max="360"
                       value={rotationDeg}
                       onChange={(e) => setRotationDeg((parseInt(e.target.value) || 0) % 360)}
-                      className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] font-mono text-cyan-300 text-right font-bold"
+                      className="w-11 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-[11px] font-mono text-cyan-300 text-right font-bold"
                     />
                     <span className="text-[11px] font-mono text-cyan-400 font-bold">°</span>
                   </div>
@@ -970,35 +975,31 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                   step="5"
                   value={rotationDeg}
                   onChange={(e) => setRotationDeg(parseInt(e.target.value) || 0)}
-                  className="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                  className="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded cursor-pointer"
                 />
 
                 <div className="flex items-center justify-between gap-1 pt-0.5">
                   <button
                     onClick={() => handleRotateBy(-90)}
                     className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
-                    title="Rotate 90 degrees counter-clockwise"
                   >
                     -90°
                   </button>
                   <button
                     onClick={() => handleRotateBy(90)}
                     className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
-                    title="Rotate 90 degrees clockwise"
                   >
                     +90°
                   </button>
                   <button
                     onClick={() => handleRotateBy(180)}
                     className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
-                    title="Rotate 180 degrees"
                   >
                     180°
                   </button>
                   <button
                     onClick={() => setRotationDeg(0)}
                     className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
-                    title="Reset rotation to 0"
                   >
                     0°
                   </button>
@@ -1006,13 +1007,13 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               </div>
 
               {/* 2. SVG Scale Multiplier */}
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="font-semibold text-slate-300 flex items-center gap-1">
+                    <Maximize2 className="w-3 h-3 text-cyan-400" />
                     <span>SVG Scale</span>
                   </span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-0.5">
                     <input
                       type="number"
                       step="0.1"
@@ -1020,7 +1021,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                       max="50"
                       value={svgScale}
                       onChange={(e) => setSvgScale(Math.max(0.05, parseFloat(e.target.value) || 1.0))}
-                      className="w-14 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] font-mono text-cyan-300 text-right font-bold"
+                      className="w-12 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-[11px] font-mono text-cyan-300 text-right font-bold"
                     />
                     <span className="text-[11px] font-mono text-cyan-400 font-bold">x</span>
                   </div>
@@ -1033,7 +1034,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                   step="0.1"
                   value={Math.min(10, svgScale)}
                   onChange={(e) => setSvgScale(parseFloat(e.target.value))}
-                  className="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                  className="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded cursor-pointer"
                 />
 
                 <div className="flex items-center justify-between gap-1 pt-0.5">
@@ -1054,44 +1055,44 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               </div>
 
               {/* 3. Orientation & Mirror Flip */}
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <FlipHorizontal className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="font-semibold text-slate-300 flex items-center gap-1">
+                    <FlipHorizontal className="w-3 h-3 text-cyan-400" />
                     <span>Flip / Mirror</span>
                   </span>
                   <span className="text-[10px] font-mono text-slate-500">
-                    {flipH ? 'H-FLIP' : ''} {flipV ? 'V-FLIP' : ''} {!flipH && !flipV ? 'NORMAL' : ''}
+                    {flipH ? 'H' : ''}{flipV ? 'V' : ''}{!flipH && !flipV ? 'NORM' : ''}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 pt-1">
+                <div className="grid grid-cols-2 gap-1.5 pt-0.5">
                   <button
                     onClick={() => setFlipH((prev) => !prev)}
-                    className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded text-xs font-semibold transition border ${
+                    className={`flex items-center justify-center gap-1 px-2 py-1 rounded text-xs font-semibold transition border ${
                       flipH
                         ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-300 font-bold shadow-sm'
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    <FlipHorizontal className="w-3.5 h-3.5" />
-                    <span>Flip Horiz</span>
+                    <FlipHorizontal className="w-3 h-3" />
+                    <span>Horiz</span>
                   </button>
                   <button
                     onClick={() => setFlipV((prev) => !prev)}
-                    className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded text-xs font-semibold transition border ${
+                    className={`flex items-center justify-center gap-1 px-2 py-1 rounded text-xs font-semibold transition border ${
                       flipV
                         ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-300 font-bold shadow-sm'
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    <FlipVertical className="w-3.5 h-3.5" />
-                    <span>Flip Vert</span>
+                    <FlipVertical className="w-3 h-3" />
+                    <span>Vert</span>
                   </button>
                 </div>
 
-                <div className="text-[10px] text-slate-500 text-center pt-0.5">
-                  Transforms anchor at center
+                <div className="text-[9px] text-slate-500 text-center pt-0.5 font-mono">
+                  Pivot centered
                 </div>
               </div>
             </div>
@@ -1099,7 +1100,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
         )}
 
         {/* Row 1: Target Word / Prefix & Origin Coordinates */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
           {/* Word / SSID Prefix Input */}
           <div className="md:col-span-5 space-y-1">
             <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
@@ -1114,10 +1115,10 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 value={text}
                 onChange={(e) => setText(e.target.value.toUpperCase())}
                 placeholder={artMode === 'svg' ? 'e.g. WIFI_MAP' : 'Enter word (e.g. KEPLER)'}
-                className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg px-3 py-2 text-sm font-mono text-emerald-400 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-500 tracking-wider"
+                className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-500 tracking-wider"
               />
-              <span className="absolute right-2.5 top-2.5 text-[10px] font-mono text-slate-500">
-                {text.length} chars
+              <span className="absolute right-2 top-2 text-[10px] font-mono text-slate-500">
+                {text.length} ch
               </span>
             </div>
           </div>
@@ -1132,7 +1133,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               step="0.0001"
               value={latCenter}
               onChange={(e) => setLatCenter(parseFloat(e.target.value) || 0)}
-              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
           </div>
 
@@ -1146,34 +1147,34 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               step="0.0001"
               value={lonCenter}
               onChange={(e) => setLonCenter(parseFloat(e.target.value) || 0)}
-              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
           </div>
 
           {/* Action Buttons: Set Clock Now & Start Wardrive */}
-          <div className="md:col-span-3 flex items-center gap-2">
+          <div className="md:col-span-3 flex items-center gap-1.5">
             <button
               onClick={handleSetClockNow}
               title="Set Wardrive Start Clock to Current Time"
-              className="px-2.5 py-2 bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-purple-500/50 rounded-lg text-purple-400 text-xs font-mono flex items-center gap-1.5 transition"
+              className="px-2 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-purple-500/50 rounded-lg text-purple-400 text-xs font-mono flex items-center gap-1 transition"
             >
               <Clock className="w-3.5 h-3.5 text-purple-400" />
-              <span className="hidden sm:inline">Now</span>
+              <span>Now</span>
             </button>
 
             <button
               onClick={handleGenerate}
               disabled={isGenerating || (artMode === 'text' && !text.trim())}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition shadow-lg shadow-emerald-950/40"
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition shadow-md shadow-emerald-950/40"
             >
               {isGenerating ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   <span>Synthesizing...</span>
                 </>
               ) : (
                 <>
-                  <Play className="w-4 h-4 fill-current" />
+                  <Play className="w-3.5 h-3.5 fill-current" />
                   <span>Start Wardrive</span>
                 </>
               )}
@@ -1182,54 +1183,54 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
               title="Advanced Vector & Geometry Settings"
-              className={`p-2 rounded-lg border text-xs transition ${
+              className={`p-1.5 rounded-lg border text-xs transition ${
                 showAdvanced 
                   ? 'bg-slate-800 border-slate-600 text-slate-200' 
                   : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Sliders className="w-4 h-4" />
+              <Sliders className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
 
         {/* Row 2: 4 Interactive Tuning Cards (AP Density, Vector Scale/Size, Speed, Start Clock/Date) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 pt-3 border-t border-slate-800">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 pt-2 border-t border-slate-800/80">
           {/* Card 1: AP Density per KM / Mile (Scale to 500k+) */}
-          <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
+          <div className="p-2 sm:p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                <Ruler className="w-3.5 h-3.5 text-cyan-400" />
+              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1">
+                <Ruler className="w-3 h-3 text-cyan-400" />
                 <span>AP Density</span>
               </label>
-              <div className="flex items-center bg-slate-900 border border-slate-800 rounded p-0.5 text-[10px]">
+              <div className="flex items-center bg-slate-900 border border-slate-800 rounded p-0.5 text-[9px]">
                 <button
                   onClick={() => setDensityUnit('km')}
-                  className={`px-2 py-0.5 rounded transition ${
+                  className={`px-1.5 py-0.5 rounded transition ${
                     densityUnit === 'km' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Per KM
+                  /km
                 </button>
                 <button
                   onClick={() => setDensityUnit('mile')}
-                  className={`px-2 py-0.5 rounded transition ${
+                  className={`px-1.5 py-0.5 rounded transition ${
                     densityUnit === 'mile' ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Per Mile
+                  /mi
                 </button>
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-400 text-[10px]">Spacing</span>
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-slate-500 text-[10px]">~{physicalMetrics.spacingMeters}m gap</span>
               <span className="text-cyan-400 font-bold">
-                {apsPerUnit.toLocaleString()} APs / {densityUnit} (~{physicalMetrics.spacingMeters}m)
+                {apsPerUnit.toLocaleString()} APs/{densityUnit}
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <input
                 type="range"
                 min="5"
@@ -1237,7 +1238,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 step="25"
                 value={Math.min(5000, apsPerUnit)}
                 onChange={(e) => setApsPerUnit(parseInt(e.target.value))}
-                className="flex-1 accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                className="flex-1 accent-cyan-500 h-1.5 bg-slate-800 rounded cursor-pointer"
               />
               <input
                 type="number"
@@ -1245,16 +1246,16 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 max="50000"
                 value={apsPerUnit}
                 onChange={(e) => setApsPerUnit(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-16 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] font-mono text-cyan-300 text-right"
+                className="w-14 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[11px] font-mono text-cyan-300 text-right"
               />
             </div>
 
-            <div className="flex items-center justify-between gap-1 pt-1">
+            <div className="flex items-center justify-between gap-1 pt-0.5">
               {DENSITY_PRESETS.map((p) => (
                 <button
                   key={p.value}
                   onClick={() => setApsPerUnit(p.value)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition border ${
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition border ${
                     apsPerUnit === p.value
                       ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300 font-bold'
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -1267,13 +1268,13 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </div>
 
           {/* Card 2: Letter Size & Scale (Scales up to 100x+ for massive statewide maps) */}
-          <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
+          <div className="p-2 sm:p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                <Maximize2 className="w-3.5 h-3.5 text-emerald-400" />
+              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1">
+                <Maximize2 className="w-3 h-3 text-emerald-400" />
                 <span>Size & Scale</span>
               </label>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-0.5">
                 <input
                   type="number"
                   step="0.5"
@@ -1281,16 +1282,16 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                   max="200"
                   value={letterScale}
                   onChange={(e) => setLetterScale(Math.max(0.05, parseFloat(e.target.value) || 1.0))}
-                  className="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] font-mono text-emerald-300 text-right font-bold"
+                  className="w-12 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[11px] font-mono text-emerald-300 text-right font-bold"
                 />
                 <span className="text-[11px] font-mono text-emerald-400 font-bold">x</span>
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-400 text-[10px]">Real Footprint</span>
-              <span className="text-slate-200 text-[10px] font-mono">
-                ~{physicalMetrics.widthKm} × ~{physicalMetrics.heightKm} km (~{physicalMetrics.widthMi} × ~{physicalMetrics.heightMi} mi)
+            <div className="flex items-center justify-between text-[10px] font-mono">
+              <span className="text-slate-500">Span:</span>
+              <span className="text-slate-300">
+                ~{physicalMetrics.widthKm}×~{physicalMetrics.heightKm} km (~{physicalMetrics.widthMi}×~{physicalMetrics.heightMi} mi)
               </span>
             </div>
 
@@ -1301,15 +1302,15 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               step="0.5"
               value={Math.min(50, letterScale)}
               onChange={(e) => setLetterScale(parseFloat(e.target.value))}
-              className="w-full accent-emerald-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+              className="w-full accent-emerald-500 h-1.5 bg-slate-800 rounded cursor-pointer"
             />
 
-            <div className="flex items-center justify-between gap-1 pt-1 overflow-x-auto">
+            <div className="flex items-center justify-between gap-1 pt-0.5 overflow-x-auto">
               {SCALE_PRESETS.map((p) => (
                 <button
                   key={p.scale}
                   onClick={() => setLetterScale(p.scale)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition border whitespace-nowrap ${
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition border whitespace-nowrap ${
                     Math.abs(letterScale - p.scale) < 0.01
                       ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-bold'
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -1322,20 +1323,20 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </div>
 
           {/* Card 3: Wardrive Vehicle Speed */}
-          <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
+          <div className="p-2 sm:p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                <Gauge className="w-3.5 h-3.5 text-amber-400" />
-                <span>Wardrive Speed</span>
+              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1">
+                <Gauge className="w-3 h-3 text-amber-400" />
+                <span>Drive Speed</span>
               </label>
               <span className="text-[10px] font-mono text-amber-400 font-bold">
                 {speedKmh} km/h ({(speedKmh * 0.621371).toFixed(0)} mph)
               </span>
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-400 text-[10px]">Velocity</span>
-              <span className="text-slate-400 text-[10px]">Simulated drive</span>
+            <div className="flex items-center justify-between text-[10px] font-mono">
+              <span className="text-slate-500">Timeline simulation</span>
+              <span className="text-slate-400 font-mono">Virtual drive</span>
             </div>
 
             <input
@@ -1345,15 +1346,15 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               step="5"
               value={speedKmh}
               onChange={(e) => setSpeedKmh(parseFloat(e.target.value))}
-              className="w-full accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+              className="w-full accent-amber-500 h-1.5 bg-slate-800 rounded cursor-pointer"
             />
 
-            <div className="flex items-center justify-between gap-1 pt-1">
+            <div className="flex items-center justify-between gap-1 pt-0.5">
               {SPEED_PRESETS.map((p) => (
                 <button
                   key={p.speed}
                   onClick={() => setSpeedKmh(p.speed)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition border ${
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition border ${
                     speedKmh === p.speed
                       ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 font-bold'
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -1366,24 +1367,24 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </div>
 
           {/* Card 4: Wardrive Start Clock & Date */}
-          <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-2">
+          <div className="p-2 sm:p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-purple-400" />
-                <span>Start Clock / Date</span>
+              <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1">
+                <Clock className="w-3 h-3 text-purple-400" />
+                <span>Start Clock</span>
               </label>
               <button
                 onClick={handleSetClockNow}
                 title="Set to Current Time"
-                className="text-[10px] font-mono text-purple-400 hover:text-purple-300 font-bold px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 transition"
+                className="text-[9px] font-mono text-purple-400 hover:text-purple-300 font-bold px-1.5 py-0.2 rounded bg-purple-500/10 border border-purple-500/20 transition"
               >
                 Set Now
               </button>
             </div>
 
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-400 text-[10px]">Simulated Timestamp</span>
-              <span className="text-purple-300 text-[10px] font-mono">
+            <div className="flex items-center justify-between text-[10px] font-mono">
+              <span className="text-slate-500">Timestamp:</span>
+              <span className="text-purple-300 truncate max-w-[120px]">
                 {startTimeLocal ? startTimeLocal.replace('T', ' ') : 'Now'}
               </span>
             </div>
@@ -1392,31 +1393,31 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               type="datetime-local"
               value={startTimeLocal}
               onChange={(e) => setStartTimeLocal(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 focus:border-purple-500 rounded px-2 py-1 text-xs font-mono text-purple-300 focus:outline-none"
+              className="w-full bg-slate-900 border border-slate-700 focus:border-purple-500 rounded px-2 py-0.5 text-[11px] font-mono text-purple-300 focus:outline-none"
             />
 
-            <div className="flex items-center justify-between gap-1 pt-1">
+            <div className="flex items-center justify-between gap-1 pt-0.5">
               <button
                 onClick={handleSetClockNow}
-                className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-900 border-slate-800 text-purple-300 hover:text-white"
+                className="px-1.5 py-0.5 rounded text-[9px] font-mono transition border bg-slate-900 border-slate-800 text-purple-300 hover:text-white"
               >
                 Now
               </button>
               <button
                 onClick={handleSetClockMinus1Hour}
-                className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                className="px-1.5 py-0.5 rounded text-[9px] font-mono transition border bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
               >
                 -1h
               </button>
               <button
                 onClick={handleSetClockYesterday}
-                className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                className="px-1.5 py-0.5 rounded text-[9px] font-mono transition border bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
               >
                 -24h
               </button>
               <button
                 onClick={handleSetClockMinus7Days}
-                className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                className="px-1.5 py-0.5 rounded text-[9px] font-mono transition border bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
               >
                 -7d
               </button>
@@ -1425,9 +1426,9 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
         </div>
 
         {/* Quick Location Presets & Coordinate Helpers */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-slate-500 font-semibold flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1.5 border-t border-slate-800/60 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] text-slate-500 font-semibold flex items-center gap-1">
               <Crosshair className="w-3 h-3 text-emerald-400" />
               Locations:
             </span>
@@ -1435,21 +1436,21 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               <button
                 key={p.name}
                 onClick={() => handleSelectPreset(p)}
-                className="px-2 py-0.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded text-[11px] text-slate-300 font-mono transition"
+                className="px-1.5 py-0.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded text-[10px] text-slate-300 font-mono transition"
               >
                 {p.name.split(' ')[0]}
               </button>
             ))}
             <button
               onClick={handleUseMyLocation}
-              className="px-2 py-0.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded text-[11px] text-emerald-400 font-medium transition flex items-center gap-1"
+              className="px-1.5 py-0.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded text-[10px] text-emerald-400 font-medium transition flex items-center gap-1"
             >
               <Crosshair className="w-2.5 h-2.5" />
               <span>Current GPS</span>
             </button>
           </div>
 
-          <div className="text-[11px] text-slate-400">
+          <div className="text-[10px] text-slate-400">
             Click map or drag the green crosshair to reposition starting point.
           </div>
         </div>
@@ -1532,72 +1533,70 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
         )}
       </div>
 
-      {/* Stats Summary Bar & One-Click Exports */}
+      {/* Stats Summary Bar */}
       {generatedResult && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="bg-slate-900/70 px-2.5 py-1.5 rounded-lg border border-slate-800/80 flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Total Synthesized APs</div>
-              <div className="text-xl font-bold font-mono text-emerald-400">
+              <div className="text-[9px] uppercase font-mono tracking-wider text-slate-500">Synthesized APs</div>
+              <div className="text-sm font-bold font-mono text-emerald-400">
                 {generatedResult.aps.length.toLocaleString()}
               </div>
             </div>
-            <Radio className="w-5 h-5 text-emerald-500/50" />
+            <Radio className="w-4 h-4 text-emerald-500/40" />
           </div>
 
-          <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+          <div className="bg-slate-900/70 px-2.5 py-1.5 rounded-lg border border-slate-800/80 flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Stroke Distance</div>
-              <div className="text-xl font-bold font-mono text-cyan-400">
+              <div className="text-[9px] uppercase font-mono tracking-wider text-slate-500">Stroke Distance</div>
+              <div className="text-sm font-bold font-mono text-cyan-400">
                 {generatedResult.totalPathLengthKm ? generatedResult.totalPathLengthKm.toFixed(1) : 0} km
               </div>
             </div>
-            <Ruler className="w-5 h-5 text-cyan-500/50" />
+            <Ruler className="w-4 h-4 text-cyan-500/40" />
           </div>
 
-          <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+          <div className="bg-slate-900/70 px-2.5 py-1.5 rounded-lg border border-slate-800/80 flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Letter Footprint</div>
+              <div className="text-[9px] uppercase font-mono tracking-wider text-slate-500">Footprint</div>
               <div className="text-sm font-bold font-mono text-purple-400">
                 {physicalMetrics.widthKm} × {physicalMetrics.heightKm} km
               </div>
             </div>
-            <Maximize2 className="w-5 h-5 text-purple-500/50" />
+            <Maximize2 className="w-4 h-4 text-purple-500/40" />
           </div>
 
-          <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+          <div className="bg-slate-900/70 px-2.5 py-1.5 rounded-lg border border-slate-800/80 flex items-center justify-between">
             <div>
-              <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Drive Timeline</div>
-              <div className="text-xs font-bold font-mono text-purple-400">
+              <div className="text-[9px] uppercase font-mono tracking-wider text-slate-500">Timeline ({speedKmh} km/h)</div>
+              <div className="text-xs font-bold font-mono text-purple-400 truncate">
                 {generatedResult.startTime ? (generatedResult.startTime instanceof Date ? generatedResult.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : ''}
                 {' → '}
                 {generatedResult.endTime ? (generatedResult.endTime instanceof Date ? generatedResult.endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') : ''}
-              </div>
-              <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                {Math.round(generatedResult.durationSeconds / 60)} min ({speedKmh} km/h)
+                <span className="text-[10px] text-slate-500 font-normal ml-1">({Math.round(generatedResult.durationSeconds / 60)}m)</span>
               </div>
             </div>
-            <Clock className="w-5 h-5 text-purple-500/50" />
+            <Clock className="w-4 h-4 text-purple-500/40" />
           </div>
         </div>
       )}
 
       {/* Main View Area */}
       {activeTab === 'map' && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {/* Map Chrome Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-            <div className="flex items-center gap-2 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-1.5 px-0.5">
+            <div className="flex items-center gap-1.5 text-xs">
               <span className="text-slate-400 font-semibold flex items-center gap-1">
                 <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                Tile Style:
+                <span>Tiles:</span>
               </span>
-              <div className="flex items-center bg-slate-950 p-0.5 rounded border border-slate-800 text-[11px]">
+              <div className="flex items-center bg-slate-950 p-0.5 rounded border border-slate-800 text-[10px]">
                 {Object.keys(TILE_PROVIDERS).map((k) => (
                   <button
                     key={k}
                     onClick={() => setMapType(k)}
-                    className={`px-2 py-0.5 rounded transition ${
+                    className={`px-1.5 py-0.5 rounded transition ${
                       mapType === k ? 'bg-slate-800 text-cyan-300 font-semibold' : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -1608,22 +1607,22 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             </div>
 
             {/* Quick Export Action Buttons */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={handleDownloadWigle}
                 disabled={!generatedResult?.aps?.length}
-                className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded text-xs font-semibold transition"
+                className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded text-xs font-semibold transition"
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-3 h-3" />
                 <span>WiGLE CSV ({generatedResult?.aps?.length > 1000 ? `${(generatedResult.aps.length/1000).toFixed(0)}k` : generatedResult?.aps?.length || 0})</span>
               </button>
 
               <button
                 onClick={handleDownloadKepler}
                 disabled={!generatedResult?.aps?.length}
-                className="flex items-center gap-1.5 px-3 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 rounded text-xs font-semibold transition"
+                className="flex items-center gap-1 px-2.5 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 rounded text-xs font-semibold transition"
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-3 h-3" />
                 <span>Kepler CSV</span>
               </button>
 
@@ -1631,9 +1630,9 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 href="https://kepler.gl/demo"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-3 py-1 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 rounded text-xs font-semibold transition"
+                className="flex items-center gap-1 px-2.5 py-1 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 rounded text-xs font-semibold transition"
               >
-                <ExternalLink className="w-3.5 h-3.5" />
+                <ExternalLink className="w-3 h-3" />
                 <span>Open Kepler.gl</span>
               </a>
             </div>
@@ -1828,58 +1827,67 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
       {/* Kepler.gl Visualizer Guide */}
       {activeTab === 'guide' && (
-        <div className="bg-slate-900/60 p-5 rounded-xl border border-slate-800 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-purple-500/10 border border-purple-500/30 rounded-lg text-purple-400">
-              <Sparkles className="w-5 h-5" />
+        <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2.5">
+              <div className="p-1.5 bg-purple-500/10 border border-purple-500/30 rounded-lg text-purple-400">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wide">Visualizing in Kepler.gl in 3 Steps</h3>
+                <p className="text-[11px] text-slate-400">Turn generated synthetic AP points into glowing map art</p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-100">Visualizing in Kepler.gl in 3 Steps</h3>
-              <p className="text-xs text-slate-400">How to turn your generated AP points into glowing map art</p>
-            </div>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
+              Inspired by OSINTIAL
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-2">
-              <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center justify-center border border-emerald-500/30">
+          <div className="p-2.5 bg-cyan-950/20 border border-cyan-800/40 rounded-lg text-xs text-cyan-300 flex items-center justify-between gap-2">
+            <span>Special credit to <strong>OSINTIAL</strong> for inspiring this tool and the concept of drawing vector words and shapes onto wardriving maps using synthesized AP trails.</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 space-y-1.5">
+              <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center justify-center border border-emerald-500/30">
                 1
               </div>
-              <h4 className="text-xs font-bold text-slate-200">Download the Kepler CSV</h4>
-              <p className="text-xs text-slate-400">
-                Click the <strong>Kepler CSV</strong> download button above to get the clean tabular file with <code className="text-cyan-400 font-mono">lat</code>, <code className="text-cyan-400 font-mono">lon</code>, and <code className="text-cyan-400 font-mono">first_seen</code>.
+              <h4 className="text-xs font-bold text-slate-200">Download Kepler CSV</h4>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Click the <strong>Kepler CSV</strong> button to get clean tabular coordinates (<code className="text-cyan-400 font-mono">lat</code>, <code className="text-cyan-400 font-mono">lon</code>, <code className="text-cyan-400 font-mono">first_seen</code>).
               </p>
             </div>
 
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-2">
-              <div className="w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-400 text-xs font-bold flex items-center justify-center border border-cyan-500/30">
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 space-y-1.5">
+              <div className="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400 text-xs font-bold flex items-center justify-center border border-cyan-500/30">
                 2
               </div>
               <h4 className="text-xs font-bold text-slate-200">Open Kepler.gl Demo</h4>
-              <p className="text-xs text-slate-400">
-                Visit <a href="https://kepler.gl/demo" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline font-semibold">kepler.gl/demo</a> and drag & drop the downloaded CSV file into the browser window.
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Open <a href="https://kepler.gl/demo" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline font-semibold">kepler.gl/demo</a> in your browser and drag & drop the CSV into the window.
               </p>
             </div>
 
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-2">
-              <div className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 text-xs font-bold flex items-center justify-center border border-purple-500/30">
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 space-y-1.5">
+              <div className="w-5 h-5 rounded-full bg-purple-500/20 text-purple-400 text-xs font-bold flex items-center justify-center border border-purple-500/30">
                 3
               </div>
-              <h4 className="text-xs font-bold text-slate-200">Customize Layers & Play</h4>
-              <p className="text-xs text-slate-400">
-                Kepler automatically auto-detects the points. Enable the <strong>Point</strong> layer, set color to Cyan or Emerald, and watch your vector word appear across the landscape!
+              <h4 className="text-xs font-bold text-slate-200">Customize Layers</h4>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Kepler detects the points. Enable the <strong>Point</strong> layer, pick Cyan or Emerald, and watch your vector artwork illuminate the map!
               </p>
             </div>
           </div>
 
-          <div className="pt-2 flex justify-end">
+          <div className="pt-1 flex justify-end">
             <a
               href="https://kepler.gl/demo"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition shadow-lg shadow-purple-950/40"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition shadow-md shadow-purple-950/40"
             >
-              <ExternalLink className="w-4 h-4" />
-              <span>Launch Kepler.gl Demo Site</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Launch Kepler.gl Demo</span>
             </a>
           </div>
         </div>

@@ -72,7 +72,7 @@ export const SIDEBAR_SECTIONS = [
       { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF receiver: zoomable spectrum & waterfall, audio, sweep, ADS-B, IQ recorder, firmware flasher & first-time setup' },
       { id: 'wardrive', name: 'GPS & Wardrive Suite', icon: Compass, accent: 'emerald', desc: 'Warhog CYD, Piglet, Panda PAU09, NMEA tracker & u-blox UBX' },
       { id: 'warhog-piglet', name: 'Warhog CYD & Piglet Suite', icon: Sparkles, accent: 'amber', desc: 'Warhog CYD (ESP32-2432S028R) & Piglet ESP32-C5/S3 wardriver deck' },
-      { id: 'wardrive-generator', name: 'Demo Wardrive Generator', icon: MapPin, accent: 'emerald', desc: 'Generate synthetic wardriving vector text & AP trails for Kepler.gl and WiGLE' },
+      { id: 'wardrive-generator', name: 'Demo Wardrive Generator', icon: MapPin, accent: 'emerald', desc: 'Synthetic wardriving vector art for Kepler.gl & WiGLE (inspired by OSINTIAL)' },
       { id: 'ble', name: 'Bluetooth LE Explorer', icon: Bluetooth, accent: 'cyan', desc: 'Web Bluetooth GATT client: services, notify, typed writes, Nordic DFU updates' }
     ]
   },
