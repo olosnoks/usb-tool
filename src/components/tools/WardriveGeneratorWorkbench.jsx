@@ -37,16 +37,19 @@ import {
   RotateCcw,
   RotateCw,
   FlipHorizontal,
-  FlipVertical
+  FlipVertical,
+  Scissors,
+  FileArchive
 } from 'lucide-react';
+import JSZip from 'jszip';
 import { 
   generateDemoAps, 
   generateWigleCsv, 
   generateTestCsv, 
+  splitApsIntoFileChunks,
   exportPythonScriptSource,
   parseSvgToNormalizedStrokes,
   dateToLocalDatetimeString,
-  SVG_PRESETS,
   VECTOR_FONTS,
   AUTH_MODES,
   CHANNELS
@@ -85,11 +88,11 @@ const TILE_PROVIDERS = {
 };
 
 const SPEED_PRESETS = [
-  { label: 'Walk (5 km/h)', speed: 5 },
-  { label: 'Bike (15 km/h)', speed: 15 },
-  { label: 'City (45 km/h)', speed: 45 },
-  { label: 'Hwy (90 km/h)', speed: 90 },
-  { label: 'Air (250 km/h)', speed: 250 }
+  { label: 'Walk (3 mph)', speed: 5 },
+  { label: 'City (30 mph)', speed: 48 },
+  { label: 'Hwy (65 mph)', speed: 105 },
+  { label: 'Jet (250 mph)', speed: 402 },
+  { label: '666 mph (Hyper)', speed: 1071.82 }
 ];
 
 const SCALE_PRESETS = [
@@ -103,12 +106,22 @@ const SCALE_PRESETS = [
 ];
 
 const DENSITY_PRESETS = [
-  { label: '10', value: 10 },
   { label: '50', value: 50 },
   { label: '200', value: 200 },
-  { label: '500', value: 500 },
   { label: '1,000', value: 1000 },
-  { label: '5,000 (~500k)', value: 5000 }
+  { label: '5,000', value: 5000 },
+  { label: '10k (~1M)', value: 10000 }
+];
+
+const SPLIT_SIZE_OPTIONS = [
+  { label: 'No Limit (Single File)', bytes: 0 },
+  { label: '1 MB limit (~8k APs)', bytes: 1 * 1024 * 1024 },
+  { label: '2 MB limit (~16k APs)', bytes: 2 * 1024 * 1024 },
+  { label: '5 MB limit (~40k APs)', bytes: 5 * 1024 * 1024 },
+  { label: '10 MB limit (WiGLE upload)', bytes: 10 * 1024 * 1024 },
+  { label: '25 MB limit (Discord/Email)', bytes: 25 * 1024 * 1024 },
+  { label: '50 MB limit (Kepler heap)', bytes: 50 * 1024 * 1024 },
+  { label: '100 MB limit', bytes: 100 * 1024 * 1024 }
 ];
 
 export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) {
@@ -118,16 +131,15 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
   const [latCenter, setLatCenter] = useState(32.25);
   const [lonCenter, setLonCenter] = useState(-90.13);
 
-  // SVG mode state
-  const [selectedSvgPreset, setSelectedSvgPreset] = useState('wifi');
+  // SVG mode state (user uploads or pastes custom SVGs; no premade shapes)
   const [customSvgCode, setCustomSvgCode] = useState('');
   const [showSvgPasteModal, setShowSvgPasteModal] = useState(false);
   const [svgFileName, setSvgFileName] = useState(null);
-  const [parsedSvgStrokes, setParsedSvgStrokes] = useState(() => {
-    const p = SVG_PRESETS.find(item => item.id === 'wifi') || SVG_PRESETS[0];
-    return parseSvgToNormalizedStrokes(p.svg).strokes;
-  });
+  const [parsedSvgStrokes, setParsedSvgStrokes] = useState([]);
   const fileInputRef = useRef(null);
+
+  // File size split limit state (0 = single file)
+  const [splitLimitBytes, setSplitLimitBytes] = useState(0);
 
   // SVG Transformations: Rotation & Scaling
   const [rotationDeg, setRotationDeg] = useState(0);
@@ -257,19 +269,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     onLogMessage(`[CLOCK] Set wardrive start time to 7 days ago (${str.replace('T', ' ')})`);
   };
 
-  // SVG Preset and Upload Handlers
-  const handleSelectSvgPreset = (preset) => {
-    setSelectedSvgPreset(preset.id);
-    setSvgFileName(null);
-    setCustomSvgCode(preset.svg);
-    const res = parseSvgToNormalizedStrokes(preset.svg);
-    setParsedSvgStrokes(res.strokes);
-    if (!text || text === 'KEPLER' || text.startsWith('SVG_')) {
-      setText(preset.name.replace(/\s+/g, '_').toUpperCase());
-    }
-    onLogMessage(`[SVG] Loaded preset "${preset.name}" (${res.strokes.length} paths)`);
-  };
-
+  // SVG Upload, Paste and Clear Handlers (no premade shapes)
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -278,7 +278,6 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
       const svgText = evt.target.result;
       setCustomSvgCode(svgText);
       setSvgFileName(file.name);
-      setSelectedSvgPreset('custom');
       const res = parseSvgToNormalizedStrokes(svgText);
       if (res.strokes.length === 0) {
         alert('Could not find any readable vector strokes (<path>, <polyline>, <polygon>, <circle>, <line>) in the uploaded SVG.');
@@ -286,10 +285,13 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
       }
       setParsedSvgStrokes(res.strokes);
       const cleanName = file.name.replace(/\.svg$/i, '').replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
-      setText(cleanName);
+      if (!text || text === 'KEPLER' || text.startsWith('SVG_')) {
+        setText(cleanName);
+      }
       onLogMessage(`[SVG] Imported "${file.name}" with ${res.strokes.length} vector strokes`);
     };
     reader.readAsText(file);
+    e.target.value = '';
   };
 
   const handleApplyCustomSvgPaste = () => {
@@ -300,10 +302,16 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
       return;
     }
     setParsedSvgStrokes(res.strokes);
-    setSelectedSvgPreset('custom');
-    setSvgFileName('custom_pasted.svg');
+    setSvgFileName('custom_vector.svg');
     setShowSvgPasteModal(false);
     onLogMessage(`[SVG] Applied custom SVG markup with ${res.strokes.length} paths`);
+  };
+
+  const handleClearSvg = () => {
+    setParsedSvgStrokes([]);
+    setCustomSvgCode('');
+    setSvgFileName(null);
+    onLogMessage('[SVG] Cleared SVG vector strokes');
   };
 
   // 1. Initial Leaflet Map Setup
@@ -668,16 +676,57 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     return (text || 'demo').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
   };
 
-  const handleDownloadWigle = () => {
+  const estimatedParts = useMemo(() => {
+    if (!generatedResult?.aps?.length || !splitLimitBytes || splitLimitBytes <= 0) return 1;
+    // Average WiGLE row is ~120 bytes
+    const estTotalBytes = generatedResult.aps.length * 120 + 200;
+    return Math.max(1, Math.ceil(estTotalBytes / splitLimitBytes));
+  }, [generatedResult, splitLimitBytes]);
+
+  const handleDownloadWigle = async () => {
     if (!generatedResult?.aps?.length) return;
-    const csv = generateWigleCsv(generatedResult.aps, includePreheader);
-    downloadFile(`${getCleanBaseFilename()}_wigle.csv`, csv, 'text/csv');
+    const baseName = getCleanBaseFilename();
+    const chunks = splitApsIntoFileChunks(generatedResult.aps, {
+      format: 'wigle',
+      includePreheader,
+      maxSizeBytes: splitLimitBytes,
+      baseName
+    });
+
+    if (chunks.length === 1) {
+      downloadFile(chunks[0].filename, chunks[0].content, 'text/csv');
+    } else {
+      const zip = new JSZip();
+      chunks.forEach((chunk) => {
+        zip.file(chunk.filename, chunk.content);
+      });
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      downloadFile(`${baseName}_wigle_${chunks.length}_parts.zip`, zipBlob, 'application/zip');
+      onLogMessage(`[EXPORT] Created multi-part ZIP with ${chunks.length} WiGLE CSV files (${(zipBlob.size / 1024).toFixed(0)} KB)`);
+    }
   };
 
-  const handleDownloadKepler = () => {
+  const handleDownloadKepler = async () => {
     if (!generatedResult?.aps?.length) return;
-    const csv = generateTestCsv(generatedResult.aps);
-    downloadFile(`${getCleanBaseFilename()}_test.csv`, csv, 'text/csv');
+    const baseName = getCleanBaseFilename();
+    const chunks = splitApsIntoFileChunks(generatedResult.aps, {
+      format: 'kepler',
+      includePreheader: false,
+      maxSizeBytes: splitLimitBytes,
+      baseName
+    });
+
+    if (chunks.length === 1) {
+      downloadFile(chunks[0].filename, chunks[0].content, 'text/csv');
+    } else {
+      const zip = new JSZip();
+      chunks.forEach((chunk) => {
+        zip.file(chunk.filename, chunk.content);
+      });
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      downloadFile(`${baseName}_kepler_${chunks.length}_parts.zip`, zipBlob, 'application/zip');
+      onLogMessage(`[EXPORT] Created multi-part ZIP with ${chunks.length} Kepler CSV files (${(zipBlob.size / 1024).toFixed(0)} KB)`);
+    }
   };
 
   const handleDownloadPython = () => {
@@ -887,33 +936,69 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           )}
         </div>
 
-        {/* SVG Preset Selection Strip (when in SVG mode) */}
+        {/* SVG Mode Interface (Upload / Custom Only - No Premade Shapes) */}
         {artMode === 'svg' && (
-          <div className="p-2 bg-slate-950/70 border border-slate-800/90 rounded-lg space-y-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-cyan-400" />
-                <span>Vector Presets:</span>
-              </span>
-              <span className="text-[10px] font-mono text-cyan-400">
-                {parsedSvgStrokes.length} vector {parsedSvgStrokes.length === 1 ? 'stroke' : 'strokes'} ready
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-1">
-              {SVG_PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => handleSelectSvgPreset(p)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition border ${
-                    selectedSvgPreset === p.id && !svgFileName
-                      ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-200 font-bold'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
+          <div className="p-2 bg-slate-950/70 border border-slate-800/90 rounded-lg space-y-2">
+            {parsedSvgStrokes.length === 0 ? (
+              <div className="p-3 bg-slate-900/60 border border-dashed border-slate-700 rounded-lg text-center space-y-2">
+                <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-300">
+                  <Upload className="w-4 h-4 text-cyan-400" />
+                  <span>No SVG Loaded — Import Any Vector Graphic</span>
+                </div>
+                <p className="text-[11px] text-slate-400 max-w-lg mx-auto">
+                  Upload an SVG file or paste SVG markup (paths, circles, polygons). The generator traces outlines into GPS waypoints for virtual wardrive synthesis.
+                </p>
+                <div className="flex items-center justify-center gap-2 pt-0.5">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs font-bold transition flex items-center gap-1.5 shadow"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload .SVG File</span>
+                  </button>
+                  <button
+                    onClick={() => setShowSvgPasteModal(true)}
+                    className="px-3 py-1 bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 rounded text-xs font-medium transition flex items-center gap-1.5"
+                  >
+                    <FileCode className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Paste SVG XML</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-2 p-1.5 bg-slate-900/80 border border-slate-800 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Custom SVG:</span>
+                  </span>
+                  <span className="px-2 py-0.5 bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 rounded text-xs font-mono font-bold flex items-center gap-1.5">
+                    <span>{svgFileName || 'Custom Vector Graphic'}</span>
+                    <span className="text-[10px] text-cyan-400/80 font-normal">({parsedSvgStrokes.length} {parsedSvgStrokes.length === 1 ? 'stroke' : 'strokes'})</span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-2 py-0.5 bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 rounded text-[11px] font-medium transition"
+                  >
+                    Replace
+                  </button>
+                  <button
+                    onClick={() => setShowSvgPasteModal(!showSvgPasteModal)}
+                    className="px-2 py-0.5 bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-300 rounded text-[11px] font-medium transition"
+                  >
+                    Edit XML
+                  </button>
+                  <button
+                    onClick={handleClearSvg}
+                    className="px-2 py-0.5 bg-rose-950/30 hover:bg-rose-900/40 border border-rose-800/50 text-rose-300 rounded text-[11px] font-medium transition"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Paste SVG XML Box */}
             {showSvgPasteModal && (
@@ -1234,19 +1319,19 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               <input
                 type="range"
                 min="5"
-                max="5000"
-                step="25"
-                value={Math.min(5000, apsPerUnit)}
+                max="10000"
+                step="50"
+                value={Math.min(10000, apsPerUnit)}
                 onChange={(e) => setApsPerUnit(parseInt(e.target.value))}
                 className="flex-1 accent-cyan-500 h-1.5 bg-slate-800 rounded cursor-pointer"
               />
               <input
                 type="number"
                 min="1"
-                max="50000"
+                max="100000"
                 value={apsPerUnit}
                 onChange={(e) => setApsPerUnit(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-14 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[11px] font-mono text-cyan-300 text-right"
+                className="w-16 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[11px] font-mono text-cyan-300 text-right font-bold"
               />
             </div>
 
@@ -1330,21 +1415,21 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 <span>Drive Speed</span>
               </label>
               <span className="text-[10px] font-mono text-amber-400 font-bold">
-                {speedKmh} km/h ({(speedKmh * 0.621371).toFixed(0)} mph)
+                {Math.round(speedKmh * 0.621371)} mph ({Math.round(speedKmh)} km/h)
               </span>
             </div>
 
             <div className="flex items-center justify-between text-[10px] font-mono">
-              <span className="text-slate-500">Timeline simulation</span>
+              <span className="text-slate-500">Up to 666 mph</span>
               <span className="text-slate-400 font-mono">Virtual drive</span>
             </div>
 
             <input
               type="range"
               min="5"
-              max="250"
+              max="1072"
               step="5"
-              value={speedKmh}
+              value={Math.min(1072, speedKmh)}
               onChange={(e) => setSpeedKmh(parseFloat(e.target.value))}
               className="w-full accent-amber-500 h-1.5 bg-slate-800 rounded cursor-pointer"
             />
@@ -1606,24 +1691,53 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               </div>
             </div>
 
-            {/* Quick Export Action Buttons */}
-            <div className="flex items-center gap-1.5">
+            {/* Split Size Dropdown & Quick Export Action Buttons */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded border border-slate-800 text-xs">
+                <Scissors className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="text-[11px] text-slate-400 hidden sm:inline">Split:</span>
+                <select
+                  value={splitLimitBytes}
+                  onChange={(e) => setSplitLimitBytes(Number(e.target.value))}
+                  className="bg-transparent text-slate-200 text-xs font-mono focus:outline-none cursor-pointer"
+                  title="Maximum file size limit per chunk (breaks up large files into standalone parts)"
+                >
+                  {SPLIT_SIZE_OPTIONS.map((opt) => (
+                    <option key={opt.bytes} value={opt.bytes} className="bg-slate-900 text-slate-200">
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                {splitLimitBytes > 0 && estimatedParts > 1 && (
+                  <span className="px-1.5 py-0.2 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded text-[10px] font-mono font-bold flex items-center gap-0.5">
+                    <FileArchive className="w-3 h-3" />
+                    <span>~{estimatedParts} parts</span>
+                  </span>
+                )}
+              </div>
+
               <button
                 onClick={handleDownloadWigle}
                 disabled={!generatedResult?.aps?.length}
                 className="flex items-center gap-1 px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded text-xs font-semibold transition"
+                title={splitLimitBytes > 0 && estimatedParts > 1 ? `Download ${estimatedParts}-part ZIP archive (each under size limit)` : "Download single WiGLE CSV"}
               >
                 <Download className="w-3 h-3" />
-                <span>WiGLE CSV ({generatedResult?.aps?.length > 1000 ? `${(generatedResult.aps.length/1000).toFixed(0)}k` : generatedResult?.aps?.length || 0})</span>
+                <span>
+                  WiGLE CSV {splitLimitBytes > 0 && estimatedParts > 1 ? `(${estimatedParts} parts .zip)` : `(${generatedResult?.aps?.length > 1000 ? `${(generatedResult.aps.length/1000).toFixed(0)}k` : generatedResult?.aps?.length || 0})`}
+                </span>
               </button>
 
               <button
                 onClick={handleDownloadKepler}
                 disabled={!generatedResult?.aps?.length}
                 className="flex items-center gap-1 px-2.5 py-1 bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 rounded text-xs font-semibold transition"
+                title={splitLimitBytes > 0 && estimatedParts > 1 ? `Download ${estimatedParts}-part ZIP archive` : "Download single Kepler CSV"}
               >
                 <Download className="w-3 h-3" />
-                <span>Kepler CSV</span>
+                <span>
+                  Kepler CSV {splitLimitBytes > 0 && estimatedParts > 1 ? `(${estimatedParts} parts)` : ''}
+                </span>
               </button>
 
               <a

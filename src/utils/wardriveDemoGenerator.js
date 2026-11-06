@@ -605,6 +605,111 @@ export function generateTestCsv(aps) {
 }
 
 /**
+ * Splits AP records into multiple standalone CSV files according to a maximum byte size.
+ * If maxSizeBytes <= 0 or the entire dataset fits in one file, returns a single file chunk.
+ * Each split file contains the full valid format header/preheader so it can be uploaded independently.
+ *
+ * @param {Array} aps
+ * @param {Object} options
+ * @param {'wigle'|'kepler'} [options.format='wigle']
+ * @param {boolean} [options.includePreheader=true]
+ * @param {number} [options.maxSizeBytes=0] Max file size in bytes (e.g. 10 * 1024 * 1024 for 10MB)
+ * @param {string} [options.baseName='demo']
+ * @returns {Array<{ filename: string, content: string, byteSize: number, apCount: number, part: number, totalParts: number }>}
+ */
+export function splitApsIntoFileChunks(aps, {
+  format = 'wigle',
+  includePreheader = true,
+  maxSizeBytes = 0,
+  baseName = 'demo'
+} = {}) {
+  if (!Array.isArray(aps) || aps.length === 0) {
+    const emptyHeader = format === 'wigle'
+      ? (includePreheader ? "WigleWifi-1.4,appRelease=1.0,model=Simulator,release=1.0,device=simulator,display=sim,board=sim,brand=Synthetic\n" : "") + "MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n"
+      : "mac,ssid,auth,first_seen,channel,rssi,lat,lon\n";
+    return [{
+      filename: `${baseName}_${format}.csv`,
+      content: emptyHeader,
+      byteSize: emptyHeader.length,
+      apCount: 0,
+      part: 1,
+      totalParts: 1
+    }];
+  }
+
+  const isWigle = format === 'wigle';
+  const header = isWigle
+    ? (includePreheader ? "WigleWifi-1.4,appRelease=1.0,model=Simulator,release=1.0,device=simulator,display=sim,board=sim,brand=Synthetic\n" : "") + "MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n"
+    : "mac,ssid,auth,first_seen,channel,rssi,lat,lon\n";
+
+  const formatRow = isWigle
+    ? (ap) => `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.rssi},${ap.lat},${ap.lon},${ap.alt},${ap.accuracy},WIFI\n`
+    : (ap) => `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.rssi},${ap.lat},${ap.lon}\n`;
+
+  // If no size limit, return single file
+  if (!maxSizeBytes || maxSizeBytes <= 0) {
+    const content = isWigle ? generateWigleCsv(aps, includePreheader) : generateTestCsv(aps);
+    return [{
+      filename: `${baseName}_${format}.csv`,
+      content,
+      byteSize: content.length,
+      apCount: aps.length,
+      part: 1,
+      totalParts: 1
+    }];
+  }
+
+  const chunks = [];
+  let currentRows = [];
+  let currentBytes = header.length;
+
+  for (let i = 0; i < aps.length; i++) {
+    const rowStr = formatRow(aps[i]);
+    const rowBytes = rowStr.length;
+
+    if (currentRows.length > 0 && (currentBytes + rowBytes > maxSizeBytes)) {
+      const chunkContent = header + currentRows.join('');
+      chunks.push({
+        content: chunkContent,
+        byteSize: chunkContent.length,
+        apCount: currentRows.length
+      });
+      currentRows = [rowStr];
+      currentBytes = header.length + rowBytes;
+    } else {
+      currentRows.push(rowStr);
+      currentBytes += rowBytes;
+    }
+  }
+
+  if (currentRows.length > 0) {
+    const chunkContent = header + currentRows.join('');
+    chunks.push({
+      content: chunkContent,
+      byteSize: chunkContent.length,
+      apCount: currentRows.length
+    });
+  }
+
+  const totalParts = chunks.length;
+  if (totalParts === 1) {
+    chunks[0].filename = `${baseName}_${format}.csv`;
+    chunks[0].part = 1;
+    chunks[0].totalParts = 1;
+  } else {
+    for (let p = 0; p < totalParts; p++) {
+      const partNum = String(p + 1).padStart(2, '0');
+      const totalNum = String(totalParts).padStart(2, '0');
+      chunks[p].filename = `${baseName}_${format}_part${partNum}_of_${totalNum}.csv`;
+      chunks[p].part = p + 1;
+      chunks[p].totalParts = totalParts;
+    }
+  }
+
+  return chunks;
+}
+
+/**
  * Generates the standalone Python script with user's selected parameters ready for standalone CLI execution.
  */
 export function exportPythonScriptSource({

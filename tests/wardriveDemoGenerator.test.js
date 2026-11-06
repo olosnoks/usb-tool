@@ -10,6 +10,7 @@ import {
   parseSvgToNormalizedStrokes,
   parseSvgPathToStrokes,
   exportPythonScriptSource,
+  splitApsIntoFileChunks,
   SVG_PRESETS,
   VECTOR_FONTS
 } from '../src/utils/wardriveDemoGenerator';
@@ -257,10 +258,12 @@ describe('Wardrive Demo Generator', () => {
   });
 
   it('generates demo APs in SVG mode from parsed strokes', () => {
-    const defaultWifi = SVG_PRESETS.find(p => p.id === 'wifi');
-    expect(defaultWifi).toBeDefined();
+    const customSvg = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <path d="M 20 20 L 80 80 M 80 20 L 20 80" />
+      <circle cx="50" cy="50" r="25" />
+    </svg>`;
 
-    const parsed = parseSvgToNormalizedStrokes(defaultWifi.svg);
+    const parsed = parseSvgToNormalizedStrokes(customSvg);
     const res = generateDemoAps({
       text: 'WIFI_DEMO',
       mode: 'svg',
@@ -387,5 +390,42 @@ describe('Wardrive Demo Generator', () => {
     expect(py).toContain('FLIP_H = True');
     expect(py).toContain('FLIP_V = False');
     expect(py).toContain('Inspired by OSINTIAL');
+  });
+
+  it('splits APs into smaller standalone files to meet file size limits', () => {
+    const res = generateDemoAps({ text: 'SPLIT_TEST', apsPerUnit: 200, seed: 42 });
+    expect(res.aps.length).toBeGreaterThan(100);
+
+    // 1. No split limit -> 1 file
+    const noLimit = splitApsIntoFileChunks(res.aps, {
+      format: 'wigle',
+      maxSizeBytes: 0,
+      baseName: 'demo'
+    });
+    expect(noLimit.length).toBe(1);
+    expect(noLimit[0].filename).toBe('demo_wigle.csv');
+    expect(noLimit[0].part).toBe(1);
+    expect(noLimit[0].totalParts).toBe(1);
+    expect(noLimit[0].content).toContain('WigleWifi-1.4');
+
+    // 2. Small size limit -> breaks into multiple files, each under limit
+    const smallLimit = 5000; // 5KB limit
+    const chunks = splitApsIntoFileChunks(res.aps, {
+      format: 'wigle',
+      maxSizeBytes: smallLimit,
+      baseName: 'test'
+    });
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks[0].filename).toMatch(/^test_wigle_part01_of_\d+\.csv$/);
+
+    for (const chunk of chunks) {
+      expect(chunk.byteSize).toBeLessThanOrEqual(smallLimit + 150); // within limit (+ at most 1 row tolerance)
+      expect(chunk.content).toContain('WigleWifi-1.4'); // Each chunk is a valid WiGLE file!
+      expect(chunk.content).toContain('MAC,SSID,AuthMode');
+    }
+
+    // Sum of apCounts equals total AP count
+    const totalAps = chunks.reduce((sum, c) => sum + c.apCount, 0);
+    expect(totalAps).toBe(res.aps.length);
   });
 });
