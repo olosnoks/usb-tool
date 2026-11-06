@@ -276,4 +276,17 @@ describe('UI Workbench Render Sanity Check', () => {
     expect(html).toContain('href="./wiki/?article=workspace"');
     expect(html).toContain('Open Workspace Guide &amp; Wiki');
   });
+
+  it('renders PortapackWorkbench with RocketGod Mayhem Mobile port window', () => {
+    const html = renderToString(
+      <SerialProvider>
+        <PortapackWorkbench />
+      </SerialProvider>
+    );
+
+    expect(html).toContain('PORTAPACK MAYHEM SDR');
+    expect(html).toContain('RocketGod Mayhem Mobile Port');
+    expect(html).toContain('src="./mayhem/index.html"');
+    expect(html).toContain('allow="usb; microphone; geolocation; hid"');
+  });
 });

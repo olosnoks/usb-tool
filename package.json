@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build:mayhem": "esbuild src/mayhem-mobile/src/main.ts --bundle --outfile=public/mayhem/build/app.js --format=esm --target=es2020 --minify && esbuild src/mayhem-mobile/src/dsp.worker.ts --bundle --outfile=public/mayhem/build/dsp-worker.js --format=esm --target=es2020 --minify",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
