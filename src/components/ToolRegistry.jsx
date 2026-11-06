@@ -48,6 +48,7 @@ const PtpWorkbench = React.lazy(() => import('./tools/PtpWorkbench'));
 const Fido2Workbench = React.lazy(() => import('./tools/Fido2Workbench'));
 const SessionLogPanel = React.lazy(() => import('./tools/SessionLogPanel'));
 const BleExplorer = React.lazy(() => import('./tools/BleExplorer'));
+const WardriveGeneratorWorkbench = React.lazy(() => import('./tools/WardriveGeneratorWorkbench'));
 
 const ALL_ITEMS = SIDEBAR_SECTIONS.flatMap((s) => s.items || []);
 
@@ -75,7 +76,7 @@ export const KNOWN_TOOL_IDS = [
   'programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp', 'can-bus', 'logic-analyzer', 'usb-pd', 'dfu',
   'fastboot', 'adb', 'usb-descriptors', 'hid', 'usbtmc', 'mass-storage', 'ptp', 'fido2', 'session-log', 'ble',
   'bus-explorer', 'modbus-rtu', 'alfa-wifi', 'wifi-scanner', 'warhog-piglet', 'mayhem', 'flipper', 'proxmark', 'rfid-nfc',
-  'ducky', 'cyberchef',
+  'ducky', 'cyberchef', 'wardrive-generator',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
 
@@ -148,6 +149,7 @@ export function renderTool(toolId, serial) {
     case 'flipper': return <FlipperWorkbench />;
     case 'proxmark': case 'rfid-nfc': return <ProxmarkWorkbench />;
     case 'ducky': case 'cyberchef': return <BadUsbPayloadSuite initialTab={toolId === 'cyberchef' ? 'cyberchef' : 'ducky'} />;
+    case 'wardrive-generator': return <WardriveGeneratorWorkbench onLogMessage={addLog} />;
     default:
       return (
         <div className="py-16 text-center font-mono text-xs text-slate-500">

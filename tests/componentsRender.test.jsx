@@ -42,6 +42,7 @@ import WarhogPigletWorkbench, {
 import TopologyView from '../src/components/workbenches/TopologyView';
 import SignalMapView from '../src/components/workbenches/SignalMapView';
 import GeospatialMap from '../src/components/workbenches/GeospatialMap';
+import WardriveGeneratorWorkbench from '../src/components/tools/WardriveGeneratorWorkbench';
 
 // Composite Tool Suites
 import BadUsbPayloadSuite from '../src/components/tools/BadUsbPayloadSuite';
@@ -107,6 +108,8 @@ describe('UI Workbench Render Sanity Check', () => {
     { name: 'ProtocolPacketLab (packets)', comp: <ProtocolPacketLab initialTab="packets" hexByteStream={[]} /> },
     { name: 'GpsNavigationSuite (wardrive)', comp: <GpsNavigationSuite initialTab="wardrive" /> },
     { name: 'GpsNavigationSuite (ubx)', comp: <GpsNavigationSuite initialTab="ubx" /> },
+    { name: 'GpsNavigationSuite (generator)', comp: <GpsNavigationSuite initialTab="generator" /> },
+    { name: 'WardriveGeneratorWorkbench', comp: <WardriveGeneratorWorkbench /> },
     { name: 'HardwareProgrammersSuite (ch341a)', comp: <HardwareProgrammersSuite initialTab="ch341a" /> },
     { name: 'HardwareProgrammersSuite (cmsis-dap)', comp: <HardwareProgrammersSuite initialTab="cmsis-dap" /> },
     { name: 'HardwareProgrammersSuite (jtag)', comp: <HardwareProgrammersSuite initialTab="jtag" /> },

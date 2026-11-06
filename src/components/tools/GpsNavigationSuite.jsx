@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Compass, Navigation, Radio, MapPin } from 'lucide-react';
+import { Compass, Navigation, Radio, MapPin, Sparkles } from 'lucide-react';
 import GpsWardriverDeck from '../GpsWardriverDeck';
 import UbxConfigDeck from '../UbxConfigDeck';
+import WardriveGeneratorWorkbench from './WardriveGeneratorWorkbench';
 
 export default function GpsNavigationSuite({
   initialTab = 'wardrive',
@@ -11,11 +12,11 @@ export default function GpsNavigationSuite({
   onSendRawBytes = () => {}
 }) {
   const [activeSubTab, setActiveSubTab] = useState(
-    initialTab === 'ubx' ? 'ubx' : 'wardrive'
+    initialTab === 'ubx' ? 'ubx' : initialTab === 'generator' ? 'generator' : 'wardrive'
   );
 
   useEffect(() => {
-    if (initialTab === 'ubx' || initialTab === 'wardrive') {
+    if (initialTab === 'ubx' || initialTab === 'wardrive' || initialTab === 'generator') {
       setActiveSubTab(initialTab);
     }
   }, [initialTab]);
@@ -65,6 +66,17 @@ export default function GpsNavigationSuite({
             <Navigation className="w-3.5 h-3.5" />
             <span>u-blox UBX Config</span>
           </button>
+          <button
+            onClick={() => setActiveSubTab('generator')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+              activeSubTab === 'generator'
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <MapPin className="w-3.5 h-3.5" />
+            <span>Demo Vector Generator</span>
+          </button>
         </div>
       </div>
 
@@ -76,10 +88,14 @@ export default function GpsNavigationSuite({
             isConnected={isConnected}
             onLogMessage={onLogMessage}
           />
-        ) : (
+        ) : activeSubTab === 'ubx' ? (
           <UbxConfigDeck
             isConnected={isConnected}
             onSendRawBytes={onSendRawBytes}
+            onLogMessage={onLogMessage}
+          />
+        ) : (
+          <WardriveGeneratorWorkbench
             onLogMessage={onLogMessage}
           />
         )}

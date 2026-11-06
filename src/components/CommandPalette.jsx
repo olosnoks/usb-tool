@@ -23,7 +23,8 @@ import {
   X,
   Wifi,
   Gauge,
-  Radio
+  Radio,
+  MapPin
 } from 'lucide-react';
 
 export default function CommandPalette({
@@ -72,6 +73,7 @@ export default function CommandPalette({
     { id: 'tab-injector', name: 'Open Raw Hex Frame Injector', category: 'Tools', icon: Binary, action: () => onSelectTab('injector') },
     { id: 'tab-diagnostics', name: 'Open RE Diagnostics & Baud Scanner', category: 'Tools', icon: Radar, action: () => onSelectTab('diagnostics') },
     { id: 'tab-wardrive', name: 'Open Wardrive / GPS NMEA Mapper', category: 'Tools', icon: Compass, action: () => onSelectTab('wardrive') },
+    { id: 'tab-wardrive-generator', name: 'Open Demo Wardrive Generator (Vector Text Map Art for Kepler.gl / WiGLE)', category: 'Tools', icon: MapPin, action: () => onSelectTab('wardrive-generator') },
     { id: 'tab-macros', name: 'Open Macro Decks & Custom Keypads', category: 'Tools', icon: Command, action: () => onSelectTab('macros') },
     { id: 'tab-autopsy', name: 'Open USB Autopsy & Bootloader Forcer (Vapes / Mystery Chips)', category: 'Tools', icon: Usb, action: () => onSelectTab('autopsy') },
 
