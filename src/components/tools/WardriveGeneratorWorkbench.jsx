@@ -495,17 +495,53 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
       } else {
         const totalWidth = clean.length * (effW + effGap);
         const totalHeight = effH;
-        const corner1 = [latCenter - totalHeight, lonCenter];
-        const corner2 = [latCenter, lonCenter + totalWidth];
 
-        const box = L.rectangle([corner1, corner2], {
-          color: '#10b981',
-          weight: 1.5,
-          dashArray: '4, 6',
-          fillColor: '#10b981',
-          fillOpacity: 0.07
-        });
-        previewBoxLayerRef.current.addLayer(box);
+        if (rotationDeg !== 0 || flipH || flipV) {
+          const rad = ((Number(rotationDeg) || 0) * Math.PI) / 180.0;
+          const cosR = Math.cos(rad);
+          const sinR = Math.sin(rad);
+          const centerX = lonCenter + totalWidth / 2.0;
+          const centerY = latCenter - totalHeight / 2.0;
+
+          const transformBoxPoint = (xRel, yRel) => {
+            const rawLon = lonCenter + xRel * totalWidth;
+            const rawLat = latCenter - yRel * totalHeight;
+            let dx = rawLon - centerX;
+            let dy = rawLat - centerY;
+            if (flipH) dx = -dx;
+            if (flipV) dy = -dy;
+            const rx = dx * cosR - dy * sinR;
+            const ry = dx * sinR + dy * cosR;
+            return [centerY + ry, centerX + rx];
+          };
+
+          const corners = [
+            transformBoxPoint(0, 0),
+            transformBoxPoint(1, 0),
+            transformBoxPoint(1, 1),
+            transformBoxPoint(0, 1)
+          ];
+          const polygon = L.polygon(corners, {
+            color: '#10b981',
+            weight: 1.5,
+            dashArray: '4, 6',
+            fillColor: '#10b981',
+            fillOpacity: 0.07
+          });
+          previewBoxLayerRef.current.addLayer(polygon);
+        } else {
+          const corner1 = [latCenter - totalHeight, lonCenter];
+          const corner2 = [latCenter, lonCenter + totalWidth];
+
+          const box = L.rectangle([corner1, corner2], {
+            color: '#10b981',
+            weight: 1.5,
+            dashArray: '4, 6',
+            fillColor: '#10b981',
+            fillOpacity: 0.07
+          });
+          previewBoxLayerRef.current.addLayer(box);
+        }
       }
     } catch (e) {
       // Ignored in headless/test environments
@@ -1184,6 +1220,113 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
                 <div className="text-[9px] text-slate-500 text-center pt-0.5 font-mono">
                   Pivot centered
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Text Mode Transformation Controls (Rotation & Flip) */}
+        {artMode === 'text' && (
+          <div className="p-2 bg-slate-950/70 border border-slate-800/90 rounded-lg">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {/* 1. Text Rotation */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-300 flex items-center gap-1">
+                    <RotateCw className="w-3 h-3 text-emerald-400" />
+                    <span>Text Rotation</span>
+                  </span>
+                  <div className="flex items-center gap-0.5">
+                    <input
+                      type="number"
+                      min="0"
+                      max="360"
+                      value={rotationDeg}
+                      onChange={(e) => setRotationDeg((parseInt(e.target.value) || 0) % 360)}
+                      className="w-11 bg-slate-950 border border-slate-700 rounded px-1 py-0.5 text-[11px] font-mono text-emerald-300 text-right font-bold"
+                    />
+                    <span className="text-[11px] font-mono text-emerald-400 font-bold">°</span>
+                  </div>
+                </div>
+
+                <input
+                  type="range"
+                  min="0"
+                  max="360"
+                  step="5"
+                  value={rotationDeg}
+                  onChange={(e) => setRotationDeg(parseInt(e.target.value) || 0)}
+                  className="w-full accent-emerald-500 h-1.5 bg-slate-800 rounded cursor-pointer"
+                />
+
+                <div className="flex items-center justify-between gap-1 pt-0.5">
+                  <button
+                    onClick={() => handleRotateBy(-90)}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                  >
+                    -90°
+                  </button>
+                  <button
+                    onClick={() => handleRotateBy(90)}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                  >
+                    +90°
+                  </button>
+                  <button
+                    onClick={() => handleRotateBy(180)}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                  >
+                    180°
+                  </button>
+                  <button
+                    onClick={() => setRotationDeg(0)}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                  >
+                    0°
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Text Mirror / Flip */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-300 flex items-center gap-1">
+                    <FlipHorizontal className="w-3 h-3 text-emerald-400" />
+                    <span>Flip / Mirror Text</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    {flipH ? 'H' : ''}{flipV ? 'V' : ''}{!flipH && !flipV ? 'NORM' : ''}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                  <button
+                    onClick={() => setFlipH((prev) => !prev)}
+                    className={`flex items-center justify-center gap-1 px-2 py-1 rounded text-xs font-semibold transition border ${
+                      flipH
+                        ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 font-bold shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <FlipHorizontal className="w-3 h-3" />
+                    <span>Horiz</span>
+                  </button>
+                  <button
+                    onClick={() => setFlipV((prev) => !prev)}
+                    className={`flex items-center justify-center gap-1 px-2 py-1 rounded text-xs font-semibold transition border ${
+                      flipV
+                        ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 font-bold shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <FlipVertical className="w-3 h-3" />
+                    <span>Vert</span>
+                  </button>
+                </div>
+
+                <div className="text-[9px] text-slate-500 text-center pt-0.5 font-mono">
+                  Pivots around text center
                 </div>
               </div>
             </div>

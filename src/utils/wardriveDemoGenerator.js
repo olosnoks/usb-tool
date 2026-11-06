@@ -628,9 +628,35 @@ export function generateDemoAps(options = {}) {
       }
     }
   } else {
+    // Text Mode: calculate span center to support rotation and flip
+    const textChars = cleanText.toUpperCase();
+    const count = Math.max(1, textChars.length);
+    const totalTextWidth = count * effectiveLetterW + (count - 1) * effectiveGap;
+    const totalTextHeight = effectiveLetterH;
+
+    const rad = ((Number(rotationDeg) || 0) * Math.PI) / 180.0;
+    const cosR = Math.cos(rad);
+    const sinR = Math.sin(rad);
+
+    const centerX = x0 + totalTextWidth / 2.0;
+    const centerY = y0 - totalTextHeight / 2.0;
+
+    const transformTextPoint = (lon, lat) => {
+      let dx = lon - centerX;
+      let dy = lat - centerY;
+
+      if (flipH) dx = -dx;
+      if (flipV) dy = -dy;
+
+      const rx = dx * cosR - dy * sinR;
+      const ry = dx * sinR + dy * cosR;
+
+      return [centerX + rx, centerY + ry];
+    };
+
     let currentX = x0;
 
-    for (const ch of cleanText.toUpperCase()) {
+    for (const ch of textChars) {
       const strokes = VECTOR_FONTS[ch] || VECTOR_FONTS[" "];
       const letterLocalPath = [];
 
@@ -639,10 +665,15 @@ export function generateDemoAps(options = {}) {
           const p1Rel = stroke[i];
           const p2Rel = stroke[i + 1];
 
-          const lon1 = currentX + p1Rel[0] * effectiveLetterW;
-          const lat1 = y0 - p1Rel[1] * effectiveLetterH;
-          const lon2 = currentX + p2Rel[0] * effectiveLetterW;
-          const lat2 = y0 - p2Rel[1] * effectiveLetterH;
+          let lon1 = currentX + p1Rel[0] * effectiveLetterW;
+          let lat1 = y0 - p1Rel[1] * effectiveLetterH;
+          let lon2 = currentX + p2Rel[0] * effectiveLetterW;
+          let lat2 = y0 - p2Rel[1] * effectiveLetterH;
+
+          if (rotationDeg !== 0 || flipH || flipV) {
+            [lon1, lat1] = transformTextPoint(lon1, lat1);
+            [lon2, lat2] = transformTextPoint(lon2, lat2);
+          }
 
           const pts = interpolateSegment([lon1, lat1], [lon2, lat2], effectiveStepSize);
           if (letterLocalPath.length > 0) {
@@ -1209,7 +1240,27 @@ def generate_aps(text):
                     master_path.extend(bridge_pts[1:])
                 master_path.extend(stroke_local_path)
     else:
-        for ch in text.upper():
+        text_chars = text.upper()
+        total_text_w = len(text_chars) * LETTER_W + max(0, len(text_chars) - 1) * GAP
+        total_text_h = LETTER_H
+        center_x = current_x + total_text_w / 2.0
+        center_y = y0 - total_text_h / 2.0
+        rad = math.radians(ROTATION_DEG)
+        cos_r = math.cos(rad)
+        sin_r = math.sin(rad)
+
+        def transform_text_point(lon, lat):
+            dx = lon - center_x
+            dy = lat - center_y
+            if FLIP_H:
+                dx = -dx
+            if FLIP_V:
+                dy = -dy
+            rx = dx * cos_r - dy * sin_r
+            ry = dx * sin_r + dy * cos_r
+            return (center_x + rx, center_y + ry)
+
+        for ch in text_chars:
             strokes = VECTOR_FONTS.get(ch, VECTOR_FONTS.get(" ", []))
             letter_local_path = []
             
@@ -1222,6 +1273,10 @@ def generate_aps(text):
                     lat1 = y0 - p1_rel[1] * LETTER_H
                     lon2 = current_x + p2_rel[0] * LETTER_W
                     lat2 = y0 - p2_rel[1] * LETTER_H
+
+                    if ROTATION_DEG != 0 or FLIP_H or FLIP_V:
+                        lon1, lat1 = transform_text_point(lon1, lat1)
+                        lon2, lat2 = transform_text_point(lon2, lat2)
                     
                     pts = interpolate_segment((lon1, lat1), (lon2, lat2), step_size=effective_step)
                     if letter_local_path:

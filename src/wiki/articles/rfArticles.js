@@ -1005,5 +1005,154 @@ ESP32 Marauder is **external firmware** controlled over its serial CLI — there
 - **Drive** it by typing Marauder CLI commands in the **Terminal** over the shared \`SerialContext\`.
 - **Analyze** its output by streaming captured frames into the **Packet & Protocol Lab** (which reuses \`wifiParser.js\`).
 `
+  },
+  {
+    id: 'wardrive-generator',
+    toolId: 'wardrive-generator',
+    category: 'rf',
+    title: 'Wardrive Vector Art Generator — Synthetic APs, SVG Tracing, WiGLE & Kepler Exporter',
+    summary: 'Comprehensive guide to generating geometric words and custom SVG vector art from synthetic Wi-Fi Access Points for wardriving visualization, Kepler.gl heatmaps, and WiGLE CSV benchmarks with authentic ISP router profiles (Xfinity, AT&T, Spectrum), 10k/km density, 666 mph drive simulation, and multi-part file splitting.',
+    tags: ['Wardrive', 'WiGLE', 'Kepler.gl', 'Synthetic APs', 'SVG Art', 'GPS', 'Xfinity', 'AT&T', 'Spectrum', 'OSINTIAL'],
+    readTime: '15 min read',
+    content: `
+# Wardrive Vector Art Generator — Synthetic APs, SVG Tracing & Geospatial Art Manual
+
+The **Wardrive Vector Art Generator** turns arbitrary words, phrases, and custom SVG vector graphics into synthetic Wi-Fi Access Point (AP) datasets ready for upload into **WiGLE.net**, **Kepler.gl**, or local GIS visualization pipelines. Inspired by **OSINTIAL**'s creative wardriving demonstrations, this workbench provides end-to-end vector path tracing, authentic ISP router profile generation (Xfinity, AT&T, Spectrum), vehicle timeline simulation up to 666 mph, and automated multi-part file splitting.
+
+---
+
+### 1. What Is This Tool & Why Do You Need It?
+
+Wardriving maps (like WiGLE.net and Kepler.gl) plot hundreds of thousands of geolocated Wi-Fi networks as heatmaps and points across cities, highways, and rural corridors.
+
+Testing geospatial visualization pipelines, benchmarking high-density mapping software, or creating demonstrative wardriving art requires controlled, predictable datasets. The **Wardrive Vector Art Generator** enables you to:
+- **Draw on the Map**: Render letters, phrases, logos, or geometric icons directly on real-world coordinates using synthetic APs.
+- **Benchmark GIS & Map Rendering**: Stress-test mapping applications with ultra-dense clusters (up to 10,000 APs/km, yielding 1,000,000+ points).
+- **Simulate Authentic Wardriving Expeditions**: Generate realistic drive tracks with consistent speed timelines, RSSI signal falloff, frequency channel distributions, and genuine manufacturer hardware MAC addresses.
+- **Produce Valid Upload Files**: Output standard **WiGLE Wifi 1.4** CSVs with verified preheaders or lightweight **Kepler.gl** CSVs, with optional automatic chunking into multi-part ZIP archives.
+
+---
+
+### 2. Dual Generation Modes: Text / Word vs. Custom SVG
+
+The workbench supports two complementary vector rendering pipelines:
+
+#### Mode A: Text / Phrase Mapping
+- Converts alphanumeric strings (\`A-Z\`, \`0-9\`, space) into ordered geometric vector strokes using a clean normalized vector font table.
+- Configurable letter dimensions (\`Letter Width\`, \`Letter Height\`) and inter-character spacing (\`Gap\`).
+- Scales from neighborhood-level typography to massive statewide spans (up to 200x scale factor).
+
+#### Mode B: Custom SVG Vector Art
+- Directly imports local \`.svg\` vector files or parses raw SVG XML pasted from your clipboard.
+- Automatically normalizes vector paths, polylines, polygons, lines, and circles into continuous 2D strokes.
+- **Transformation Controls**:
+  - **Rotation**: Rotate the vector artwork from 0° to 360° around its geographic center.
+  - **SVG Scale**: Dedicated multiplier (0.1x to 50x) to resize the graphic independently of font settings.
+  - **Flip / Mirror**: Horizontal and vertical reflection toggles with centered pivot points.
+
+---
+
+### 3. Authentic ISP Router Profiles & SSID Lists
+
+Rather than generic sequential numbers, the generator includes authentic North American residential and commercial ISP router profiles with matching manufacturer MAC address OUIs, security modes, and channels:
+
+| Profile | Key SSID Patterns | Security Modes | Manufacturer OUI Vendors |
+| :--- | :--- | :--- | :--- |
+| **Realistic Mix** | Balanced suburban distribution: ~42% Xfinity, ~36% AT&T, ~12% Spectrum, ~10% common routers. | Mixed WPA2, WPA3, Enterprise, Open. | Arris, Pace, Humax, Technicolor, Cisco, Nokia, Netgear. |
+| **Xfinity / Comcast** | \`xfinitywifi\` (open), \`XFINITY\` (enterprise), \`Xfinity-XXXX\`, \`HOME-XXXX\`, \`xfinitywifi-5G\`. | \`[ESS]\`, \`[WPA2-EAP-CCMP][ESS]\`, \`[WPA2-PSK-CCMP][ESS]\`. | Arris (\`A4:12:42\`, \`74:9D:79\`), Technicolor (\`00:CD:FE\`), Cisco (\`58:56:E8\`), CommScope (\`E8:89:2C\`), Humax (\`B0:77:AC\`). |
+| **AT&T** | \`ATTXXX\`, \`ATT-WIFI-XXXX\`, \`attwifi\` (open), \`ATT<HEX>\`, \`ATT-Fiber-XXXX\`, \`ATTXXX_5G\`. | \`[ESS]\`, \`[WPA2-PSK-CCMP][ESS]\`, \`[WPA2-PSK+WPA3-SAE][ESS]\`. | Pace (\`94:87:70\`, \`28:16:2E\`), Arris BGW210 (\`F8:E9:03\`), Humax BGW320 (\`3C:CE:73\`), Nokia (\`CC:7B:35\`, \`F0:F2:49\`). |
+| **Spectrum / Charter** | \`SpectrumSetup-XX\`, \`MySpectrumWiFiXX-5G\`, \`SpectrumWiFi\`, \`SpectrumWiFi Plus\`. | \`[ESS]\`, \`[WPA2-PSK-CCMP][ESS]\`, \`[WPA2-EAP-CCMP][ESS]\`. | Sagemcom (\`68:02:B8\`), Askey (\`AC:EC:80\`), Sercomm (\`E0:22:04\`), Charter (\`18:35:D1\`), Hitron (\`38:35:FB\`). |
+| **Custom Prefix** | \`${PREFIX}-000001\`, \`${PREFIX}-000002\`... | Configurable generic auth. | Standard unicast random MAC addresses. |
+
+---
+
+### 4. Density, Speed & Timeline Simulation
+
+#### AP Density Control (per km or per mile)
+- Select whether density is calculated per kilometer (\`/km\`) or per mile (\`/mi\`).
+- Slider spans from **5 APs/km** up to **10,000 APs/km**, with manual input up to **100,000**.
+- Preset buttons: \`50\`, \`200\`, \`1,000\`, \`5,000\`, and \`10k (~1M APs)\`.
+- High-density sampling protection ensures the interactive Leaflet preview maintains 60 FPS by rendering a clean preview while exporting 100% of the synthesized points to CSV.
+
+#### Vehicle Drive Speed & Start Clock
+- **Simulated Speed**: Configure virtual driving speed from **5 km/h** (walking, 3 mph) up to **1,072 km/h** (**666 mph / Hyper**).
+- **Timeline Calculation**: The algorithm tracks elapsed drive time along every vector stroke segment:
+  $$\text{duration} = \frac{\text{totalPathLengthKm}}{\text{speedKmh}} \times 3600\text{ seconds}$$
+  Every AP receives an authentic \`FirstSeen\` timestamp formatted to \`YYYY-MM-DD HH:MM:SS\`.
+- **Start Clock Presets**: Quick-action buttons to anchor the drive start time to **Now**, **-1 Hour**, **Yesterday (-24h)**, or **-7 Days**.
+
+---
+
+### 5. Multi-Part File Splitting & ZIP Packaging
+
+Large wardriving runs and high-density vector art often generate CSVs exceeding 10 MB, 25 MB, or 50 MB, which can trigger upload limits or cause browser memory exhaustion in Kepler.gl:
+
+- **Split Limit Selector**:
+  - **No Limit**: Exports a single unified CSV file.
+  - **1 MB limit** (~8,000 APs)
+  - **2 MB limit** (~16,000 APs)
+  - **5 MB limit** (~40,000 APs)
+  - **10 MB limit** (Standard WiGLE web upload ceiling)
+  - **25 MB limit** (Email and Discord attachment cap)
+  - **50 MB limit** (Kepler.gl browser heap safeguard)
+  - **100 MB limit**
+- **Independent Standalone Validity**: When split into parts, **every single chunk** includes the full \`WigleWifi-1.4\` preheader and standard column header row. This guarantees that each split file (\`filename_wigle_part01_of_04.csv\`) can be uploaded and processed independently without header errors.
+- **Automated ZIP Download**: When a file size limit is active and the dataset requires multiple chunks, clicking **WiGLE CSV** or **Kepler CSV** automatically packages the files into a single compressed \`.zip\` archive for instant download.
+
+---
+
+### 6. Step-by-Step Walkthrough: Visualizing in Kepler.gl
+
+1. **Configure Your Art**:
+   - In the workbench, set your origin coordinates (or click **Use My Location** / choose a preset city).
+   - Enter your phrase (e.g., \`DEFCON\`) or upload an SVG graphic.
+   - Choose your **Router / SSID List** profile (e.g., *Realistic Mix* or *Xfinity Defaults*).
+   - Adjust density (e.g., \`200 /km\`) and speed (\`65 mph\`).
+2. **Generate**:
+   - Click **Start Wardrive**. The preview renders on the interactive dark-matter map.
+3. **Export**:
+   - Click **Kepler CSV** (or **WiGLE CSV** if uploading to WiGLE).
+4. **Load into Kepler.gl**:
+   - Open [kepler.gl/demo](https://kepler.gl/demo) in a new tab.
+   - Drag and drop your downloaded \`.csv\` file into Kepler.
+5. **Style the Visualization**:
+   - In Kepler's left panel, add a **Point** layer with \`lat\` and \`lon\`.
+   - Set **Color By** to \`rssi\` with a green-to-red gradient to visualize signal strength.
+   - Optional: Switch layer type to **Grid** or **Hexbin** and toggle **3D Mode** to view a volumetric Wi-Fi density sculpture!
+
+---
+
+### 7. Standalone Python Exporter
+
+Need to generate or automate vector art datasets on a headless server or offline machine?
+
+1. Click the **Python Script** tab in the workbench.
+2. The tab displays a self-contained, dependency-free Python script pre-filled with your exact coordinates, letter dimensions, SVG stroke definitions, density settings, speed, and ISP SSID profiles.
+3. Click **Download .py** to save \`filename_generator.py\`.
+4. Run anywhere with standard Python 3:
+   \`\`\`bash
+   python3 demo_generator.py
+   \`\`\`
+   The script outputs both \`*_wigle.csv\` and \`*_test.csv\` in seconds.
+
+---
+
+### 8. Upstream Project & Engineering Attribution
+
+| Component / Organization | Reference & Link | Role / Attribution |
+| :--- | :--- | :--- |
+| **OSINTIAL** | [x.com/OSINTIAL](https://x.com/OSINTIAL) | Inspiration for wardriving vector art and creative GIS mapping demonstrations. |
+| **WiGLE.net** | [wigle.net](https://wigle.net) | Wireless Geographic Logging Engine and specification for the \`WigleWifi-1.4\` CSV format. |
+| **Kepler.gl** | [kepler.gl](https://kepler.gl) (Urban Computing Foundation / Uber Open Source) | Open-source geospatial visualization engine. |
+| **Leaflet** | [leafletjs.com](https://leafletjs.com) | Client-side interactive mapping library used for the in-app preview canvas. |
+
+---
+
+### Implementation & Architecture
+
+- **Workbench:** [\`src/components/tools/WardriveGeneratorWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/WardriveGeneratorWorkbench.jsx) hosts the interactive controls, Leaflet map canvas, AP data table, and multi-part exporter.
+- **Generator Core:** [\`src/utils/wardriveDemoGenerator.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/wardriveDemoGenerator.js) implements continuous stroke interpolation, polyline walking, authentic ISP router profile generation, and \`splitApsIntoFileChunks\`.
+- **SVG Engine:** [\`src/utils/svgPathParser.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/svgPathParser.js) parses raw SVG XML elements (\`<path>\`, \`<line>\`, \`<polyline>\`, \`<polygon>\`, \`<circle>\`) into normalized 2D coordinate paths.
+`
   }
 ];

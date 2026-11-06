@@ -501,4 +501,23 @@ describe('Wardrive Demo Generator', () => {
     expect(hasXfinity).toBe(true);
     expect(hasAtt).toBe(true);
   });
+
+  it('rotates and flips text mode properly', () => {
+    const unrotated = generateDemoAps({
+      text: 'L',
+      rotationDeg: 0,
+      flipH: false,
+      flipV: false,
+      seed: 42
+    });
+    const rotated = generateDemoAps({
+      text: 'L',
+      rotationDeg: 90,
+      flipH: false,
+      flipV: false,
+      seed: 42
+    });
+    expect(rotated.aps.length).toBeGreaterThan(0);
+    expect(rotated.aps[0].lat).not.toBeCloseTo(unrotated.aps[0].lat, 3);
+  });
 });
