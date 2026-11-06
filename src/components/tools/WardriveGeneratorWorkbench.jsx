@@ -33,7 +33,11 @@ import {
   Upload,
   Image,
   Type,
-  Calendar
+  Calendar,
+  RotateCcw,
+  RotateCw,
+  FlipHorizontal,
+  FlipVertical
 } from 'lucide-react';
 import { 
   generateDemoAps, 
@@ -125,6 +129,16 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
   });
   const fileInputRef = useRef(null);
 
+  // SVG Transformations: Rotation & Scaling
+  const [rotationDeg, setRotationDeg] = useState(0);
+  const [svgScale, setSvgScale] = useState(1.0);
+  const [flipH, setFlipH] = useState(false);
+  const [flipV, setFlipV] = useState(false);
+
+  const handleRotateBy = (deg) => {
+    setRotationDeg((prev) => (prev + deg + 360) % 360);
+  };
+
   // 1. Density Control: APs per KM or Mile (allows scaling to 500k+)
   const [densityUnit, setDensityUnit] = useState('km'); // 'km' | 'mile'
   const [apsPerUnit, setApsPerUnit] = useState(100);
@@ -187,8 +201,9 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
     let widthKmNum, heightKmNum;
     if (artMode === 'svg') {
-      widthKmNum = effW * 6.0 * kmPerLonDeg;
-      heightKmNum = effH * 4.0 * kmPerLatDeg;
+      const effSvgScale = Number(svgScale) > 0 ? Number(svgScale) : 1.0;
+      widthKmNum = effW * 6.0 * effSvgScale * kmPerLonDeg;
+      heightKmNum = effH * 4.0 * effSvgScale * kmPerLatDeg;
     } else {
       const totalWidthDeg = count * (effW + effGap);
       const totalHeightDeg = effH;
@@ -215,7 +230,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
       heightMi,
       spacingMeters
     };
-  }, [text, latCenter, letterW, letterH, letterScale, gap, densityUnit, apsPerUnit, artMode]);
+  }, [text, latCenter, letterW, letterH, letterScale, gap, densityUnit, apsPerUnit, artMode, svgScale]);
 
   // Clock / Start Date Quick Action Handlers
   const handleSetClockNow = () => {
@@ -428,31 +443,63 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     const effH = (Number(letterH) || 0.06) * scale;
     const effGap = (Number(gap) || 0.02) * scale;
 
-    let totalWidth, totalHeight;
-    if (artMode === 'svg') {
-      totalWidth = effW * 6.0;
-      totalHeight = effH * 4.0;
-    } else {
-      totalWidth = clean.length * (effW + effGap);
-      totalHeight = effH;
-    }
-
-    const corner1 = [latCenter - totalHeight, lonCenter];
-    const corner2 = [latCenter, lonCenter + totalWidth];
-
     try {
-      const box = L.rectangle([corner1, corner2], {
-        color: '#10b981',
-        weight: 1.5,
-        dashArray: '4, 6',
-        fillColor: '#10b981',
-        fillOpacity: 0.07
-      });
-      previewBoxLayerRef.current.addLayer(box);
+      if (artMode === 'svg') {
+        const effectiveSvgScale = scale * (Number(svgScale) > 0 ? Number(svgScale) : 1.0);
+        const svgSpanLon = (Number(letterW) || 0.04) * 6.0 * effectiveSvgScale;
+        const svgSpanLat = (Number(letterH) || 0.06) * 4.0 * effectiveSvgScale;
+        const rad = ((Number(rotationDeg) || 0) * Math.PI) / 180.0;
+        const cosR = Math.cos(rad);
+        const sinR = Math.sin(rad);
+
+        const transformCorner = (px, py) => {
+          let x = px;
+          let y = py;
+          if (flipH) x = 1.0 - x;
+          if (flipV) y = 1.0 - y;
+          const dx = x - 0.5;
+          const dy = y - 0.5;
+          const rx = dx * cosR - dy * sinR;
+          const ry = dx * sinR + dy * cosR;
+          const lon = lonCenter + (rx + 0.5) * svgSpanLon;
+          const lat = latCenter - (ry + 0.5) * svgSpanLat;
+          return [lat, lon];
+        };
+
+        const corners = [
+          transformCorner(0, 0),
+          transformCorner(1, 0),
+          transformCorner(1, 1),
+          transformCorner(0, 1)
+        ];
+
+        const polygon = L.polygon(corners, {
+          color: '#06b6d4',
+          weight: 1.5,
+          dashArray: '4, 6',
+          fillColor: '#06b6d4',
+          fillOpacity: 0.07
+        });
+        previewBoxLayerRef.current.addLayer(polygon);
+      } else {
+        const totalWidth = clean.length * (effW + effGap);
+        const totalHeight = effH;
+        const corner1 = [latCenter - totalHeight, lonCenter];
+        const corner2 = [latCenter, lonCenter + totalWidth];
+
+        const box = L.rectangle([corner1, corner2], {
+          color: '#10b981',
+          weight: 1.5,
+          dashArray: '4, 6',
+          fillColor: '#10b981',
+          fillOpacity: 0.07
+        });
+        previewBoxLayerRef.current.addLayer(box);
+      }
     } catch (e) {
       // Ignored in headless/test environments
     }
-  }, [text, latCenter, lonCenter, letterW, letterH, letterScale, gap, artMode, isLeafletAvailable]);
+  }, [text, latCenter, lonCenter, letterW, letterH, letterScale, gap, artMode, svgScale, rotationDeg, flipH, flipV, isLeafletAvailable]);
 
   // 5. Run Generation Algorithm
   const handleGenerate = useCallback(() => {
@@ -473,6 +520,10 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
         apsPerUnit: Number(apsPerUnit) || 100,
         speedKmh: Number(speedKmh),
         startTime: parsedStart,
+        rotationDeg: Number(rotationDeg) || 0,
+        svgScale: Number(svgScale) || 1.0,
+        flipH,
+        flipV,
         seed: useFixedSeed ? Number(seed) : Math.floor(Math.random() * 100000)
       });
 
@@ -553,7 +604,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     } finally {
       setIsGenerating(false);
     }
-  }, [text, artMode, parsedSvgStrokes, startTimeLocal, latCenter, lonCenter, letterW, letterH, letterScale, gap, densityUnit, apsPerUnit, speedKmh, useFixedSeed, seed, isLeafletAvailable, onLogMessage]);
+  }, [text, artMode, parsedSvgStrokes, startTimeLocal, latCenter, lonCenter, letterW, letterH, letterScale, gap, densityUnit, apsPerUnit, speedKmh, rotationDeg, svgScale, flipH, flipV, useFixedSeed, seed, isLeafletAvailable, onLogMessage]);
 
   // Auto-generate on mount
   useEffect(() => {
@@ -644,6 +695,10 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
       apsPerUnit,
       speedKmh,
       startTime: startTimeLocal,
+      rotationDeg,
+      svgScale,
+      flipH,
+      flipV,
       includePreheader
     });
     downloadFile(`${getCleanBaseFilename()}_generator.py`, py, 'text/x-python');
@@ -671,6 +726,10 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
         apsPerUnit,
         speedKmh,
         startTime: startTimeLocal,
+        rotationDeg,
+        svgScale,
+        flipH,
+        flipV,
         includePreheader
       });
     }
@@ -881,6 +940,161 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 </div>
               </div>
             )}
+
+            {/* SVG Transformation Controls: Rotation, Scale & Flip */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-2.5 bg-slate-900/90 border border-slate-800 rounded-lg">
+              {/* 1. Rotation */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                    <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Rotation</span>
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="0"
+                      max="360"
+                      value={rotationDeg}
+                      onChange={(e) => setRotationDeg((parseInt(e.target.value) || 0) % 360)}
+                      className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] font-mono text-cyan-300 text-right font-bold"
+                    />
+                    <span className="text-[11px] font-mono text-cyan-400 font-bold">°</span>
+                  </div>
+                </div>
+
+                <input
+                  type="range"
+                  min="0"
+                  max="360"
+                  step="5"
+                  value={rotationDeg}
+                  onChange={(e) => setRotationDeg(parseInt(e.target.value) || 0)}
+                  className="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+
+                <div className="flex items-center justify-between gap-1 pt-0.5">
+                  <button
+                    onClick={() => handleRotateBy(-90)}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                    title="Rotate 90 degrees counter-clockwise"
+                  >
+                    -90°
+                  </button>
+                  <button
+                    onClick={() => handleRotateBy(90)}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                    title="Rotate 90 degrees clockwise"
+                  >
+                    +90°
+                  </button>
+                  <button
+                    onClick={() => handleRotateBy(180)}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                    title="Rotate 180 degrees"
+                  >
+                    180°
+                  </button>
+                  <button
+                    onClick={() => setRotationDeg(0)}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono transition border bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                    title="Reset rotation to 0"
+                  >
+                    0°
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. SVG Scale Multiplier */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>SVG Scale</span>
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="50"
+                      value={svgScale}
+                      onChange={(e) => setSvgScale(Math.max(0.05, parseFloat(e.target.value) || 1.0))}
+                      className="w-14 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] font-mono text-cyan-300 text-right font-bold"
+                    />
+                    <span className="text-[11px] font-mono text-cyan-400 font-bold">x</span>
+                  </div>
+                </div>
+
+                <input
+                  type="range"
+                  min="0.1"
+                  max="10.0"
+                  step="0.1"
+                  value={Math.min(10, svgScale)}
+                  onChange={(e) => setSvgScale(parseFloat(e.target.value))}
+                  className="w-full accent-cyan-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+
+                <div className="flex items-center justify-between gap-1 pt-0.5">
+                  {[0.5, 1.0, 2.0, 5.0].map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSvgScale(s)}
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition border ${
+                        Math.abs(svgScale - s) < 0.01
+                          ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300 font-bold'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {s}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. Orientation & Mirror Flip */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                    <FlipHorizontal className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Flip / Mirror</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    {flipH ? 'H-FLIP' : ''} {flipV ? 'V-FLIP' : ''} {!flipH && !flipV ? 'NORMAL' : ''}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    onClick={() => setFlipH((prev) => !prev)}
+                    className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded text-xs font-semibold transition border ${
+                      flipH
+                        ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-300 font-bold shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <FlipHorizontal className="w-3.5 h-3.5" />
+                    <span>Flip Horiz</span>
+                  </button>
+                  <button
+                    onClick={() => setFlipV((prev) => !prev)}
+                    className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded text-xs font-semibold transition border ${
+                      flipV
+                        ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-300 font-bold shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <FlipVertical className="w-3.5 h-3.5" />
+                    <span>Flip Vert</span>
+                  </button>
+                </div>
+
+                <div className="text-[10px] text-slate-500 text-center pt-0.5">
+                  Transforms anchor at center
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1602,6 +1816,10 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               apsPerUnit,
               speedKmh,
               startTime: startTimeLocal,
+              rotationDeg,
+              svgScale,
+              flipH,
+              flipV,
               includePreheader
             })}
           </pre>

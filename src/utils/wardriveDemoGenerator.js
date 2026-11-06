@@ -275,6 +275,10 @@ export function generateDemoAps(options = {}) {
     stepSize = null,
     startTime = null,          // Custom start clock/date (Date, ISO string, or ms timestamp)
     endTime = null,
+    rotationDeg = 0,           // Rotation angle in degrees (0 to 360)
+    svgScale = 1.0,            // Dedicated SVG scale multiplier
+    flipH = false,             // Flip horizontally
+    flipV = false,             // Flip vertically
     seed = 42
   } = options;
 
@@ -312,21 +316,38 @@ export function generateDemoAps(options = {}) {
   const y0 = Number(latCenter);
 
   if (isSvgMode) {
-    // In SVG mode: normalized coordinates (0 to 1) are scaled across the geographic span
-    const svgSpanLon = effectiveLetterW * 6.0;
-    const svgSpanLat = effectiveLetterH * 4.0;
+    // In SVG mode: normalized coordinates (0 to 1) are rotated, scaled, and placed
+    const effectiveSvgScale = effectiveScale * (Number(svgScale) > 0 ? Number(svgScale) : 1.0);
+    const svgSpanLon = (Number(letterW) || 0.04) * 6.0 * effectiveSvgScale;
+    const svgSpanLat = (Number(letterH) || 0.06) * 4.0 * effectiveSvgScale;
+
+    const rad = ((Number(rotationDeg) || 0) * Math.PI) / 180.0;
+    const cosR = Math.cos(rad);
+    const sinR = Math.sin(rad);
+
+    const transformPoint = (p) => {
+      let px = p[0];
+      let py = p[1];
+      if (flipH) px = 1.0 - px;
+      if (flipV) py = 1.0 - py;
+
+      const dx = px - 0.5;
+      const dy = py - 0.5;
+
+      const rx = dx * cosR - dy * sinR;
+      const ry = dx * sinR + dy * cosR;
+
+      const lon = x0 + (rx + 0.5) * svgSpanLon;
+      const lat = y0 - (ry + 0.5) * svgSpanLat;
+      return [lon, lat];
+    };
 
     for (const stroke of svgStrokes) {
       if (!stroke || stroke.length < 2) continue;
       const strokeLocalPath = [];
       for (let i = 0; i < stroke.length - 1; i++) {
-        const p1 = stroke[i];
-        const p2 = stroke[i + 1];
-
-        const lon1 = x0 + p1[0] * svgSpanLon;
-        const lat1 = y0 - p1[1] * svgSpanLat;
-        const lon2 = x0 + p2[0] * svgSpanLon;
-        const lat2 = y0 - p2[1] * svgSpanLat;
+        const [lon1, lat1] = transformPoint(stroke[i]);
+        const [lon2, lat2] = transformPoint(stroke[i + 1]);
 
         const pts = interpolateSegment([lon1, lat1], [lon2, lat2], effectiveStepSize);
         if (strokeLocalPath.length > 0) {
@@ -600,6 +621,10 @@ export function exportPythonScriptSource({
   apsPerUnit = 100.0,
   speedKmh = 50.0,
   startTime = null,
+  rotationDeg = 0,
+  svgScale = 1.0,
+  flipH = false,
+  flipV = false,
   includePreheader = true
 } = {}) {
   const scale = Number(letterScale) || 1.0;
@@ -652,6 +677,12 @@ if START_TIME_ISO.strip():
 else:
     START_TIME = datetime.now() - timedelta(days=1)
 
+# 6. SVG Transformation Settings (when MODE == "svg")
+ROTATION_DEG = ${Number(rotationDeg) || 0}   # Rotation angle in degrees
+SVG_SCALE = ${Number(svgScale) || 1.0}        # SVG scale multiplier
+FLIP_H = ${flipH ? 'True' : 'False'}         # Flip horizontally
+FLIP_V = ${flipV ? 'True' : 'False'}         # Flip vertically
+
 INCLUDE_PREHEADER = ${preheaderLiteral}           
 
 # Clean, ordered vector strokes for letters and numbers (Relative coordinates 0.0 to 1.0)
@@ -684,20 +715,32 @@ def generate_aps(text):
     effective_step = max(0.0008, 0.0008 * min(LETTER_SCALE, 8.0))
 
     if MODE == "svg" and SVG_STROKES:
-        svg_span_lon = LETTER_W * 6.0
-        svg_span_lat = LETTER_H * 4.0
+        rad = math.radians(ROTATION_DEG)
+        cos_r = math.cos(rad)
+        sin_r = math.sin(rad)
+        svg_span_lon = LETTER_W * 6.0 * SVG_SCALE
+        svg_span_lat = LETTER_H * 4.0 * SVG_SCALE
+
+        def transform_point(p):
+            px = 1.0 - p[0] if FLIP_H else p[0]
+            py = 1.0 - p[1] if FLIP_V else p[1]
+            dx = px - 0.5
+            dy = py - 0.5
+            rx = dx * cos_r - dy * sin_r
+            ry = dx * sin_r + dy * cos_r
+            return (
+                current_x + (rx + 0.5) * svg_span_lon,
+                y0 - (ry + 0.5) * svg_span_lat
+            )
+
         for stroke in SVG_STROKES:
             if len(stroke) < 2:
                 continue
             stroke_local_path = []
             for i in range(len(stroke) - 1):
-                p1 = stroke[i]
-                p2 = stroke[i + 1]
-                lon1 = current_x + p1[0] * svg_span_lon
-                lat1 = y0 - p1[1] * svg_span_lat
-                lon2 = current_x + p2[0] * svg_span_lon
-                lat2 = y0 - p2[1] * svg_span_lat
-                pts = interpolate_segment((lon1, lat1), (lon2, lat2), step_size=effective_step)
+                p1_trans = transform_point(stroke[i])
+                p2_trans = transform_point(stroke[i + 1])
+                pts = interpolate_segment(p1_trans, p2_trans, step_size=effective_step)
                 if stroke_local_path:
                     stroke_local_path.extend(pts[1:])
                 else:

@@ -292,4 +292,99 @@ describe('Wardrive Demo Generator', () => {
     expect(py).toContain('START_TIME_ISO = "2026-11-06 12:30:00"');
     expect(py).toContain('svg_span_lon');
   });
+
+  it('rotates, scales, and flips SVG art accurately', () => {
+    // Single horizontal stroke from (0.2, 0.5) to (0.8, 0.5)
+    const testStrokes = [[ [0.2, 0.5], [0.8, 0.5] ]];
+
+    // 0 deg rotation
+    const resNormal = generateDemoAps({
+      text: 'ROT_0',
+      mode: 'svg',
+      svgStrokes: testStrokes,
+      latCenter: 30.0,
+      lonCenter: -90.0,
+      rotationDeg: 0,
+      svgScale: 1.0,
+      seed: 42
+    });
+
+    // 90 deg rotation turns horizontal stroke vertical
+    const resRotated90 = generateDemoAps({
+      text: 'ROT_90',
+      mode: 'svg',
+      svgStrokes: testStrokes,
+      latCenter: 30.0,
+      lonCenter: -90.0,
+      rotationDeg: 90,
+      svgScale: 1.0,
+      seed: 42
+    });
+
+    const normalLonSpan = resNormal.bounds.maxLon - resNormal.bounds.minLon;
+    const normalLatSpan = resNormal.bounds.maxLat - resNormal.bounds.minLat;
+
+    const rotLonSpan = resRotated90.bounds.maxLon - resRotated90.bounds.minLon;
+    const rotLatSpan = resRotated90.bounds.maxLat - resRotated90.bounds.minLat;
+
+    // Normal was horizontal, so normalLonSpan >> normalLatSpan
+    expect(normalLonSpan).toBeGreaterThan(normalLatSpan * 5);
+
+    // Rotated 90 deg is vertical, so rotLatSpan >> rotLonSpan
+    expect(rotLatSpan).toBeGreaterThan(rotLonSpan * 5);
+
+    // Scaling by 2x doubles the footprint
+    const resScaled = generateDemoAps({
+      text: 'SCALE_2',
+      mode: 'svg',
+      svgStrokes: testStrokes,
+      latCenter: 30.0,
+      lonCenter: -90.0,
+      svgScale: 2.0,
+      seed: 42
+    });
+    const scaledLonSpan = resScaled.bounds.maxLon - resScaled.bounds.minLon;
+    expect(scaledLonSpan).toBeGreaterThan(normalLonSpan * 1.8);
+
+    // Flip H flips x coordinates
+    const asymmetricStrokes = [[ [0.1, 0.5], [0.3, 0.5] ]];
+    const resNoFlip = generateDemoAps({
+      mode: 'svg',
+      svgStrokes: asymmetricStrokes,
+      latCenter: 30.0,
+      lonCenter: -90.0,
+      flipH: false,
+      seed: 42
+    });
+    const resFlipped = generateDemoAps({
+      mode: 'svg',
+      svgStrokes: asymmetricStrokes,
+      latCenter: 30.0,
+      lonCenter: -90.0,
+      flipH: true,
+      seed: 42
+    });
+
+    // Since stroke was on the left [0.1, 0.3], flipped it's on the right [0.7, 0.9]
+    expect(resFlipped.aps[0].lon).toBeGreaterThan(resNoFlip.aps[0].lon);
+  });
+
+  it('exports standalone Python script with rotation, scale, and flip variables', () => {
+    const py = exportPythonScriptSource({
+      text: 'TRANSFORM_PY',
+      mode: 'svg',
+      svgStrokes: [[[0, 0], [1, 1]]],
+      latCenter: 32.25,
+      lonCenter: -90.13,
+      rotationDeg: 45,
+      svgScale: 2.5,
+      flipH: true,
+      flipV: false
+    });
+
+    expect(py).toContain('ROTATION_DEG = 45');
+    expect(py).toContain('SVG_SCALE = 2.5');
+    expect(py).toContain('FLIP_H = True');
+    expect(py).toContain('FLIP_V = False');
+  });
 });
