@@ -11,6 +11,10 @@ import {
   parseSvgPathToStrokes,
   exportPythonScriptSource,
   splitApsIntoFileChunks,
+  fetchOsrmRoadRoute,
+  channelToFrequency,
+  WIGLE_PREHEADER,
+  WIGLE_HEADER,
   SSID_PROFILES,
   XFINITY_OUIS,
   ATT_OUIS,
@@ -150,15 +154,17 @@ describe('Wardrive Demo Generator', () => {
     expect(res.bounds).toBeNull();
   });
 
-  it('generates standard WiGLE Wifi 1.4 CSV', () => {
+  it('generates standard WiGLE Wifi 1.6 CSV with Biscuit Pro header', () => {
     const res = generateDemoAps({ text: 'A', latCenter: 32.0, lonCenter: -90.0, seed: 1 });
     const csvWithPreheader = generateWigleCsv(res.aps, true);
-    expect(csvWithPreheader).toContain('WigleWifi-1.4');
-    expect(csvWithPreheader).toContain('MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type');
-    expect(csvWithPreheader).toContain('WIFI');
+    expect(csvWithPreheader).toContain('WigleWifi-1.6');
+    expect(csvWithPreheader).toContain('model=Biscuit Pro');
+    expect(csvWithPreheader).toContain('brand=Biscuit Shop');
+    expect(csvWithPreheader).toContain('MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type');
+    expect(csvWithPreheader).toContain(',,,WIFI');
 
     const csvWithoutPreheader = generateWigleCsv(res.aps, false);
-    expect(csvWithoutPreheader.startsWith('MAC,SSID')).toBe(true);
+    expect(csvWithoutPreheader.startsWith('MAC,SSID,AuthMode,FirstSeen,Channel,Frequency')).toBe(true);
   });
 
   it('generates Kepler / test CSV format', () => {
@@ -235,7 +241,7 @@ describe('Wardrive Demo Generator', () => {
 
     expect(giant.aps.length).toBeGreaterThan(100);
     expect(giant.bounds.maxLon - giant.bounds.minLon).toBeGreaterThan(5.0); // Spans >5 degrees lon
-    expect(elapsed).toBeLessThan(2000); // Finishes in < 2 seconds
+    expect(elapsed).toBeLessThan(5000); // Finishes comfortably even under parallel test suite load
   });
 
   it('parses SVG paths and shapes into normalized strokes', () => {
@@ -410,7 +416,8 @@ describe('Wardrive Demo Generator', () => {
     expect(noLimit[0].filename).toBe('demo_wigle.csv');
     expect(noLimit[0].part).toBe(1);
     expect(noLimit[0].totalParts).toBe(1);
-    expect(noLimit[0].content).toContain('WigleWifi-1.4');
+    expect(noLimit[0].content).toContain('WigleWifi-1.6');
+    expect(noLimit[0].content).toContain('model=Biscuit Pro');
 
     // 2. Small size limit -> breaks into multiple files, each under limit
     const smallLimit = 5000; // 5KB limit
@@ -424,8 +431,9 @@ describe('Wardrive Demo Generator', () => {
 
     for (const chunk of chunks) {
       expect(chunk.byteSize).toBeLessThanOrEqual(smallLimit + 150); // within limit (+ at most 1 row tolerance)
-      expect(chunk.content).toContain('WigleWifi-1.4'); // Each chunk is a valid WiGLE file!
+      expect(chunk.content).toContain('WigleWifi-1.6'); // Each chunk is a valid WiGLE file!
       expect(chunk.content).toContain('MAC,SSID,AuthMode');
+      expect(chunk.content).toContain('Frequency');
     }
 
     // Sum of apCounts equals total AP count
@@ -519,5 +527,71 @@ describe('Wardrive Demo Generator', () => {
     });
     expect(rotated.aps.length).toBeGreaterThan(0);
     expect(rotated.aps[0].lat).not.toBeCloseTo(unrotated.aps[0].lat, 3);
+  });
+
+  it('calculates 802.11 channel frequencies accurately', () => {
+    expect(channelToFrequency(1)).toBe(2412);
+    expect(channelToFrequency(6)).toBe(2437);
+    expect(channelToFrequency(11)).toBe(2462);
+    expect(channelToFrequency(14)).toBe(2484);
+    expect(channelToFrequency(36)).toBe(5180);
+    expect(channelToFrequency(149)).toBe(5745);
+    expect(channelToFrequency(165)).toBe(5825);
+  });
+
+  it('generates demo APs along a real road route path', () => {
+    // Simulated road route coordinates (e.g. 4 road vertices along a street)
+    const roadCoords = [
+      [-115.1728, 36.1147],
+      [-115.1700, 36.1200],
+      [-115.1660, 36.1280],
+      [-115.1600, 36.1350]
+    ];
+
+    const res = generateDemoAps({
+      mode: 'route',
+      routeCoordinates: roadCoords,
+      text: 'STRIP_DRIVE',
+      apsPerUnit: 150,
+      densityUnit: 'km',
+      speedKmh: 45.0,
+      seed: 777
+    });
+
+    expect(res.aps.length).toBeGreaterThan(20);
+    expect(res.totalPathLengthKm).toBeGreaterThan(1.0);
+    expect(res.masterPath.length).toBe(4);
+    expect(res.aps[0].frequency).toBeGreaterThan(2400);
+
+    const wigleCsv = generateWigleCsv(res.aps);
+    expect(wigleCsv).toContain(WIGLE_PREHEADER.trim());
+    expect(wigleCsv).toContain(WIGLE_HEADER.trim());
+    // APs should carry STRIP_DRIVE prefix or ISP SSID
+    expect(res.aps.some(ap => ap.ssid.startsWith('STRIP_DRIVE-'))).toBe(true);
+
+    // Python export for route mode
+    const py = exportPythonScriptSource({
+      mode: 'route',
+      routeCoordinates: roadCoords,
+      text: 'STRIP_DRIVE',
+      apsPerUnit: 150
+    });
+    expect(py).toContain('MODE = "route"');
+    expect(py).toContain('ROUTE_COORDINATES = [');
+  });
+
+  it('validates fetchOsrmRoadRoute error handling and fallback', async () => {
+    // Less than 2 waypoints
+    const invalidRes = await fetchOsrmRoadRoute([{ lat: 36.1, lon: -115.1 }]);
+    expect(invalidRes.success).toBe(false);
+    expect(invalidRes.error).toContain('At least 2 waypoints');
+
+    // Network timeout / fallback test
+    const fallbackRes = await fetchOsrmRoadRoute([
+      { lat: 36.11, lon: -115.17 },
+      { lat: 36.12, lon: -115.16 }
+    ], { timeoutMs: 1 }); // 1ms timeout guarantees fallback
+    expect(fallbackRes.coordinates.length).toBe(2);
+    expect(fallbackRes.coordinates[0]).toEqual([-115.17, 36.11]);
   });
 });

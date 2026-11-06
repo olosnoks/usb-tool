@@ -511,6 +511,81 @@ export function generateApIdentity(rng, pointCounter, ssidMode = 'prefix', ssidP
 }
 
 /**
+ * Fetches an authentic driving route snapped to actual real-world roads via OpenStreetMap's OSRM API.
+ * 
+ * @param {Array<{lat: number, lon: number}|[number, number]>} waypoints List of waypoints
+ * @param {Object} options
+ * @param {'driving'|'bike'|'foot'} [options.profile='driving']
+ * @param {number} [options.timeoutMs=8000]
+ * @returns {Promise<{ success: boolean, coordinates: Array<[number, number]>, distanceMeters: number, durationSeconds: number, error?: string }>}
+ */
+export async function fetchOsrmRoadRoute(waypoints, { profile = 'driving', timeoutMs = 8000 } = {}) {
+  if (!Array.isArray(waypoints) || waypoints.length < 2) {
+    return {
+      success: false,
+      coordinates: [],
+      distanceMeters: 0,
+      durationSeconds: 0,
+      error: 'At least 2 waypoints are required to calculate a road route.'
+    };
+  }
+
+  // Format lon,lat pairs expected by OSRM API: lon1,lat1;lon2,lat2;...
+  const coordsStr = waypoints.map((w) => {
+    const lat = Array.isArray(w) ? Number(w[0]) : Number(w.lat);
+    const lon = Array.isArray(w) ? Number(w[1]) : Number(w.lon);
+    return `${lon.toFixed(6)},${lat.toFixed(6)}`;
+  }).join(';');
+
+  // Prepare direct fallback coordinates in case OSRM is unreachable
+  const directCoordinates = waypoints.map((w) => {
+    const lat = Array.isArray(w) ? Number(w[0]) : Number(w.lat);
+    const lon = Array.isArray(w) ? Number(w[1]) : Number(w.lon);
+    return [lon, lat];
+  });
+
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  try {
+    const url = `https://router.project-osrm.org/route/v1/${profile}/${coordsStr}?overview=full&geometries=geojson`;
+    const response = await fetch(url, {
+      signal: controller ? controller.signal : undefined
+    });
+
+    if (timeoutId) clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`OSRM HTTP error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
+      throw new Error(data.message || `OSRM error status: ${data.code}`);
+    }
+
+    const primaryRoute = data.routes[0];
+    const coordinates = primaryRoute.geometry.coordinates; // [[lon, lat], ...]
+
+    return {
+      success: true,
+      coordinates,
+      distanceMeters: primaryRoute.distance || 0,
+      durationSeconds: primaryRoute.duration || 0
+    };
+  } catch (err) {
+    if (timeoutId) clearTimeout(timeoutId);
+    return {
+      success: false,
+      coordinates: directCoordinates,
+      distanceMeters: 0,
+      durationSeconds: 0,
+      error: err.name === 'AbortError' ? 'Road route query timed out' : (err.message || 'Failed to fetch road route')
+    };
+  }
+}
+
+/**
  * Generate synthetic Access Points tracing text along a vector font path.
  * Supports density in APs per km or APs per mile (with totals up to 500k+),
  * configurable letter dimensions & scale, vehicle speed, custom start clock/date,
@@ -519,7 +594,8 @@ export function generateApIdentity(rng, pointCounter, ssidMode = 'prefix', ssidP
 export function generateDemoAps(options = {}) {
   const {
     text = 'KEPLER',
-    mode = 'text',             // 'text' | 'svg'
+    mode = 'text',             // 'text' | 'svg' | 'route'
+    routeCoordinates = null,   // Array of [lon, lat] points along actual roads
     svgStrokes = null,         // Array of normalized strokes [[[x, y], ...], ...]
     latCenter = 32.25,
     lonCenter = -90.13,
@@ -543,9 +619,10 @@ export function generateDemoAps(options = {}) {
   } = options;
 
   const isSvgMode = mode === 'svg' && Array.isArray(svgStrokes) && svgStrokes.length > 0;
+  const isRouteMode = mode === 'route' && Array.isArray(routeCoordinates) && routeCoordinates.length >= 2;
   const cleanText = String(text || '').trim();
 
-  if (!isSvgMode && !cleanText) {
+  if (!isSvgMode && !isRouteMode && !cleanText) {
     return { 
       aps: [], 
       masterPath: [], 
@@ -562,7 +639,8 @@ export function generateDemoAps(options = {}) {
   const effectiveGap = (Number(gap) || 0.02) * effectiveScale;
 
   // Local metric conversions at given latitude
-  const latRad = (Number(latCenter) * Math.PI) / 180.0;
+  const effectiveLat = isRouteMode && routeCoordinates.length > 0 ? routeCoordinates[0][1] : Number(latCenter);
+  const latRad = (effectiveLat * Math.PI) / 180.0;
   const kmPerLonDeg = 111.0 * Math.cos(latRad);
   const kmPerLatDeg = 111.0;
 
@@ -575,7 +653,10 @@ export function generateDemoAps(options = {}) {
   const x0 = Number(lonCenter);
   const y0 = Number(latCenter);
 
-  if (isSvgMode) {
+  if (isRouteMode) {
+    // Road Route Mode: directly use real-world GPS coordinates along actual roads
+    masterPath.push(...routeCoordinates);
+  } else if (isSvgMode) {
     // In SVG mode: normalized coordinates (0 to 1) are rotated, scaled, and placed
     const effectiveSvgScale = effectiveScale * (Number(svgScale) > 0 ? Number(svgScale) : 1.0);
     const svgSpanLon = (Number(letterW) || 0.04) * 6.0 * effectiveSvgScale;
@@ -752,7 +833,7 @@ export function generateDemoAps(options = {}) {
   let pointCounter = 1;
   const rng = createPrng(seed);
   const seen = new Set();
-  const ssidPrefix = (cleanText ? cleanText.replace(/\s+/g, '_') : 'SVG_ART').toUpperCase();
+  const ssidPrefix = (cleanText ? cleanText.replace(/\s+/g, '_') : (isRouteMode ? 'ROUTE' : 'SVG_ART')).toUpperCase();
 
   let minLat = Infinity;
   let maxLat = -Infinity;
@@ -816,12 +897,15 @@ export function generateDemoAps(options = {}) {
       if (lon < minLon) minLon = lon;
       if (lon > maxLon) maxLon = lon;
 
+      const frequency = apIdentity.frequency || channelToFrequency(apIdentity.channel);
+
       aps.push({
         mac,
         ssid: apIdentity.ssid,
         auth: apIdentity.auth,
         first_seen: formatTimestamp(currentTime),
         channel: apIdentity.channel,
+        frequency,
         rssi: rng.randint(-90, -45),
         lat,
         lon,
@@ -848,19 +932,36 @@ export function generateDemoAps(options = {}) {
 }
 
 /**
- * Generate standard WiGLE Wifi 1.4 CSV format.
+ * Calculates frequency in MHz from standard 802.11 Wi-Fi channel numbers.
+ * Supports 2.4 GHz (channels 1-14) and 5 GHz (channels 32-177).
+ *
+ * @param {number|string} channel
+ * @returns {number} Frequency in MHz
+ */
+export function channelToFrequency(channel) {
+  const ch = Number(channel) || 1;
+  if (ch === 14) return 2484;
+  if (ch >= 1 && ch <= 13) return 2407 + ch * 5;
+  if (ch >= 32 && ch <= 177) return 5000 + ch * 5;
+  return ch > 14 ? 5000 + ch * 5 : 2407 + ch * 5;
+}
+
+export const WIGLE_PREHEADER = "WigleWifi-1.6,appRelease=1.0.22 (Beta 3),model=Biscuit Pro,release=v1.6.2,device=Biscuit Pro,display=Biscuit Pro,board=Biscuit Pro,brand=Biscuit Shop,star=Sol,body=3,subBody=0\n";
+export const WIGLE_HEADER = "MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type\n";
+
+/**
+ * Generate standard WiGLE Wifi 1.6 CSV format.
  * High-performance chunked generation handles 500k+ rows easily.
  */
 export function generateWigleCsv(aps, includePreheader = true) {
   const chunks = [];
-  let buffer = includePreheader
-    ? "WigleWifi-1.4,appRelease=1.0,model=Simulator,release=1.0,device=simulator,display=sim,board=sim,brand=Synthetic\n"
-    : "";
-  buffer += "MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n";
+  let buffer = includePreheader ? WIGLE_PREHEADER : "";
+  buffer += WIGLE_HEADER;
 
   for (let i = 0; i < aps.length; i++) {
     const ap = aps[i];
-    buffer += `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.rssi},${ap.lat},${ap.lon},${ap.alt},${ap.accuracy},WIFI\n`;
+    const freq = ap.frequency || channelToFrequency(ap.channel);
+    buffer += `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${freq},${ap.rssi},${ap.lat},${ap.lon},${ap.alt},${ap.accuracy},,,WIFI\n`;
     if (buffer.length > 131072) {
       chunks.push(buffer);
       buffer = '';
@@ -910,7 +1011,7 @@ export function splitApsIntoFileChunks(aps, {
 } = {}) {
   if (!Array.isArray(aps) || aps.length === 0) {
     const emptyHeader = format === 'wigle'
-      ? (includePreheader ? "WigleWifi-1.4,appRelease=1.0,model=Simulator,release=1.0,device=simulator,display=sim,board=sim,brand=Synthetic\n" : "") + "MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n"
+      ? (includePreheader ? WIGLE_PREHEADER : "") + WIGLE_HEADER
       : "mac,ssid,auth,first_seen,channel,rssi,lat,lon\n";
     return [{
       filename: `${baseName}_${format}.csv`,
@@ -924,11 +1025,11 @@ export function splitApsIntoFileChunks(aps, {
 
   const isWigle = format === 'wigle';
   const header = isWigle
-    ? (includePreheader ? "WigleWifi-1.4,appRelease=1.0,model=Simulator,release=1.0,device=simulator,display=sim,board=sim,brand=Synthetic\n" : "") + "MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n"
+    ? (includePreheader ? WIGLE_PREHEADER : "") + WIGLE_HEADER
     : "mac,ssid,auth,first_seen,channel,rssi,lat,lon\n";
 
   const formatRow = isWigle
-    ? (ap) => `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.rssi},${ap.lat},${ap.lon},${ap.alt},${ap.accuracy},WIFI\n`
+    ? (ap) => `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.frequency || channelToFrequency(ap.channel)},${ap.rssi},${ap.lat},${ap.lon},${ap.alt},${ap.accuracy},,,WIFI\n`
     : (ap) => `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.rssi},${ap.lat},${ap.lon}\n`;
 
   // If no size limit, return single file
@@ -1000,6 +1101,7 @@ export function splitApsIntoFileChunks(aps, {
 export function exportPythonScriptSource({
   text = 'KEPLER',
   mode = 'text',
+  routeCoordinates = null,
   svgStrokes = null,
   latCenter = 32.25,
   lonCenter = -90.13,
@@ -1025,6 +1127,8 @@ export function exportPythonScriptSource({
   const preheaderLiteral = includePreheader ? 'True' : 'False';
   const startTimeStr = startTime ? (startTime instanceof Date ? formatTimestamp(startTime) : String(startTime).replace('T', ' ')) : '';
   const isSvg = mode === 'svg' && Array.isArray(svgStrokes) && svgStrokes.length > 0;
+  const isRoute = mode === 'route' && Array.isArray(routeCoordinates) && routeCoordinates.length >= 2;
+  const effectiveMode = isRoute ? 'route' : (isSvg ? 'svg' : 'text');
 
   return `import csv
 import random
@@ -1032,14 +1136,14 @@ import math
 from datetime import datetime, timedelta
 
 # ==============================================================================
-# WARDRIVING VECTOR ART GENERATOR
+# WARDRIVING VECTOR ART & ROAD ROUTE GENERATOR
 # Inspired by OSINTIAL
-# Creates words or SVG art made from generated APs to test or visualize on wardriving maps
+# Creates words, road routes, or SVG art made from generated APs to test or visualize on wardriving maps
 # View your results here: https://kepler.gl/demo
 # ==============================================================================
 
-# Generation Mode: "text" or "svg"
-MODE = "${isSvg ? 'svg' : 'text'}"
+# Generation Mode: "text", "route", or "svg"
+MODE = "${effectiveMode}"
 
 # 1. Location Coordinates
 LAT_CENTER = ${latCenter}   # Origin Latitude (click map or edit here)
@@ -1072,7 +1176,7 @@ else:
 # 6. SSID / Router Profile: "prefix", "isp_mix", "xfinity", "att", "spectrum"
 SSID_MODE = "${ssidMode || 'prefix'}"
 
-# 7. SVG Transformation Settings (when MODE == "svg")
+# 7. SVG / Route Transformation Settings
 ROTATION_DEG = ${Number(rotationDeg) || 0}   # Rotation angle in degrees
 SVG_SCALE = ${Number(svgScale) || 1.0}        # SVG scale multiplier
 FLIP_H = ${flipH ? 'True' : 'False'}         # Flip horizontally
@@ -1085,6 +1189,9 @@ VECTOR_FONTS = ${JSON.stringify(VECTOR_FONTS, null, 4)}
 
 # Normalized SVG Strokes (when MODE == "svg")
 SVG_STROKES = ${JSON.stringify(isSvg ? svgStrokes : [], null, 4)}
+
+# Real-world Road Coordinates (when MODE == "route")
+ROUTE_COORDINATES = ${JSON.stringify(isRoute ? routeCoordinates : [], null, 4)}
 
 AUTH_MODES = ["[WPA2-PSK-CCMP][ESS]", "[RSN-SAE-CCMP][ESS]", "[WPA2-PSK-CCMP][RSN-SAE-CCMP][ESS]", "[ESS]"]
 CHANNELS = [1, 6, 11, 36, 40, 44, 48, 149, 153, 157, 161]
@@ -1203,7 +1310,9 @@ def generate_aps(text):
     y0 = LAT_CENTER
     effective_step = max(0.0008, 0.0008 * min(LETTER_SCALE, 8.0))
 
-    if MODE == "svg" and SVG_STROKES:
+    if MODE == "route" and ROUTE_COORDINATES:
+        master_path.extend(ROUTE_COORDINATES)
+    elif MODE == "svg" and SVG_STROKES:
         rad = math.radians(ROTATION_DEG)
         cos_r = math.cos(rad)
         sin_r = math.sin(rad)
@@ -1368,6 +1477,7 @@ def generate_aps(text):
 
             lat = current_pt[1] + random.uniform(-0.000001, 0.000001)
             lon = current_pt[0] + random.uniform(-0.000001, 0.000001)
+            freq = 2484 if ap_ch == 14 else (5000 + ap_ch * 5 if ap_ch > 14 else 2407 + ap_ch * 5)
 
             aps.append({
                 "mac": mac,
@@ -1375,6 +1485,7 @@ def generate_aps(text):
                 "auth": ap_auth,
                 "first_seen": current_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "channel": ap_ch,
+                "frequency": freq,
                 "rssi": random.randint(-90, -45),
                 "lat": round(lat, 6),
                 "lon": round(lon, 6),
@@ -1388,16 +1499,18 @@ def generate_aps(text):
 def write_wigle(aps, path):
     with open(path, "w", newline="", encoding="utf-8") as f:
         if INCLUDE_PREHEADER:
-            f.write("WigleWifi-1.4,appRelease=1.0,model=Simulator,release=1.0,"
-                    "device=simulator,display=sim,board=sim,brand=Synthetic\\n")
+            f.write("WigleWifi-1.6,appRelease=1.0.22 (Beta 3),model=Biscuit Pro,release=v1.6.2,"
+                    "device=Biscuit Pro,display=Biscuit Pro,board=Biscuit Pro,brand=Biscuit Shop,"
+                    "star=Sol,body=3,subBody=0\\n")
         w = csv.writer(f)
-        w.writerow(["MAC", "SSID", "AuthMode", "FirstSeen", "Channel", "RSSI",
+        w.writerow(["MAC", "SSID", "AuthMode", "FirstSeen", "Channel", "Frequency", "RSSI",
                     "CurrentLatitude", "CurrentLongitude", "AltitudeMeters",
-                    "AccuracyMeters", "Type"])
+                    "AccuracyMeters", "RCOIs", "MfgrId", "Type"])
         for ap in aps:
+            freq = ap.get("frequency") or (2484 if ap["channel"] == 14 else (5000 + ap["channel"] * 5 if ap["channel"] > 14 else 2407 + ap["channel"] * 5))
             w.writerow([ap["mac"], ap["ssid"], ap["auth"], ap["first_seen"],
-                        ap["channel"], ap["rssi"], ap["lat"], ap["lon"],
-                        ap["alt"], ap["accuracy"], "WIFI"])
+                        ap["channel"], freq, ap["rssi"], ap["lat"], ap["lon"],
+                        ap["alt"], ap["accuracy"], "", "", "WIFI"])
 
 def write_test(aps, path):
     cols = ["mac", "ssid", "auth", "first_seen", "channel", "rssi", "lat", "lon"]
