@@ -39,7 +39,8 @@ import {
   FlipHorizontal,
   FlipVertical,
   Scissors,
-  FileArchive
+  FileArchive,
+  Wifi
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { 
@@ -50,6 +51,7 @@ import {
   exportPythonScriptSource,
   parseSvgToNormalizedStrokes,
   dateToLocalDatetimeString,
+  SSID_PROFILES,
   VECTOR_FONTS,
   AUTH_MODES,
   CHANNELS
@@ -128,6 +130,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
   // Input parameters & mode
   const [artMode, setArtMode] = useState('text'); // 'text' | 'svg'
   const [text, setText] = useState('KEPLER');
+  const [ssidMode, setSsidMode] = useState('isp_mix'); // 'isp_mix' | 'xfinity' | 'att' | 'spectrum' | 'prefix'
   const [latCenter, setLatCenter] = useState(32.25);
   const [lonCenter, setLonCenter] = useState(-90.13);
 
@@ -532,6 +535,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
         svgScale: Number(svgScale) || 1.0,
         flipH,
         flipV,
+        ssidMode,
         seed: useFixedSeed ? Number(seed) : Math.floor(Math.random() * 100000)
       });
 
@@ -612,7 +616,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     } finally {
       setIsGenerating(false);
     }
-  }, [text, artMode, parsedSvgStrokes, startTimeLocal, latCenter, lonCenter, letterW, letterH, letterScale, gap, densityUnit, apsPerUnit, speedKmh, rotationDeg, svgScale, flipH, flipV, useFixedSeed, seed, isLeafletAvailable, onLogMessage]);
+  }, [text, artMode, ssidMode, parsedSvgStrokes, startTimeLocal, latCenter, lonCenter, letterW, letterH, letterScale, gap, densityUnit, apsPerUnit, speedKmh, rotationDeg, svgScale, flipH, flipV, useFixedSeed, seed, isLeafletAvailable, onLogMessage]);
 
   // Auto-generate on mount
   useEffect(() => {
@@ -748,6 +752,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
       svgScale,
       flipH,
       flipV,
+      ssidMode,
       includePreheader
     });
     downloadFile(`${getCleanBaseFilename()}_generator.py`, py, 'text/x-python');
@@ -779,6 +784,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
         svgScale,
         flipH,
         flipV,
+        ssidMode,
         includePreheader
       });
     }
@@ -1184,14 +1190,14 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </div>
         )}
 
-        {/* Row 1: Target Word / Prefix & Origin Coordinates */}
+        {/* Row 1: Target Word / Prefix, SSID List Profile & Origin Coordinates */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
           {/* Word / SSID Prefix Input */}
-          <div className="md:col-span-5 space-y-1">
+          <div className="md:col-span-3 space-y-1">
             <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
-              <span>{artMode === 'svg' ? 'SSID Prefix / Identifier' : 'Text / Phrase to Map'}</span>
+              <span>{artMode === 'svg' ? 'Prefix' : 'Word to Map'}</span>
               <span className="text-[10px] text-slate-500 font-mono">
-                {artMode === 'svg' ? 'Prefix for AP SSIDs' : 'A-Z, 0-9, space'}
+                {text.length} ch
               </span>
             </label>
             <div className="relative">
@@ -1199,13 +1205,34 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 type="text"
                 value={text}
                 onChange={(e) => setText(e.target.value.toUpperCase())}
-                placeholder={artMode === 'svg' ? 'e.g. WIFI_MAP' : 'Enter word (e.g. KEPLER)'}
+                placeholder={artMode === 'svg' ? 'e.g. MAP' : 'e.g. KEPLER'}
                 className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-500 tracking-wider"
               />
-              <span className="absolute right-2 top-2 text-[10px] font-mono text-slate-500">
-                {text.length} ch
-              </span>
             </div>
+          </div>
+
+          {/* Router / SSID Profile Selector */}
+          <div className="md:col-span-3 space-y-1">
+            <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <Wifi className="w-3 h-3 text-cyan-400" />
+                <span>Router / SSID List</span>
+              </span>
+              <span className="text-[10px] text-cyan-400 font-mono">
+                {ssidMode === 'prefix' ? 'Text Prefix' : 'ISP Defaults'}
+              </span>
+            </label>
+            <select
+              value={ssidMode}
+              onChange={(e) => setSsidMode(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-500 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none cursor-pointer"
+            >
+              <option value="isp_mix">Realistic Mix (Xfinity, AT&T, Spectrum)</option>
+              <option value="xfinity">Xfinity / Comcast (xfinitywifi, Xfinity-XXXX)</option>
+              <option value="att">AT&T (ATTXXX, ATT-WIFI-XXXX, attwifi)</option>
+              <option value="spectrum">Spectrum (SpectrumSetup, MySpectrum)</option>
+              <option value="prefix">Prefix / Word Only ({text || 'KEPLER'}-#)</option>
+            </select>
           </div>
 
           {/* Latitude Input */}
@@ -1237,7 +1264,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </div>
 
           {/* Action Buttons: Set Clock Now & Start Wardrive */}
-          <div className="md:col-span-3 flex items-center gap-1.5">
+          <div className="md:col-span-2 flex items-center gap-1.5">
             <button
               onClick={handleSetClockNow}
               title="Set Wardrive Start Clock to Current Time"
@@ -1933,6 +1960,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               svgScale,
               flipH,
               flipV,
+              ssidMode,
               includePreheader
             })}
           </pre>

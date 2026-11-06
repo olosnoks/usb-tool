@@ -253,9 +253,268 @@ export function localDatetimeStringToDate(str) {
 }
 
 /**
+ * Authentic default ISP router profiles & realistic Wi-Fi datasets.
+ */
+export const SSID_PROFILES = [
+  { id: 'prefix', label: 'Custom Text / Prefix', description: 'SSID-000001 (e.g. KEPLER-000001)' },
+  { id: 'isp_mix', label: 'Realistic ISP Mix', description: 'Xfinity, AT&T, Spectrum, Netgear & TP-Link' },
+  { id: 'xfinity', label: 'Xfinity / Comcast Defaults', description: 'xfinitywifi, XFINITY, Xfinity-XXXX, HOME-XXXX' },
+  { id: 'att', label: 'AT&T Defaults', description: 'ATTXXX, ATT-WIFI-XXXX, attwifi, ATT-Fiber-XXXX' },
+  { id: 'spectrum', label: 'Spectrum / Charter Defaults', description: 'SpectrumSetup-XX, MySpectrumWiFi, SpectrumWiFi' }
+];
+
+export const XFINITY_OUIS = [
+  'A4:12:42', // Arris
+  '00:CD:FE', // Technicolor
+  '58:56:E8', // Cisco
+  'E8:89:2C', // CommScope
+  '10:05:01', // Technicolor CH
+  '74:9D:79', // Arris Group
+  '20:73:55', // Cisco SPVTG
+  'B0:77:AC'  // Humax
+];
+
+export const ATT_OUIS = [
+  '94:87:70', // Pace Plc
+  'F8:E9:03', // Arris Group (BGW210)
+  '3C:CE:73', // Humax (BGW320)
+  'CC:7B:35', // Nokia
+  '00:1E:46', // Cisco / Scientific Atlanta
+  '28:16:2E', // 2Wire / Pace
+  'D4:04:CD', // Motorola Solutions
+  'F0:F2:49'  // Nokia Solutions
+];
+
+export const SPECTRUM_OUIS = [
+  '68:02:B8', // Sagemcom
+  'AC:EC:80', // Askey Computer
+  'E0:22:04', // Sercomm
+  '18:35:D1', // Charter Communications
+  '38:35:FB'  // Hitron Technologies
+];
+
+export const COMMON_ROUTER_OUIS = [
+  '20:4E:7F', // Netgear
+  'C0:FF:D4', // Netgear
+  '14:91:82', // Belkin / Linksys
+  '60:38:E0', // TP-Link
+  '70:4F:57', // TP-Link
+  '04:D9:F5', // ASUSTek
+  '18:31:BF'  // ASUSTek
+];
+
+const HEX_CHARS = '0123456789ABCDEF';
+
+function randHex(rng, len) {
+  let s = '';
+  for (let i = 0; i < len; i++) {
+    s += HEX_CHARS[rng.randrange(16)];
+  }
+  return s;
+}
+
+function randDigits(rng, len) {
+  let s = '';
+  for (let i = 0; i < len; i++) {
+    s += String(rng.randrange(10));
+  }
+  return s;
+}
+
+export function genMacFromOui(rng, oui) {
+  const rest = Array.from({ length: 3 }, () => rng.randrange(256).toString(16).padStart(2, '0').toUpperCase()).join(':');
+  return `${oui}:${rest}`;
+}
+
+export function genGenericMac(rng) {
+  let firstOctet = rng.randrange(256) & 0xFE; // Clear multicast bit
+  firstOctet &= 0xFD;                        // Clear local/private bit
+  const secondNibble = rng.choice([0, 4, 8, 12]);
+  const firstHex = (((firstOctet & 0xF0) | secondNibble) >>> 0).toString(16).padStart(2, '0').toUpperCase();
+  const rest = Array.from({ length: 5 }, () => rng.randrange(256).toString(16).padStart(2, '0').toUpperCase()).join(':');
+  return `${firstHex}:${rest}`;
+}
+
+/**
+ * Generate an authentic AP identity (SSID, MAC with vendor OUI, AuthMode, Channel)
+ * according to ISP router profiles (Xfinity, AT&T, Spectrum, or custom prefix).
+ */
+export function generateApIdentity(rng, pointCounter, ssidMode = 'prefix', ssidPrefix = 'DEMO') {
+  let effectiveMode = ssidMode;
+  if (effectiveMode === 'isp_mix') {
+    const roll = rng.uniform(0, 100);
+    if (roll < 42) effectiveMode = 'xfinity';
+    else if (roll < 78) effectiveMode = 'att';
+    else if (roll < 90) effectiveMode = 'spectrum';
+    else effectiveMode = 'common';
+  }
+
+  if (effectiveMode === 'xfinity') {
+    const oui = rng.choice(XFINITY_OUIS);
+    const mac = genMacFromOui(rng, oui);
+    const subRoll = rng.uniform(0, 100);
+
+    if (subRoll < 26) {
+      // xfinitywifi - Open public hotspot
+      return {
+        ssid: 'xfinitywifi',
+        mac,
+        auth: '[ESS]',
+        channel: rng.choice([1, 6, 11, 36, 40, 44, 149, 157])
+      };
+    } else if (subRoll < 40) {
+      // XFINITY - 802.1x Enterprise secure public hotspot
+      return {
+        ssid: 'XFINITY',
+        mac,
+        auth: '[WPA2-EAP-CCMP][ESS]',
+        channel: rng.choice([1, 6, 11, 36, 44, 149, 153])
+      };
+    } else if (subRoll < 75) {
+      // Xfinity-XXXX (e.g. Xfinity-A4B2)
+      const code = randHex(rng, 4);
+      return {
+        ssid: `Xfinity-${code}`,
+        mac,
+        auth: rng.choice(['[WPA2-PSK-CCMP][ESS]', '[WPA2-PSK-CCMP][RSN-SAE-CCMP][ESS]']),
+        channel: rng.choice(CHANNELS)
+      };
+    } else if (subRoll < 93) {
+      // HOME-XXXX (Arris/Cisco Xfinity gateways)
+      const code = randHex(rng, 4);
+      return {
+        ssid: `HOME-${code}`,
+        mac,
+        auth: '[WPA2-PSK-CCMP][ESS]',
+        channel: rng.choice([1, 6, 11])
+      };
+    } else {
+      // xfinitywifi-5G
+      return {
+        ssid: 'xfinitywifi-5G',
+        mac,
+        auth: '[ESS]',
+        channel: rng.choice([36, 44, 48, 149, 153, 157, 161])
+      };
+    }
+  }
+
+  if (effectiveMode === 'att') {
+    const oui = rng.choice(ATT_OUIS);
+    const mac = genMacFromOui(rng, oui);
+    const subRoll = rng.uniform(0, 100);
+
+    if (subRoll < 35) {
+      // ATT<3digits> (e.g. ATT731, ATT592)
+      const digits = randDigits(rng, 3);
+      return {
+        ssid: `ATT${digits}`,
+        mac,
+        auth: rng.choice(['[WPA2-PSK-CCMP][ESS]', '[WPA2-PSK-CCMP][RSN-SAE-CCMP][ESS]']),
+        channel: rng.choice(CHANNELS)
+      };
+    } else if (subRoll < 60) {
+      // ATT-WIFI-<4digits> (e.g. ATT-WIFI-5302)
+      const digits = randDigits(rng, 4);
+      return {
+        ssid: `ATT-WIFI-${digits}`,
+        mac,
+        auth: '[WPA2-PSK-CCMP][ESS]',
+        channel: rng.choice(CHANNELS)
+      };
+    } else if (subRoll < 75) {
+      // ATT<hex> (e.g. ATT4xP2, ATT82F1)
+      const code = randHex(rng, 4);
+      return {
+        ssid: `ATT${code}`,
+        mac,
+        auth: '[WPA2-PSK-CCMP][ESS]',
+        channel: rng.choice(CHANNELS)
+      };
+    } else if (subRoll < 87) {
+      // attwifi - Open hotspot
+      return {
+        ssid: 'attwifi',
+        mac,
+        auth: '[ESS]',
+        channel: rng.choice([1, 6, 11, 36, 44, 149])
+      };
+    } else {
+      // ATT<3digits>_5G / ATT-Fiber-<hex>
+      const isFiber = rng.uniform(0, 10) > 5;
+      const ssid = isFiber ? `ATT-Fiber-${randHex(rng, 4)}` : `ATT${randDigits(rng, 3)}_5G`;
+      return {
+        ssid,
+        mac,
+        auth: '[WPA2-PSK-CCMP][ESS]',
+        channel: rng.choice([36, 40, 44, 48, 149, 153, 157, 161])
+      };
+    }
+  }
+
+  if (effectiveMode === 'spectrum') {
+    const oui = rng.choice(SPECTRUM_OUIS);
+    const mac = genMacFromOui(rng, oui);
+    const subRoll = rng.uniform(0, 100);
+
+    if (subRoll < 45) {
+      return {
+        ssid: `SpectrumSetup-${randHex(rng, 2)}`,
+        mac,
+        auth: '[WPA2-PSK-CCMP][ESS]',
+        channel: rng.choice(CHANNELS)
+      };
+    } else if (subRoll < 75) {
+      const band = rng.choice(['5G', '2G']);
+      return {
+        ssid: `MySpectrumWiFi${randHex(rng, 2)}-${band}`,
+        mac,
+        auth: '[WPA2-PSK-CCMP][ESS]',
+        channel: band === '5G' ? rng.choice([36, 44, 149, 157]) : rng.choice([1, 6, 11])
+      };
+    } else {
+      return {
+        ssid: subRoll < 90 ? 'SpectrumWiFi' : 'SpectrumWiFi Plus',
+        mac,
+        auth: subRoll < 90 ? '[ESS]' : '[WPA2-EAP-CCMP][ESS]',
+        channel: rng.choice([1, 6, 11, 36, 44, 149])
+      };
+    }
+  }
+
+  if (effectiveMode === 'common') {
+    const oui = rng.choice(COMMON_ROUTER_OUIS);
+    const mac = genMacFromOui(rng, oui);
+    const brands = [
+      () => `NETGEAR${randDigits(rng, 2)}`,
+      () => `Linksys${randDigits(rng, 5)}`,
+      () => `TP-Link_${randHex(rng, 4)}`,
+      () => `ASUS_${randHex(rng, 2)}`,
+      () => `CenturyLink${randDigits(rng, 4)}`
+    ];
+    const brandFn = rng.choice(brands);
+    return {
+      ssid: brandFn(),
+      mac,
+      auth: rng.choice(AUTH_MODES),
+      channel: rng.choice(CHANNELS)
+    };
+  }
+
+  // Default: 'prefix' mode
+  return {
+    ssid: `${ssidPrefix}-${String(pointCounter).padStart(6, '0')}`,
+    mac: genGenericMac(rng),
+    auth: rng.choice(AUTH_MODES),
+    channel: rng.choice(CHANNELS)
+  };
+}
+
+/**
  * Generate synthetic Access Points tracing text along a vector font path.
  * Supports density in APs per km or APs per mile (with totals up to 500k+),
- * configurable letter dimensions & scale, vehicle speed, and custom start clock/date.
+ * configurable letter dimensions & scale, vehicle speed, custom start clock/date,
+ * and realistic ISP router profiles (Xfinity, AT&T, Spectrum, or custom prefix).
  */
 export function generateDemoAps(options = {}) {
   const {
@@ -279,6 +538,7 @@ export function generateDemoAps(options = {}) {
     svgScale = 1.0,            // Dedicated SVG scale multiplier
     flipH = false,             // Flip horizontally
     flipV = false,             // Flip vertically
+    ssidMode = 'prefix',       // 'prefix' | 'isp_mix' | 'xfinity' | 'att' | 'spectrum'
     seed = 42
   } = options;
 
@@ -503,21 +763,15 @@ export function generateDemoAps(options = {}) {
         currentTime = new Date(currentTime.getTime() + timeStepSeconds * 1000);
       }
 
-      // Generate globally unique, unicast MAC address
-      const genMac = () => {
-        let firstOctet = rng.randrange(256) & 0xFE; // Clear multicast bit
-        firstOctet &= 0xFD;                        // Clear local/private bit
-        const secondNibble = rng.choice([0, 4, 8, 12]);
-        const firstHex = (((firstOctet & 0xF0) | secondNibble) >>> 0).toString(16).padStart(2, '0').toUpperCase();
-        const rest = Array.from({ length: 5 }, () => rng.randrange(256).toString(16).padStart(2, '0').toUpperCase()).join(':');
-        return `${firstHex}:${rest}`;
-      };
+      // Generate authentic AP identity based on chosen profile (Xfinity, AT&T, ISP mix, or prefix)
+      let apIdentity = generateApIdentity(rng, pointCounter, ssidMode, ssidPrefix);
+      let mac = apIdentity.mac;
 
-      let mac = genMac();
       // Keep seen bounded to prevent memory blowup on 500k+ items
       if (seen.size > 200000) seen.clear();
       while (seen.has(mac)) {
-        mac = genMac();
+        apIdentity = generateApIdentity(rng, pointCounter, ssidMode, ssidPrefix);
+        mac = apIdentity.mac;
       }
       seen.add(mac);
 
@@ -533,10 +787,10 @@ export function generateDemoAps(options = {}) {
 
       aps.push({
         mac,
-        ssid: `${ssidPrefix}-${String(pointCounter).padStart(6, '0')}`,
-        auth: rng.choice(AUTH_MODES),
+        ssid: apIdentity.ssid,
+        auth: apIdentity.auth,
         first_seen: formatTimestamp(currentTime),
-        channel: rng.choice(CHANNELS),
+        channel: apIdentity.channel,
         rssi: rng.randint(-90, -45),
         lat,
         lon,
@@ -730,6 +984,7 @@ export function exportPythonScriptSource({
   svgScale = 1.0,
   flipH = false,
   flipV = false,
+  ssidMode = 'prefix',
   includePreheader = true
 } = {}) {
   const scale = Number(letterScale) || 1.0;
@@ -783,7 +1038,10 @@ if START_TIME_ISO.strip():
 else:
     START_TIME = datetime.now() - timedelta(days=1)
 
-# 6. SVG Transformation Settings (when MODE == "svg")
+# 6. SSID / Router Profile: "prefix", "isp_mix", "xfinity", "att", "spectrum"
+SSID_MODE = "${ssidMode || 'prefix'}"
+
+# 7. SVG Transformation Settings (when MODE == "svg")
 ROTATION_DEG = ${Number(rotationDeg) || 0}   # Rotation angle in degrees
 SVG_SCALE = ${Number(svgScale) || 1.0}        # SVG scale multiplier
 FLIP_H = ${flipH ? 'True' : 'False'}         # Flip horizontally
@@ -799,6 +1057,100 @@ SVG_STROKES = ${JSON.stringify(isSvg ? svgStrokes : [], null, 4)}
 
 AUTH_MODES = ["[WPA2-PSK-CCMP][ESS]", "[RSN-SAE-CCMP][ESS]", "[WPA2-PSK-CCMP][RSN-SAE-CCMP][ESS]", "[ESS]"]
 CHANNELS = [1, 6, 11, 36, 40, 44, 48, 149, 153, 157, 161]
+
+XFINITY_OUIS = ["A4:12:42", "00:CD:FE", "58:56:E8", "E8:89:2C", "10:05:01", "74:9D:79", "B0:77:AC"]
+ATT_OUIS = ["94:87:70", "F8:E9:03", "3C:CE:73", "CC:7B:35", "00:1E:46", "28:16:2E", "D4:04:CD"]
+SPECTRUM_OUIS = ["68:02:B8", "AC:EC:80", "E0:22:04", "18:35:D1", "38:35:FB"]
+COMMON_OUIS = ["20:4E:7F", "C0:FF:D4", "14:91:82", "60:38:E0", "70:4F:57", "04:D9:F5", "18:31:BF"]
+
+def generate_ap_identity(point_counter, prefix):
+    eff_mode = SSID_MODE
+    if eff_mode == "isp_mix":
+        r = random.uniform(0, 100)
+        if r < 42:
+            eff_mode = "xfinity"
+        elif r < 78:
+            eff_mode = "att"
+        elif r < 90:
+            eff_mode = "spectrum"
+        else:
+            eff_mode = "common"
+
+    if eff_mode == "xfinity":
+        oui = random.choice(XFINITY_OUIS)
+        mac = f"{oui}:" + ":".join(f"{random.randrange(256):02X}" for _ in range(3))
+        sub = random.uniform(0, 100)
+        if sub < 26:
+            return "xfinitywifi", mac, "[ESS]", random.choice([1, 6, 11, 36, 44, 149, 157])
+        elif sub < 40:
+            return "XFINITY", mac, "[WPA2-EAP-CCMP][ESS]", random.choice([1, 6, 11, 36, 44, 149])
+        elif sub < 75:
+            code = "".join(random.choices("0123456789ABCDEF", k=4))
+            return f"Xfinity-{code}", mac, random.choice(["[WPA2-PSK-CCMP][ESS]", "[WPA2-PSK-CCMP][RSN-SAE-CCMP][ESS]"]), random.choice(CHANNELS)
+        elif sub < 93:
+            code = "".join(random.choices("0123456789ABCDEF", k=4))
+            return f"HOME-{code}", mac, "[WPA2-PSK-CCMP][ESS]", random.choice([1, 6, 11])
+        else:
+            return "xfinitywifi-5G", mac, "[ESS]", random.choice([36, 44, 48, 149, 153, 157, 161])
+
+    if eff_mode == "att":
+        oui = random.choice(ATT_OUIS)
+        mac = f"{oui}:" + ":".join(f"{random.randrange(256):02X}" for _ in range(3))
+        sub = random.uniform(0, 100)
+        if sub < 35:
+            digits = "".join(random.choices("0123456789", k=3))
+            return f"ATT{digits}", mac, random.choice(["[WPA2-PSK-CCMP][ESS]", "[WPA2-PSK-CCMP][RSN-SAE-CCMP][ESS]"]), random.choice(CHANNELS)
+        elif sub < 60:
+            digits = "".join(random.choices("0123456789", k=4))
+            return f"ATT-WIFI-{digits}", mac, "[WPA2-PSK-CCMP][ESS]", random.choice(CHANNELS)
+        elif sub < 75:
+            code = "".join(random.choices("0123456789ABCDEF", k=4))
+            return f"ATT{code}", mac, "[WPA2-PSK-CCMP][ESS]", random.choice(CHANNELS)
+        elif sub < 87:
+            return "attwifi", mac, "[ESS]", random.choice([1, 6, 11, 36, 44, 149])
+        else:
+            is_fiber = random.random() > 0.5
+            ssid = f"ATT-Fiber-{''.join(random.choices('0123456789ABCDEF', k=4))}" if is_fiber else f"ATT{''.join(random.choices('0123456789', k=3))}_5G"
+            return ssid, mac, "[WPA2-PSK-CCMP][ESS]", random.choice([36, 40, 44, 48, 149, 153, 157, 161])
+
+    if eff_mode == "spectrum":
+        oui = random.choice(SPECTRUM_OUIS)
+        mac = f"{oui}:" + ":".join(f"{random.randrange(256):02X}" for _ in range(3))
+        sub = random.uniform(0, 100)
+        if sub < 45:
+            return f"SpectrumSetup-{''.join(random.choices('0123456789ABCDEF', k=2))}", mac, "[WPA2-PSK-CCMP][ESS]", random.choice(CHANNELS)
+        elif sub < 75:
+            band = random.choice(["5G", "2G"])
+            ch = random.choice([36, 44, 149]) if band == "5G" else random.choice([1, 6, 11])
+            return f"MySpectrumWiFi{''.join(random.choices('0123456789ABCDEF', k=2))}-{band}", mac, "[WPA2-PSK-CCMP][ESS]", ch
+        else:
+            ssid = "SpectrumWiFi" if sub < 90 else "SpectrumWiFi Plus"
+            auth = "[ESS]" if sub < 90 else "[WPA2-EAP-CCMP][ESS]"
+            return ssid, mac, auth, random.choice([1, 6, 11, 36, 44])
+
+    if eff_mode == "common":
+        oui = random.choice(COMMON_OUIS)
+        mac = f"{oui}:" + ":".join(f"{random.randrange(256):02X}" for _ in range(3))
+        brand = random.choice(["netgear", "linksys", "tplink", "asus", "centurylink"])
+        if brand == "netgear":
+            ssid = f"NETGEAR{''.join(random.choices('0123456789', k=2))}"
+        elif brand == "linksys":
+            ssid = f"Linksys{''.join(random.choices('0123456789', k=5))}"
+        elif brand == "tplink":
+            ssid = f"TP-Link_{''.join(random.choices('0123456789ABCDEF', k=4))}"
+        elif brand == "asus":
+            ssid = f"ASUS_{''.join(random.choices('0123456789ABCDEF', k=2))}"
+        else:
+            ssid = f"CenturyLink{''.join(random.choices('0123456789', k=4))}"
+        return ssid, mac, random.choice(AUTH_MODES), random.choice(CHANNELS)
+
+    # Prefix mode
+    first_octet = random.randrange(256) & 0xFE
+    first_octet &= 0xFD
+    second_nibble = random.choice([0, 4, 8, 12])
+    first_hex = f"{(first_octet & 0xF0) | second_nibble:02X}"
+    mac = first_hex + ":" + ":".join(f"{random.randrange(256):02X}" for _ in range(5))
+    return f"{prefix}-{point_counter:06d}", mac, random.choice(AUTH_MODES), random.choice(CHANNELS)
 
 def interpolate_segment(p1, p2, step_size=0.001):
     """Interpolate points smoothly along a straight line segment."""
@@ -950,20 +1302,13 @@ def generate_aps(text):
             if point_counter > 1:
                 current_time += timedelta(seconds=time_step_sec)
 
-            # Generate globally unique, unicast MAC address
-            first_octet = random.randrange(256) & 0xFE
-            first_octet &= 0xFD
-            second_nibble = random.choice([0, 4, 8, 12])
-            first_hex = f"{(first_octet & 0xF0) | second_nibble:02X}"
-            mac = first_hex + ":" + ":".join(f"{random.randrange(256):02X}" for _ in range(5))
+            # Generate authentic AP identity based on chosen SSID profile
+            ap_ssid, mac, ap_auth, ap_ch = generate_ap_identity(point_counter, ssid_prefix)
             
             if len(seen) > 200000:
                 seen.clear()
             while mac in seen:
-                first_octet = random.randrange(256) & 0xFE
-                first_octet &= 0xFD
-                first_hex = f"{(first_octet & 0xF0) | second_nibble:02X}"
-                mac = first_hex + ":" + ":".join(f"{random.randrange(256):02X}" for _ in range(5))
+                ap_ssid, mac, ap_auth, ap_ch = generate_ap_identity(point_counter, ssid_prefix)
             seen.add(mac)
 
             lat = current_pt[1] + random.uniform(-0.000001, 0.000001)
@@ -971,10 +1316,10 @@ def generate_aps(text):
 
             aps.append({
                 "mac": mac,
-                "ssid": f"{ssid_prefix}-{point_counter:06d}",
-                "auth": random.choice(AUTH_MODES),
+                "ssid": ap_ssid,
+                "auth": ap_auth,
                 "first_seen": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "channel": random.choice(CHANNELS),
+                "channel": ap_ch,
                 "rssi": random.randint(-90, -45),
                 "lat": round(lat, 6),
                 "lon": round(lon, 6),

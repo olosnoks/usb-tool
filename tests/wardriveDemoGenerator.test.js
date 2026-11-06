@@ -11,6 +11,10 @@ import {
   parseSvgPathToStrokes,
   exportPythonScriptSource,
   splitApsIntoFileChunks,
+  SSID_PROFILES,
+  XFINITY_OUIS,
+  ATT_OUIS,
+  generateApIdentity,
   SVG_PRESETS,
   VECTOR_FONTS
 } from '../src/utils/wardriveDemoGenerator';
@@ -427,5 +431,74 @@ describe('Wardrive Demo Generator', () => {
     // Sum of apCounts equals total AP count
     const totalAps = chunks.reduce((sum, c) => sum + c.apCount, 0);
     expect(totalAps).toBe(res.aps.length);
+  });
+
+  it('generates demo APs with Xfinity ISP router defaults and authentic OUIs', () => {
+    const res = generateDemoAps({
+      text: 'XF',
+      ssidMode: 'xfinity',
+      apsPerUnit: 100,
+      seed: 99
+    });
+    expect(res.aps.length).toBeGreaterThan(10);
+
+    const ssids = res.aps.map(a => a.ssid);
+    // Should have authentic Xfinity SSIDs: xfinitywifi, XFINITY, Xfinity-XXXX, or HOME-XXXX
+    const hasXfinityWifi = ssids.some(s => s === 'xfinitywifi' || s === 'xfinitywifi-5G');
+    const hasXfinityOrHome = ssids.some(s => s.startsWith('Xfinity-') || s.startsWith('HOME-') || s === 'XFINITY');
+    expect(hasXfinityWifi || hasXfinityOrHome).toBe(true);
+
+    // Verify OUIs match Xfinity vendors (Arris, Technicolor, Cisco, CommScope, Humax)
+    const validXfinityOuis = new Set(XFINITY_OUIS);
+    for (const ap of res.aps) {
+      const oui = ap.mac.slice(0, 8);
+      expect(validXfinityOuis.has(oui)).toBe(true);
+      // Open hotspot must have [ESS] auth
+      if (ap.ssid === 'xfinitywifi' || ap.ssid === 'xfinitywifi-5G') {
+        expect(ap.auth).toBe('[ESS]');
+      }
+    }
+  });
+
+  it('generates demo APs with AT&T ISP router defaults and authentic OUIs', () => {
+    const res = generateDemoAps({
+      text: 'AT',
+      ssidMode: 'att',
+      apsPerUnit: 100,
+      seed: 123
+    });
+    expect(res.aps.length).toBeGreaterThan(10);
+
+    const ssids = res.aps.map(a => a.ssid);
+    // Should have authentic AT&T SSIDs: ATTXXX, ATT-WIFI-XXXX, attwifi, ATT-Fiber-XXXX
+    const hasAtt = ssids.some(s => s.startsWith('ATT') || s === 'attwifi');
+    expect(hasAtt).toBe(true);
+
+    // Verify OUIs match AT&T vendors (Pace, Arris, Humax, Nokia, Cisco)
+    const validAttOuis = new Set(ATT_OUIS);
+    for (const ap of res.aps) {
+      const oui = ap.mac.slice(0, 8);
+      expect(validAttOuis.has(oui)).toBe(true);
+      if (ap.ssid === 'attwifi') {
+        expect(ap.auth).toBe('[ESS]');
+      }
+    }
+  });
+
+  it('generates demo APs with realistic ISP mix (Xfinity, AT&T, Spectrum, Common)', () => {
+    const res = generateDemoAps({
+      text: 'MIX',
+      ssidMode: 'isp_mix',
+      apsPerUnit: 200,
+      seed: 456
+    });
+    expect(res.aps.length).toBeGreaterThan(30);
+
+    const ssids = res.aps.map(a => a.ssid);
+    const hasXfinity = ssids.some(s => s.includes('xfinity') || s.includes('Xfinity') || s.startsWith('HOME-') || s === 'XFINITY');
+    const hasAtt = ssids.some(s => s.startsWith('ATT') || s === 'attwifi');
+
+    expect(hasXfinity).toBe(true);
+    expect(hasAtt).toBe(true);
   });
 });
