@@ -229,6 +229,7 @@ function AppContent() {
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
         onSelectTab={(tabId) => { open(tabId); setIsCommandPaletteOpen(false); }}
+        activeTool={activeTool}
         onConnect={connect}
         onDisconnect={disconnect}
         onClearLogs={clearLogs}

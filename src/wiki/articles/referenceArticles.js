@@ -284,5 +284,70 @@ Every USB device announces a 16-bit **Vendor ID (VID)** and 16-bit **Product ID 
 | **The Linux USB ID Repository (\`usb.ids\`)** | Stephen J. Gowdy & The Linux Kernel Organization | [linux-usb.org/usb.ids](http://www.linux-usb.org/usb.ids) |
 | **Silicon Decapping & Reverse Engineering Archives** | Zeptobars Silicon Photography & SparkFun Electronics Counterfeit IC Archives | [zeptobars.com](https://zeptobars.com) / [sparkfun.com](https://www.sparkfun.com) |
 `
+  },
+  {
+    id: 'session-log',
+    toolId: 'session-log',
+    category: 'reference',
+    title: 'Session Log & Audit Report — Hardware Telemetry & Export',
+    summary: 'A deterministic, tamper-evident audit log of all hardware actions performed in the workspace: connected devices, firmware writes, register reads, errors, and exports to Markdown and JSON.',
+    tags: ['Session Log', 'Audit Report', 'Telemetry', 'Forensics', 'Markdown', 'JSON', 'Compliance', 'Security'],
+    readTime: '12 min read',
+    content: `
+# Session Log & Audit Report — Workspace Telemetry & Verification
+
+The **Session Log & Audit Report** panel maintains a real-time, chronological record of every hardware transaction conducted within Skon's USB Tool. Designed for firmware engineers, penetration testers, and hardware security auditors, it provides a transparent paper trail of serial port connections, flash operations, logic captures, register reads, and critical errors.
+
+---
+
+### 1. What Gets Recorded?
+
+The session logging subsystem (\`src/utils/sessionLog.js\`) captures events generated across all workbenches without requiring manual note-taking:
+
+| Event Category | Logged Metadata | Example Recorded Action |
+| :--- | :--- | :--- |
+| **Device Lifecycle** | Port VID/PID, serial number, baud rate changes, connect/disconnect timestamps. | Connected CP2102 at 115,200 baud on COM3. |
+| **Flash & ROM Writes** | Image offsets, byte counts, partition labels, verification checksums (MD5/SHA-256). | Programmed 0x10000 bytes at offset 0x10000 (verified by MD5). |
+| **Logic & Bus Operations** | Decoder transactions, I2C addresses detected, SPI chip IDs read, CAN frame IDs. | Scanned I2C bus: ACK at 0x3C (SSD1306) and 0x68 (MPU6050). |
+| **Security & Exploits** | DuckyScript compilations, BadUSB HID payloads generated, RFID UID clones. | Cloned Mifare Classic 1K UID 0xDEADBEEF via Proxmark3. |
+| **Errors & Exceptions** | Frame timeouts, NACK errors, parity failures, WebUSB/WebSerial access denials. | STUSB4500 NACK received at address 0x28. |
+
+---
+
+### 2. Export Formats & Reporting
+
+The panel offers instant one-click export into two primary industry formats:
+
+#### Markdown Technical Audit Report (\`.md\`)
+Formatted with headers, tabular device summaries, chronological event bullet points, and code blocks ready for inclusion in client deliverables, pull requests, or security vulnerability assessments.
+
+#### Structured Machine-Readable JSON (\`.json\`)
+Emits a structured JSON document conforming to modern logging schemas:
+\`\`\`json
+{
+  "sessionStart": "2026-11-06T09:30:00.000Z",
+  "clientVersion": "1.0.0",
+  "devices": [
+    { "vid": "0x10C4", "pid": "0xEA60", "name": "Silicon Labs CP2102" }
+  ],
+  "entries": [
+    {
+      "timestamp": "2026-11-06T09:30:15.120Z",
+      "tool": "Firmware Flasher",
+      "level": "INFO",
+      "message": "Flashed partition bootloader at 0x1000 (MD5: e4d909c290d0fb1ca068ffaddf22cbd0)"
+    }
+  ]
+}
+\`\`\`
+
+---
+
+### 3. Implementation & Architecture
+
+- **Subsystem:** [\`src/utils/sessionLog.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/sessionLog.js) — pure in-memory event bus, subscriber notify hooks, and Markdown/JSON serialization engine.
+- **Component:** [\`src/components/tools/SessionLogPanel.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/SessionLogPanel.jsx) — filterable event table, level badges (INFO, WARN, ERROR), and export triggers.
+- **Tests:** [\`tests/sessionLog.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/sessionLog.test.js).
+`
   }
 ];

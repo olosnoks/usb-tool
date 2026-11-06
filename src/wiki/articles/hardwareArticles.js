@@ -1283,5 +1283,88 @@ After \`CNXN\`, everything happens on **streams**. The host \`OPEN\`s a service 
 | Public key format | AOSP \`libcrypto_utils/android_pubkey.c\` |
 | WebUSB | W3C WebUSB specification |
 `
+  },
+  {
+    id: 'dfu',
+    toolId: 'dfu',
+    category: 'programmers',
+    title: 'WebUSB DFU Flasher — STM32 & DfuSe Firmware Download',
+    summary: 'Flash firmware onto microcontrollers with USB DFU 1.1 and ST DfuSe bootloaders directly from the browser: parse memory layouts from alternate interfaces, mass or sector erase, and program .bin or .dfu firmware files.',
+    tags: ['DFU', 'DfuSe', 'STM32', 'Firmware', 'WebUSB', 'Bootloader', 'Flasher', 'GD32', 'ARM'],
+    readTime: '16 min read',
+    content: `
+# WebUSB DFU Flasher — USB DFU 1.1 & ST DfuSe Manual
+
+The **WebUSB DFU Flasher** talks directly to USB devices exposing a **Device Firmware Upgrade (DFU)** interface. It implements both the official USB-IF DFU 1.1 standard and STMicroelectronics' proprietary **DfuSe** protocol extension, enabling in-browser flashing of STM32, GD32, and other ARM Cortex-M microcontrollers without installing ST-Link utilities or DfuSe Demonstration software.
+
+---
+
+### 1. What is USB DFU and ST DfuSe?
+
+USB DFU defines a standard USB device class (\`0xFE\`, subclass \`0x01\`) that allows microcontrollers to update their on-chip firmware over a standard USB cable.
+
+| Protocol Variant | USB BCD Version | Key Characteristics | Target Hardware |
+| :--- | :--- | :--- | :--- |
+| **Standard DFU 1.1** | \`0x0100\` / \`0x0110\` | Linear block download without explicit memory address pointers. | Generic MCUs, Atmel, GD32, keyboards. |
+| **ST DfuSe** | \`0x011A\` | Extended protocol supporting random-access flash addresses, page erase commands, and memory map string parsing. | STM32 built-in system memory bootloaders (STM32F0/F1/F2/F3/F4/F7/G0/G4/H7). |
+
+---
+
+### 2. DFU Protocol Mechanics & State Machine
+
+USB DFU executes entirely over **Control Endpoint 0** using vendor/class requests (\`bmRequestType = 0x21\` for host-to-device, \`0xA1\` for device-to-host):
+
+| Request Code | Value | Direction | Purpose |
+| :--- | :--- | :--- | :--- |
+| \`DFU_DETACH\` | \`0\` | Out | Requests device transition from runtime to DFU mode. |
+| \`DFU_DNLOAD\` | \`1\` | Out | Transfers a payload block of firmware data (or DfuSe command). |
+| \`DFU_UPLOAD\` | \`2\` | In | Reads back flashed memory blocks for readback verification. |
+| \`DFU_GETSTATUS\` | \`3\` | In | Reads the 6-byte status response: status code, poll timeout (ms), and current state. |
+| \`DFU_CLRSTATUS\` | \`4\` | Out | Clears sticky error states (\`dfuERROR\`) back to \`dfuIDLE\`. |
+| \`DFU_GETSTATE\` | \`5\` | In | Returns the raw 1-byte state without clearing status flags. |
+| \`DFU_ABORT\` | \`6\` | Out | Aborts ongoing download or upload operations. |
+
+#### ST DfuSe Command Framing
+ST DfuSe multiplexes command transactions through \`DFU_DNLOAD\` with block number \`0\`:
+- **Set Address Pointer (\`0x21\`):** \`[0x21, addr_0, addr_1, addr_2, addr_3]\` (Little-endian 32-bit base address).
+- **Page Erase (\`0x41\`):** \`[0x41, addr_0, addr_1, addr_2, addr_3]\` (Triggers non-volatile flash page erase at target address).
+- **Mass Erase (\`0x41\` without address):** Erases all flash sectors.
+
+#### DfuSe Memory Map Parsing
+DfuSe devices name their alternate interface settings using a structured string descriptor:
+\`\`\`text
+@Internal Flash  /0x08000000/04*016Kg,01*064Kg,07*128Kg
+\`\`\`
+The WebUSB DFU client automatically parses this string to compute:
+1. Base flash memory address (\`0x08000000\`).
+2. Sector geometry: 4 sectors of 16 KB, 1 sector of 64 KB, and 7 sectors of 128 KB.
+3. Sector erase boundaries so only modified flash blocks are erased before programming.
+
+---
+
+### 3. Step-by-Step Flashing Workflow
+
+1. **Enter DFU Bootloader Mode:**
+   - Pull **BOOT0** high (to 3.3V) and momentarily toggle **RESET / NRST**.
+   - Plug the board directly into your computer via a data USB cable.
+2. **Connect via WebUSB:**
+   - Click **Connect DFU Device** in the DFU Flasher.
+   - Select the device from the browser prompt (typically labeled *STM32 BOOTLOADER* with VID \`0x0483\` / PID \`0xDF11\`).
+3. **Select Firmware File:**
+   - Upload a raw binary (\`.bin\`) or structured ST DfuSe image (\`.dfu\`).
+   - If using \`.bin\`, confirm the flash base address (defaults to \`0x08000000\` for STM32).
+4. **Flash & Verify:**
+   - Click **Erase & Flash Firmware**. The workbench erases necessary sectors, streams 2048-byte blocks via \`DFU_DNLOAD\`, polls \`DFU_GETSTATUS\`, and verifies MD5 checksums.
+5. **Reboot to Application:**
+   - Disconnect BOOT0 (tie back to GND) and toggle Reset, or click **Manifest / Leave DFU**.
+
+---
+
+### 4. Implementation & Architecture
+
+- **Driver:** [\`src/utils/dfuDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/dfuDriver.js) — complete USB DFU 1.1 / DfuSe driver, state machine polling, alternate interface parsing, and binary chunking.
+- **Workbench:** [\`src/components/tools/DfuFlasher.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/DfuFlasher.jsx) — interactive memory layout viewer, progress gauge, and multi-file flasher.
+- **Tests:** [\`tests/dfuDriver.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/dfuDriver.test.js).
+`
   }
 ];

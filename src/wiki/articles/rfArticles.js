@@ -817,7 +817,7 @@ for (let i = 2; i < buffer.length - 2; i++) {
   },
   {
     id: 'piglet-suite',
-    toolId: 'flasher',
+    toolId: 'warhog-piglet',
     category: 'rf',
     title: 'Piglet Wardriver Suite — Full Setup Guide for All 7 Boards',
     summary: 'The ultimate guide to configuring, flashing, and running Piglet Wardriver across all 7 supported boards with GPS wiring, C5 stub bypass, and WiGLE CSV.',
@@ -1062,7 +1062,7 @@ Rather than generic sequential numbers, the generator includes authentic North A
 | **Xfinity / Comcast** | \`xfinitywifi\` (open), \`XFINITY\` (enterprise), \`Xfinity-XXXX\`, \`HOME-XXXX\`, \`xfinitywifi-5G\`. | \`[ESS]\`, \`[WPA2-EAP-CCMP][ESS]\`, \`[WPA2-PSK-CCMP][ESS]\`. | Arris (\`A4:12:42\`, \`74:9D:79\`), Technicolor (\`00:CD:FE\`), Cisco (\`58:56:E8\`), CommScope (\`E8:89:2C\`), Humax (\`B0:77:AC\`). |
 | **AT&T** | \`ATTXXX\`, \`ATT-WIFI-XXXX\`, \`attwifi\` (open), \`ATT<HEX>\`, \`ATT-Fiber-XXXX\`, \`ATTXXX_5G\`. | \`[ESS]\`, \`[WPA2-PSK-CCMP][ESS]\`, \`[WPA2-PSK+WPA3-SAE][ESS]\`. | Pace (\`94:87:70\`, \`28:16:2E\`), Arris BGW210 (\`F8:E9:03\`), Humax BGW320 (\`3C:CE:73\`), Nokia (\`CC:7B:35\`, \`F0:F2:49\`). |
 | **Spectrum / Charter** | \`SpectrumSetup-XX\`, \`MySpectrumWiFiXX-5G\`, \`SpectrumWiFi\`, \`SpectrumWiFi Plus\`. | \`[ESS]\`, \`[WPA2-PSK-CCMP][ESS]\`, \`[WPA2-EAP-CCMP][ESS]\`. | Sagemcom (\`68:02:B8\`), Askey (\`AC:EC:80\`), Sercomm (\`E0:22:04\`), Charter (\`18:35:D1\`), Hitron (\`38:35:FB\`). |
-| **Custom Prefix** | \`${PREFIX}-000001\`, \`${PREFIX}-000002\`... | Configurable generic auth. | Standard unicast random MAC addresses. |
+| **Custom Prefix** | \`\${PREFIX}-000001\`, \`\${PREFIX}-000002\`... | Configurable generic auth. | Standard unicast random MAC addresses. |
 
 ---
 
@@ -1153,6 +1153,77 @@ Need to generate or automate vector art datasets on a headless server or offline
 - **Workbench:** [\`src/components/tools/WardriveGeneratorWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/WardriveGeneratorWorkbench.jsx) hosts the interactive controls, Leaflet map canvas, AP data table, and multi-part exporter.
 - **Generator Core:** [\`src/utils/wardriveDemoGenerator.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/wardriveDemoGenerator.js) implements continuous stroke interpolation, polyline walking, authentic ISP router profile generation, and \`splitApsIntoFileChunks\`.
 - **SVG Engine:** [\`src/utils/svgPathParser.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/svgPathParser.js) parses raw SVG XML elements (\`<path>\`, \`<line>\`, \`<polyline>\`, \`<polygon>\`, \`<circle>\`) into normalized 2D coordinate paths.
+`
+  },
+  {
+    id: 'ble',
+    toolId: 'ble',
+    category: 'rf',
+    title: 'Bluetooth LE Explorer — Web Bluetooth GATT Client & Nordic DFU',
+    summary: 'Interact with Bluetooth Low Energy devices over Web Bluetooth: discover GATT services, inspect characteristics, subscribe to live telemetry notifications, execute typed writes, and flash firmware via Nordic Semiconductor DFU.',
+    tags: ['BLE', 'Bluetooth', 'GATT', 'Web Bluetooth', 'Nordic DFU', 'nRF52', 'IoT', 'Wireless', 'Telemetry'],
+    readTime: '20 min read',
+    content: `
+# Bluetooth LE Explorer — Web Bluetooth GATT & Nordic DFU Manual
+
+The **Bluetooth LE Explorer** is a browser-native GATT client powered by the **Web Bluetooth API**. It allows hardware engineers, embedded developers, and security auditors to scan for nearby Bluetooth Low Energy devices, inspect GATT service hierarchies, stream sensor telemetry via notifications, send formatted byte payloads, and update firmware using the **Nordic Semiconductor DFU** protocol directly from Chrome or Edge.
+
+---
+
+### 1. BLE & GATT Architecture Overview
+
+Bluetooth Low Energy communicates using the **Generic Attribute Profile (GATT)**, an hierarchical data model built upon the Attribute Protocol (ATT):
+
+\`\`\`
+[BLE Device] (Peripheral / Server)
+  └── [Primary Service] (UUID 16-bit or 128-bit)
+        └── [Characteristic] (Value + Properties + Permissions)
+              ├── Characteristic Value (Byte array)
+              └── [Descriptor] (e.g. CCCD 0x2902 - Client Characteristic Configuration)
+\`\`\`
+
+#### Service & Characteristic Types
+- **Standard Bluetooth SIG Services:** Identified by 16-bit UUIDs (e.g. \`0x180D\` for Heart Rate, \`0x180F\` for Battery Service, \`0x180A\` for Device Information).
+- **Vendor-Specific Custom Services:** Identified by full 128-bit UUIDs (e.g. Nordic UART Service \`6E400001-B5A3-F393-E0A9-E50E24DCCA9E\`).
+
+---
+
+### 2. Characteristic Properties & Operations
+
+Every GATT characteristic declares access capabilities in its properties bitmask:
+
+| Property | Description | Host Action |
+| :--- | :--- | :--- |
+| **Read** | Allows retrieving current characteristic value. | Workbench performs an asynchronous \`readValue()\` call. |
+| **Write** | Allows host to send byte data with device acknowledgement (ATT Write Request). | Workbench writes value with response verification. |
+| **Write Without Response** | High-throughput unacknowledged writes (ATT Write Command). | Used for serial streaming and bulk firmware data transfers. |
+| **Notify** | Peripheral asynchronously pushes new values when state changes. | Workbench registers event listener via \`startNotifications()\`. |
+| **Indicate** | Peripheral pushes values requiring host ATT Acknowledgement. | Handled transparently by browser Bluetooth stack. |
+
+---
+
+### 3. Nordic Semiconductor DFU (Device Firmware Update)
+
+The workbench includes a built-in firmware flasher for Nordic Semiconductor nRF51, nRF52, and nRF53 series SoCs running Nordic Secure DFU:
+
+#### DFU Service UUIDs
+- **Control Point Characteristic:** \`8EC87001-F36E-4559-B94F-FF40D4A00B7B\` (Commands, packet sizes, object validation).
+- **Packet Characteristic:** \`8EC87002-F36E-4559-B94F-FF40D4A00B7B\` (Raw binary payload streaming).
+
+#### Flashing Procedure
+1. **Init Packet Transfer:** Uploads the signed init packet containing image hashes, hardware version, and softdevice requirements.
+2. **Execute Command:** Verifies init packet signature on the target SoC.
+3. **Firmware Chunking:** Streams the application binary in MTU-sized chunks, checking CRC-32 checksums at each sector boundary.
+4. **Activation & Reboot:** Signals the bootloader to swap partitions and boot the newly flashed application.
+
+---
+
+### 4. Implementation & Architecture
+
+- **Driver:** [\`src/utils/bleDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/bleDriver.js) — Web Bluetooth connection handling, service enumeration, characteristic caching, and notification streaming.
+- **DFU Engine:** [\`src/utils/nordicDfu.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/nordicDfu.js) — Nordic Secure DFU protocol implementation and packet assembler.
+- **Workbench:** [\`src/components/tools/BleExplorer.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/BleExplorer.jsx) — interactive GATT tree browser, live chart visualizer, and hexadecimal console.
+- **Tests:** [\`tests/bleDriver.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/bleDriver.test.js) and [\`tests/nordicDfu.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/nordicDfu.test.js).
 `
   }
 ];

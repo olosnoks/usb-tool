@@ -21,6 +21,7 @@ import { useSerial } from '../../context/SerialContext';
 import { identifyUsbChip } from '../../utils/usbDatabase';
 import StatusBadge from '../common/StatusBadge';
 import { APP_THEMES, applyAppTheme, loadAppThemeId, saveAppThemeId, themeSwatch } from '../../utils/appThemes';
+import { toolMeta } from '../ToolRegistry';
 
 export default function Header({
   activeTool = 'flasher',
@@ -240,11 +241,14 @@ export default function Header({
             href={`./wiki/?tool=${activeTool || 'flasher'}`}
             target="_blank"
             rel="noopener noreferrer"
-            title={`Open Wiki Documentation for ${activeTool}`}
+            title={`Open Wiki Documentation for ${toolMeta(activeTool || 'flasher').title}`}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold font-mono transition-all active:scale-95 shadow-sm shadow-indigo-500/10"
           >
             <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
             <span className="hidden md:inline">WIKI</span>
+            <span className="text-[10px] text-indigo-200/80 max-w-[8rem] truncate hidden xl:inline">
+              ({toolMeta(activeTool || 'flasher').title})
+            </span>
           </a>
 
           {/* Command Palette Trigger */}

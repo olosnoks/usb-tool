@@ -10,7 +10,7 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 import {
   Minus, Square, Copy, X, ZoomIn, ZoomOut, CopyPlus,
-  MoreHorizontal, RotateCcw, Check
+  MoreHorizontal, RotateCcw, Check, BookOpen
 } from 'lucide-react';
 import { TITLE_BAR_H, MIN_W, MIN_H, fitZoomFor, displayTitle, instanceOf } from '../../utils/windowManager';
 
@@ -289,6 +289,18 @@ export default function ToolWindow({
             )}
           </div>
 
+          {/* Quick Wiki Link for this Tool */}
+          <a
+            href={`./wiki/?tool=${win.toolId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Open Wiki Manual for ${win.title}`}
+            className="p-1 rounded text-slate-400 hover:text-indigo-300 hover:bg-slate-800 transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+          </a>
+
           {/* Window Options Menu Trigger (...) */}
           <div className="relative">
             <button
@@ -439,6 +451,29 @@ export default function ToolWindow({
                       <span>Windows</span>
                     </button>
                   </div>
+                </div>
+
+                {/* Knowledge Base Wiki Link */}
+                <div className="py-2.5 border-b border-slate-800">
+                  <a
+                    href={`./wiki/?tool=${win.toolId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setIsMenuOpen(false)}
+                    style={{ backgroundColor: '#131c31' }}
+                    className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:brightness-125 border border-indigo-500/40 text-left transition-all group"
+                  >
+                    <div
+                      className="p-1.5 rounded border border-indigo-500/40 text-indigo-300 group-hover:border-indigo-400 shrink-0"
+                      style={{ backgroundColor: '#1e1b4b' }}
+                    >
+                      <BookOpen className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-100 text-xs">Knowledge Base Manual</div>
+                      <div className="text-[10px] text-slate-400 truncate">Read wiki documentation for {win.title}</div>
+                    </div>
+                  </a>
                 </div>
 
                 {/* Pro-Tips / Hotkeys */}

@@ -47,60 +47,161 @@ const CATEGORY_ICONS = {
   AlertTriangle
 };
 
+export const TOOL_TO_ARTICLE_MAP = {
+  // Core
+  terminal: 'terminal',
+  flasher: 'flasher',
+  hardware: 'hardware',
+  'bruce-suite': 'bruce-suite',
+  marauder: 'marauder',
+
+  // Analysis & Protocols
+  'packet-analyzer': 'packet-analyzer',
+  hex: 'packet-analyzer',
+  packets: 'packet-analyzer',
+  kismet: 'packet-analyzer',
+  'logic-analyzer': 'logic-analyzer',
+  'can-bus': 'can-bus',
+  'bus-explorer': 'bus-explorer',
+  'modbus-rtu': 'modbus-rtu',
+  plotter: 'plotter',
+  bridge: 'bridge',
+  usbtmc: 'usbtmc',
+  cyberchef: 'cyberchef-workbench',
+
+  // RF & Wireless
+  'alfa-wifi': 'alfa-wifi',
+  'wifi-scanner': 'alfa-wifi',
+  flipper: 'flipper',
+  proxmark: 'proxmark',
+  'rfid-nfc': 'proxmark',
+  mayhem: 'mayhem',
+  wardrive: 'wardrive',
+  ubx: 'wardrive',
+  'warhog-piglet': 'piglet-suite',
+  'warhog-sd': 'piglet-suite',
+  'warhog-config': 'piglet-suite',
+  'warhog-console': 'piglet-suite',
+  'warhog-flasher': 'piglet-suite',
+  'warhog-pinouts': 'piglet-suite',
+  'wardrive-generator': 'wardrive-generator',
+  ble: 'ble',
+
+  // Hardware & Programmers
+  ducky: 'ducky',
+  programmers: 'programmers',
+  ch341a: 'programmers',
+  'cmsis-dap': 'programmers',
+  'jtag-programmer': 'programmers',
+  'avr-isp': 'programmers',
+  'usb-pd': 'usb-pd',
+  dfu: 'dfu',
+  fastboot: 'fastboot',
+  adb: 'adb',
+  'rocketgod-suite': 'rocketgod-suite',
+
+  // Utilities
+  micropython: 'micropython',
+  improv: 'improv',
+  telemetry: 'telemetry',
+  alerts: 'alerts',
+  automation: 'automation',
+  autopsy: 'autopsy',
+  'esp-dump': 'esp-dump',
+  'usb-descriptors': 'usb-descriptors',
+  hid: 'hid',
+  'mass-storage': 'mass-storage',
+  ptp: 'ptp',
+  fido2: 'fido2',
+
+  // Reference & Setup
+  setup: 'setup',
+  troubleshooting: 'troubleshooting',
+  'session-log': 'session-log',
+  pinouts: 'pinouts-reference',
+  'pinouts-reference': 'pinouts-reference',
+  'pinouts-modal': 'pinouts-reference',
+  intel: 'chip-intelligence',
+  'chip-intelligence': 'chip-intelligence',
+  'intel-modal': 'chip-intelligence'
+};
+
+export function resolveArticleForTool(target) {
+  if (!target) return WIKI_ARTICLES[0];
+  const q = String(target).trim().toLowerCase();
+
+  // 1. Explicit tool map
+  if (TOOL_TO_ARTICLE_MAP[q]) {
+    const found = WIKI_ARTICLES.find(a => a.id === TOOL_TO_ARTICLE_MAP[q]);
+    if (found) return found;
+  }
+
+  // 2. Direct ID or toolId match
+  const direct = WIKI_ARTICLES.find(a => a.id.toLowerCase() === q || (a.toolId && a.toolId.toLowerCase() === q));
+  if (direct) return direct;
+
+  // 3. Fallback without instance suffix (e.g. "ducky#2" -> "ducky")
+  const baseKey = q.split('#')[0];
+  if (TOOL_TO_ARTICLE_MAP[baseKey]) {
+    const found = WIKI_ARTICLES.find(a => a.id === TOOL_TO_ARTICLE_MAP[baseKey]);
+    if (found) return found;
+  }
+
+  return WIKI_ARTICLES[0];
+}
+
+function parseTargetFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const urlArticle = params.get('article');
+    const urlTool = params.get('tool');
+    const hash = window.location.hash.replace('#', '');
+    const hashTool = hash.startsWith('tool=') ? hash.replace('tool=', '') : hash;
+    return urlArticle || urlTool || hashTool || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 export default function WikiApp() {
   const [searchQuery, setSearchQuery] = useState('');
   
   // Parse tool or article parameter from URL on load
-  const [selectedArticleId, setSelectedArticleId] = useState(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const urlTool = params.get('tool');
-      const urlArticle = params.get('article');
-      if (urlArticle) {
-        const found = WIKI_ARTICLES.find(a => a.id === urlArticle);
-        if (found) return found.id;
-      }
-      if (urlTool) {
-        const found = WIKI_ARTICLES.find(a => a.toolId === urlTool || a.id === urlTool);
-        if (found) return found.id;
-      }
-      const hash = window.location.hash.replace('#', '');
-      if (hash.startsWith('tool=')) {
-        const t = hash.replace('tool=', '');
-        const found = WIKI_ARTICLES.find(a => a.toolId === t || a.id === t);
-        if (found) return found.id;
-      }
-      if (hash) {
-        const found = WIKI_ARTICLES.find(a => a.id === hash || a.toolId === hash);
-        if (found) return found.id;
-      }
-    } catch (e) {}
-    return WIKI_ARTICLES[0].id;
-  });
-
-  const [selectedCategory, setSelectedCategory] = useState(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const urlTool = params.get('tool');
-      const urlArticle = params.get('article');
-      const target = urlArticle || urlTool;
-      if (target) {
-        const found = WIKI_ARTICLES.find(a => a.id === target || a.toolId === target);
-        if (found) return found.category;
-      }
-    } catch (e) {}
-    return 'all';
-  });
-
+  const initialArticle = resolveArticleForTool(parseTargetFromUrl());
+  const [selectedArticleId, setSelectedArticleId] = useState(initialArticle.id);
+  const [selectedCategory, setSelectedCategory] = useState(parseTargetFromUrl() ? initialArticle.category : 'all');
   const [copiedCodeSnippet, setCopiedCodeSnippet] = useState(null);
   const [collapsedCategories, setCollapsedCategories] = useState({});
+
+  // Reactive URL listener (syncs if navigation happens externally)
+  useEffect(() => {
+    const syncFromUrl = () => {
+      const target = parseTargetFromUrl();
+      if (target) {
+        const art = resolveArticleForTool(target);
+        if (art) {
+          setSelectedArticleId(art.id);
+          setSelectedCategory(art.category);
+        }
+      }
+    };
+    window.addEventListener('popstate', syncFromUrl);
+    window.addEventListener('hashchange', syncFromUrl);
+    return () => {
+      window.removeEventListener('popstate', syncFromUrl);
+      window.removeEventListener('hashchange', syncFromUrl);
+    };
+  }, []);
 
   // When article changes, keep URL search parameter in sync
   const handleSelectArticle = (articleId) => {
     setSelectedArticleId(articleId);
-    try {
-      const art = WIKI_ARTICLES.find(a => a.id === articleId);
-      if (art) {
+    const art = WIKI_ARTICLES.find(a => a.id === articleId);
+    if (art) {
+      if (selectedCategory !== 'all' && selectedCategory !== art.category) {
+        setSelectedCategory(art.category);
+      }
+      try {
         const url = new URL(window.location.href);
         if (art.toolId) {
           url.searchParams.set('tool', art.toolId);
@@ -108,8 +209,8 @@ export default function WikiApp() {
           url.searchParams.set('article', art.id);
         }
         window.history.replaceState(null, '', url.toString());
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
   };
 
   // Filter articles by category and search query

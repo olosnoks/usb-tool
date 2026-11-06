@@ -43,79 +43,79 @@ export const SIDEBAR_SECTIONS = [
     id: 'core',
     title: 'CORE OPERATIONS',
     items: [
-      { id: 'terminal', name: 'Terminal & Console', icon: Terminal, accent: 'cyan', desc: 'Real-time serial log & baud hunter' },
-      { id: 'flasher', name: 'Firmware Flasher', icon: HardDrive, accent: 'amber', desc: 'Multi-binary partition flashing' },
-      { id: 'hardware', name: 'Hardware Controls', icon: Sliders, accent: 'emerald', desc: 'Strapping timers, DTR/RTS, U-Boot' }
+      { id: 'terminal', name: 'Terminal & Console', icon: Terminal, accent: 'cyan', desc: 'Real-time serial log & baud hunter', keywords: ['console', 'uart', 'baud', 'serial', 'com', 'monitor', 'log', 'echo', 'terminal'] },
+      { id: 'flasher', name: 'Firmware Flasher', icon: HardDrive, accent: 'amber', desc: 'Multi-binary partition flashing', keywords: ['esp32', 'esp8266', 'esptool', 'bin', 'rom', 'partitions', 'flash', 'bootloader', 'ota', 'flasher'] },
+      { id: 'hardware', name: 'Hardware Controls', icon: Sliders, accent: 'emerald', desc: 'Strapping timers, DTR/RTS, U-Boot', keywords: ['strapping', 'gpio0', 'reset', 'dtr', 'rts', 'uboot', 'bootloader', 'timers', 'hardware'] }
     ]
   },
   {
     id: 'analysis',
     title: 'ANALYSIS & PROTOCOL LAB',
     items: [
-      { id: 'packet-analyzer', name: 'Packet & Protocol Lab', icon: Activity, accent: 'purple', desc: 'Wi-Fi 802.11, PCAP, Hex Stream & Packet Framer' },
-      { id: 'logic-analyzer', name: '24MHz Logic Analyzer', icon: Activity, accent: 'cyan', desc: '8-channel capture (SUMP, fx2lafw, VCD/.sr) with I2C, UART, SPI, 1-Wire, CAN, WS2812, IR & SWD decoders' },
-      { id: 'can-bus', name: 'CAN Bus & OBD-II Scanner', icon: Gauge, accent: 'emerald', desc: 'Sniffer with DBC decoding, replay, OBD-II and UDS diagnostics' },
-      { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', desc: 'I2C scan, registers, live sensor readouts, OLED test and SPI flash dumps via Bus Pirate' },
-      { id: 'modbus-rtu', name: 'Modbus RTU & RS-485', icon: Activity, accent: 'amber', desc: 'Industrial holding registers & inverter telemetry' },
-      { id: 'plotter', name: 'Oscilloscope Plotter', icon: Activity, accent: 'rose', desc: 'Multi-channel live waveforms' },
-      { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer' },
-      { id: 'usbtmc', name: 'USBTMC Instrument', icon: Gauge, accent: 'cyan', desc: 'SCPI console, scope waveforms & screenshots, DMM logging and scripts over WebUSB' },
-      { id: 'cyberchef', name: 'CyberChef Workbench', icon: Sparkles, accent: 'purple', desc: 'Cyber Swiss Army Knife: 200+ crypto, encoding, compression & parsing operations' }
+      { id: 'packet-analyzer', name: 'Packet & Protocol Lab', icon: Activity, accent: 'purple', desc: 'Wi-Fi 802.11, PCAP, Hex Stream & Packet Framer', keywords: ['pcap', 'hex', 'packets', 'kismet', 'wireshark', 'dissector', 'framer', 'sniff', 'raw', 'protocol', 'analyzer'] },
+      { id: 'logic-analyzer', name: '24MHz Logic Analyzer', icon: Activity, accent: 'cyan', desc: '8-channel capture (SUMP, fx2lafw, VCD/.sr) with I2C, UART, SPI, 1-Wire, CAN, WS2812, IR & SWD decoders', keywords: ['sump', 'fx2lafw', 'sigrok', 'vcd', 'sr', '8-channel', 'i2c', 'uart', 'spi', '1-wire', 'can', 'ws2812', 'ir', 'swd', 'logic', 'analyzer'] },
+      { id: 'can-bus', name: 'CAN Bus & OBD-II Scanner', icon: Gauge, accent: 'emerald', desc: 'Sniffer with DBC decoding, replay, OBD-II and UDS diagnostics', keywords: ['can', 'obd', 'obd2', 'obd-ii', 'dbc', 'automotive', 'uds', 'vehicle', 'car', 'elm327', 'replay', 'bus'] },
+      { id: 'bus-explorer', name: 'I2C & SPI Bus Explorer', icon: Cpu, accent: 'emerald', desc: 'I2C scan, registers, live sensor readouts, OLED test and SPI flash dumps via Bus Pirate', keywords: ['bus pirate', 'i2c', 'spi', 'scan', 'registers', 'sensors', 'oled', 'eeprom', 'flash dump', 'explorer'] },
+      { id: 'modbus-rtu', name: 'Modbus RTU & RS-485', icon: Activity, accent: 'amber', desc: 'Industrial holding registers & inverter telemetry', keywords: ['modbus', 'rs485', 'holding registers', 'inverter', 'plc', 'scada', 'industrial', 'rtu'] },
+      { id: 'plotter', name: 'Oscilloscope Plotter', icon: Activity, accent: 'rose', desc: 'Multi-channel live waveforms', keywords: ['scope', 'oscilloscope', 'waveform', 'analog', 'adc', 'graph', 'telemetry', 'channels', 'plotter'] },
+      { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer', keywords: ['mitm', 'man in the middle', 'bridge', 'dual-port', 'pass-through', 'sniffer', 'uart'] },
+      { id: 'usbtmc', name: 'USBTMC Instrument', icon: Gauge, accent: 'cyan', desc: 'SCPI console, scope waveforms & screenshots, DMM logging and scripts over WebUSB', keywords: ['usbtmc', 'scpi', 'scope', 'multimeter', 'dmm', 'rigol', 'sigrok', 'visa', 'instrument'] },
+      { id: 'cyberchef', name: 'CyberChef Workbench', icon: Sparkles, accent: 'purple', desc: 'Cyber Swiss Army Knife: 200+ crypto, encoding, compression & parsing operations', keywords: ['cyberchef', 'chef', 'crypto', 'base64', 'hex', 'deobfuscate', 'magic', 'entropy', 'hash', 'recipe', 'pipeline', 'gchq'] }
     ]
   },
   {
     id: 'rf',
     title: 'RF, WIRELESS & BADGES',
     items: [
-      { id: 'alfa-wifi', name: 'Wi-Fi Monitor (Alfa / Panda PAU09)', icon: Wifi, accent: 'cyan', desc: 'WebUSB monitor mode & 802.11 frame capture for Alfa RTL8812AU & Panda PAU09 (RT5572)' },
-      { id: 'flipper', name: 'Flipper Zero Suite', icon: Bot, accent: 'amber', desc: 'qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC & SD' },
-      { id: 'proxmark', name: 'Proxmark3 / PM5 Suite', icon: Radio, accent: 'cyan', desc: '13.56MHz & 125kHz RFID cloner, raw NG framing & WebFlash' },
-      { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF receiver: zoomable spectrum & waterfall, audio, sweep, ADS-B, IQ recorder, firmware flasher & first-time setup' },
-      { id: 'wardrive', name: 'GPS & Wardrive Suite', icon: Compass, accent: 'emerald', desc: 'Warhog CYD, Piglet, Panda PAU09, NMEA tracker & u-blox UBX' },
-      { id: 'warhog-piglet', name: 'Warhog CYD & Piglet Suite', icon: Sparkles, accent: 'amber', desc: 'Warhog CYD (ESP32-2432S028R) & Piglet ESP32-C5/S3 wardriver deck' },
-      { id: 'wardrive-generator', name: 'Demo Wardrive Generator', icon: MapPin, accent: 'emerald', desc: 'Synthetic wardriving vector art for Kepler.gl & WiGLE (inspired by OSINTIAL)' },
-      { id: 'ble', name: 'Bluetooth LE Explorer', icon: Bluetooth, accent: 'cyan', desc: 'Web Bluetooth GATT client: services, notify, typed writes, Nordic DFU updates' }
+      { id: 'alfa-wifi', name: 'Wi-Fi Monitor (Alfa / Panda PAU09)', icon: Wifi, accent: 'cyan', desc: 'WebUSB monitor mode & 802.11 frame capture for Alfa RTL8812AU & Panda PAU09 (RT5572)', keywords: ['alfa', 'panda', 'pau09', 'rt5572', 'rtl8812au', 'monitor mode', 'wifi', 'wi-fi', '802.11', 'pcap', 'sniffer', 'injection', 'wifi-scanner'] },
+      { id: 'flipper', name: 'Flipper Zero Suite', icon: Bot, accent: 'amber', desc: 'qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC & SD', keywords: ['flipper', 'flipper zero', 'qflipper', 'sub-ghz', 'subghz', 'nfc', 'rfid', 'badusb', 'screen mirror'] },
+      { id: 'proxmark', name: 'Proxmark3 / PM5 Suite', icon: Radio, accent: 'cyan', desc: '13.56MHz & 125kHz RFID cloner, raw NG framing & WebFlash', keywords: ['proxmark', 'pm5', 'rfid', 'nfc', '13.56mhz', '125khz', 'mifare', 't5577', 'em4100', 'cloner', 'rfid-nfc'] },
+      { id: 'mayhem', name: 'PortaPack Mayhem SDR', icon: Radio, accent: 'purple', desc: 'HackRF receiver: zoomable spectrum & waterfall, audio, sweep, ADS-B, IQ recorder, firmware flasher & first-time setup', keywords: ['mayhem', 'portapack', 'hackrf', 'sdr', 'spectrum', 'waterfall', 'ads-b', 'aircraft', 'iq', 'radio', 'sub-ghz'] },
+      { id: 'wardrive', name: 'GPS & Wardrive Suite', icon: Compass, accent: 'emerald', desc: 'Warhog CYD, Piglet, Panda PAU09, NMEA tracker & u-blox UBX', keywords: ['wardrive', 'gps', 'nmea', 'ubx', 'u-blox', 'wigle', 'mapper', 'kml', 'tracking'] },
+      { id: 'warhog-piglet', name: 'Warhog CYD & Piglet Suite', icon: Sparkles, accent: 'amber', desc: 'Warhog CYD (ESP32-2432S028R) & Piglet ESP32-C5/S3 wardriver deck', keywords: ['warhog', 'piglet', 'cyd', 'cheap yellow display', 'esp32-2432s028r', 'esp32-c5', 'esp32-s3', 'sd card', 'wardriver.cfg', 'screen mirror'] },
+      { id: 'wardrive-generator', name: 'Demo Wardrive Generator', icon: MapPin, accent: 'emerald', desc: 'Synthetic wardriving vector art for Kepler.gl & WiGLE (inspired by OSINTIAL)', keywords: ['demo generator', 'wardrive generator', 'kepler', 'kepler.gl', 'wigle', 'vector', 'svg', 'map art', 'osintial', 'synthetic'] },
+      { id: 'ble', name: 'Bluetooth LE Explorer', icon: Bluetooth, accent: 'cyan', desc: 'Web Bluetooth GATT client: services, notify, typed writes, Nordic DFU updates', keywords: ['ble', 'bluetooth', 'gatt', 'nordic', 'dfu', 'nrf', 'nrf52', 'services', 'characteristics', 'wireless'] }
     ]
   },
   {
     id: 'programmers',
     title: 'HARDWARE & PAYLOADS',
     items: [
-      { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript keystroke compiler, syntax validator & live simulator' },
-      { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash, CMSIS-DAP debugger (RTT, SWO, flash), JTAG / SVF and AVR ISP' },
-      { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'STUSB4500 sink: contract readout, voltage requests and verified NVM (power-up PDOs)' },
-      { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more' },
-      { id: 'fastboot', name: 'Android Fastboot', icon: Smartphone, accent: 'emerald', desc: 'Unlock, sparse-aware flashing, A/B slots, factory image zips, reboot over WebUSB' },
-      { id: 'adb', name: 'Android ADB', icon: Smartphone, accent: 'emerald', desc: 'Device info, shell, files, apps, logcat, screen with tap control, wireless ADB' }
+      { id: 'ducky', name: 'BadUSB & Payload Studio', icon: Keyboard, accent: 'amber', desc: 'DuckyScript keystroke compiler, syntax validator & live simulator', keywords: ['ducky', 'duckyscript', 'badusb', 'rubber ducky', 'keystroke injection', 'hid', 'payload', 'payload studio', 'arduino', 'circuitpython'] },
+      { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash, CMSIS-DAP debugger (RTT, SWO, flash), JTAG / SVF and AVR ISP', keywords: ['programmers', 'ch341a', 'cmsis-dap', 'cmsis', 'dap', 'swd', 'rtt', 'swo', 'jtag', 'svf', 'cpld', 'avr', 'isp', 'atmega', 'spi flash', 'bios'] },
+      { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'STUSB4500 sink: contract readout, voltage requests and verified NVM (power-up PDOs)', keywords: ['usb-pd', 'power delivery', 'pd', 'type-c', 'stusb4500', 'pdo', 'voltage trigger', '9v', '12v', '15v', '20v', 'e-marker'] },
+      { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more', keywords: ['dfu', 'dfuse', 'stm32', 'bootloader', 'flash', 'firmware update', 'gd32', 'arm'] },
+      { id: 'fastboot', name: 'Android Fastboot', icon: Smartphone, accent: 'emerald', desc: 'Unlock, sparse-aware flashing, A/B slots, factory image zips, reboot over WebUSB', keywords: ['fastboot', 'android', 'bootloader', 'unlock', 'partitions', 'sparse', 'recovery', 'reboot'] },
+      { id: 'adb', name: 'Android ADB', icon: Smartphone, accent: 'emerald', desc: 'Device info, shell, files, apps, logcat, screen with tap control, wireless ADB', keywords: ['adb', 'android', 'shell', 'logcat', 'screen mirror', 'tap', 'file manager', 'wireless adb', 'apk'] }
     ]
   },
   {
     id: 'utilities',
     title: 'DEVICE UTILITIES',
     items: [
-      { id: 'micropython', name: 'MicroPython Files', icon: FileCode, accent: 'purple', desc: 'On-chip filesystem explorer' },
-      { id: 'improv', name: 'Improv Wi-Fi', icon: Wifi, accent: 'emerald', desc: 'Standard serial Wi-Fi provisioner' },
-      { id: 'telemetry', name: 'Telemetry Gauges', icon: Gauge, accent: 'cyan', desc: 'Speedometer sensor dials' },
-      { id: 'alerts', name: 'Crash & Panic Alerts', icon: ShieldAlert, accent: 'rose', desc: 'Auto-detect kernel panics' },
-      { id: 'automation', name: 'Test Runner & Scripts', icon: Bot, accent: 'purple', desc: 'Automated JS test routines' },
-      { id: 'autopsy', name: 'USB Recon & Autopsy', icon: Usb, accent: 'amber', desc: 'Mystery chip descriptor analysis' },
-      { id: 'usb-descriptors', name: 'USB Descriptor Explorer', icon: Usb, accent: 'cyan', desc: 'lsusb -v in the browser: configs, interfaces, endpoints' },
-      { id: 'hid', name: 'HID Inspector', icon: Keyboard, accent: 'purple', desc: 'Decode live reports, report rate, record/playback, output & feature reports (WebHID)' },
-      { id: 'mass-storage', name: 'Mass Storage Inspector', icon: HardDrive, accent: 'amber', desc: 'Read-only: partitions, FAT/exFAT browsing, deleted-file recovery, imaging with SHA-256' },
-      { id: 'ptp', name: 'PTP / MTP Camera', icon: Camera, accent: 'purple', desc: 'Storage, thumbnails, bulk download, delete and remote capture over WebUSB' },
-      { id: 'fido2', name: 'FIDO2 Security Key', icon: KeyRound, accent: 'emerald', desc: 'Read a security key: versions, AAGUID, options (WebHID, read-only)' }
+      { id: 'micropython', name: 'MicroPython Files', icon: FileCode, accent: 'purple', desc: 'On-chip filesystem explorer', keywords: ['micropython', 'repl', 'mip', 'files', 'ampy', 'python', 'pyboard'] },
+      { id: 'improv', name: 'Improv Wi-Fi', icon: Wifi, accent: 'emerald', desc: 'Standard serial Wi-Fi provisioner', keywords: ['improv', 'wifi', 'provisioner', 'home assistant', 'serial wifi'] },
+      { id: 'telemetry', name: 'Telemetry Gauges', icon: Gauge, accent: 'cyan', desc: 'Speedometer sensor dials', keywords: ['telemetry', 'gauges', 'speedometer', 'dials', 'sensors', 'dashboard'] },
+      { id: 'alerts', name: 'Crash & Panic Alerts', icon: ShieldAlert, accent: 'rose', desc: 'Auto-detect kernel panics', keywords: ['alerts', 'crash', 'panic', 'watchdog', 'coredump', 'kernel panic', 'backtrace'] },
+      { id: 'automation', name: 'Test Runner & Scripts', icon: Bot, accent: 'purple', desc: 'Automated JS test routines', keywords: ['automation', 'scripts', 'test runner', 'javascript', 'testing'] },
+      { id: 'autopsy', name: 'USB Recon & Autopsy', icon: Usb, accent: 'amber', desc: 'Mystery chip descriptor analysis', keywords: ['autopsy', 'recon', 'mystery chip', 'vape', 'vid pid', 'baud hunter', 'reverse engineering'] },
+      { id: 'usb-descriptors', name: 'USB Descriptor Explorer', icon: Usb, accent: 'cyan', desc: 'lsusb -v in the browser: configs, interfaces, endpoints', keywords: ['descriptors', 'usb-descriptors', 'lsusb', 'tree', 'endpoints', 'interfaces', 'configs'] },
+      { id: 'hid', name: 'HID Inspector', icon: Keyboard, accent: 'purple', desc: 'Decode live reports, report rate, record/playback, output & feature reports (WebHID)', keywords: ['hid', 'webhid', 'reports', 'gamepad', 'keyboard', 'mouse', 'input reports'] },
+      { id: 'mass-storage', name: 'Mass Storage Inspector', icon: HardDrive, accent: 'amber', desc: 'Read-only: partitions, FAT/exFAT browsing, deleted-file recovery, imaging with SHA-256', keywords: ['mass storage', 'usb drive', 'flash drive', 'fat32', 'exfat', 'forensics', 'carving', 'mbr', 'scsi', 'msc', 'bot'] },
+      { id: 'ptp', name: 'PTP / MTP Camera', icon: Camera, accent: 'purple', desc: 'Storage, thumbnails, bulk download, delete and remote capture over WebUSB', keywords: ['ptp', 'mtp', 'camera', 'dslr', 'photos', 'canon', 'nikon', 'sony', 'tether'] },
+      { id: 'fido2', name: 'FIDO2 Security Key', icon: KeyRound, accent: 'emerald', desc: 'Read a security key: versions, AAGUID, options (WebHID, read-only)', keywords: ['fido2', 'webauthn', 'u2f', 'security key', 'yubikey', 'ctap2', 'aaguid'] }
     ]
   },
   {
     id: 'setup',
     title: 'SETUP & REFERENCE',
     items: [
-      { id: 'wiki-external', name: 'Knowledge Base Wiki', icon: BookOpen, href: './wiki/', accent: 'amber', desc: 'Standalone documentation & firmware manual' },
-      { id: 'session-log', name: 'Session Log & Report', icon: ScrollText, accent: 'emerald', desc: 'Everything the hardware tools did this session: devices, actions, errors. Export Markdown / JSON' },
-      { id: 'setup', name: 'Linux Setup & Drivers', icon: HelpCircle, accent: 'purple', desc: 'udev rules & USB-UART drivers' },
-      { id: 'esp-dump', name: 'Silicon Memory Dump', icon: Cpu, accent: 'amber', desc: 'Direct eFuse and flash reader' },
-      { id: 'pinouts-modal', name: 'Pinouts Reference', icon: BookOpen, isModal: true, accent: 'cyan', desc: 'ESP32 & USB wiring diagrams' },
-      { id: 'intel-modal', name: 'Chip Intelligence', icon: Cpu, isModal: true, accent: 'cyan', desc: 'VID/PID device identification' }
+      { id: 'wiki-external', name: 'Knowledge Base Wiki', icon: BookOpen, href: './wiki/', accent: 'amber', desc: 'Standalone documentation & firmware manual', keywords: ['wiki', 'docs', 'documentation', 'manual', 'help', 'guides'] },
+      { id: 'session-log', name: 'Session Log & Report', icon: ScrollText, accent: 'emerald', desc: 'Everything the hardware tools did this session: devices, actions, errors. Export Markdown / JSON', keywords: ['session log', 'audit', 'report', 'export', 'markdown', 'json', 'history'] },
+      { id: 'setup', name: 'Linux Setup & Drivers', icon: HelpCircle, accent: 'purple', desc: 'udev rules & USB-UART drivers', keywords: ['setup', 'drivers', 'udev', 'linux', 'zadig', 'winusb', 'ch340', 'cp2102'] },
+      { id: 'esp-dump', name: 'Silicon Memory Dump', icon: Cpu, accent: 'amber', desc: 'Direct eFuse and flash reader', keywords: ['esp-dump', 'efuse', 'silicon', 'flash dump', 'rom', 'mac address'] },
+      { id: 'pinouts-modal', name: 'Pinouts Reference', icon: BookOpen, isModal: true, accent: 'cyan', desc: 'ESP32 & USB wiring diagrams', keywords: ['pinouts', 'wiring', 'diagrams', 'esp32', 'level shift'] },
+      { id: 'intel-modal', name: 'Chip Intelligence', icon: Cpu, isModal: true, accent: 'cyan', desc: 'VID/PID device identification', keywords: ['chip', 'intel', 'vid', 'pid', 'lookup', 'usb id'] }
     ]
   }
 ];
@@ -213,9 +213,17 @@ export default function Sidebar({
       {/* Nav Tool List */}
       <div className="flex-1 overflow-y-auto p-1.5 space-y-3 scrollbar-thin scrollbar-thumb-slate-800">
         {SIDEBAR_SECTIONS.map((section) => {
-          const visibleItems = section.items.filter(
-            item => !filterQuery || item.name.toLowerCase().includes(filterQuery.toLowerCase()) || item.desc.toLowerCase().includes(filterQuery.toLowerCase())
-          );
+          const visibleItems = section.items.filter((item) => {
+            if (!filterQuery) return true;
+            const q = filterQuery.toLowerCase().trim();
+            const searchCorpus = [
+              item.name,
+              item.desc,
+              item.id,
+              ...(item.keywords || [])
+            ].join(' ').toLowerCase();
+            return q.split(/\s+/).every((token) => searchCorpus.includes(token));
+          });
 
           if (visibleItems.length === 0) return null;
 
@@ -242,7 +250,11 @@ export default function Sidebar({
                     <button
                       key={item.id}
                       onClick={(e) => handleItemClick(item, e)}
-                      title={`${item.name}: ${item.desc}${isOpen ? ' (open — click to bring its window to the front; Alt-click to open another instance)' : ''}`}
+                      title={
+                        item.id === 'wiki-external'
+                          ? `Knowledge Base Wiki: Open documentation${activeTool ? ` for ${activeTool}` : ''}`
+                          : `${item.name}: ${item.desc}${isOpen ? ' (open — click to bring its window to the front; Alt-click to open another instance)' : ''}`
+                      }
                       className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-xs border transition-all text-left ${getAccentStyles(
                         item,
                         isActive
