@@ -11,8 +11,8 @@
 // and the proxy calls ZAP.
 //
 // Supported URL styles (match src/utils/netClient.js):
-//   - Placeholder: http://localhost:8080/fetch?url={url}
-//   - Prefix:      http://localhost:8080/   -> /http://target/path
+//   - Placeholder: http://localhost:47101/fetch?url={url}
+//   - Prefix:      http://localhost:47101/   -> /http://target/path
 //
 // No npm dependencies: Node standard library only.
 

@@ -10,9 +10,11 @@ tool talks to its own service on `localhost`.
 ## Two ways to run
 
 ### 1. One file, from the app (easiest)
-Open the **Docker Backends** tool in the app and click **Download** (or **Copy**).
-You get a single self-contained `docker-compose.yml` with each Node service's
-source embedded — no other files needed. Then:
+In any tool that needs a backend, click the **Docker backend** button in its proxy
+bar, then **compose.yml** (or **Copy**). You get a single self-contained
+`docker-compose.yml` with each Node service's source embedded — no other files
+needed. (**All files (.zip)** instead gives the real Dockerfiles and sources.)
+Then:
 
 ```bash
 docker compose up -d                       # safe services
@@ -42,11 +44,12 @@ docker compose up -d
 
 ## Wiring in the app
 
-In the **Docker Backends** tool you can, per service: set its base URL, run a
-health check, and (for `cors-proxy`) set it as the proxy for every fetch tool in
-one click. The Port Scanner and Certificate Inspector call their services
-directly once configured; the other services are reachable and health-checked,
-and their tools can be pointed at them as integrations land.
+Each backend-capable tool has a **Docker backend** button in its proxy bar. There
+you can set the service's base URL, run a health check, and (for `cors-proxy`) set
+it as the proxy for every fetch tool in one click. The Port Scanner and
+Certificate Inspector call their services directly once configured; the DNS, ZAP
+and Hydra services are reachable and health-checked, and their tools can be
+pointed at them as integrations land.
 
 ## Safety
 

@@ -3,7 +3,7 @@
 # The web app is a static, browser-only site. These containers give its security
 # tools capabilities a browser cannot have on its own (cross-origin fetches, real
 # port scans, live TLS handshakes, arbitrary DNS). Each tool talks to its own
-# service on localhost; configure the URLs in the app's "Docker Backends" panel.
+# service on localhost; configure URLs via each tool's Docker backend button.
 #
 #   Start the safe services:      docker compose up -d
 #   Include the offensive ones:   docker compose --profile offensive up -d

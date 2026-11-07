@@ -1,7 +1,7 @@
 // Client for the local Docker backend services (see backends.js and /backend).
 //
 // Each service has a base URL (default http://localhost:<port>) the user can
-// override in the Docker Backends panel. Tools call the typed helpers below and
+// override via each tool's Docker backend button. Tools call the helpers below and
 // fall back to their browser-only behavior when the backend is not configured or
 // not reachable.
 
