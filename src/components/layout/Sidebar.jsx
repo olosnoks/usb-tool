@@ -86,6 +86,7 @@ export const SIDEBAR_SECTIONS = [
     title: 'WEB APP TESTING',
     items: [
       { id: 'burp-proxy', name: 'HTTP/HTTPS Repeater', icon: ShieldCheck, accent: 'purple', desc: 'Repeater, Intruder & Decoder — send crafted HTTP/HTTPS requests', keywords: ['burp', 'repeater', 'intruder', 'decoder', 'proxy', 'http', 'https', 'request', 'web app'] },
+      { id: 'api-client', name: 'API Client (OpenAPI)', icon: FileCode, accent: 'cyan', desc: 'Import OpenAPI/Swagger, browse & send endpoints, schema fuzzing', keywords: ['api', 'openapi', 'swagger', 'rest', 'postman', 'hoppscotch', 'endpoint', 'fuzz', 'schema'] },
       { id: 'owasp-zap', name: 'Web Scanner', icon: ShieldAlert, accent: 'amber', desc: 'Passive web vuln scan: headers, cookies, CORS, TLS', keywords: ['owasp', 'zap', 'vulnerability', 'scanner', 'web', 'passive', 'headers'] },
       { id: 'nikto-scanner', name: 'Web Path Prober', icon: Sparkles, accent: 'rose', desc: 'Probe common sensitive paths and server header', keywords: ['nikto', 'vulnerability', 'scanner', 'web', 'paths'] },
       { id: 'hydra-bruteforce', name: 'HTTP Basic Auth Tester', icon: Cpu, accent: 'emerald', desc: 'Try credential lists against HTTP Basic auth', keywords: ['hydra', 'bruteforce', 'login', 'basic auth', 'http'] },

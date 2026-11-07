@@ -27,6 +27,7 @@ const HydraBruteforceWorkbench = React.lazy(() => import('./tools/HydraBruteforc
 const TcpdumpViewerWorkbench = React.lazy(() => import('./tools/TcpdumpViewerWorkbench'));
 const DnsEnumeratorWorkbench = React.lazy(() => import('./tools/DnsEnumeratorWorkbench'));
 const OwaspZapWorkbench = React.lazy(() => import('./tools/OwaspZapWorkbench'));
+const ApiClientWorkbench = React.lazy(() => import('./tools/ApiClientWorkbench'));
 const PwnedPasswordsCheckerWorkbench = React.lazy(() => import('./tools/PwnedPasswordsCheckerWorkbench'));
 const CertInspectWorkbench = React.lazy(() => import('./tools/CertInspectWorkbench'));
 
@@ -96,7 +97,7 @@ export const KNOWN_TOOL_IDS = [
   // New hacker tools
   'nmap-scanner', 'hashcat-cracker', 'burp-proxy', 'aircrack-wifi',
   'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-enumerator',
-  'owasp-zap', 'pwned-passwords', 'cert-inspect',
+  'owasp-zap', 'pwned-passwords', 'cert-inspect', 'api-client',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
 
@@ -197,6 +198,7 @@ export function renderTool(toolId, serial) {
     case 'tcpdump-viewer': return <TcpdumpViewerWorkbench onLogMessage={addLog} />;
     case 'dns-enumerator': return <DnsEnumeratorWorkbench onLogMessage={addLog} />;
     case 'owasp-zap': return <OwaspZapWorkbench onLogMessage={addLog} />;
+    case 'api-client': return <ApiClientWorkbench onLogMessage={addLog} />;
     case 'pwned-passwords': return <PwnedPasswordsCheckerWorkbench onLogMessage={addLog} />;
     case 'cert-inspect': return <CertInspectWorkbench onLogMessage={addLog} />;
     default:
