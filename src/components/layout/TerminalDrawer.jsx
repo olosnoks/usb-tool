@@ -12,6 +12,7 @@ import {
   ArrowDown
 } from 'lucide-react';
 import { useSerial } from '../../context/SerialContext';
+import SerialControls from './SerialControls';
 
 export default function TerminalDrawer({
   isOpen,
@@ -88,30 +89,26 @@ export default function TerminalDrawer({
         />
       )}
 
-      {/* Drawer Header Bar (Always visible) */}
-      <div className="flex items-center justify-between px-3 sm:px-4 py-2 bg-slate-950 border-b border-slate-900 select-none">
-        {/* Left: Drawer title & Live Preview */}
-        <div className="flex items-center gap-2.5 truncate flex-1 mr-3">
+      {/* Drawer Header Bar (Always visible) — now also hosts the serial controls */}
+      <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2 bg-slate-950 border-b border-slate-900 select-none flex-wrap">
+        {/* Left: Drawer title + serial connection controls */}
+        <div className="flex items-center gap-2.5 min-w-0">
           <button
             onClick={onToggleOpen}
-            className="flex items-center gap-1.5 text-cyan-400 font-bold hover:text-cyan-300 transition-colors"
+            className="flex items-center gap-1.5 text-cyan-400 font-bold hover:text-cyan-300 transition-colors shrink-0"
+            title={isOpen ? 'Collapse drawer' : 'Expand live terminal drawer'}
           >
             <TerminalIcon className="w-4 h-4" />
-            <span className="text-xs">LIVE SERIAL DRAWER</span>
+            <span className="text-xs hidden sm:inline">SERIAL</span>
             {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
           </button>
 
-          {/* Activity status pill */}
-          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px]">
-            <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
-            <span className={isConnected ? 'text-emerald-400' : 'text-slate-500'}>
-              {isConnected ? `${baudRate} bps` : 'OFFLINE'}
-            </span>
-          </div>
+          {/* Serial connection controls (moved here from the app header) */}
+          <SerialControls />
 
           {/* Collapsed live line preview */}
           {!isOpen && latestEntry && (
-            <div className="hidden md:flex items-center gap-2 text-[11px] text-slate-400 truncate flex-1">
+            <div className="hidden lg:flex items-center gap-2 text-[11px] text-slate-400 truncate min-w-0">
               <span className="text-slate-600 text-[10px]">{latestEntry.timestamp}</span>
               <span className={`truncate font-mono ${latestEntry.type === 'rx' ? 'text-cyan-300' : latestEntry.type === 'tx' ? 'text-amber-400' : 'text-slate-400'}`}>
                 {latestEntry.text}
