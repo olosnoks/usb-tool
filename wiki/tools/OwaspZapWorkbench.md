@@ -1,27 +1,30 @@
-# Web Scanner Workbench (OWASP ZAP-style)
+# Web Security Scanner Workbench (OWASP ZAP-style)
 
-**Purpose**: Front-end for a WebAssembly web-vulnerability-scanning engine.
+**Purpose**: Assess a web target's security posture from the browser.
 
-**Important limitation**: Active scanning of arbitrary origins is blocked by the
-browser's same-origin/CORS policy, so it cannot be done from the page alone. The
-WASM engine must carry the scanning logic and its own transport. Until the engine
-is built, the tool reports its absence honestly and never fabricates alerts.
+**How it works**: By default it runs a real **passive scan**
+(`src/utils/webScan.js`) on the target's HTTP response, reporting findings with a
+severity and CWE:
+
+- Cleartext HTTP, missing HSTS (CWE-319).
+- Missing Content-Security-Policy and X-Frame-Options / clickjacking (CWE-693, 1021).
+- Missing X-Content-Type-Options, Referrer-Policy, Permissions-Policy.
+- Information disclosure via Server, X-Powered-By, X-AspNet-Version (CWE-200).
+- Permissive CORS, including `*` with credentials (CWE-942).
+- Insecure cookies: missing Secure / HttpOnly / SameSite (CWE-614, 1004, 1275).
+
+**Active scanning** (crafting malicious requests) cannot be done from a browser. If
+a WebAssembly engine is present at `public/wasm/zap.wasm` its findings are merged in.
+See [docs/WASM_ENGINES.md](../../docs/WASM_ENGINES.md).
 
 **Usage**:
-- Enter a target URL.
-- Click **Start Scan** (disabled until the engine loads). Alerts display severity,
-  CWE, and description.
+- Optionally set a proxy (empty = direct).
+- Enter a target URL and click **Start Scan**. Findings are listed by severity.
 
-**Implementation Details**:
-- Adapter `src/utils/zapWrapper.js` (`loadZapEngine()`) loads `public/wasm/zap.wasm`.
-- Required exports: `memory`, `malloc`, `free`, and `scan(urlPtr, urlLen) -> resultPtr`
-  (null-terminated UTF-8 JSON of alert objects). See
-  [docs/WASM_ENGINES.md](../../docs/WASM_ENGINES.md).
-- When the binary is missing, an `EngineNotice` panel shows the build hint and the
-  expected interface.
-
-**Dependencies**: `src/utils/zapWrapper.js`, `src/utils/wasmLoader.js`,
-`src/components/tools/common/EngineNotice.jsx`.
-
-**Status**: Engine not shipped. Compile `zap.wasm` with the `emsdk` submodule and
-place it in `public/wasm/`.
+**Honest limitations**:
+- Reading cross-origin response headers requires CORS. Without a proxy, most
+  targets expose only a few headers, so the passive scan is incomplete; a proxy
+  returns the full response for analysis.
+- Browsers strip `Set-Cookie` from `fetch` responses, so cookie-flag checks only
+  fire when a proxy forwards that header.
+- This is a passive posture check, not a full active vulnerability scan.
