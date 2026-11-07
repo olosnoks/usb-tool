@@ -1,21 +1,24 @@
-# Hashcat Cracker Workbench
+# Hash Cracker Workbench
 
-**Purpose**: Client‑side password hash cracking using the **hashcat** algorithm compiled to WebAssembly. No backend is required; all computation runs in the browser.
+**Purpose**: Client-side dictionary attack against a hash. Runs entirely in the
+browser; no backend, no WASM.
 
 **Usage**:
-- Provide a hash (e.g. MD5, SHA‑1, NTLM) in the *Hash* field.
-- Select a *Wordlist* (plain‑text file) via the file picker.
-- Choose a *Hash Mode* from the dropdown (default: `0 – MD5`).
-- Click **Start** to begin cracking. Progress, speed, and found passwords appear in the log pane.
+- Choose an algorithm: MD5, SHA-1, SHA-256, SHA-384, or SHA-512.
+- Paste the target hash (hex).
+- Enter a wordlist, one candidate per line.
+- Click **Crack**. Progress is shown as a percentage and the run can be stopped.
+  On success the matching candidate is displayed.
 
 **Implementation Details**:
-- The WASM binary (`public/wasm/hashcat.wasm`) exports `init`, `updateWordlist`, `crack`, and `terminate` functions.
-- `src/utils/wasmLoader.js` loads the module lazily on component mount.
-- The workbench streams the wordlist to the WASM module chunk‑by‑chunk to avoid loading the entire file into memory.
+- SHA-1/256/384/512 use the Web Crypto API (`crypto.subtle.digest`).
+- MD5 is implemented locally in `src/utils/md5.js` because Web Crypto omits it.
+  The implementation is verified against the RFC 1321 test vectors.
+- The loop yields to the event loop every 500 candidates so the UI stays responsive.
 
-**Dependencies**: `src/utils/wasmLoader.js`, `src/utils/fileReader.js` (optional helper for streaming files).
+**Dependencies**: `src/utils/md5.js`.
 
 **Notes**:
-- Performance depends on the device’s CPU/GPU; WebGPU can be leveraged if the WASM build includes it.
-- Only a subset of hashcat’s massive algorithm set is compiled; unsupported modes will show an error message.
-
+- This is a dictionary (wordlist) attack, not brute force over a keyspace.
+- Throughput is JavaScript-bound; it suits testing and small lists, not large
+  cracking jobs.
