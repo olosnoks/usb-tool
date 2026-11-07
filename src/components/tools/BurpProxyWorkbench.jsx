@@ -1,22 +1,24 @@
 import React, { useState, useRef } from 'react';
 import { proxiedFetch, isProxyEnabled, describeNetworkError } from '../../utils/netClient';
-import { countMarkers, stripMarkers, applyMarkers } from '../../utils/intruder';
-import { CODECS } from '../../utils/codec';
+import { countMarkers, stripMarkers, applyMarkers, applyAllMarkers } from '../../utils/intruder';
+import { CODECS, jwtDecode } from '../../utils/codec';
+import { md5Hex } from '../../utils/md5';
+import { parseCurl, parseRawHttp, toCurl } from '../../utils/httpImport';
+import { lineDiff, diffStats } from '../../utils/diff';
 import ProxyConfig from './common/ProxyConfig';
 
 /**
- * Web request toolkit modelled on Burp Suite, within browser limits.
- *  - Repeater: craft a request, send it, inspect the response, with history.
- *  - Intruder: mark {{positions}} and fuzz them with a payload list (sniper).
- *  - Decoder:  encode/decode Base64, URL, Hex, HTML.
+ * Burp-style web request toolkit (within browser limits).
+ *  - Repeater: craft HTTP/HTTPS requests, multi-view response, history, import.
+ *  - Intruder: sniper / battering-ram / pitchfork / cluster-bomb with grep-match.
+ *  - Comparer: line diff of two responses/texts.
+ *  - Decoder: Base64/URL/Hex/HTML, JWT decode, hashing, smart-decode.
  *
- * A browser cannot act as a transparent intercepting proxy; requests go through
- * fetch and are CORS-limited. Configure a proxy (netClient) to reach arbitrary
- * hosts and read their responses.
+ * A browser cannot be a transparent intercepting proxy; requests go through fetch
+ * and are CORS-limited. Configure a proxy to reach arbitrary hosts.
  */
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 
-// Accept http:// and https:// URLs. If no scheme is given, default to https://.
 function normalizeUrl(raw) {
   const u = (raw || '').trim();
   if (!u) return u;
@@ -53,31 +55,103 @@ async function sendRequest({ method, url, headers, body }) {
   };
 }
 
+function hexDump(str, max = 8192) {
+  const bytes = new TextEncoder().encode(str).subarray(0, max);
+  const rows = [];
+  for (let i = 0; i < bytes.length; i += 16) {
+    const slice = bytes.subarray(i, i + 16);
+    const hex = Array.from(slice).map((b) => b.toString(16).padStart(2, '0')).join(' ');
+    const ascii = Array.from(slice).map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : '.')).join('');
+    rows.push(`${i.toString(16).padStart(8, '0')}  ${hex.padEnd(47)}  ${ascii}`);
+  }
+  return rows.join('\n') + (new TextEncoder().encode(str).length > max ? '\n… truncated …' : '');
+}
+
+function prettyBody(body, headers) {
+  const ct = (headers || []).find(([k]) => k.toLowerCase() === 'content-type')?.[1] || '';
+  if (/json/i.test(ct) || /^\s*[[{]/.test(body)) {
+    try { return JSON.stringify(JSON.parse(body), null, 2); } catch { /* fall through */ }
+  }
+  return body;
+}
+
+// Render text with case-insensitive <mark> highlights for a search term.
+function Highlighted({ text, term }) {
+  if (!term) return <>{text}</>;
+  const parts = [];
+  const lower = text.toLowerCase();
+  const t = term.toLowerCase();
+  let i = 0;
+  let k = 0;
+  while (i < text.length) {
+    const idx = lower.indexOf(t, i);
+    if (idx < 0) { parts.push(text.slice(i)); break; }
+    if (idx > i) parts.push(text.slice(i, idx));
+    parts.push(<mark key={k++} className="bg-amber-400/40 text-amber-100">{text.slice(idx, idx + term.length)}</mark>);
+    i = idx + term.length;
+  }
+  return <>{parts}</>;
+}
+
 export default function BurpProxyWorkbench({ onLogMessage }) {
   const [tab, setTab] = useState('repeater');
-  // Shared request (Repeater <-> Intruder)
   const [method, setMethod] = useState('GET');
   const [url, setUrl] = useState('');
   const [headers, setHeaders] = useState('');
   const [body, setBody] = useState('');
+  const [cmpA, setCmpA] = useState('');
+  const [cmpB, setCmpB] = useState('');
 
   const log = (msg) => onLogMessage?.(msg);
-  const reqProps = { method, url, headers, body, setMethod, setUrl, setHeaders, setBody };
+  const req = { method, url, headers, body, setMethod, setUrl, setHeaders, setBody };
+  const toComparer = (text, slot) => { if (slot === 'b') setCmpB(text); else setCmpA(text); setTab('comparer'); };
 
   return (
     <div className="p-4">
       <ProxyConfig onLogMessage={onLogMessage} />
       <div className="flex gap-1 mb-3 border-b border-slate-800">
-        {['repeater', 'intruder', 'decoder'].map((t) => (
+        {['repeater', 'intruder', 'comparer', 'decoder'].map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-3 py-1 text-sm capitalize rounded-t ${tab === t ? 'bg-slate-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}>
             {t}
           </button>
         ))}
       </div>
-      {tab === 'repeater' && <Repeater {...reqProps} log={log} />}
-      {tab === 'intruder' && <Intruder {...reqProps} log={log} />}
+      {tab === 'repeater' && <Repeater {...req} log={log} toComparer={toComparer} />}
+      {tab === 'intruder' && <Intruder {...req} log={log} toComparer={toComparer} />}
+      {tab === 'comparer' && <Comparer a={cmpA} b={cmpB} setA={setCmpA} setB={setCmpB} />}
       {tab === 'decoder' && <Decoder />}
+    </div>
+  );
+}
+
+function ImportBar({ setMethod, setUrl, setHeaders, setBody, log }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const doImport = (fn, kind) => {
+    try {
+      const r = fn(text);
+      setMethod(r.method); setUrl(r.url); setHeaders(r.headers); setBody(r.body);
+      setOpen(false); setText('');
+      log?.(`Imported ${kind} request: ${r.method} ${r.url}`);
+    } catch (e) { log?.(`Import failed: ${e.message}`); alert(`Import failed: ${e.message}`); }
+  };
+  return (
+    <div className="mb-2">
+      <button onClick={() => setOpen((o) => !o)} className="text-xs text-cyan-300 hover:text-cyan-200">
+        {open ? '▾ Import request' : '▸ Import request (curl / raw HTTP)'}
+      </button>
+      {open && (
+        <div className="mt-1">
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4}
+            placeholder={"Paste a curl command or a raw HTTP request, then parse…"}
+            className="w-full bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
+          <div className="flex gap-2 mt-1">
+            <button onClick={() => doImport(parseCurl, 'curl')} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Parse as curl</button>
+            <button onClick={() => doImport(parseRawHttp, 'raw')} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Parse as raw HTTP</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -97,8 +171,45 @@ function RequestEditor({ method, url, headers, body, setMethod, setUrl, setHeade
   );
 }
 
+function ResponseView({ response, toComparer }) {
+  const [view, setView] = useState('pretty');
+  const [search, setSearch] = useState('');
+  if (!response) return null;
+  if (response.error) return <p className="text-red-400 text-sm mt-2">{response.error}</p>;
+
+  const pretty = prettyBody(response.body, response.headers);
+  const shown = view === 'pretty' ? pretty : view === 'hex' ? hexDump(response.body) : response.body;
+
+  return (
+    <div className="mt-3 text-sm text-gray-200">
+      <div className="flex flex-wrap items-center gap-2">
+        <span>Status: <span className={response.status < 400 ? 'text-green-400' : 'text-red-400'}>{response.status} {response.statusText}</span></span>
+        <span className="text-gray-500 text-xs">{response.size} bytes · {response.timeMs}ms</span>
+        <div className="ml-auto flex gap-1">
+          {['pretty', 'raw', 'hex', 'render'].map((v) => (
+            <button key={v} onClick={() => setView(v)} className={`px-2 py-0.5 rounded text-xs capitalize ${view === v ? 'bg-slate-700 text-white' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>{v}</button>
+          ))}
+        </div>
+      </div>
+      <div className="mt-2 flex gap-2">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="search response…" className="flex-1 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200" />
+        {toComparer && <button onClick={() => toComparer(response.body, 'a')} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">→ Comparer A</button>}
+        {toComparer && <button onClick={() => toComparer(response.body, 'b')} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">→ Comparer B</button>}
+      </div>
+      <div className="mt-2 text-xs text-gray-400">Response headers:</div>
+      <pre className="bg-slate-800 p-2 rounded overflow-auto text-xs" style={{ maxHeight: '12vh' }}>{response.headers.map(([k, v]) => `${k}: ${v}`).join('\n')}</pre>
+      <div className="mt-2 text-xs text-gray-400">Body:</div>
+      {view === 'render' ? (
+        <iframe title="response" sandbox="" srcDoc={response.body} className="w-full bg-white rounded" style={{ height: '32vh' }} />
+      ) : (
+        <pre className="bg-slate-800 p-2 rounded overflow-auto text-xs" style={{ maxHeight: '32vh' }}><Highlighted text={shown} term={search} /></pre>
+      )}
+    </div>
+  );
+}
+
 function Repeater(props) {
-  const { method, url, headers, body, log } = props;
+  const { method, url, headers, body, log, toComparer } = props;
   const [response, setResponse] = useState(null);
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState([]);
@@ -128,19 +239,13 @@ function Repeater(props) {
   return (
     <div className="flex gap-3">
       <div className="flex-1 min-w-0">
+        <ImportBar {...props} />
         <RequestEditor {...props} />
-        <button onClick={send} disabled={busy} className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-500 disabled:opacity-40">{busy ? 'Sending…' : 'Send'}</button>
-        {response && !response.error && (
-          <div className="mt-3 text-sm text-gray-200">
-            <div>Status: <span className={response.status < 400 ? 'text-green-400' : 'text-red-400'}>{response.status} {response.statusText}</span>
-              <span className="text-gray-500 text-xs"> · {response.size} bytes · {response.timeMs}ms</span></div>
-            <div className="mt-2 text-xs text-gray-400">Response headers:</div>
-            <pre className="bg-slate-800 p-2 rounded overflow-auto text-xs" style={{ maxHeight: '12vh' }}>{response.headers.map(([k, v]) => `${k}: ${v}`).join('\n')}</pre>
-            <div className="mt-2 text-xs text-gray-400">Body:</div>
-            <pre className="bg-slate-800 p-2 rounded overflow-auto text-xs" style={{ maxHeight: '28vh' }}>{response.body}</pre>
-          </div>
-        )}
-        {response?.error && <p className="text-red-400 text-sm mt-2">{response.error}</p>}
+        <div className="flex gap-2">
+          <button onClick={send} disabled={busy} className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-500 disabled:opacity-40">{busy ? 'Sending…' : 'Send'}</button>
+          <button onClick={() => { navigator.clipboard?.writeText(toCurl({ method, url, headers, body })); log('Copied as curl'); }} className="px-3 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Copy as curl</button>
+        </div>
+        <ResponseView response={response} toComparer={toComparer} />
       </div>
       {history.length > 0 && (
         <div className="w-56 shrink-0">
@@ -159,40 +264,74 @@ function Repeater(props) {
   );
 }
 
+const ATTACKS = [
+  { id: 'sniper', label: 'Sniper (one position at a time)' },
+  { id: 'battering', label: 'Battering ram (same payload, all positions)' },
+  { id: 'pitchfork', label: 'Pitchfork (parallel sets)' },
+  { id: 'clusterbomb', label: 'Cluster bomb (all combinations)' },
+];
+
+function buildJobs(attack, positions, sets) {
+  if (positions === 0) return [];
+  if (attack === 'sniper') {
+    const list = sets[0] || [];
+    const jobs = [];
+    for (let p = 0; p < positions; p++) for (const pl of list) jobs.push({ values: Array.from({ length: positions }, (_, i) => (i === p ? pl : null)), label: `p${p + 1}=${pl}` });
+    return jobs;
+  }
+  if (attack === 'battering') {
+    return (sets[0] || []).map((pl) => ({ values: Array(positions).fill(pl), label: pl }));
+  }
+  if (attack === 'pitchfork') {
+    const len = Math.min(...Array.from({ length: positions }, (_, i) => (sets[i] || []).length));
+    const jobs = [];
+    for (let k = 0; k < len; k++) { const vals = Array.from({ length: positions }, (_, i) => sets[i][k]); jobs.push({ values: vals, label: vals.join(' | ') }); }
+    return jobs;
+  }
+  // cluster bomb
+  let combos = [[]];
+  for (let i = 0; i < positions; i++) {
+    const set = sets[i] || [];
+    const next = [];
+    for (const c of combos) for (const pl of set) next.push([...c, pl]);
+    combos = next;
+  }
+  return combos.map((vals) => ({ values: vals, label: vals.join(' | ') }));
+}
+
 function Intruder(props) {
-  const { method, url, headers, body, log } = props;
-  const [payloads, setPayloads] = useState('');
+  const { method, url, headers, body, log, toComparer } = props;
+  const [attack, setAttack] = useState('sniper');
+  const [payloadText, setPayloadText] = useState('');
+  const [perPos, setPerPos] = useState({}); // { posIndex: payloadText } for pitchfork/cluster
+  const [grep, setGrep] = useState('');
   const [results, setResults] = useState([]);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const [baseline, setBaseline] = useState(null);
+  const [sort, setSort] = useState({ key: 'idx', dir: 1 });
+  const [filter, setFilter] = useState('');
   const cancelRef = useRef(false);
 
   const positions = countMarkers([url, headers, body]);
+  const multiSet = attack === 'pitchfork' || attack === 'clusterbomb';
+  const linesOf = (t) => (t || '').split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.length > 0);
 
   const run = async () => {
-    const list = payloads.split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.length > 0);
-    if (!url.trim() || positions === 0 || list.length === 0) {
+    const sets = multiSet
+      ? Array.from({ length: positions }, (_, i) => linesOf(perPos[i]))
+      : [linesOf(payloadText)];
+    if (!url.trim() || positions === 0 || sets.every((s) => s.length === 0)) {
       log('Intruder needs a URL, at least one {{marker}}, and payloads.');
       return;
     }
+    const jobs = buildJobs(attack, positions, sets);
+    if (jobs.length === 0) { log('No payload combinations to run.'); return; }
     setRunning(true);
     setResults([]);
     cancelRef.current = false;
-    const total = positions * list.length;
-    setProgress({ done: 0, total });
-    log(`Intruder: ${positions} position(s) × ${list.length} payload(s) = ${total} request(s)`);
+    setProgress({ done: 0, total: jobs.length });
+    log(`Intruder (${attack}): ${positions} position(s), ${jobs.length} request(s)`);
 
-    // Baseline request (markers at defaults)
-    try {
-      const base = await sendRequest({ method, url: stripMarkers(url), headers: stripMarkers(headers), body: stripMarkers(body) });
-      setBaseline({ status: base.status, size: base.size });
-    } catch { setBaseline(null); }
-
-    const jobs = [];
-    for (let p = 0; p < positions; p++) {
-      for (const payload of list) jobs.push({ p, payload });
-    }
     let done = 0;
     const collected = [];
     const concurrency = 5;
@@ -200,19 +339,20 @@ function Intruder(props) {
     const worker = async () => {
       while (idx < jobs.length) {
         if (cancelRef.current) return;
-        const job = jobs[idx++];
-        const fields = applyMarkers({ url, headers, body }, job.p, job.payload);
+        const myIdx = idx++;
+        const job = jobs[myIdx];
+        const fields = applyAllMarkers({ url, headers, body }, job.values);
         let row;
         try {
           const res = await sendRequest({ method, url: fields.url, headers: fields.headers, body: fields.body });
-          row = { position: job.p + 1, payload: job.payload, status: res.status, length: res.size, timeMs: res.timeMs };
+          row = { idx: myIdx + 1, label: job.label, status: res.status, length: res.size, timeMs: res.timeMs, match: grep ? res.body.includes(grep) : null, body: res.body };
         } catch (e) {
-          row = { position: job.p + 1, payload: job.payload, status: 'err', length: 0, timeMs: 0, error: describeNetworkError(e) };
+          row = { idx: myIdx + 1, label: job.label, status: 'err', length: 0, timeMs: 0, match: null, error: describeNetworkError(e) };
         }
         done += 1;
         collected.push(row);
-        setProgress({ done, total });
-        setResults([...collected].sort((a, b) => a.position - b.position || a.payload.localeCompare(b.payload)));
+        setProgress({ done, total: jobs.length });
+        setResults([...collected]);
       }
     };
     await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, worker));
@@ -220,32 +360,58 @@ function Intruder(props) {
     setRunning(false);
   };
 
-  const anomaly = (r) => baseline && (r.status !== baseline.status || Math.abs(r.length - baseline.size) > 0);
+  const sorted = [...results]
+    .filter((r) => !filter || String(r.label).toLowerCase().includes(filter.toLowerCase()))
+    .sort((a, b) => {
+      const va = a[sort.key]; const vb = b[sort.key];
+      if (va === vb) return 0;
+      return (va > vb ? 1 : -1) * sort.dir;
+    });
+  const toggleSort = (key) => setSort((s) => ({ key, dir: s.key === key ? -s.dir : 1 }));
+  const Th = ({ k, children }) => <th onClick={() => toggleSort(k)} className="p-1 cursor-pointer select-none hover:text-white">{children}{sort.key === k ? (sort.dir > 0 ? ' ▲' : ' ▼') : ''}</th>;
 
   return (
     <div>
+      <ImportBar {...props} />
       <RequestEditor {...props} markerHint />
-      <div className="text-xs text-gray-400 mb-1">{positions} marker position(s) detected. Mark fuzz points with <code>{'{{value}}'}</code>.</div>
-      <textarea placeholder="Payloads (one per line)" rows={4} value={payloads} onChange={(e) => setPayloads(e.target.value)} className="w-full mb-2 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <select value={attack} onChange={(e) => setAttack(e.target.value)} className="bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200">
+          {ATTACKS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+        </select>
+        <span className="text-xs text-gray-400">{positions} marker position(s) — mark with <code>{'{{value}}'}</code></span>
+      </div>
+      {multiSet ? (
+        Array.from({ length: positions }, (_, i) => (
+          <textarea key={i} value={perPos[i] || ''} onChange={(e) => setPerPos((p) => ({ ...p, [i]: e.target.value }))} rows={3}
+            placeholder={`Payload set for position ${i + 1} (one per line)`} className="w-full mb-2 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
+        ))
+      ) : (
+        <textarea value={payloadText} onChange={(e) => setPayloadText(e.target.value)} rows={4} placeholder="Payloads (one per line)" className="w-full mb-2 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
+      )}
+      <input value={grep} onChange={(e) => setGrep(e.target.value)} placeholder="grep-match: flag responses containing this string" className="w-full mb-2 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200" />
       <div className="flex gap-2 mb-2">
         <button onClick={run} disabled={running} className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-500 disabled:opacity-40">
           {running ? `Attacking ${progress.done}/${progress.total}` : 'Start attack'}
         </button>
         {running && <button onClick={() => { cancelRef.current = true; }} className="px-3 py-1 bg-slate-700 text-gray-200 rounded hover:bg-slate-600">Stop</button>}
+        {results.length > 0 && <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="filter payloads…" className="bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200" />}
       </div>
-      {baseline && <div className="text-xs text-gray-500 mb-1">Baseline: status {baseline.status}, {baseline.size} bytes. Rows differing from baseline are highlighted.</div>}
       {results.length > 0 && (
         <div className="overflow-auto" style={{ maxHeight: '45vh' }}>
           <table className="w-full text-xs text-gray-200 border-collapse font-mono">
-            <thead className="sticky top-0 bg-slate-800"><tr className="text-left"><th className="p-1">Pos</th><th className="p-1">Payload</th><th className="p-1">Status</th><th className="p-1">Length</th><th className="p-1">Time</th></tr></thead>
+            <thead className="sticky top-0 bg-slate-800 text-left">
+              <tr><Th k="idx">#</Th><Th k="label">Payload</Th><Th k="status">Status</Th><Th k="length">Length</Th><Th k="timeMs">Time</Th>{grep && <Th k="match">Match</Th>}<th className="p-1"></th></tr>
+            </thead>
             <tbody>
-              {results.map((r, i) => (
-                <tr key={i} className={`border-b border-slate-800 ${anomaly(r) ? 'bg-yellow-950/30' : ''}`}>
-                  <td className="p-1 text-gray-500">{r.position}</td>
-                  <td className="p-1 break-all">{r.payload}</td>
+              {sorted.map((r, i) => (
+                <tr key={i} className={`border-b border-slate-800 ${r.match ? 'bg-yellow-950/30' : ''}`}>
+                  <td className="p-1 text-gray-500">{r.idx}</td>
+                  <td className="p-1 break-all">{r.label}</td>
                   <td className={`p-1 ${r.status === 'err' ? 'text-red-400' : r.status < 400 ? 'text-green-400' : 'text-yellow-400'}`}>{r.status}</td>
                   <td className="p-1">{r.length}</td>
                   <td className="p-1 text-gray-500">{r.timeMs}ms</td>
+                  {grep && <td className={`p-1 ${r.match ? 'text-yellow-300 font-bold' : 'text-gray-600'}`}>{r.match ? 'yes' : 'no'}</td>}
+                  <td className="p-1">{r.body != null && <button onClick={() => toComparer(r.body, 'b')} className="text-cyan-400 hover:text-cyan-200">→cmp</button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -256,14 +422,50 @@ function Intruder(props) {
   );
 }
 
+function Comparer({ a, b, setA, setB }) {
+  const [rows, setRows] = useState(null);
+  const compare = () => setRows(lineDiff(a, b));
+  const stats = rows ? diffStats(rows) : null;
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <textarea value={a} onChange={(e) => setA(e.target.value)} rows={8} placeholder="A" className="bg-slate-900 border border-slate-800 rounded p-2 text-xs text-gray-200 font-mono" />
+        <textarea value={b} onChange={(e) => setB(e.target.value)} rows={8} placeholder="B" className="bg-slate-900 border border-slate-800 rounded p-2 text-xs text-gray-200 font-mono" />
+      </div>
+      <button onClick={compare} className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-500 text-sm">Compare</button>
+      {stats && <span className="ml-3 text-xs text-gray-400">+{stats.added} added · -{stats.removed} removed · {stats.same} unchanged</span>}
+      {rows && (
+        <pre className="mt-2 bg-slate-900 p-2 rounded overflow-auto text-xs font-mono" style={{ maxHeight: '55vh' }}>
+          {rows.map((r, i) => (
+            <div key={i} className={r.type === 'add' ? 'bg-green-950/40 text-green-300' : r.type === 'del' ? 'bg-red-950/40 text-red-300' : 'text-gray-400'}>
+              {r.type === 'add' ? '+ ' : r.type === 'del' ? '- ' : '  '}{r.text}
+            </div>
+          ))}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function Decoder() {
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
   const [error, setError] = useState('');
 
-  const apply = (fn) => {
-    try { setOutput(fn(input)); setError(''); }
-    catch (e) { setError(e.message); }
+  const apply = (fn) => { try { setOutput(fn(input)); setError(''); } catch (e) { setError(e.message); } };
+  const hash = async (alg) => {
+    try {
+      if (alg === 'MD5') { setOutput(md5Hex(input)); setError(''); return; }
+      const buf = await crypto.subtle.digest(alg, new TextEncoder().encode(input));
+      setOutput(Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join(''));
+      setError('');
+    } catch (e) { setError(e.message); }
+  };
+  const smartDecode = () => {
+    for (const c of CODECS) {
+      try { const d = c.decode(input); if (d && d !== input && /[\x20-\x7e]/.test(d)) { setOutput(`[${c.label}]\n${d}`); setError(''); return; } } catch { /* next */ }
+    }
+    setError('Smart decode could not interpret the input.');
   };
 
   return (
@@ -276,10 +478,15 @@ function Decoder() {
             <button onClick={() => apply(c.decode)} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">{c.label} dec</button>
           </span>
         ))}
-        <button onClick={() => { setInput(output); setOutput(''); }} className="px-2 py-1 bg-slate-800 text-gray-300 rounded text-xs hover:bg-slate-700">↑ output → input</button>
+        <button onClick={() => apply(jwtDecode)} className="px-2 py-1 bg-indigo-700 text-gray-100 rounded text-xs hover:bg-indigo-600">JWT decode</button>
+        <button onClick={smartDecode} className="px-2 py-1 bg-cyan-700 text-gray-100 rounded text-xs hover:bg-cyan-600">Smart decode</button>
+        {['MD5', 'SHA-1', 'SHA-256'].map((a) => (
+          <button key={a} onClick={() => hash(a)} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">{a}</button>
+        ))}
+        <button onClick={() => { setInput(output.replace(/^\[[^\]]+\]\n/, '')); setOutput(''); }} className="px-2 py-1 bg-slate-800 text-gray-300 rounded text-xs hover:bg-slate-700">↑ output → input</button>
       </div>
       {error && <p className="text-red-400 text-xs mb-1">Error: {error}</p>}
-      <textarea placeholder="Output" rows={5} readOnly value={output} className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-sm text-gray-200 font-mono" />
+      <textarea placeholder="Output" rows={6} readOnly value={output} className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-sm text-gray-200 font-mono" />
     </div>
   );
 }

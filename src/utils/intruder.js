@@ -27,3 +27,18 @@ export function applyMarkers({ url, headers, body }, positionIndex, payload) {
   });
   return { url: apply(url), headers: apply(headers), body: apply(body) };
 }
+
+/**
+ * Replace every marker with the value at its index in `values`
+ * (used by battering-ram / pitchfork / cluster-bomb). Missing values fall back
+ * to the marker's default inner text.
+ */
+export function applyAllMarkers({ url, headers, body }, values) {
+  let counter = 0;
+  const apply = (s) => (s || '').replace(MARK, (_, inner) => {
+    const value = counter < values.length && values[counter] != null ? values[counter] : inner;
+    counter += 1;
+    return value;
+  });
+  return { url: apply(url), headers: apply(headers), body: apply(body) };
+}

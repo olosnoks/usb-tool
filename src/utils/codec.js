@@ -50,6 +50,24 @@ export function htmlDecode(str) {
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
 }
 
+export function base64UrlDecode(str) {
+  let s = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  return base64Decode(s);
+}
+
+// Decode a JWT into pretty-printed header + payload (signature is not verified).
+export function jwtDecode(token) {
+  const parts = token.trim().split('.');
+  if (parts.length < 2) throw new Error('Not a JWT (expected header.payload.signature)');
+  const header = JSON.parse(base64UrlDecode(parts[0]));
+  const payload = JSON.parse(base64UrlDecode(parts[1]));
+  const out = { header, payload };
+  if (payload.exp) out.expires = new Date(payload.exp * 1000).toISOString();
+  if (payload.iat) out.issuedAt = new Date(payload.iat * 1000).toISOString();
+  return JSON.stringify(out, null, 2) + '\n\n// Signature is NOT verified.';
+}
+
 export const CODECS = [
   { id: 'base64', label: 'Base64', encode: base64Encode, decode: base64Decode },
   { id: 'url', label: 'URL', encode: urlEncode, decode: urlDecode },
