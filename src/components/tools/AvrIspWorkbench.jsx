@@ -3,7 +3,6 @@ import {
   Cpu,
   CheckCircle2,
   AlertTriangle,
-  Sparkles,
   Sliders,
   Zap,
   Usb,
@@ -13,7 +12,6 @@ import {
 } from 'lucide-react';
 import { AvrIspClient, fuseHazards } from '../../utils/avrIspDriver';
 import { parseIntelHex } from '../../utils/firmwareParser';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { confirmAction } from '../../utils/sessionLog';
 const hex2 = (n) => (n ?? 0).toString(16).padStart(2, '0').toUpperCase();
@@ -29,7 +27,6 @@ const FUSE_FIELDS = [
 export default function AvrIspWorkbench() {
   const [client] = useState(() => new AvrIspClient(console.log));
   const [isConnected, setIsConnected] = useState(false);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [busy, setBusy] = useState('');
   const [chipInfo, setChipInfo] = useState(null);
   const [programmer, setProgrammer] = useState(null);
@@ -64,22 +61,12 @@ export default function AvrIspWorkbench() {
     const info = await client.connectHardware();
     setProgrammer(info);
     setIsConnected(true);
-    setIsSimulated(false);
-    await identify();
-  });
-
-  const handleConnectSimulation = () => run('connect', async () => {
-    client.connectSimulation();
-    setProgrammer(null);
-    setIsConnected(true);
-    setIsSimulated(true);
     await identify();
   });
 
   const handleDisconnect = async () => {
     await client.disconnect();
     setIsConnected(false);
-    setIsSimulated(false);
     setChipInfo(null);
     setFuses(null);
     setResult('');
@@ -102,7 +89,7 @@ export default function AvrIspWorkbench() {
     if (hazards.length) {
       allowHazards = confirmAction(`These fuse values can lock you out of the chip:\n\n${hazards.join('\n\n')}\n\nWrite them anyway?`);
       if (!allowHazards) return;
-    } else if (!isSimulated && !confirmAction(`Write L=0x${hex2(next.lfuse)} H=0x${hex2(next.hfuse)} E=0x${hex2(next.efuse)} to the ${chipInfo?.name || 'chip'}?`)) {
+    } else if (!confirmAction(`Write L=0x${hex2(next.lfuse)} H=0x${hex2(next.hfuse)} E=0x${hex2(next.efuse)} to the ${chipInfo?.name || 'chip'}?`)) {
       return;
     }
     const back = await client.writeFuses(next, { allowHazards });
@@ -129,25 +116,25 @@ export default function AvrIspWorkbench() {
   };
 
   const handleFlash = () => run('flash', async () => {
-    if (!isSimulated && !confirmAction(`Erase the ${chipInfo?.name || 'chip'} and write ${image.name}?`)) return;
+    if (!confirmAction(`Erase the ${chipInfo?.name || 'chip'} and write ${image.name}?`)) return;
     setProgress(0);
     const r = await client.flashImage(image, { onProgress: setProgress });
     setResult(`SUCCESS: ${image.name} written and verified (${r.bytes} bytes).`);
   });
 
   const handleBurn = () => run('burn', async () => {
-    if (!isSimulated && !image) throw new Error('Load the bootloader .hex first (for example optiboot_atmega328.hex from the Arduino IDE).');
+    if (!image) throw new Error('Load the bootloader .hex first (for example optiboot_atmega328.hex from the Arduino IDE).');
     const f = client.chip?.defaultFuses;
-    if (!isSimulated && !confirmAction(`Burn ${image.name} as the bootloader?\n\nThis erases the chip, sets fuses L=0x${hex2(f.lfuse)} H=0x${hex2(f.hfuse)} E=0x${hex2(f.efuse)} and lock 0x${hex2(f.lock)}.`)) return;
+    if (!confirmAction(`Burn ${image.name} as the bootloader?\n\nThis erases the chip, sets fuses L=0x${hex2(f.lfuse)} H=0x${hex2(f.hfuse)} E=0x${hex2(f.efuse)} and lock 0x${hex2(f.lock)}.`)) return;
     setProgress(0);
-    await client.burnBootloader(image || { data: new Uint8Array(512), startAddress: 0x7e00 }, setProgress);
+    await client.burnBootloader(image, setProgress);
     const back = await client.readFuses();
     setFuses(back);
-    setResult(`SUCCESS: Bootloader written, verified and protected${isSimulated ? ' (simulated)' : ''}.`);
+    setResult('SUCCESS: Bootloader written, verified and protected.');
   });
 
   const handleErase = () => run('erase', async () => {
-    if (!isSimulated && !confirmAction('Erase all flash and EEPROM on the target?')) return;
+    if (!confirmAction('Erase all flash and EEPROM on the target?')) return;
     await client.chipErase();
     setResult('SUCCESS: Chip erased.');
   });
@@ -156,10 +143,6 @@ export default function AvrIspWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && (
-        <DemoBanner>Simulated programmer and ATmega328P. Nothing is sent to hardware.</DemoBanner>
-      )}
-
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
@@ -175,24 +158,14 @@ export default function AvrIspWorkbench() {
 
           <div className="flex items-center gap-2">
             {!isConnected ? (
-              <>
-                <button
-                  onClick={handleConnectHardware}
-                  disabled={!!busy}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold text-xs disabled:opacity-40"
-                >
-                  <Usb className="w-3.5 h-3.5" />
-                  <span>{busy === 'connect' ? 'CONNECTING...' : 'CONNECT ARDUINOISP (SERIAL)'}</span>
-                </button>
-                <button
-                  onClick={handleConnectSimulation}
-                  disabled={!!busy}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-amber-300 border border-amber-500/40 text-xs font-bold disabled:opacity-40"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>DEMO</span>
-                </button>
-              </>
+              <button
+                onClick={handleConnectHardware}
+                disabled={!!busy}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold text-xs disabled:opacity-40"
+              >
+                <Usb className="w-3.5 h-3.5" />
+                <span>{busy === 'connect' ? 'CONNECTING...' : 'CONNECT ARDUINOISP (SERIAL)'}</span>
+              </button>
             ) : (
               <>
                 <button
@@ -227,8 +200,8 @@ export default function AvrIspWorkbench() {
             />
             <Card
               label="Programmer"
-              value={isSimulated ? 'Simulated' : 'STK500v1'}
-              sub={programmer ? `HW v${programmer.hw} · FW ${programmer.sw}` : 'Virtual target'}
+              value="STK500v1"
+              sub={programmer ? `HW v${programmer.hw} · FW ${programmer.sw}` : ''}
               color="text-purple-300"
             />
           </div>
@@ -335,7 +308,7 @@ export default function AvrIspWorkbench() {
           </button>
           <button
             onClick={handleBurn}
-            disabled={!ready || (!isSimulated && !image)}
+            disabled={!ready || !image}
             className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 font-extrabold text-xs disabled:opacity-40"
           >
             {busy === 'burn' ? 'PROGRAMMING BOOTLOADER...' : 'BURN AS BOOTLOADER (FUSES + LOCK)'}

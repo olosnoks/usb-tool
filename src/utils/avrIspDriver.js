@@ -235,7 +235,6 @@ export class AvrIspClient {
   constructor(logger = console.log) {
     this.logger = logger;
     this.isConnected = false;
-    this.isSimulated = false;
     this.chip = null;
     this.signature = null;
     this.programmer = null;
@@ -246,16 +245,6 @@ export class AvrIspClient {
   }
 
   log(msg) { this.logger(`[AVR ISP] ${msg}`); }
-
-  connectSimulation(sig = 0x1E950F) {
-    this.isConnected = true;
-    this.isSimulated = true;
-    this.chip = AVR_CHIP_DATABASE[sig];
-    this.signature = sig;
-    this.fuses = { ...this.chip.defaultFuses };
-    this.log('Connected to a simulated programmer and ATmega328P.');
-    return true;
-  }
 
   /**
    * Open an ArduinoISP / STK500v1 programmer. `link` may be passed in (tests);
@@ -271,7 +260,6 @@ export class AvrIspClient {
       this.programmerInfo = await this.programmer.version();
       this.log(`Programmer answered: hardware v${this.programmerInfo.hw}, firmware ${this.programmerInfo.sw}.`);
       this.isConnected = true;
-      this.isSimulated = false;
       return this.programmerInfo;
     } catch (e) {
       await this.link.close();
@@ -290,7 +278,6 @@ export class AvrIspClient {
     this.programmer = null;
     if (link) await link.close();
     this.isConnected = false;
-    this.isSimulated = false;
     this.chip = null;
     this.signature = null;
     this.log('Disconnected.');
@@ -309,12 +296,6 @@ export class AvrIspClient {
   /** Read the 3-byte signature and look the chip up. */
   async readSignature() {
     if (!this.isConnected) return null;
-    if (this.isSimulated) {
-      this.chip = AVR_CHIP_DATABASE[0x1E950F];
-      this.signature = 0x1E950F;
-      this.log(`Signature 1E 95 0F (${this.chip.name})`);
-      return { signature: 0x1E950F, ...this.chip };
-    }
     // Set a generic page size first so programming mode can start.
     await this.programmer.setDevice({ pageSize: 128, eepromSize: 1024, flashSize: 32768 });
     const sig = await this._prog((p) => p.readSignature());
@@ -332,7 +313,7 @@ export class AvrIspClient {
 
   async readFuses() {
     if (!this.isConnected) return null;
-    if (!this.isSimulated) this.fuses = await this._prog((p) => p.readFuses());
+    this.fuses = await this._prog((p) => p.readFuses());
     const f = this.fuses;
     this.log(`Fuses L=0x${hex2(f.lfuse)} H=0x${hex2(f.hfuse)} E=0x${hex2(f.efuse)} Lock=0x${hex2(f.lock)}`);
     return { ...f };
@@ -346,11 +327,6 @@ export class AvrIspClient {
     if (!this.isConnected) throw new Error('Programmer not connected.');
     const hazards = fuseHazards(this.chip, newFuses);
     if (hazards.length && !allowHazards) throw new Error(hazards.join(' '));
-    if (this.isSimulated) {
-      this.fuses = { ...newFuses };
-      this.log('Fuses written (simulated).');
-      return { ...this.fuses };
-    }
     if (!this.chip) throw new Error('Read the signature first: fuses are only written to a recognized chip.');
     await this._prog(async (p) => {
       if (!this.chip.noEfuse) await p.writeFuse('efuse', newFuses.efuse);
@@ -370,7 +346,6 @@ export class AvrIspClient {
 
   async chipErase() {
     if (!this.isConnected) throw new Error('Programmer not connected.');
-    if (this.isSimulated) { this.log('Chip erased (simulated).'); return; }
     await this._prog((p) => p.chipErase());
     this.log('Chip erased: flash and EEPROM are 0xFF, lock bits cleared.');
   }
@@ -381,11 +356,6 @@ export class AvrIspClient {
    */
   async flashImage(image, { onProgress, erase = true } = {}) {
     if (!this.isConnected) throw new Error('Programmer not connected.');
-    if (this.isSimulated) {
-      for (let p = 0; p <= 100; p += 20) { onProgress?.(p); await sleep(60); }
-      this.log('Image written and verified (simulated).');
-      return { pages: 0, bytes: image.data.length };
-    }
     if (!this.chip) throw new Error('Read the signature first: the page size comes from the chip.');
     const end = image.startAddress + image.data.length;
     if (end > this.chip.flashSize) throw new Error(`Image ends at 0x${end.toString(16)}, past the ${this.chip.name}'s ${this.chip.flashSize / 1024} KB flash.`);
@@ -422,12 +392,6 @@ export class AvrIspClient {
    */
   async burnBootloader(image, onProgress) {
     if (!this.isConnected) throw new Error('AVR ISP programmer not connected.');
-    if (this.isSimulated) {
-      this.log('Erasing chip memory (simulated)...');
-      for (let p = 0; p <= 100; p += 20) { onProgress?.(p); await sleep(80); }
-      this.log('Bootloader written and verified (simulated).');
-      return true;
-    }
     if (!image) throw new Error('Load a bootloader .hex file first.');
     if (!this.chip) throw new Error('Read the signature first.');
     const preset = this.chip.defaultFuses;
