@@ -1566,89 +1566,6 @@ export default function AlfaWifiWorkbench() {
   };
 
   // 5. RF Simulation Ingestion Loop
-  useEffect(() => {
-    let simInterval = null;
-    if (isSimulateRf && isMonitoring && !isPaused) {
-      setChipsetStatus(adapterPreset === 'pau09' ? 'RT5572 (Simulated - PAU09)' : 'RTL8812AU (Simulated)');
-      setHardwareStatus({
-        adapterMac: '00:C0:CA:98:76:54',
-        firmwareVersion: 'v2.4.1 (Simulated)',
-        chipsetModel: 'Realtek RTL8812AU (Alfa AWUS036ACH)',
-        temperatureC: 41,
-        status: 'Active (Simulated)',
-        isIntrospected: true
-      });
-      let mockIndex = 0;
-
-      simInterval = setInterval(() => {
-        const baseFrame = MOCK_WIFI_FRAMES[mockIndex % MOCK_WIFI_FRAMES.length];
-        mockIndex++;
-
-        const now = new Date();
-        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}.${String(now.getMilliseconds()).padStart(3, '0')}`;
-        const jitterRssi = baseFrame.rssi + Math.floor(Math.random() * 5) - 2;
-        if (jitterRssi < rfSensitivityRef.current) {
-          return;
-        }
-
-        const simulatedFrame = {
-          ...baseFrame,
-          timestamp: timeStr,
-          lastSeen: timeStr,
-          rssi: jitterRssi,
-          channel: channelRef.current
-        };
-
-        // Convert mock rawHex to Uint8Array for PCAP buffer with strict ring buffer cap
-        if (baseFrame.rawHex) {
-          const hexBytes = baseFrame.rawHex.split(' ').map(h => parseInt(h, 16));
-          const fakePkt = new Uint8Array([0x00, 0x00, 0x04, 0x00, ...hexBytes]);
-          
-          // Pre-Worker Filtering Pipeline check for simulated frames
-          if (!fastFilterPacket(fakePkt, filterSettingsRef.current)) {
-            return;
-          }
-
-          if (isStreamingToDiskRef.current && livePcapWriterRef.current?.isOpen) {
-            livePcapWriterRef.current.writePacket(fakePkt);
-            setDiskStreamStats({
-              fileName: livePcapWriterRef.current.fileName,
-              packetCount: livePcapWriterRef.current.packetCount,
-              bytesWritten: livePcapWriterRef.current.bytesWritten
-            });
-          } else {
-            if (rawPacketsRef.current.length >= PCAP_MAX_CAPACITY) {
-              rawPacketsRef.current.shift(); // Strict ring buffer: overwrite oldest
-              setPcapBufferFull(true);
-            }
-            rawPacketsRef.current.push(fakePkt);
-          }
-
-          // EAPOL Handshake detection
-          const hsRes = handshakeTrackerRef.current.processPacket(fakePkt, simulatedFrame);
-          if (hsRes && hsRes.isNewComplete) {
-            setHandshakeAlert(hsRes);
-            playHandshakeChime();
-          }
-        }
-
-        // Airtime calculation for simulation
-        simAirtimeTrackerRef.current.addFrame(baseFrame.duration || 320, Date.now());
-        setAirtimePercent(simAirtimeTrackerRef.current.getAirtime().airtimePercent);
-
-        channelStatsRef.current[simulatedFrame.channel] = (channelStatsRef.current[simulatedFrame.channel] || 0) + 1;
-        waterfallCountsRef.current[simulatedFrame.channel] = (waterfallCountsRef.current[simulatedFrame.channel] || 0) + 1;
-        packetCountRef.current += 1;
-        lastPacketTimeRef.current = Date.now();
-        pendingFramesRef.current.push(simulatedFrame);
-        checkDeauthAttack(simulatedFrame);
-      }, 250);
-    }
-
-    return () => {
-      if (simInterval) clearInterval(simInterval);
-    };
-  }, [isSimulateRf, isMonitoring, isPaused]);
 
   // 6. Connect Hardware via WebUSB
   const handleConnect = async () => {
@@ -3150,25 +3067,6 @@ export default function AlfaWifiWorkbench() {
                   />
                 </label>
 
-                {/* Simulate RF Traffic */}
-                <label className="flex items-center justify-between px-2.5 py-1.5 rounded-lg border border-slate-700/60 cursor-pointer select-none" style={{ backgroundColor: '#131c31' }}>
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <Radio className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Simulate RF Telemetry</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={isSimulateRf}
-                    onChange={(e) => {
-                      setIsSimulateRf(e.target.checked);
-                      if (e.target.checked && !isMonitoring) {
-                        setIsMonitoring(true);
-                        isCapturingRef.current = true;
-                      }
-                    }}
-                    className="accent-cyan-500 w-3.5 h-3.5 rounded"
-                  />
-                </label>
 
                 {/* RX Gain Slider */}
                 <div className="p-2.5 rounded-lg border border-slate-700/60 space-y-1.5" style={{ backgroundColor: '#131c31' }}>
@@ -4449,7 +4347,6 @@ export default function AlfaWifiWorkbench() {
               setIsGroupByCluster={setIsGroupByCluster}
               setIsMonitoring={setIsMonitoring}
               setIsSetupGuideOpen={setIsSetupGuideOpen}
-              setIsSimulateRf={setIsSimulateRf}
               setSelectedItem={setSelectedItem}
               setSetupGuideError={setSetupGuideError}
               setTablePage={setTablePage}

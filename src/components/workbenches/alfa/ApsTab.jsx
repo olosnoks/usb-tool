@@ -32,7 +32,6 @@ export default function ApsTab({
   setIsGroupByCluster,
   setIsMonitoring,
   setIsSetupGuideOpen,
-  setIsSimulateRf,
   setSelectedItem,
   setSetupGuideError,
   setTablePage,
@@ -119,20 +118,6 @@ export default function ApsTab({
                 title="Toggle automatic channel hopping across 2.4G and 5G bands"
               >
                 {isAutoHop ? 'Disable Auto-Hop' : 'Enable Auto-Hop Scan'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSimulateRf(true);
-                  if (!isMonitoring) {
-                    setIsMonitoring(true);
-                    isCapturingRef.current = true;
-                  }
-                }}
-                className="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-cyan-300 hover:border-cyan-500/40 text-xs font-semibold transition"
-                title="Generate realistic simulated 802.11 beacon, probe, and handshake traffic"
-              >
-                Simulate RF (Demo)
               </button>
               <button
                 type="button"
