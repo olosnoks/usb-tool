@@ -93,8 +93,7 @@ export const SIDEBAR_SECTIONS = [
     title: 'WEB APP TESTING',
     items: [
       { id: 'http-workbench', name: 'HTTP Workbench', icon: ShieldCheck, accent: 'purple', desc: 'Repeater, Intruder, Comparer & Decoder plus an OpenAPI/Swagger API client with schema fuzzing', keywords: ['burp', 'repeater', 'intruder', 'comparer', 'decoder', 'proxy', 'http', 'https', 'request', 'web app', 'api', 'openapi', 'swagger', 'rest', 'postman', 'hoppscotch', 'endpoint', 'fuzz', 'schema'] },
-      { id: 'owasp-zap', name: 'Web Scanner', icon: ShieldAlert, accent: 'amber', desc: 'Passive web vuln scan: headers, cookies, CORS, TLS', keywords: ['owasp', 'zap', 'vulnerability', 'scanner', 'web', 'passive', 'headers'] },
-      { id: 'nikto-scanner', name: 'Web Path Prober', icon: Sparkles, accent: 'rose', desc: 'Probe common sensitive paths and server header', keywords: ['nikto', 'vulnerability', 'scanner', 'web', 'paths'] },
+      { id: 'web-analyzer', name: 'Web Analyzer', icon: Link2, accent: 'purple', desc: 'Analyze a URL: links/resources/forms & security headers, passive header/cookie/CORS/TLS scan, and sensitive-path probing', keywords: ['web analyzer', 'url', 'link', 'analyzer', 'crawl', 'scrape', 'links', 'resources', 'forms', 'headers', 'security headers', 'meta', 'owasp', 'zap', 'passive', 'scanner', 'nikto', 'paths', 'content discovery'] },
       { id: 'hydra-bruteforce', name: 'HTTP Basic Auth Tester', icon: Cpu, accent: 'emerald', desc: 'Try credential lists against HTTP Basic auth', keywords: ['hydra', 'bruteforce', 'login', 'basic auth', 'http'] },
       { id: 'nmap-scanner', name: 'Port Scanner', icon: Radio, accent: 'cyan', desc: 'Browser connect-timing TCP port scan', keywords: ['nmap', 'port scanner', 'service discovery', 'network', 'recon'] },
       { id: 'dns-toolkit', name: 'DNS Toolkit', icon: Network, accent: 'indigo', desc: 'Records, email auth (SPF/DMARC/DKIM/DNSBL) & subdomain brute-force over DNS-over-HTTPS', keywords: ['dns', 'enumerate', 'doh', 'records', 'subdomain', 'recon', 'mail', 'mxtoolbox', 'spf', 'dmarc', 'dkim', 'dnsbl', 'blacklist', 'mx', 'txt', 'caa', 'email', 'deliverability', 'toolkit'] },
@@ -107,7 +106,6 @@ export const SIDEBAR_SECTIONS = [
       { id: 'ip-calculator', name: 'IP / CIDR Calculator', icon: Calculator, accent: 'purple', desc: 'IPv4 & IPv6 subnet math: network, broadcast, mask, host range & counts (fully offline)', keywords: ['ip', 'cidr', 'subnet', 'netmask', 'wildcard', 'ipv4', 'ipv6', 'calculator', 'network', 'broadcast', 'range'] },
       { id: 'hash-calculator', name: 'Hash & HMAC Calculator', icon: Hash, accent: 'amber', desc: 'MD5 / SHA-1 / SHA-256/384/512 + HMAC for text and files via Web Crypto (fully offline)', keywords: ['hash', 'md5', 'sha', 'sha256', 'sha1', 'sha512', 'hmac', 'checksum', 'digest', 'fingerprint', 'file hash'] },
       { id: 'osint-clients', name: 'OSINT API Clients', icon: Radar, accent: 'cyan', desc: 'Shodan, urlscan.io & HackerTarget clients — bring your own API key (via proxy)', keywords: ['osint', 'shodan', 'urlscan', 'hackertarget', 'recon', 'intelligence', 'api', 'host lookup', 'reverse ip'] },
-      { id: 'url-inspector', name: 'URL / Link Analyzer', icon: Link2, accent: 'purple', desc: 'Fetch a page & map its links, scripts, styles, images, forms, meta & security headers (via proxy)', keywords: ['url', 'link', 'analyzer', 'crawl', 'scrape', 'links', 'resources', 'forms', 'headers', 'security headers', 'meta', 'urlscan'] }
     ]
   },
   {

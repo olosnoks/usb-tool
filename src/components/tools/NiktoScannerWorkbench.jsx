@@ -25,7 +25,7 @@ function isInteresting(status) {
 }
 const norm = (p) => (p.startsWith('/') || /^https?:\/\//.test(p) ? p : `/${p}`);
 
-export default function NiktoScannerWorkbench({ onLogMessage }) {
+export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = false }) {
   const [target, setTarget] = useState('');
   const [paths, setPaths] = useState(null); // loaded wordlist, or null => builtin
   const [results, setResults] = useState([]); // interesting only
@@ -86,7 +86,7 @@ export default function NiktoScannerWorkbench({ onLogMessage }) {
   return (
     <div className="p-4">
       <p className="text-sm text-gray-400 mb-3">Content discovery: probe paths from a wordlist and flag interesting responses.</p>
-      <ProxyConfig onLogMessage={onLogMessage} />
+      {!hideProxyConfig && <ProxyConfig onLogMessage={onLogMessage} />}
       <WordlistPicker category="paths" max={5000} label="Path list" onLoad={(lines, meta) => { setPaths(lines); log(`Path list: ${lines.length} entries (${meta.name})`); }} />
       <div className="text-xs text-gray-500 mb-2">{paths ? `${paths.length.toLocaleString()} paths loaded` : `Using built-in list (${BUILTIN_PATHS.length} paths)`}</div>
       <div className="flex gap-2 mb-3">

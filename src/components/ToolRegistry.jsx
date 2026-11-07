@@ -22,11 +22,9 @@ const NmapScannerWorkbench = React.lazy(() => import('./tools/NmapScannerWorkben
 const HashcatCrackerWorkbench = React.lazy(() => import('./tools/HashcatCrackerWorkbench'));
 const HttpWorkbench = React.lazy(() => import('./tools/HttpWorkbench'));
 const AircrackWifiWorkbench = React.lazy(() => import('./tools/AircrackWifiWorkbench'));
-const NiktoScannerWorkbench = React.lazy(() => import('./tools/NiktoScannerWorkbench'));
 const HydraBruteforceWorkbench = React.lazy(() => import('./tools/HydraBruteforceWorkbench'));
 const TcpdumpViewerWorkbench = React.lazy(() => import('./tools/TcpdumpViewerWorkbench'));
 const DnsToolkitWorkbench = React.lazy(() => import('./tools/DnsToolkitWorkbench'));
-const OwaspZapWorkbench = React.lazy(() => import('./tools/OwaspZapWorkbench'));
 const PwnedPasswordsCheckerWorkbench = React.lazy(() => import('./tools/PwnedPasswordsCheckerWorkbench'));
 const CertInspectWorkbench = React.lazy(() => import('./tools/CertInspectWorkbench'));
 const DbBrowserWorkbench = React.lazy(() => import('./tools/DbBrowserWorkbench'));
@@ -36,7 +34,7 @@ const IpCalculatorWorkbench = React.lazy(() => import('./tools/IpCalculatorWorkb
 const HashCalculatorWorkbench = React.lazy(() => import('./tools/HashCalculatorWorkbench'));
 const CrtShFinderWorkbench = React.lazy(() => import('./tools/CrtShFinderWorkbench'));
 const OsintClientsWorkbench = React.lazy(() => import('./tools/OsintClientsWorkbench'));
-const UrlInspectorWorkbench = React.lazy(() => import('./tools/UrlInspectorWorkbench'));
+const WebAnalyzerWorkbench = React.lazy(() => import('./tools/WebAnalyzerWorkbench'));
 
 const LogicAnalyzerWorkbench = React.lazy(() => import('./tools/LogicAnalyzerWorkbench'));
 const UsbPdWorkbench = React.lazy(() => import('./tools/UsbPdWorkbench'));
@@ -80,7 +78,7 @@ export const DEFAULT_NATURAL_WIDTH = 1100;
 export const TOOL_NATURAL_WIDTH = {
   mayhem: 1180, 'alfa-wifi': 1280, 'warhog-piglet': 1200, 'logic-analyzer': 1200, 'packet-analyzer': 1200,
   terminal: 900, flasher: 1000, hardware: 900, setup: 900, 'session-log': 900,
-  cyberchef: 1200, ducky: 1000, 'http-workbench': 1200,
+  cyberchef: 1200, ducky: 1000, 'http-workbench': 1200, 'web-analyzer': 1150,
 };
 
 /** Title, icon and accent for a tool id (aliases resolve to their group's entry). */
@@ -106,7 +104,7 @@ export const KNOWN_TOOL_IDS = [
   'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-toolkit', 'dns-enumerator', 'dns-mail-doctor',
   'owasp-zap', 'pwned-passwords', 'cert-inspect', 'api-client',
   'db-browser', 'regex-tester', 'jwt-inspector',
-  'ip-calculator', 'hash-calculator', 'crtsh-finder', 'osint-clients', 'url-inspector',
+  'ip-calculator', 'hash-calculator', 'crtsh-finder', 'osint-clients', 'web-analyzer', 'url-inspector',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
 
@@ -203,12 +201,12 @@ export function renderTool(toolId, serial) {
     case 'http-workbench': return <HttpWorkbench onLogMessage={addLog} />;
     case 'burp-proxy': return <HttpWorkbench onLogMessage={addLog} initialSection="request" />;
     case 'aircrack-wifi': return <AircrackWifiWorkbench onLogMessage={addLog} />;
-    case 'nikto-scanner': return <NiktoScannerWorkbench onLogMessage={addLog} />;
+    case 'nikto-scanner': return <WebAnalyzerWorkbench onLogMessage={addLog} initialTab="paths" />;
     case 'hydra-bruteforce': return <HydraBruteforceWorkbench onLogMessage={addLog} />;
     case 'tcpdump-viewer': return <TcpdumpViewerWorkbench onLogMessage={addLog} />;
     case 'dns-toolkit': return <DnsToolkitWorkbench onLogMessage={addLog} />;
     case 'dns-enumerator': return <DnsToolkitWorkbench onLogMessage={addLog} initialTab="records" />;
-    case 'owasp-zap': return <OwaspZapWorkbench onLogMessage={addLog} />;
+    case 'owasp-zap': return <WebAnalyzerWorkbench onLogMessage={addLog} initialTab="passive" />;
     case 'api-client': return <HttpWorkbench onLogMessage={addLog} initialSection="api" />;
     case 'pwned-passwords': return <PwnedPasswordsCheckerWorkbench onLogMessage={addLog} />;
     case 'cert-inspect': return <CertInspectWorkbench onLogMessage={addLog} />;
@@ -220,7 +218,8 @@ export function renderTool(toolId, serial) {
     case 'hash-calculator': return <HashCalculatorWorkbench onLogMessage={addLog} />;
     case 'crtsh-finder': return <CrtShFinderWorkbench onLogMessage={addLog} />;
     case 'osint-clients': return <OsintClientsWorkbench onLogMessage={addLog} />;
-    case 'url-inspector': return <UrlInspectorWorkbench onLogMessage={addLog} />;
+    case 'web-analyzer': return <WebAnalyzerWorkbench onLogMessage={addLog} />;
+    case 'url-inspector': return <WebAnalyzerWorkbench onLogMessage={addLog} initialTab="links" />;
     default:
       return (
         <div className="py-16 text-center font-mono text-xs text-slate-500">

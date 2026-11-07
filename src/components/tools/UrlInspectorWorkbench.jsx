@@ -35,7 +35,7 @@ function Card({ icon: Icon, title, count, children }) {
   );
 }
 
-export default function UrlInspectorWorkbench({ onLogMessage }) {
+export default function UrlInspectorWorkbench({ onLogMessage, hideProxyConfig = false }) {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -83,7 +83,7 @@ export default function UrlInspectorWorkbench({ onLogMessage }) {
 
   return (
     <div className="w-full min-w-0 max-w-full text-gray-200">
-      <ProxyConfig onLogMessage={log} />
+      {!hideProxyConfig && <ProxyConfig onLogMessage={log} />}
       <div className="flex flex-wrap gap-2 mb-3">
         <input
           value={url}

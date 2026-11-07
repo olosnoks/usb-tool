@@ -33,7 +33,9 @@ export const TOOL_GROUPS = {
   // legacy DNS tools merged into the DNS Toolkit
   'dns-enumerator': 'dns-toolkit', 'dns-mail-doctor': 'dns-toolkit',
   // HTTP repeater + API client merged into the HTTP Workbench
-  'burp-proxy': 'http-workbench', 'api-client': 'http-workbench'
+  'burp-proxy': 'http-workbench', 'api-client': 'http-workbench',
+  // URL-analysis tools merged into the Web Analyzer
+  'url-inspector': 'web-analyzer', 'owasp-zap': 'web-analyzer', 'nikto-scanner': 'web-analyzer'
 };
 
 export const windowKeyFor = (toolId) => TOOL_GROUPS[toolId] || toolId;

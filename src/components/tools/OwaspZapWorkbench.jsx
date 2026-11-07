@@ -19,7 +19,7 @@ import ProxyConfig from './common/ProxyConfig';
  */
 const SEV_COLOR = { High: 'text-red-400', Medium: 'text-orange-400', Low: 'text-yellow-400', Info: 'text-gray-400' };
 
-export default function OwaspZapWorkbench({ onLogMessage }) {
+export default function OwaspZapWorkbench({ onLogMessage, hideProxyConfig = false }) {
   const [target, setTarget] = useState('');
   const [running, setRunning] = useState(false);
   const [alerts, setAlerts] = useState([]);
@@ -74,7 +74,7 @@ export default function OwaspZapWorkbench({ onLogMessage }) {
         Passive checks on a target's response (headers, cookies, transport, CORS).
         {hasEngine ? ' Active WASM engine present.' : ' Active scanning needs the optional WASM engine.'}
       </p>
-      <ProxyConfig onLogMessage={onLogMessage} />
+      {!hideProxyConfig && <ProxyConfig onLogMessage={onLogMessage} />}
       <div className="flex gap-2">
         <input type="url" placeholder="Target URL (e.g. https://example.com)" value={target} onChange={(e) => setTarget(e.target.value)} className="flex-1 bg-slate-900 border border-slate-800 rounded p-1 text-sm text-gray-200" />
         <button onClick={startScan} disabled={running} className="px-3 py-1 bg-orange-600 text-white rounded hover:bg-orange-500 disabled:opacity-40">
