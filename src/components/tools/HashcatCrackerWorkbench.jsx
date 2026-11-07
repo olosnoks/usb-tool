@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { md5Hex } from '../../utils/md5';
+import WordlistPicker from './common/WordlistPicker';
 
 /**
  * Client-side dictionary hash cracker.
@@ -73,6 +74,7 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
         <label className="block text-sm text-gray-300">Target hash (hex)</label>
         <input type="text" value={targetHash} onChange={(e) => setTargetHash(e.target.value)} className="bg-slate-900 border border-slate-800 rounded p-1 text-sm text-gray-200 font-mono" placeholder="e.g. 5d41402abc4b2a76b9719d911017c592" />
         <label className="block text-sm text-gray-300">Wordlist (one candidate per line)</label>
+        <WordlistPicker category="passwords" max={100000} label="Password list" onLoad={(lines) => setWordlist(lines.join('\n'))} />
         <textarea value={wordlist} onChange={(e) => setWordlist(e.target.value)} rows={6} className="bg-slate-900 border border-slate-800 rounded p-1 text-sm text-gray-200 font-mono" />
         <div className="flex gap-2 mt-2">
           <button onClick={startCrack} disabled={running} className="px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-500 disabled:opacity-40">

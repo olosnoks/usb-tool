@@ -1,25 +1,25 @@
 # Web Path Prober Workbench
 
-**Purpose**: Probe a web server for a list of commonly sensitive paths and report
-the HTTP status of each, plus the server header.
+**Purpose**: Content discovery — probe many URL paths on a target and flag
+interesting responses, plus the server header.
 
-**Network limitation**: A browser can only read a cross-origin response when the
-target sends permissive CORS headers. Without a proxy, most responses are
-unreadable: the request may reach the server, but the status is hidden and shown as
-`blocked`. Configure a proxy to get real status codes against any host.
+**Wordlists (SecLists)**:
+- Load a path list with the wordlist picker: curated SecLists entries (common,
+  quickhits, API endpoints, RAFT, big), a custom URL, or an uploaded file.
+- SecLists are fetched from the jsDelivr CDN (`cdn.jsdelivr.net/gh/danielmiessler/SecLists`),
+  which is CORS-enabled, so loading works directly from the browser.
+- With no list loaded, a small built-in list of ~16 common sensitive paths is used.
 
 **Usage**:
-- Set an optional proxy in the proxy bar (empty = direct).
-- Enter the target base URL.
-- Click **Scan**. Each path row shows its status; interesting statuses (200, 301,
-  401, 403, 500, etc.) are highlighted. The server header is shown separately.
+- Optionally set a proxy (empty = direct).
+- Load a path list, enter the target base URL, and click **Scan**. Scanning runs
+  with bounded concurrency and a progress counter, and can be stopped.
+- Only interesting responses are listed: 2xx/3xx and auth-gated (401/403). The
+  summary shows total probed, interesting count, and blocked/unreachable count.
 
-**Implementation Details**:
-- Probes a built-in list of paths (`.git/HEAD`, `.env`, `admin`, `wp-login.php`,
-  `server-status`, and others) with `proxiedFetch`.
-- A `HEAD` request reads the `Server` response header when permitted.
+**Honest limitation**: a browser can only read a cross-origin response when the
+target sends permissive CORS headers. Without a proxy, most responses are
+unreadable and counted as "blocked". Configure a proxy to get real status codes.
 
-**Dependencies**: `src/utils/netClient.js`, `src/components/tools/common/ProxyConfig.jsx`.
-
-**Notes**:
-- This is a lightweight path prober, not a full Nikto signature engine.
+**Implementation**: `src/utils/wordlists.js`, `src/components/tools/common/WordlistPicker.jsx`,
+`src/utils/netClient.js`.

@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { proxiedFetch, isProxyEnabled, describeNetworkError } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
+import WordlistPicker from './common/WordlistPicker';
 
 /**
  * HTTP Basic-auth credential tester.
@@ -62,7 +63,9 @@ export default function HydraBruteforceWorkbench({ onLogMessage }) {
       <ProxyConfig onLogMessage={onLogMessage} />
       <div className="grid gap-2 mb-4">
         <input placeholder="Target URL (e.g. https://example.com/protected)" value={url} onChange={(e) => setUrl(e.target.value)} className="bg-slate-900 border border-slate-800 rounded p-1 text-sm text-gray-200" />
+        <WordlistPicker category="usernames" max={5000} label="Usernames" onLoad={(lines) => setUsers(lines.join('\n'))} />
         <textarea placeholder="Usernames (one per line)" rows={4} value={users} onChange={(e) => setUsers(e.target.value)} className="bg-slate-900 border border-slate-800 rounded p-1 text-sm text-gray-200 font-mono" />
+        <WordlistPicker category="passwords" max={10000} label="Passwords" onLoad={(lines) => setPasses(lines.join('\n'))} />
         <textarea placeholder="Passwords (one per line)" rows={4} value={passes} onChange={(e) => setPasses(e.target.value)} className="bg-slate-900 border border-slate-800 rounded p-1 text-sm text-gray-200 font-mono" />
         <div className="flex gap-2 mt-2">
           <button onClick={start} disabled={running} className="px-3 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-500 disabled:opacity-40">

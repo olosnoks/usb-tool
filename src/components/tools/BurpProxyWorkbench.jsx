@@ -6,6 +6,7 @@ import { md5Hex } from '../../utils/md5';
 import { parseCurl, parseRawHttp, toCurl } from '../../utils/httpImport';
 import { lineDiff, diffStats } from '../../utils/diff';
 import ProxyConfig from './common/ProxyConfig';
+import WordlistPicker from './common/WordlistPicker';
 
 /**
  * Burp-style web request toolkit (within browser limits).
@@ -386,7 +387,10 @@ function Intruder(props) {
             placeholder={`Payload set for position ${i + 1} (one per line)`} className="w-full mb-2 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
         ))
       ) : (
-        <textarea value={payloadText} onChange={(e) => setPayloadText(e.target.value)} rows={4} placeholder="Payloads (one per line)" className="w-full mb-2 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
+        <>
+          <WordlistPicker max={20000} label="Payloads" onLoad={(lines) => setPayloadText(lines.join('\n'))} />
+          <textarea value={payloadText} onChange={(e) => setPayloadText(e.target.value)} rows={4} placeholder="Payloads (one per line)" className="w-full mb-2 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
+        </>
       )}
       <input value={grep} onChange={(e) => setGrep(e.target.value)} placeholder="grep-match: flag responses containing this string" className="w-full mb-2 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200" />
       <div className="flex gap-2 mb-2">

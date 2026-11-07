@@ -16,6 +16,12 @@ client-side.
 
 **Dependencies**: `src/utils/netClient.js`, `src/components/tools/common/ProxyConfig.jsx`.
 
+**Subdomain brute-force**:
+- Load a subdomain wordlist (SecLists, via the picker), enter a domain, and click
+  **Brute subdomains**. Each `word.domain` is resolved over DoH with bounded
+  concurrency; subdomains that resolve are listed with their A records.
+
 **Notes**:
 - True AXFR zone transfers require a TCP connection to the authoritative server
   and cannot be performed from a browser.
+- Wordlists load from the SecLists jsDelivr CDN (CORS-enabled).
