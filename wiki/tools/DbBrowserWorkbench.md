@@ -18,6 +18,12 @@ Open a `.sqlite` / `.db` file, then switch between three modes:
   The engine loads lazily on first use; if it can't load, Browse and Structure
   still work. **The original file on disk is never modified.**
 
+**Export database (.sqlite)**: a header button serializes the in-memory database
+— including any inserts/updates/DDL run in Execute SQL — to a downloadable
+`.sqlite` file (`db.export()`), giving you a write-back path. (Browse & Structure
+read the originally opened bytes, so they don't reflect in-session SQL edits;
+the export does.)
+
 ## Endpoint
 Query a database/REST endpoint over HTTP (PostgREST, CouchDB, Elasticsearch
 `_search`, Datasette, or any JSON API) and render the JSON as a table. Presets

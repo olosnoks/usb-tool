@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Database, Table as TableIcon, FileUp, Globe, RefreshCw, ChevronLeft, ChevronRight, Download, Boxes, Terminal, Play } from 'lucide-react';
 import { openDatabase, listSchema, readRows, countRows, parseColumnDefs } from '../../utils/sqlite.js';
-import { openSqlDatabase, runSql } from '../../utils/sqljs.js';
+import { openSqlDatabase, runSql, exportSqlDatabase } from '../../utils/sqljs.js';
 import { proxiedFetch, isProxyEnabled, describeNetworkError } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
 
@@ -178,6 +178,22 @@ function SqliteTab({ log }) {
     }
   }, [bytes, sqlDb, engine.state, log]);
 
+  const [exporting, setExporting] = useState(false);
+  const exportDb = async () => {
+    setExporting(true);
+    const d = sqlDb || await ensureEngine();
+    if (d) {
+      try {
+        const out = exportSqlDatabase(d);
+        const name = (fileName || 'database.sqlite').replace(/(\.(sqlite3?|db3?|s3db))?$/i, '') + '-export.sqlite';
+        const blob = new Blob([out], { type: 'application/x-sqlite3' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+        log?.(`Exported database (${(out.length / 1024).toFixed(0)} KB)`);
+      } catch (e) { log?.(`Export failed: ${e.message}`); }
+    }
+    setExporting(false);
+  };
+
   const runQuery = async () => {
     setSqlRunning(true); setSqlError(''); setSqlResults(null);
     const d = sqlDb || await ensureEngine();
@@ -204,6 +220,11 @@ function SqliteTab({ log }) {
           <input type="file" accept=".sqlite,.sqlite3,.db,.db3,.s3db,application/x-sqlite3,application/vnd.sqlite3" className="hidden" onChange={onFile} />
         </label>
         {fileName && <span className="text-xs text-gray-400 font-mono">{fileName} · {(fileSize / 1024).toFixed(0)} KB · {db?.pageSize}B pages · {db?.encoding}</span>}
+        {db && (
+          <button onClick={exportDb} disabled={exporting} title="Serialize the in-memory database (including any SQL edits) to a .sqlite file" className="ml-auto px-3 py-1.5 bg-slate-800 border border-slate-700 text-gray-200 rounded text-xs hover:bg-slate-700 disabled:opacity-50 inline-flex items-center gap-1">
+            {exporting ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />} Export database (.sqlite)
+          </button>
+        )}
       </div>
       {error && <div className="mb-3 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{error}</div>}
 

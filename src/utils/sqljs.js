@@ -29,3 +29,8 @@ export function runSql(db, sql) {
   const res = db.exec(sql); // [{ columns:[], values:[[]] }]
   return res.map((r) => ({ columns: r.columns, rows: r.values }));
 }
+
+/** Serialize the in-memory database (including any edits) back to bytes. */
+export function exportSqlDatabase(db) {
+  return db.export(); // Uint8Array of a valid .sqlite file
+}
