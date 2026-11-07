@@ -4,7 +4,6 @@ import {
   Usb,
   Power,
   ShieldAlert,
-  Sparkles,
   Activity,
   Send
 } from 'lucide-react';
@@ -17,7 +16,6 @@ import {
   listGrantedHidDevices
 } from '../../utils/hidInspector';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 import HidReportTools from './hid/HidReportTools';
 
 import { useSessionError } from '../../utils/sessionLog';
@@ -34,7 +32,6 @@ const DEMO_COLLECTIONS = [{
 
 export default function HidInspectorWorkbench() {
   const [device, setDevice] = useState(null);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [info, setInfo] = useState(null); // described collections
   const [meta, setMeta] = useState(null); // { vendorId, productId, productName }
   const [granted, setGranted] = useState([]);
@@ -95,21 +92,6 @@ export default function HidInspectorWorkbench() {
     }
   };
 
-  const connectDemo = () => {
-    stopEverything();
-    const collections = describeCollections(DEMO_COLLECTIONS);
-    buildReportMap(collections);
-    setDevice({ demo: true });
-    setIsSimulated(true);
-    setInfo(collections);
-    setMeta({ vendorId: 0x1234, productId: 0x0002, productName: 'Simulated Mouse' });
-    demoTimer.current = setInterval(() => {
-      const buttons = Math.floor(Math.random() * 8) & 0b101;
-      const x = (Math.floor(Math.random() * 11) - 5) & 0xff;
-      const y = (Math.floor(Math.random() * 11) - 5) & 0xff;
-      onInputReport(0, new DataView(Uint8Array.from([buttons, x, y]).buffer));
-    }, 250);
-  };
 
   const disconnect = async () => {
     stopEverything();
@@ -125,7 +107,6 @@ export default function HidInspectorWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && <DemoBanner>Simulated mouse: the live reports below are random, not from a device.</DemoBanner>}
 
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -140,7 +121,7 @@ export default function HidInspectorWorkbench() {
               or feature reports (keyboard LEDs, vendor settings) when you choose to.
             </p>
           </div>
-          <StatusBadge status={device && !isSimulated ? 'online' : isSimulated ? 'warning' : 'offline'} label="HID" value={device ? (isSimulated ? 'Demo' : 'Live') : 'Idle'} pulse={!!device} />
+          <StatusBadge status={device ? 'online' : 'offline'} label="HID" value={device ? 'Live' : 'Idle'} pulse={!!device} />
         </div>
 
         {!webHidAvailable && (
@@ -159,9 +140,6 @@ export default function HidInspectorWorkbench() {
             <>
               <button onClick={connect} disabled={!webHidAvailable} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-xs font-bold disabled:opacity-40">
                 <Usb className="w-3.5 h-3.5" /> OPEN HID DEVICE
-              </button>
-              <button onClick={connectDemo} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-purple-300 border border-purple-500/40 text-xs font-bold">
-                <Sparkles className="w-3.5 h-3.5" /> DEMO
               </button>
             </>
           ) : (
@@ -202,7 +180,6 @@ export default function HidInspectorWorkbench() {
 
           <HidReportTools
             device={device}
-            isSimulated={isSimulated}
             info={info}
             meta={meta}
             addTap={addTap}

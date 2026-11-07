@@ -31,7 +31,6 @@ export default function TelemetryDashboard({
   });
 
   const [activeGaugeChannel, setActiveGaugeChannel] = useState('rpm');
-  const [demoSimActive, setDemoSimActive] = useState(false);
   const [streamFormat, setStreamFormat] = useState('auto'); // auto, json, csv, kv
   const lastParsedTextRef = useRef('');
   const demoIntervalRef = useRef(null);
@@ -123,30 +122,6 @@ export default function TelemetryDashboard({
   }, [latestTextStream]);
 
   // Demo Telemetry Generator
-  useEffect(() => {
-    if (!demoSimActive) {
-      if (demoIntervalRef.current) clearInterval(demoIntervalRef.current);
-      return;
-    }
-
-    let t = 0;
-    demoIntervalRef.current = setInterval(() => {
-      t += 0.1;
-      updateChannelValues({
-        pitch: +(Math.sin(t * 0.8) * 18).toFixed(1),
-        roll: +(Math.cos(t * 0.5) * 28).toFixed(1),
-        temp: +(25 + Math.sin(t * 0.2) * 4).toFixed(1),
-        volts: +(12.2 + (Math.random() - 0.5) * 0.2).toFixed(2),
-        rpm: Math.round(2600 + Math.sin(t) * 1400 + Math.random() * 80),
-        altitude: Math.round(150 + Math.sin(t * 0.3) * 35)
-      });
-    }, 100);
-
-    return () => {
-      if (demoIntervalRef.current) clearInterval(demoIntervalRef.current);
-    };
-  }, [demoSimActive]);
-
   const handleResetStats = () => {
     setTelemetryData(prev => {
       const reset = {};
@@ -197,18 +172,6 @@ export default function TelemetryDashboard({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setDemoSimActive(!demoSimActive)}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all border ${
-              demoSimActive 
-                ? 'bg-amber-500/20 text-cyber-amber border-amber-500/50 shadow-amber-glow' 
-                : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-600'
-            }`}
-          >
-            {demoSimActive ? <Square className="w-3.5 h-3.5 text-cyber-amber" /> : <Play className="w-3.5 h-3.5 text-cyber-emerald" />}
-            {demoSimActive ? 'STOP SIMULATION' : 'DEMO SIMULATION'}
-          </button>
-
           <button
             onClick={handleResetStats}
             title="Reset min/max peak statistics"

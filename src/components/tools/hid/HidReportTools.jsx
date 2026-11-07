@@ -13,7 +13,7 @@ const inp = 'bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-2
  * input-report recording for the HID inspector.
  * addTap(fn) subscribes to input reports (reportId, bytes, t); inject(reportId, bytes) plays one back into the decoder.
  */
-export default function HidReportTools({ device, isSimulated, info, meta, addTap, inject }) {
+export default function HidReportTools({ device, info, meta, addTap, inject }) {
   const outputs = info.flatMap((c) => c.outputReports);
   const features = info.flatMap((c) => c.featureReports);
   const [outId, setOutId] = useState(outputs[0]?.reportId ?? 0);
@@ -60,7 +60,6 @@ export default function HidReportTools({ device, isSimulated, info, meta, addTap
   }, []);
 
   const send = async (kind, reportId, bytes) => {
-    if (isSimulated) { note(`(demo) would send ${kind} report ${reportId}: ${hexDump(bytes)}`); return; }
     try {
       if (kind === 'output') await device.sendReport(Number(reportId), bytes);
       else await device.sendFeatureReport(Number(reportId), bytes);
@@ -71,7 +70,6 @@ export default function HidReportTools({ device, isSimulated, info, meta, addTap
   };
 
   const getFeature = async () => {
-    if (isSimulated) { note('(demo) the simulated mouse has no feature reports'); return; }
     try {
       const dv = await device.receiveFeatureReport(Number(featId));
       const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
@@ -162,7 +160,7 @@ export default function HidReportTools({ device, isSimulated, info, meta, addTap
             <input value={featHex} onChange={(e) => setFeatHex(e.target.value)} placeholder="bytes to SET" className={`${inp} flex-1 min-w-[8rem]`} />
             <button
               onClick={() => {
-                if (!isSimulated && !confirmAction(`Send feature report ${featId}? Vendor feature reports can change device settings or firmware state.`)) return;
+                if (!confirmAction(`Send feature report ${featId}? Vendor feature reports can change device settings or firmware state.`)) return;
                 try { send('feature', featId, parseHexBytes(featHex)); } catch (e) { note(e.message, 'err'); }
               }}
               className={`${btn} border-amber-500/40 text-amber-300`}
