@@ -1181,7 +1181,7 @@ Every destructive action asks for confirmation first, and flashing/erasing is re
 
 ### 5. Implementation & Architecture
 
-- **Driver:** [\`src/utils/fastbootDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fastbootDriver.js) owns the protocol with no React or \`navigator.usb\` dependency: \`FastbootDevice\` serializes commands on the shared bulk pipe, \`parseResponse\` splits the tag, \`download()\` runs the DATA handshake and chunks the upload, and \`getAllVars()\` parses \`getvar:all\` (splitting on the **last** colon, since names like \`partition-type:boot\` contain colons). \`createSimulatedFastboot()\` backs the demo.
+- **Driver:** [\`src/utils/fastbootDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fastbootDriver.js) owns the protocol with no React or \`navigator.usb\` dependency: \`FastbootDevice\` serializes commands on the shared bulk pipe, \`parseResponse\` splits the tag, \`download()\` runs the DATA handshake and chunks the upload, and \`getAllVars()\` parses \`getvar:all\` (splitting on the **last** colon, since names like \`partition-type:boot\` contain colons).
 - **Transport:** \`FastbootUsbTransport\` finds the class \`ff/42/03\` interface and its bulk endpoints.
 - **Workbench:** [\`src/components/tools/FastbootWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/FastbootWorkbench.jsx) renders the device summary, the lock/flash/erase/boot/reboot panels and the variable table, with a confirmation on every destructive step.
 - **Tests:** [\`tests/fastboot.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fastboot.test.js) runs the driver against a simulated bootloader covering getvar, the download handshake, lock-gated flashing, erase, slots, boot and reboot.
@@ -1269,7 +1269,7 @@ After \`CNXN\`, everything happens on **streams**. The host \`OPEN\`s a service 
 ### 5. Implementation & Architecture
 
 - **Crypto:** [\`src/utils/adbCrypto.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbCrypto.js) — RSA key generation, \`android_pubkey\` encoding (modulus, Montgomery \`n0inv\` and \`rr\`), and PKCS#1 v1.5 token signing by BigInt modexp.
-- **Protocol:** [\`src/utils/adbDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbDriver.js) — message framing, the CNXN/AUTH handshake, the OPEN/OKAY/WRTE/CLSE stream with flow control, and the shell / sync / tcpip / reboot services. \`createSimulatedAdb()\` backs the demo.
+- **Protocol:** [\`src/utils/adbDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbDriver.js) — message framing, the CNXN/AUTH handshake, the OPEN/OKAY/WRTE/CLSE stream with flow control, and the shell / sync / tcpip / reboot services.
 - **Workbench:** [\`src/components/tools/AdbWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/AdbWorkbench.jsx).
 - **Tests:** [\`tests/adbCrypto.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/adbCrypto.test.js) proves a signed token verifies as a valid PKCS#1 block and the public-key blob round-trips; [\`tests/adb.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/adb.test.js) runs the full handshake, shell, and file push/pull against a simulated adbd.
 

@@ -780,7 +780,7 @@ The SCSI commands used here are **INQUIRY** (0x12), **READ CAPACITY(10)** (0x25)
 
 ### 3. Implementation & Architecture
 
-- **Driver:** [\`src/utils/massStorageDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/massStorageDriver.js) — \`buildCbw\`/\`parseCsw\`, \`parseInquiry\`/\`parseCapacity\`, and \`MassStorageDevice\` with \`testUnitReady\`/\`inquiry\`/\`readCapacity\`/\`read\`. No write path exists. \`createSimulatedMassStorage()\` backs the demo.
+- **Driver:** [\`src/utils/massStorageDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/massStorageDriver.js) — \`buildCbw\`/\`parseCsw\`, \`parseInquiry\`/\`parseCapacity\`, and \`MassStorageDevice\` with \`testUnitReady\`/\`inquiry\`/\`readCapacity\`/\`read\`. No write path exists.
 - **Workbench:** [\`src/components/tools/MassStorageWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/MassStorageWorkbench.jsx) — identity, capacity and a hex sector viewer, behind a claim-the-drive confirmation.
 - **Tests:** [\`tests/massStorage.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/massStorage.test.js) checks CBW/CSW framing and INQUIRY/capacity/sector reads against a simulated drive.
 
@@ -840,7 +840,7 @@ Key operations: \`OpenSession\`, \`GetDeviceInfo\`, \`GetStorageIDs\`, \`GetObje
 
 ### 3. Implementation & Architecture
 
-- **Driver:** [\`src/utils/ptpDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/ptpDriver.js) — \`buildContainer\`/\`parseContainerHeader\`, a \`DataReader\` for PTP strings/arrays, \`parseDeviceInfo\`/\`parseObjectInfo\`, and \`PtpDevice\` whose \`transaction()\` runs the command/data/response phases (reassembling large data across USB transfers). \`createSimulatedPtp()\` backs the demo.
+- **Driver:** [\`src/utils/ptpDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/ptpDriver.js) — \`buildContainer\`/\`parseContainerHeader\`, a \`DataReader\` for PTP strings/arrays, \`parseDeviceInfo\`/\`parseObjectInfo\`, and \`PtpDevice\` whose \`transaction()\` runs the command/data/response phases (reassembling large data across USB transfers).
 - **Workbench:** [\`src/components/tools/PtpWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/PtpWorkbench.jsx).
 - **Tests:** [\`tests/ptp.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/ptp.test.js) covers container framing, PTP string/array decoding, and the session/device-info/handles/object-info/download flow against a simulated camera.
 
@@ -906,7 +906,7 @@ FIDO2 commands are **CBOR**-encoded. \`authenticatorGetInfo\` is CTAP2 command \
 
 ### 4. Implementation & Architecture
 
-- **Driver:** [\`src/utils/fido2Driver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fido2Driver.js) — a small CBOR decoder (\`decodeCbor\`), \`buildPackets\` for CTAP-HID framing, \`parseGetInfo\`/\`aaguidToString\`, and \`Fido2Device\` with \`init\`/\`getInfo\`/\`ping\`. \`createSimulatedFido2()\` backs the demo. No credential or reset operations exist.
+- **Driver:** [\`src/utils/fido2Driver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fido2Driver.js) — a small CBOR decoder (\`decodeCbor\`), \`buildPackets\` for CTAP-HID framing, \`parseGetInfo\`/\`aaguidToString\`, and \`Fido2Device\` with \`init\`/\`getInfo\`/\`ping\`. No credential or reset operations exist.
 - **Workbench:** [\`src/components/tools/Fido2Workbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/Fido2Workbench.jsx).
 - **Tests:** [\`tests/fido2.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fido2.test.js) covers CBOR decoding, AAGUID formatting, packet framing, and INIT / GetInfo / PING against a simulated key.
 
