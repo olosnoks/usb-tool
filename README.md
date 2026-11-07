@@ -18,6 +18,8 @@ Beyond serial it covers 802.11 monitor-mode capture for Alfa / RTL8812AU and Pan
 
 **Analysis & Protocol Lab** — Packet & Protocol Lab (802.11 dissector, PCAP, hex stream) · CAN Bus & OBD-II Scanner · Modbus RTU & RS-485 · Oscilloscope Plotter · MitM Serial Bridge · CyberChef Workbench (Web Worker pipeline) · 24 MHz Logic Analyzer (SUMP / fx2lafw) · I²C & SPI Bus Explorer (Bus Pirate) · USBTMC Instruments (SCPI)
 
+**Web App Testing & Data** — HTTP/HTTPS Repeater · API Client (OpenAPI/Swagger + schema fuzzing) · Web Scanner · Web Path Prober · HTTP Basic Auth Tester · Port Scanner · DNS Enumerator · Certificate Inspector · Pwned Passwords · Lite DB Browser (read-only SQLite file viewer + HTTP database/REST endpoint query: PostgREST, CouchDB, Elasticsearch, Datasette) · Web Security Toolbox (launcher for browser-based OSINT, recon, encoding & lab services: Shodan, Censys, urlscan.io, crt.sh, CyberChef, regex101, jwt.io, PortSwigger Academy, TryHackMe)
+
 **RF, Wireless & Badges** — Wi-Fi Monitor (Alfa RTL8812AU / Panda PAU09 over WebUSB) · Flipper Zero Suite · Proxmark3 / PM5 · PortaPack Mayhem SDR (HackRF receiver plus a Flash & First-Time Setup tab: Mayhem or stock firmware over WebUSB, DFU rescue, SD-card files) · GPS & Wardrive Suite · Warhog & Piglet Suite (SD explorer, wardriver.cfg editor, device control, serial console, live Core monitor dashboard, and a screen mirror with remote touch over the WT protocol)
 
 **Hardware & Payloads** — BadUSB & Payload Studio (DuckyScript) · Hardware Programmers: CH341A SPI flash, plus CMSIS-DAP SWD debugger, JTAG / SVF and AVR ISP · USB-PD (STUSB4500) · Android Fastboot (bootloader unlock & partition flashing) · Android ADB (shell, file transfer, wireless)

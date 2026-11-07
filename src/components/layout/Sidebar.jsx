@@ -33,7 +33,9 @@ import {
   Camera,
   KeyRound,
   ScrollText,
-  MapPin
+  MapPin,
+  Database,
+  Globe
 } from 'lucide-react';
 
 import { windowKeyFor } from '../../utils/windowManager';
@@ -93,7 +95,9 @@ export const SIDEBAR_SECTIONS = [
       { id: 'nmap-scanner', name: 'Port Scanner', icon: Radio, accent: 'cyan', desc: 'Browser connect-timing TCP port scan', keywords: ['nmap', 'port scanner', 'service discovery', 'network', 'recon'] },
       { id: 'dns-enumerator', name: 'DNS Enumerator', icon: MapPin, accent: 'indigo', desc: 'Resolve DNS records over DNS-over-HTTPS', keywords: ['dns', 'enumerate', 'doh', 'records', 'subdomain', 'recon'] },
       { id: 'cert-inspect', name: 'Certificate Inspector', icon: ShieldCheck, accent: 'cyan', desc: 'Parse X.509 PEM/DER certificates (TLS/SSL)', keywords: ['certificate', 'x509', 'pem', 'der', 'tls', 'ssl'] },
-      { id: 'pwned-passwords', name: 'Pwned Passwords', icon: ShieldCheck, accent: 'rose', desc: 'Check passwords against HaveIBeenPwned (k-anonymity)', keywords: ['pwned', 'hibp', 'breach', 'password', 'haveibeenpwned'] }
+      { id: 'pwned-passwords', name: 'Pwned Passwords', icon: ShieldCheck, accent: 'rose', desc: 'Check passwords against HaveIBeenPwned (k-anonymity)', keywords: ['pwned', 'hibp', 'breach', 'password', 'haveibeenpwned'] },
+      { id: 'db-browser', name: 'Lite DB Browser', icon: Database, accent: 'emerald', desc: 'Open SQLite files read-only & query DB/REST endpoints (PostgREST, CouchDB, Elasticsearch, Datasette)', keywords: ['database', 'db', 'sqlite', 'sql', 'postgrest', 'couchdb', 'elasticsearch', 'datasette', 'rest', 'endpoint', 'table', 'browser', 'viewer'] },
+      { id: 'web-toolbox', name: 'Web Security Toolbox', icon: Globe, accent: 'cyan', desc: 'Launcher for browser-based OSINT, recon, encoding & lab services (Shodan, crt.sh, CyberChef, urlscan, PortSwigger…)', keywords: ['web toolbox', 'osint', 'recon', 'shodan', 'censys', 'urlscan', 'crt.sh', 'cyberchef', 'regex101', 'jwt', 'portswigger', 'tryhackme', 'launcher', 'links', 'bookmarks'] }
     ]
   },
   {

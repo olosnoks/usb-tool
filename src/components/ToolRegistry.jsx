@@ -30,6 +30,8 @@ const OwaspZapWorkbench = React.lazy(() => import('./tools/OwaspZapWorkbench'));
 const ApiClientWorkbench = React.lazy(() => import('./tools/ApiClientWorkbench'));
 const PwnedPasswordsCheckerWorkbench = React.lazy(() => import('./tools/PwnedPasswordsCheckerWorkbench'));
 const CertInspectWorkbench = React.lazy(() => import('./tools/CertInspectWorkbench'));
+const WebToolboxWorkbench = React.lazy(() => import('./tools/WebToolboxWorkbench'));
+const DbBrowserWorkbench = React.lazy(() => import('./tools/DbBrowserWorkbench'));
 
 const LogicAnalyzerWorkbench = React.lazy(() => import('./tools/LogicAnalyzerWorkbench'));
 const UsbPdWorkbench = React.lazy(() => import('./tools/UsbPdWorkbench'));
@@ -98,6 +100,7 @@ export const KNOWN_TOOL_IDS = [
   'nmap-scanner', 'hashcat-cracker', 'burp-proxy', 'aircrack-wifi',
   'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-enumerator',
   'owasp-zap', 'pwned-passwords', 'cert-inspect', 'api-client',
+  'web-toolbox', 'db-browser',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
 
@@ -201,6 +204,8 @@ export function renderTool(toolId, serial) {
     case 'api-client': return <ApiClientWorkbench onLogMessage={addLog} />;
     case 'pwned-passwords': return <PwnedPasswordsCheckerWorkbench onLogMessage={addLog} />;
     case 'cert-inspect': return <CertInspectWorkbench onLogMessage={addLog} />;
+    case 'web-toolbox': return <WebToolboxWorkbench />;
+    case 'db-browser': return <DbBrowserWorkbench onLogMessage={addLog} />;
     default:
       return (
         <div className="py-16 text-center font-mono text-xs text-slate-500">
