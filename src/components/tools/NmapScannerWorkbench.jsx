@@ -104,7 +104,6 @@ export default function NmapScannerWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4">
-      <h2 className="text-lg font-bold mb-2">Port Scanner</h2>
       <p className="text-sm text-gray-400 mb-3">
         {method === 'wasm'
           ? 'Scanning via the WebAssembly engine.'

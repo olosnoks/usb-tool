@@ -50,7 +50,6 @@ export default function PwnedPasswordsCheckerWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4 space-y-4">
-      <h2 className="text-lg font-bold">Pwned Passwords Checker</h2>
       <p className="text-sm text-gray-400">
         Checks passwords against HaveIBeenPwned using k-anonymity. Only the first 5 characters of each
         SHA-1 hash are sent; the password never leaves your browser.

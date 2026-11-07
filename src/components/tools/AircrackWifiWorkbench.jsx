@@ -60,7 +60,6 @@ export default function AircrackWifiWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4">
-      <h2 className="text-lg font-bold mb-2">WPA PMKID Cracker</h2>
       <p className="text-sm text-gray-400 mb-4">
         Offline dictionary attack on a captured WPA/WPA2 PMKID. Runs in your browser; no backend.
       </p>

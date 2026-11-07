@@ -46,7 +46,6 @@ export default function TcpdumpViewerWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4">
-      <h2 className="text-lg font-bold mb-2">PCAP Viewer</h2>
       <p className="text-sm text-gray-400 mb-3">Upload a classic .pcap capture to decode its packets.</p>
       <input type="file" accept=".pcap,.cap" onChange={handleFile} className="mb-3 text-gray-200" />
       {fileName && <div className="mb-2 text-sm text-gray-200"><strong>File:</strong> {fileName}{meta && ` — ${meta.packetCount} packets, ${LINKTYPES[meta.linktype] || 'linktype ' + meta.linktype}`}</div>}

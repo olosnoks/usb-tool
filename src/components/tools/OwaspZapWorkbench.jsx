@@ -70,7 +70,6 @@ export default function OwaspZapWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4 space-y-3">
-      <h2 className="text-lg font-bold">Web Security Scanner</h2>
       <p className="text-sm text-gray-400">
         Passive checks on a target's response (headers, cookies, transport, CORS).
         {hasEngine ? ' Active WASM engine present.' : ' Active scanning needs the optional WASM engine.'}

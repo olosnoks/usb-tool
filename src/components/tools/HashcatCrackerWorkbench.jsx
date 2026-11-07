@@ -62,7 +62,6 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4">
-      <h2 className="text-lg font-bold mb-2">Hash Cracker</h2>
       <p className="text-sm text-gray-400 mb-4">
         Dictionary attack against a hash using MD5 or SHA-1/256/384/512. Runs entirely in your browser.
       </p>

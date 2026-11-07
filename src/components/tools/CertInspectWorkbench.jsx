@@ -55,7 +55,6 @@ export default function CertInspectWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4 space-y-4 font-mono text-xs">
-      <h2 className="text-lg font-bold">Certificate Inspector</h2>
       <p className="text-sm text-gray-400 font-sans">Load a PEM or DER certificate to view its fields and fingerprints.</p>
       <input type="file" accept=".pem,.crt,.cer,.der" onChange={handleFile} className="bg-slate-900 border border-slate-800 rounded p-1 text-gray-200" />
       {error && <p className="text-red-400">Error: {error}</p>}

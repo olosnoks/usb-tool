@@ -58,7 +58,6 @@ export default function BurpProxyWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4">
-      <h2 className="text-lg font-bold mb-2">Web Request Toolkit</h2>
       <ProxyConfig onLogMessage={onLogMessage} />
       <div className="flex gap-1 mb-3 border-b border-slate-800">
         {['repeater', 'intruder', 'decoder'].map((t) => (

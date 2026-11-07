@@ -64,7 +64,6 @@ export default function NiktoScannerWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4">
-      <h2 className="text-lg font-bold mb-2">Web Path Prober</h2>
       <p className="text-sm text-gray-400 mb-3">Check common sensitive paths and the server header.</p>
       <ProxyConfig onLogMessage={onLogMessage} />
       <div className="flex gap-2 mb-3">

@@ -58,7 +58,6 @@ export default function HydraBruteforceWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4">
-      <h2 className="text-lg font-bold mb-2">HTTP Basic Auth Tester</h2>
       <p className="text-sm text-gray-400 mb-3">Try username/password lists against an HTTP Basic-auth endpoint.</p>
       <ProxyConfig onLogMessage={onLogMessage} />
       <div className="grid gap-2 mb-4">
