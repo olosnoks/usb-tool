@@ -3,13 +3,12 @@ import {
   Usb, Smartphone, TerminalSquare, Upload, Download, Wifi, Power, ShieldAlert, Sparkles, Loader2, Play, Folder, FileText,
   ChevronRight, Package, ScrollText, Monitor, Square, Trash2, RefreshCw, Info
 } from 'lucide-react';
-import { AdbConnection, requestAdbDevice, createSimulatedAdb } from '../../utils/adbDriver';
+import { AdbConnection, requestAdbDevice } from '../../utils/adbDriver';
 import {
   parseGetprop, deviceSummary, parseBattery, parseWmSize, LogcatPoller, LOG_LEVELS, parsePackages, installApk, uninstallPackage,
   packagePaths, packageVersion, KEYCODES, tapCommand, inputTextCommand
 } from '../../utils/adbTools';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { confirmAction, record } from '../../utils/sessionLog';
 const REBOOT_TARGETS = [
@@ -36,7 +35,6 @@ const quote = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
 
 export default function AdbWorkbench({ initialTab = 'device' }) {
   const [adb, setAdb] = useState(null);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [status, setStatus] = useState('offline');
   const [statusMsg, setStatusMsg] = useState('No ADB device connected');
   const [banner, setBanner] = useState('');
@@ -108,18 +106,17 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
     setScreenSize(parseWmSize(await conn.shell('wm size')));
   };
 
-  const connect = async (simulated) => {
+  const connect = async () => {
     setBusy('connect');
     try {
-      const transport = simulated ? createSimulatedAdb() : await requestAdbDevice();
+      const transport = await requestAdbDevice();
       const conn = new AdbConnection(transport, { logger: addLog });
       const { banner: b } = await conn.connect({ onPrompt: () => addLog('Tap "Allow USB debugging" on the device (and "always allow" to remember this computer).', 'info') });
       queue.current = Promise.resolve();
       setAdb(conn);
-      setIsSimulated(simulated);
       setBanner(b);
-      setStatus(simulated ? 'warning' : 'online');
-      setStatusMsg(simulated ? 'Simulated device' : 'Connected');
+      setStatus('online');
+      setStatusMsg('Connected');
       await serial(() => loadDeviceInfo(conn)).catch((e) => addLog(`Device info: ${e.message}`, 'err'));
     } catch (err) {
       setStatus('warning');
@@ -134,7 +131,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
     setLogcatOn(false);
     setAutoScreen(false);
     try { await adb?.close(); } catch (e) { /* ignore */ }
-    setAdb(null); setIsSimulated(false); setBanner(''); setStatus('offline'); setStatusMsg('No ADB device connected');
+    setAdb(null); setBanner(''); setStatus('offline'); setStatusMsg('No ADB device connected');
     setProps(null); setBattery(null); setEntries(null); setPackages(null); setLogcat([]); setScreen(null); setPkgInfo({});
   };
 
@@ -314,7 +311,6 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && <DemoBanner>Simulated device: shell output, apps, logcat, files, the screen and reboots are invented.</DemoBanner>}
 
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -329,7 +325,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
               The phone asks "Allow USB debugging?" the first time; tap <b>Always allow</b> so it remembers this browser&apos;s key.
             </p>
           </div>
-          <StatusBadge status={status} label={status === 'online' ? 'ADB' : status === 'warning' ? 'SIM' : 'IDLE'} value={status === 'online' ? 'Connected' : status === 'warning' && isSimulated ? 'Demo' : 'Offline'} />
+          <StatusBadge status={status} label={status === 'online' ? 'ADB' : status === 'warning' ? 'ERR' : 'IDLE'} value={status === 'online' ? 'Connected' : 'Offline'} />
         </div>
 
         {!webUsbAvailable && (
@@ -340,14 +336,9 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
 
         <div className="pt-3 flex flex-wrap items-center gap-2">
           {!adb ? (
-            <>
-              <button onClick={() => connect(false)} disabled={!webUsbAvailable || !!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 text-xs font-bold disabled:opacity-40">
-                {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} CONNECT ADB (WEBUSB)
-              </button>
-              <button onClick={() => connect(true)} disabled={!!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-emerald-300 border border-emerald-500/40 text-xs font-bold">
-                <Sparkles className="w-3.5 h-3.5" /> DEMO
-              </button>
-            </>
+            <button onClick={() => connect()} disabled={!webUsbAvailable || !!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 text-xs font-bold disabled:opacity-40">
+              {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} CONNECT ADB (WEBUSB)
+            </button>
           ) : (
             <button onClick={disconnect} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
               <Power className="w-3.5 h-3.5" /> DISCONNECT

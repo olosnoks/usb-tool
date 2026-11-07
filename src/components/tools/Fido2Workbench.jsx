@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
-import { KeyRound, Usb, Power, ShieldAlert, Sparkles, Activity, Loader2 } from 'lucide-react';
-import { Fido2Device, requestFido2Device, createSimulatedFido2 } from '../../utils/fido2Driver';
+import { KeyRound, Usb, Power, ShieldAlert, Activity, Loader2 } from 'lucide-react';
+import { Fido2Device, requestFido2Device } from '../../utils/fido2Driver';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { useSessionError } from '../../utils/sessionLog';
 export default function Fido2Workbench() {
   const [dev, setDev] = useState(null);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [status, setStatus] = useState('offline');
   const [ctap, setCtap] = useState(null); // CTAPHID init info
   const [info, setInfo] = useState(null); // getInfo
@@ -16,22 +14,22 @@ export default function Fido2Workbench() {
   const [error, setError] = useSessionError('FIDO2');
   const webHidAvailable = typeof navigator !== 'undefined' && 'hid' in navigator;
 
-  const connect = async (simulated) => {
+  const connect = async () => {
     setBusy('connect'); setError('');
     try {
-      const transport = simulated ? createSimulatedFido2() : await requestFido2Device();
+      const transport = await requestFido2Device();
       const d = new Fido2Device(transport);
       await d.open();
       setCtap(await d.init());
       setInfo(await d.getInfo());
-      setDev(d); setIsSimulated(simulated); setStatus(simulated ? 'warning' : 'online');
+      setDev(d); setStatus('online');
     } catch (err) { setError(err.message); setStatus('warning'); }
     finally { setBusy(''); }
   };
 
   const disconnect = async () => {
     try { await dev?.close(); } catch (e) { /* ignore */ }
-    setDev(null); setIsSimulated(false); setStatus('offline'); setCtap(null); setInfo(null); setPing(null);
+    setDev(null); setStatus('offline'); setCtap(null); setInfo(null); setPing(null);
   };
 
   const doPing = async () => {
@@ -45,8 +43,6 @@ export default function Fido2Workbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && <DemoBanner>Simulated security key: the versions, AAGUID and options below are invented.</DemoBanner>}
-
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
@@ -58,7 +54,7 @@ export default function Fido2Workbench() {
               round-trip. Read-only — it does not create, list or delete credentials, change the PIN, or reset the key.
             </p>
           </div>
-          <StatusBadge status={status} label={status === 'online' ? 'CTAP' : status === 'warning' ? 'SIM' : 'IDLE'} value={dev ? (isSimulated ? 'Demo' : 'Connected') : 'Offline'} />
+          <StatusBadge status={status} label={status === 'online' ? 'CTAP' : status === 'warning' ? 'ERR' : 'IDLE'} value={dev ? 'Connected' : 'Offline'} />
         </div>
 
         {!webHidAvailable && (
@@ -82,14 +78,9 @@ export default function Fido2Workbench() {
 
         <div className="pt-3 flex flex-wrap items-center gap-2">
           {!dev ? (
-            <>
-              <button onClick={() => connect(false)} disabled={!webHidAvailable || !!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 text-xs font-bold disabled:opacity-40">
-                {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} READ SECURITY KEY (WEBHID)
-              </button>
-              <button onClick={() => connect(true)} disabled={!!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-emerald-300 border border-emerald-500/40 text-xs font-bold">
-                <Sparkles className="w-3.5 h-3.5" /> DEMO
-              </button>
-            </>
+            <button onClick={() => connect()} disabled={!webHidAvailable || !!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 text-xs font-bold disabled:opacity-40">
+              {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} READ SECURITY KEY (WEBHID)
+            </button>
           ) : (
             <>
               <button onClick={disconnect} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
