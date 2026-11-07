@@ -116,8 +116,7 @@ export const SIDEBAR_SECTIONS = [
       { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash, CMSIS-DAP debugger (RTT, SWO, flash), JTAG / SVF and AVR ISP', keywords: ['programmers', 'ch341a', 'cmsis-dap', 'cmsis', 'dap', 'swd', 'rtt', 'swo', 'jtag', 'svf', 'cpld', 'avr', 'isp', 'atmega', 'spi flash', 'bios'] },
       { id: 'usb-pd', name: 'USB-PD Power Delivery', icon: Zap, accent: 'amber', desc: 'STUSB4500 sink: contract readout, voltage requests and verified NVM (power-up PDOs)', keywords: ['usb-pd', 'power delivery', 'pd', 'type-c', 'stusb4500', 'pdo', 'voltage trigger', '9v', '12v', '15v', '20v', 'e-marker'] },
       { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more', keywords: ['dfu', 'dfuse', 'stm32', 'bootloader', 'flash', 'firmware update', 'gd32', 'arm'] },
-      { id: 'fastboot', name: 'Android Fastboot', icon: Smartphone, accent: 'emerald', desc: 'Unlock, sparse-aware flashing, A/B slots, factory image zips, reboot over WebUSB', keywords: ['fastboot', 'android', 'bootloader', 'unlock', 'partitions', 'sparse', 'recovery', 'reboot'] },
-      { id: 'adb', name: 'Android ADB', icon: Smartphone, accent: 'emerald', desc: 'Device info, shell, files, apps, logcat, screen with tap control, wireless ADB', keywords: ['adb', 'android', 'shell', 'logcat', 'screen mirror', 'tap', 'file manager', 'wireless adb', 'apk'] }
+      { id: 'android', name: 'Android (ADB & Fastboot)', icon: Smartphone, accent: 'emerald', desc: 'One Android tool over WebUSB: ADB (device info, shell, files, apps, logcat, screen, wireless) and Fastboot (unlock, sparse flashing, A/B slots, factory zips, reboot)', keywords: ['android', 'adb', 'fastboot', 'bootloader', 'unlock', 'partitions', 'sparse', 'recovery', 'reboot', 'shell', 'logcat', 'screen mirror', 'tap', 'file manager', 'wireless adb', 'apk'] }
     ]
   },
   {
