@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { DemoBanner } from '../common/DemoNotice';
 import { fetchKismetDevices, fetchKismetAlerts, fetchKismetStatus } from '../../utils/kismetClient';
 import {
   Radio,
@@ -108,157 +107,7 @@ const ALFA_PROFILES = [
 ];
 
 // Rich simulated Alfa + Kismet capture telemetry
-const MOCK_KISMET_DEVICES = [
-  {
-    bssid: 'E0:E1:A9:44:B2:10',
-    ssid: 'Corporate_Corp_Sec5G',
-    type: 'AP',
-    channel: 36,
-    frequency: '5.180 GHz',
-    band: '5GHz',
-    signal: -48,
-    signalQuality: 92,
-    crypto: 'WPA3-SAE / WPA2-Enterprise',
-    manufacturer: 'Cisco Systems, Inc.',
-    packets: 14820,
-    clients: 8,
-    firstSeen: '10 mins ago',
-    lastSeen: '1s ago',
-    clientList: ['3C:71:BF:11:22:33 (Apple MacBook)', '94:E6:F7:88:99:AA (Intel AX211)', '40:98:AD:CC:DD:EE (iPhone 15 Pro)']
-  },
-  {
-    bssid: '70:4F:57:33:91:FA',
-    ssid: 'Skyline_Guest_Public',
-    type: 'AP',
-    channel: 6,
-    frequency: '2.437 GHz',
-    band: '2.4GHz',
-    signal: -62,
-    signalQuality: 74,
-    crypto: 'Open (Captive Portal / OWE)',
-    manufacturer: 'Ubiquiti Networks Inc.',
-    packets: 8430,
-    clients: 14,
-    firstSeen: '12 mins ago',
-    lastSeen: '2s ago',
-    clientList: ['12:34:56:78:9A:BC (Samsung Galaxy)', '58:94:6B:12:43:A1 (Google Pixel 8)']
-  },
-  {
-    bssid: '24:A4:3C:99:10:E2',
-    ssid: 'IoT_Telemetry_Hidden',
-    type: 'AP',
-    channel: 1,
-    frequency: '2.412 GHz',
-    band: '2.4GHz',
-    signal: -71,
-    signalQuality: 58,
-    crypto: 'WPA2-PSK [AES-CCMP]',
-    manufacturer: 'Espressif Systems',
-    packets: 4120,
-    clients: 6,
-    firstSeen: '8 mins ago',
-    lastSeen: '3s ago',
-    clientList: ['84:F3:EB:20:11:22 (ESP32-S3 Node)', 'DC:54:75:A0:44:55 (ESP8266 Sensor)']
-  },
-  {
-    bssid: 'B0:BE:76:88:21:40',
-    ssid: 'Tesla_Powerwall_Grid',
-    type: 'AP',
-    channel: 11,
-    frequency: '2.462 GHz',
-    band: '2.4GHz',
-    signal: -78,
-    signalQuality: 45,
-    crypto: 'WPA2-PSK [AES-CCMP]',
-    manufacturer: 'Tesla Motors',
-    packets: 1950,
-    clients: 1,
-    firstSeen: '15 mins ago',
-    lastSeen: '8s ago',
-    clientList: ['B0:BE:76:88:21:41 (Gateway Monitor)']
-  },
-  {
-    bssid: '00:26:86:14:22:90',
-    ssid: 'Lab_Internal_Audit_149',
-    type: 'AP',
-    channel: 149,
-    frequency: '5.745 GHz',
-    band: '5GHz',
-    signal: -53,
-    signalQuality: 86,
-    crypto: 'WPA3-SAE Only',
-    manufacturer: 'Aruba Networks',
-    packets: 9840,
-    clients: 4,
-    firstSeen: '5 mins ago',
-    lastSeen: '1s ago',
-    clientList: ['F4:D4:88:77:66:55 (Dell Precision Workstation)']
-  },
-  {
-    bssid: '3C:71:BF:11:22:33',
-    ssid: 'Probing: Corporate_Corp_Sec5G',
-    type: 'STA',
-    channel: 36,
-    frequency: '5.180 GHz',
-    band: '5GHz',
-    signal: -51,
-    signalQuality: 88,
-    crypto: 'Station / Supplicant',
-    manufacturer: 'Apple, Inc.',
-    packets: 3200,
-    clients: 0,
-    firstSeen: '7 mins ago',
-    lastSeen: '1s ago',
-    clientList: []
-  },
-  {
-    bssid: '1A:2B:3C:D4:E5:F6',
-    ssid: 'Probing: Home_Wi-Fi_Starbucks',
-    type: 'STA',
-    channel: 6,
-    frequency: '2.437 GHz',
-    band: '2.4GHz',
-    signal: -69,
-    signalQuality: 60,
-    crypto: 'Station / Supplicant',
-    manufacturer: 'Intel Corporate',
-    packets: 1120,
-    clients: 0,
-    firstSeen: '4 mins ago',
-    lastSeen: '4s ago',
-    clientList: []
-  }
-];
 
-const MOCK_WIDS_ALERTS = [
-  {
-    id: 1,
-    type: 'DEAUTH_FLOOD',
-    severity: 'CRITICAL',
-    target: 'Corporate_Corp_Sec5G (E0:E1:A9:44:B2:10)',
-    desc: 'Burst of 124 802.11 Deauthentication frames detected within 800ms. Potential client disconnection / handshake capture attempt.',
-    channel: 36,
-    time: '2 mins ago'
-  },
-  {
-    id: 2,
-    type: 'ROGUE_AP_SSID_SPOOF',
-    severity: 'WARN',
-    target: 'Skyline_Guest_Public (F0:99:BF:AA:BB:CC)',
-    desc: 'Known SSID broadcasting from unfamiliar BSSID with different security parameters. Possible Evil Twin or unauthorized repeater.',
-    channel: 1,
-    time: '5 mins ago'
-  },
-  {
-    id: 3,
-    type: 'NULL_PROBE_RESPONSE',
-    severity: 'INFO',
-    target: '70:4F:57:33:91:FA',
-    desc: 'AP answered broadcast probe request without specifying SSID element. Standard non-stealth beacon response.',
-    channel: 6,
-    time: '8 mins ago'
-  }
-];
 
 export default function KismetStudioWorkbench() {
   // Connection states
@@ -266,7 +115,6 @@ export default function KismetStudioWorkbench() {
   const [apiKey, setApiKey] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [useDemoMode, setUseDemoMode] = useState(false);   // opt-in: real Kismet server by default
   const [activeTab, setActiveTab] = useState('inventory'); // inventory, spectrum, alerts, hardware
   
   // Hardware profile & command assistant
@@ -343,35 +191,25 @@ kismet -c ${monIface} --no-ncurses`;
     }
 
     setIsConnecting(true);
-    if (useDemoMode) {
-      // Demo: load the mock capture
-      setTimeout(() => {
-        setDevices(MOCK_KISMET_DEVICES);
-        setAlerts(MOCK_WIDS_ALERTS);
-        setIsConnected(true);
-        setIsConnecting(false);
-      }, 600);
-    } else {
-      // Real Kismet server: check status (and the login), then poll below.
-      try {
-        const st = await fetchKismetStatus(serverUrl, apiKey);
-        setDevices([]);
-        setAlerts([]);
-        setServerUptime(st.uptime || '--:--:--');
-        setKismetError('');
-        setLastUpdate(null);
-        setIsConnected(true);
-      } catch (err) {
-        alert(`${err.message}\n\nStart Kismet with a source, e.g.: kismet -c wlan1mon`);
-      } finally {
-        setIsConnecting(false);
-      }
+    // Real Kismet server: check status (and the login), then poll below.
+    try {
+      const st = await fetchKismetStatus(serverUrl, apiKey);
+      setDevices([]);
+      setAlerts([]);
+      setServerUptime(st.uptime || '--:--:--');
+      setKismetError('');
+      setLastUpdate(null);
+      setIsConnected(true);
+    } catch (err) {
+      alert(`${err.message}\n\nStart Kismet with a source, e.g.: kismet -c wlan1mon`);
+    } finally {
+      setIsConnecting(false);
     }
   };
 
   // Live data from a real Kismet server, every 3 s while connected.
   useEffect(() => {
-    if (!isConnected || useDemoMode) return undefined;
+    if (!isConnected) return undefined;
     let stopped = false;
     const poll = async () => {
       try {
@@ -393,7 +231,7 @@ kismet -c ${monIface} --no-ncurses`;
     poll();
     const iv = setInterval(poll, 3000);
     return () => { stopped = true; clearInterval(iv); };
-  }, [isConnected, useDemoMode, serverUrl, apiKey]);
+  }, [isConnected, serverUrl, apiKey]);
 
   // Filtered devices
   const filteredDevices = useMemo(() => {
@@ -468,10 +306,7 @@ kismet -c ${monIface} --no-ncurses`;
 
   return (
     <div className="flex flex-col gap-4 font-mono text-slate-100">
-      {isConnected && useDemoMode && (
-        <DemoBanner>The devices, alerts and rates below are a canned Alfa + Kismet capture, not your server.</DemoBanner>
-      )}
-      {isConnected && !useDemoMode && (
+      {isConnected && (
         <div role="note" className={`p-2.5 rounded-lg border text-xs ${kismetError ? 'border-rose-500/40 bg-rose-500/10 text-rose-200' : 'border-sky-500/40 bg-sky-500/10 text-sky-200'}`}>
           {kismetError
             ? `Kismet at ${serverUrl}: ${kismetError}`
@@ -486,9 +321,6 @@ kismet -c ${monIface} --no-ncurses`;
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold tracking-tight text-white flex items-center gap-2">
-                KISMET STUDIO & ALFA ADAPTER
-              </h2>
               <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
                 802.11 Monitor Lab
               </span>
@@ -516,16 +348,6 @@ kismet -c ${monIface} --no-ncurses`;
             />
           </div>
 
-          <label className="flex items-center gap-1.5 text-xs text-slate-300 bg-slate-900/80 px-2.5 py-1.5 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800 transition">
-            <input
-              type="checkbox"
-              checked={useDemoMode}
-              onChange={(e) => setUseDemoMode(e.target.checked)}
-              disabled={isConnected}
-              className="rounded text-purple-500 focus:ring-purple-500"
-            />
-            <span className="text-[11px]">Simulate Alfa RF</span>
-          </label>
 
           <button
             onClick={handleToggleConnect}
@@ -571,7 +393,7 @@ kismet -c ${monIface} --no-ncurses`;
           <div>
             <div className="text-[10px] uppercase text-slate-400 font-semibold">Packet Telemetry</div>
             <div className="text-sm font-bold text-purple-400 mt-0.5">
-              {isConnected && useDemoMode ? `${packetRate.toLocaleString()} pkts/s` : '-- pkts/s'}
+              {isConnected ? `${packetRate.toLocaleString()} pkts/s` : "-- pkts/s"}
             </div>
             <div className="text-[10px] text-slate-500">Uptime: {isConnected ? serverUptime : '--:--:--'}</div>
           </div>
