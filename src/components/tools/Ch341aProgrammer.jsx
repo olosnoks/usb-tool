@@ -12,7 +12,6 @@ import {
   AlertTriangle,
   Layers,
   FileCode,
-  Sparkles,
   Zap,
   Sliders
 } from 'lucide-react';
@@ -23,7 +22,6 @@ import {
 } from '../../utils/ch341aDriver';
 import HexViewer from '../common/HexViewer';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { confirmAction, useSessionError } from '../../utils/sessionLog';
 const hex = (v, w = 6) => `0x${v.toString(16).toUpperCase().padStart(w, '0')}`;
@@ -31,7 +29,6 @@ const hex = (v, w = 6) => `0x${v.toString(16).toUpperCase().padStart(w, '0')}`;
 export default function Ch341aProgrammer() {
   const [client] = useState(() => new Ch341aClient(console.log));
   const [isConnected, setIsConnected] = useState(false);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [chipInfo, setChipInfo] = useState(null);
   const [isBusy, setIsBusy] = useState(false);
   const [busyAction, setBusyAction] = useState('');
@@ -81,7 +78,6 @@ export default function Ch341aProgrammer() {
       setBusyAction('Connecting to CH341A WebUSB...');
       await client.connect();
       setIsConnected(true);
-      setIsSimulated(false);
       // Auto-detect chip
       const detected = await client.readJedecId();
       setChipInfo(detected);
@@ -94,23 +90,11 @@ export default function Ch341aProgrammer() {
     }
   };
 
-  // Connect Virtual Simulation
-  const handleConnectSimulation = async () => {
-    const chip = await client.connectSimulation();
-    setIsConnected(true);
-    setIsSimulated(true);
-    setChipInfo(chip);
-    setStatus(await client.readStatus());
-    const data = await client.readFlash(0, 65536);
-    showBuffer(data, 'rx');
-  };
-
   const handleDisconnect = () => {
     client.disconnect();
     setStatus(null);
     setDiff(null);
     setIsConnected(false);
-    setIsSimulated(false);
     setChipInfo(null);
     setLoadedBuffer(null);
     setHexByteStream([]);
@@ -170,7 +154,7 @@ export default function Ch341aProgrammer() {
       alert(`The buffer (${loadedBuffer.length} bytes) is larger than the chip (${chipInfo.sizeBytes} bytes).`);
       return;
     }
-    if (!isSimulated && !confirmAction(`Write ${loadedBuffer.length} bytes to the ${chipInfo?.model || 'SPI flash'} from address 0?\n\nSectors that differ are erased and reprogrammed, then verified. Keep a backup dump of the original contents.`)) return;
+    if (!confirmAction(`Write ${loadedBuffer.length} bytes to the ${chipInfo?.model || 'SPI flash'} from address 0?\n\nSectors that differ are erased and reprogrammed, then verified. Keep a backup dump of the original contents.`)) return;
     try {
       setIsBusy(true);
       setBusyAction(`Programming ${loadedBuffer.length} bytes to SPI flash...`);
@@ -247,14 +231,6 @@ export default function Ch341aProgrammer() {
                   <Cpu className="w-3.5 h-3.5" />
                   <span>CONNECT CH341A (WEBUSB)</span>
                 </button>
-                <button
-                  onClick={handleConnectSimulation}
-                  disabled={isBusy}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>DEMO SIMULATION</span>
-                </button>
               </>
             ) : (
               <button
@@ -295,9 +271,9 @@ export default function Ch341aProgrammer() {
             <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
               <span className="text-[10px] text-slate-500 font-bold uppercase">Programmer Hardware</span>
               <div className="text-purple-300 font-bold text-sm mt-0.5">
-                {isSimulated ? 'VIRTUAL CH341A' : 'CH341A USB'}
+                CH341A USB
               </div>
-              <div className="text-[10px] text-slate-400">{isSimulated ? 'Simulated Target Active' : 'VID 0x1A86 PID 0x5512'}</div>
+              <div className="text-[10px] text-slate-400">VID 0x1A86 PID 0x5512</div>
             </div>
           </div>
         )}
@@ -373,7 +349,6 @@ export default function Ch341aProgrammer() {
         </div>
       )}
 
-      {isSimulated && <DemoBanner>Virtual CH341A with a W25Q64 flash and a 24C02 EEPROM; it speaks the real CH341 packet protocol, but no hardware is involved.</DemoBanner>}
       {error && (
         <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
           <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
@@ -407,7 +382,7 @@ export default function Ch341aProgrammer() {
                 onClick={() => {
                   const v = parseInt(srInput, 16);
                   if (Number.isNaN(v) || v > 0xff) { setError('SR1 is one hex byte.'); return; }
-                  if (!isSimulated && !confirmAction(`Write status register 1 = ${hex(v, 2)}? Setting SRP0 with WP# low can lock the register until power-off.`)) return;
+                  if (!confirmAction(`Write status register 1 = ${hex(v, 2)}? Setting SRP0 with WP# low can lock the register until power-off.`)) return;
                   job('Writing status register...', async () => setStatus(await client.writeStatus(v)));
                 }}
                 disabled={isBusy}
@@ -418,7 +393,7 @@ export default function Ch341aProgrammer() {
             </div>
             <button
               onClick={() => {
-                if (!isSimulated && !confirmAction(`Erase the WHOLE ${chipInfo?.model || 'chip'}? Every byte becomes FF. Save a dump first.`)) return;
+                if (!confirmAction(`Erase the WHOLE ${chipInfo?.model || 'chip'}? Every byte becomes FF. Save a dump first.`)) return;
                 job('Chip erase (this can take a minute)...', async () => { await client.eraseChip(); setStatus(await client.readStatus()); });
               }}
               disabled={isBusy}
@@ -493,7 +468,7 @@ export default function Ch341aProgrammer() {
               <button
                 onClick={() => {
                   if (!loadedBuffer) { setError('Load or read a buffer first.'); return; }
-                  if (!isSimulated && !confirmAction(`Write ${loadedBuffer.length} bytes to the ${eepromType}?`)) return;
+                  if (!confirmAction(`Write ${loadedBuffer.length} bytes to the ${eepromType}?`)) return;
                   job(`Writing ${eepromType}...`, async () => {
                     const ee = client.eeprom(eepromType, parseInt(eepromAddr, 16) || 0x50);
                     await ee.write(loadedBuffer.subarray(0, Math.min(loadedBuffer.length, ee.size)), (f) => setProgress({ percent: Math.round(f * 100), current: 0, total: ee.size }));

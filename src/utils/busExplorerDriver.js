@@ -227,16 +227,6 @@ export class BusExplorerClient {
 
   log(msg) { this.logger(`[BUS EXPLORER] ${msg}`); }
 
-  connectSimulation() {
-    this.isConnected = true;
-    this.isSimulated = true;
-    this.detectedDevices = [0x3C, 0x40, 0x48, 0x50, 0x68, 0x76]; // OLED, INA219, ADC, EEPROM, MPU6050, BME280
-    this._simSensors = null;
-    this.initSimulatedRegisters(0x68);
-    this.log('Simulated I2C bus with five sensors online.');
-    return true;
-  }
-
   /** Open a Bus Pirate (v3/v4) and put it in raw I2C mode. `link` is for tests. */
   async connectHardware({ link = null } = {}) {
     this.link = link || await SerialLink.request(this._owner, { baudRate: 115200 });

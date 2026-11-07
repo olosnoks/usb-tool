@@ -71,41 +71,12 @@ export class ModbusClient {
   constructor(logger = console.log) {
     this.logger = logger;
     this.isConnected = false;
-    this.isSimulated = false;
     this.slaveId = 1;
     this.baudRate = 9600;
     this.parity = 'none';
     // Live transport: an async (txBytes, { expectedLength, timeoutMs }) => Uint8Array
     // provided by SerialContext.transceive when talking to real RS-485 hardware.
     this.transceive = null;
-
-    // Simulated 40001-40020 Holding Registers (Solar Inverter / Power Meter)
-    this.simRegisters = new Uint16Array(32);
-    this.initSimulatedRegisters();
-  }
-
-  initSimulatedRegisters() {
-    this.simRegisters[0] = 2305; // 230.5 V AC Mains Voltage (x10)
-    this.simRegisters[1] = 124;  // 12.4 A Grid Current (x10)
-    this.simRegisters[2] = 2858; // 2858 W Active Power
-    this.simRegisters[3] = 5002; // 50.02 Hz Grid Frequency (x100)
-    this.simRegisters[4] = 98;   // 0.98 Power Factor (x100)
-    this.simRegisters[5] = 425;  // 42.5 °C Inverter Heatsink Temp (x10)
-    this.simRegisters[6] = 1420; // Daily Energy (14.20 kWh)
-    this.simRegisters[7] = 8520; // Total Lifetime Energy (8520 kWh)
-    for (let i = 8; i < 32; i++) {
-      this.simRegisters[i] = (i * 111) & 0xFFFF;
-    }
-  }
-
-  connectSimulation(slaveId = 1, baud = 9600) {
-    this.isConnected = true;
-    this.isSimulated = true;
-    this.transceive = null;
-    this.slaveId = slaveId;
-    this.baudRate = baud;
-    this.logger(`[MODBUS RTU] SIMULATION — connected to virtual RS-485 bus at ${baud} bps. Listening for Slave ID ${slaveId}. (No real hardware; data is synthetic.)`);
-    return true;
   }
 
   // Bind to a real serial/RS-485 adapter via SerialContext.transceive.
@@ -115,7 +86,6 @@ export class ModbusClient {
     }
     this.transceive = transceiveFn;
     this.isConnected = true;
-    this.isSimulated = false;
     this.slaveId = slaveId;
     this.baudRate = baud;
     this.logger(`[MODBUS RTU] LIVE — bound to serial port @ ${baud} bps (8-N-1). Polling Slave ID ${slaveId} over RS-485.`);
@@ -124,7 +94,6 @@ export class ModbusClient {
 
   disconnect() {
     this.isConnected = false;
-    this.isSimulated = false;
     this.transceive = null;
     this.logger('[MODBUS RTU] Disconnected from RS-485 bus.');
   }
@@ -136,27 +105,7 @@ export class ModbusClient {
     const reqFrame = buildModbusRtuRequest(this.slaveId, 0x03, startAddr, count);
     this.logger(`[MODBUS TX] => ${toHexString(reqFrame)}`);
 
-    if (!this.isSimulated) {
-      return this.readHoldingRegistersLive(reqFrame, startAddr, count);
-    }
-
-    await new Promise(r => setTimeout(r, 80));
-
-    // Dynamic noise on simulated registers
-    this.simRegisters[0] = 2300 + Math.floor(Math.random() * 15);
-    this.simRegisters[1] = 120 + Math.floor(Math.random() * 10);
-    this.simRegisters[2] = Math.round((this.simRegisters[0] * this.simRegisters[1]) / 100);
-    this.simRegisters[3] = 5000 + Math.floor(Math.random() * 6);
-
-    const results = [];
-    for (let i = 0; i < count; i++) {
-      const addr = startAddr + i;
-      const rawVal = this.simRegisters[addr % 32];
-      results.push(this.formatRegister(addr, rawVal));
-    }
-
-    this.logger(`[MODBUS RX] <= SIM: synthesized ${count} registers from virtual Slave ${this.slaveId}.`);
-    return results;
+    return this.readHoldingRegistersLive(reqFrame, startAddr, count);
   }
 
   // Live FC 0x03: transmit the request frame and parse the real slave response.
@@ -214,35 +163,28 @@ export class ModbusClient {
     const reqFrame = buildModbusRtuRequest(this.slaveId, 0x06, addr, value);
     this.logger(`[MODBUS TX] => Write Reg ${addr}: ${toHexString(reqFrame)}`);
 
-    if (!this.isSimulated) {
-      let resp;
-      try {
-        // A successful 0x06 response is an echo of the 8-byte request
-        resp = await this.transceive(reqFrame, { expectedLength: 8, timeoutMs: 800 });
-      } catch (err) {
-        this.logger(`[MODBUS RX] <= Transport error: ${err.message}`);
-        return false;
-      }
-      if (!resp || resp.length < 5) {
-        this.logger('[MODBUS RX] <= Write not acknowledged (timeout / short frame).');
-        return false;
-      }
-      if (resp[1] & 0x80) {
-        this.logger(`[MODBUS RX] <= Write exception 0x${resp[2].toString(16).padStart(2, '0')}: ${MODBUS_EXCEPTIONS[resp[2]] || 'Unknown'}.`);
-        return false;
-      }
-      const frame = resp.slice(0, 8);
-      if (frame.length < 8 || !this.verifyCrc(frame)) {
-        this.logger(`[MODBUS RX] <= Write ack CRC mismatch / malformed: ${toHexString(resp)}`);
-        return false;
-      }
-      this.logger(`[MODBUS RX] <= Write Reg ${addr} acknowledged by Slave ${this.slaveId} (echo OK).`);
-      return true;
+    let resp;
+    try {
+      // A successful 0x06 response is an echo of the 8-byte request
+      resp = await this.transceive(reqFrame, { expectedLength: 8, timeoutMs: 800 });
+    } catch (err) {
+      this.logger(`[MODBUS RX] <= Transport error: ${err.message}`);
+      return false;
     }
-
-    this.simRegisters[addr % 32] = value & 0xFFFF;
-    await new Promise(r => setTimeout(r, 80));
-    this.logger(`[MODBUS RX] <= SIM: Write Reg ${addr} acknowledged by virtual Slave ${this.slaveId}.`);
+    if (!resp || resp.length < 5) {
+      this.logger('[MODBUS RX] <= Write not acknowledged (timeout / short frame).');
+      return false;
+    }
+    if (resp[1] & 0x80) {
+      this.logger(`[MODBUS RX] <= Write exception 0x${resp[2].toString(16).padStart(2, '0')}: ${MODBUS_EXCEPTIONS[resp[2]] || 'Unknown'}.`);
+      return false;
+    }
+    const frame = resp.slice(0, 8);
+    if (frame.length < 8 || !this.verifyCrc(frame)) {
+      this.logger(`[MODBUS RX] <= Write ack CRC mismatch / malformed: ${toHexString(resp)}`);
+      return false;
+    }
+    this.logger(`[MODBUS RX] <= Write Reg ${addr} acknowledged by Slave ${this.slaveId} (echo OK).`);
     return true;
   }
 

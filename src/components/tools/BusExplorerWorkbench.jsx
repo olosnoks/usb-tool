@@ -20,14 +20,12 @@ import {
   I2C_SPEEDS
 } from '../../utils/busExplorerDriver';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 import SensorFlashPanels from './bus/SensorFlashPanels';
 
 import { useSessionError } from '../../utils/sessionLog';
 export default function BusExplorerWorkbench() {
   const [client] = useState(() => new BusExplorerClient(console.log));
   const [isConnected, setIsConnected] = useState(false);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [detectedDevices, setDetectedDevices] = useState([]);
   const [selectedAddr, setSelectedAddr] = useState(0x68);
   const [isScanning, setIsScanning] = useState(false);
@@ -67,23 +65,13 @@ export default function BusExplorerWorkbench() {
   const handleConnectHardware = () => guard('connect', async () => {
     await client.connectHardware();
     setIsConnected(true);
-    setIsSimulated(false);
     setDetectedDevices([]);
     setSettings({ ...client.settings });
   });
 
-  const handleConnectSimulation = () => {
-    client.connectSimulation();
-    setIsConnected(true);
-    setIsSimulated(true);
-    setDetectedDevices(client.detectedDevices);
-    handleSelectAddress(0x68, true);
-  };
-
   const handleDisconnect = async () => {
     await client.disconnect();
     setIsConnected(false);
-    setIsSimulated(false);
     setDetectedDevices([]);
   };
 
@@ -110,8 +98,7 @@ export default function BusExplorerWorkbench() {
 
   const handleSelectAddress = (addr, fresh = false) => {
     setSelectedAddr(addr);
-    client.initSimulatedRegisters(addr);
-    if (fresh || client.isSimulated) refreshRegisters();
+    if (fresh) refreshRegisters();
     else setInspectRegs([]);
   };
 
@@ -140,7 +127,6 @@ export default function BusExplorerWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && <DemoBanner>Simulated I2C bus: the devices, sensor readings, OLED and SPI flash below are invented.</DemoBanner>}
       {error && (
         <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
           <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
@@ -170,13 +156,6 @@ export default function BusExplorerWorkbench() {
                   <Usb className="w-3.5 h-3.5" />
                   <span>{busy === 'connect' ? 'CONNECTING...' : 'CONNECT BUS PIRATE (SERIAL)'}</span>
                 </button>
-                <button
-                  onClick={handleConnectSimulation}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 hover:bg-emerald-500/30 text-xs font-bold transition-all"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>DEMO</span>
-                </button>
               </>
             ) : (
               <button
@@ -203,7 +182,7 @@ export default function BusExplorerWorkbench() {
             <span className="text-[11px] text-slate-400">
               {scanAt != null ? `Probing 0x${scanAt.toString(16).toUpperCase()}...` : <>Found <strong className="text-emerald-400">{detectedDevices.length}</strong> responding device(s)</>}
             </span>
-            {isConnected && !isSimulated && (
+            {isConnected && (
               <div className="flex items-center gap-2 text-[11px] text-slate-300">
                 <label className="flex items-center gap-1"><input type="checkbox" checked={settings.power} disabled={!!busy} onChange={(e) => handleSetting({ power: e.target.checked })} /> 3.3V/5V power</label>
                 <label className="flex items-center gap-1"><input type="checkbox" checked={settings.pullups} disabled={!!busy} onChange={(e) => handleSetting({ pullups: e.target.checked })} /> pull-ups</label>
