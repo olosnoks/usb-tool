@@ -35,7 +35,7 @@ docker compose up -d
 
 | Service | Port | Image | Backs | Capability |
 |---|---|---|---|---|
-| `cors-proxy` | 47101 | node:20-alpine | Web Analyzer, HTTP Workbench, API Client, URL Inspector, Burp, OSINT, crt.sh, Pwned Passwords, DB Browser | Forwards HTTP(S) with permissive CORS; reaches sibling services by name |
+| `cors-proxy` | 47101 | node:20-alpine | Web Analyzer, HTTP Workbench, API Client, URL Inspector, Burp, OSINT, crt.sh, Pwned Passwords, DB Browser, Kismet Studio | Forwards HTTP(S) with permissive CORS; reaches sibling services by name |
 | `nmap` | 47102 | node:20-alpine + nmap | Port Scanner | Real `nmap` scans with service/version detection |
 | `tls-inspector` | 47103 | node:20-alpine | Certificate Inspector | Live TLS handshake → the cert the server serves now |
 | `dns` | 47104 | node:20-alpine | DNS Toolkit | Any record type against any nameserver |

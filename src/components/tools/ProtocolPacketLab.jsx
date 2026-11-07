@@ -10,7 +10,8 @@ export default function ProtocolPacketLab({
   byteStream = [],
   hexByteStream = [],
   onClearHex,
-  isConnected = false
+  isConnected = false,
+  onLogMessage
 }) {
   const [activeSubTab, setActiveSubTab] = useState(
     initialTab === 'hex' ? 'hex' : initialTab === 'packets' ? 'packets' : initialTab === 'kismet' ? 'kismet' : 'analyzer'
@@ -89,7 +90,7 @@ export default function ProtocolPacketLab({
       {/* Active Tab View */}
       <div className="w-full">
         {activeSubTab === 'analyzer' && <PacketAnalyzerWorkbench />}
-        {activeSubTab === 'kismet' && <KismetStudioWorkbench />}
+        {activeSubTab === 'kismet' && <KismetStudioWorkbench onLogMessage={onLogMessage} />}
         {activeSubTab === 'hex' && (
           <HexViewer
             byteStream={hexByteStream}

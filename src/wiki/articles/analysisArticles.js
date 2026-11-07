@@ -182,11 +182,12 @@ Kismet functions as a headless multi-threaded C++ RF capture engine serving real
    kismet -c wlan1mon
    \`\`\`
 3. In Skon's USB Tool, switch to the **Kismet Studio (Alfa / 802.11)** tab.
-4. Click **Connect Kismet** (or check **Simulate Alfa RF** if working offline).
-5. The device catalog immediately populates with dual-band 2.4 GHz and 5 GHz Access Points and client stations.
-6. Switch to **Channels & Congestion** to identify clear 5 GHz DFS channels or examine 2.4 GHz channel overlap on 1, 6, and 11.
-7. Check the **WIDS Intrusion Alerts** tab to monitor for deauth floods, rogue APs, or beacon injection attacks in real time!
-8. Click **WiGLE CSV** to export geolocated access points for wireless mapping submission.
+4. Set the server URL (default \`http://localhost:2501\`) and, if Kismet needs a login, its API key or \`user:password\`, then click **Connect Kismet**.
+5. If this page is served over https (or Kismet doesn't send CORS headers), the browser will block the direct call. Click **Docker backend** in the proxy bar, bring up the \`cors-proxy\` service, set it as the proxy, and connect again — requests then route through \`localhost:47101\` to Kismet. Kismet still does all the radio capture itself.
+6. The device catalog populates with dual-band 2.4 GHz and 5 GHz Access Points and client stations from the live server.
+7. Switch to **Channels & Congestion** to identify clear 5 GHz DFS channels or examine 2.4 GHz channel overlap on 1, 6, and 11.
+8. Check the **WIDS Intrusion Alerts** tab to monitor for deauth floods, rogue APs, or beacon injection attacks in real time!
+9. Click **WiGLE CSV** to export geolocated access points for wireless mapping submission.
 
 ---
 
@@ -196,6 +197,7 @@ Kismet functions as a headless multi-threaded C++ RF capture engine serving real
 | :--- | :--- | :--- |
 | **No Packets Appearing in Table** | Firmware is not in raw packet streaming mode or wrong baud rate. | Ensure baud rate is 115200 or 921600. In Marauder, verify \`settings -s ForcePackets enable\`. |
 | **Cannot Connect to Kismet (Port 2501)** | Kismet daemon is not running or blocked by local firewall. | Run \`kismet -c wlan1mon\` in terminal. Verify \`http://localhost:2501\` responds in browser. |
+| **Connect fails only from the hosted (https) site** | Browser blocks a plain-http / non-CORS Kismet from an https page. | Run the \`cors-proxy\` Docker backend and set it as the proxy in Kismet Studio's proxy bar; requests then reach Kismet via \`localhost:47101\`. |
 | **Alfa Adapter Not Entering Monitor Mode** | NetworkManager or wpa_supplicant reclaiming USB interface. | Run \`sudo airmon-ng check kill\` prior to starting monitor mode. Ensure correct DKMS driver is installed. |
 | **FCS (Checksum) Errors on All Frames** | RF multipath interference or antenna impedance mismatch. | Attach external 2.4GHz/5GHz SMA antennas and keep adapter at least 1 meter away from USB 3.0 hubs. |
 | **Missing Handshake Message 4** | Client was too far away for the sniffer to receive the low-power station ACK. | Move the sniffing antenna physically closer to the client laptop or smartphone. |
