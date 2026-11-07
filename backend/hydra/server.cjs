@@ -25,7 +25,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const PORT = Number(process.env.PORT) || 8092;
+const PORT = Number(process.env.PORT) || 47106;
 const AUTHORIZED = String(process.env.I_HAVE_AUTHORIZATION || '').toLowerCase() === 'yes';
 const MAX_RUNTIME_MS = Number(process.env.ATTACK_TIMEOUT_MS) || 180000;
 

@@ -16,7 +16,7 @@
 const http = require('http');
 const { spawnSync } = require('child_process');
 
-const PORT = Number(process.env.PORT) || 8091;
+const PORT = Number(process.env.PORT) || 47102;
 const MAX_RUNTIME_MS = Number(process.env.SCAN_TIMEOUT_MS) || 120000;
 
 // Reject anything that is not a plain hostname or IPv4/IPv6 literal.

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Container, Copy, Download, HeartPulse, CheckCircle2, XCircle, ShieldAlert, Plug } from 'lucide-react';
-import { SERVICES, TOOL_BACKENDS, buildComposeYaml } from '../../utils/backends';
+import JSZip from 'jszip';
+import { Container, Copy, Download, FolderDown, HeartPulse, CheckCircle2, XCircle, ShieldAlert, Plug } from 'lucide-react';
+import { SERVICES, TOOL_BACKENDS, buildComposeYaml, backendFileBundle } from '../../utils/backends';
 import { getBackendUrl, setBackendUrl, checkHealth } from '../../utils/backendClient';
 import { setProxyUrl } from '../../utils/netClient';
 
@@ -28,6 +29,14 @@ export default function DockerBackendsWorkbench({ onLogMessage }) {
     const blob = new Blob([compose], { type: 'text/yaml' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'docker-compose.yml'; a.click(); URL.revokeObjectURL(a.href);
     log('Downloaded docker-compose.yml');
+  };
+  const downloadZip = async () => {
+    const zip = new JSZip();
+    const root = zip.folder('skons-backend');
+    backendFileBundle().forEach(({ path, content }) => root.file(path, content));
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'skons-backend.zip'; a.click(); URL.revokeObjectURL(a.href);
+    log('Downloaded skons-backend.zip (all Docker files)');
   };
 
   const saveUrl = (id) => { setBackendUrl(id, urls[id]); log(`${id} backend URL saved: ${urls[id]}`); };
@@ -74,7 +83,8 @@ export default function DockerBackendsWorkbench({ onLogMessage }) {
           )}
           <div className="ml-auto flex gap-2">
             <button onClick={copyCompose} className="px-2.5 py-1 bg-slate-800 border border-slate-700 rounded text-xs hover:bg-slate-700 inline-flex items-center gap-1"><Copy size={12} /> {copied ? 'Copied' : 'Copy'}</button>
-            <button onClick={downloadCompose} className="px-2.5 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 inline-flex items-center gap-1"><Download size={12} /> Download</button>
+            <button onClick={downloadCompose} title="Single self-contained compose file" className="px-2.5 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 inline-flex items-center gap-1"><Download size={12} /> compose.yml</button>
+            <button onClick={downloadZip} title="All Docker files: build-based compose, Dockerfiles, servers, README" className="px-2.5 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 inline-flex items-center gap-1"><FolderDown size={12} /> All files (.zip)</button>
           </div>
         </div>
         {includeOffensive && (
@@ -85,7 +95,8 @@ export default function DockerBackendsWorkbench({ onLogMessage }) {
         )}
         <pre className="max-h-64 overflow-auto bg-slate-950 border border-slate-800 rounded p-2 text-[10px] font-mono leading-relaxed text-slate-300">{compose}</pre>
         <div className="mt-2 text-[11px] text-slate-400 font-mono">
-          <div># save next to nothing — it is self-contained, then:</div>
+          <div># compose.yml is self-contained (one file). All files (.zip) gives the</div>
+          <div># real Dockerfiles + sources if you prefer building. Then, in that folder:</div>
           <div>docker compose up -d{includeOffensive ? '   # add --profile offensive for Hydra' : ''}</div>
         </div>
       </div>

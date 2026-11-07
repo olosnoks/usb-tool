@@ -19,38 +19,49 @@ import tlsSrc from '../../backend/tls-inspector/server.cjs?raw';
 import dnsSrc from '../../backend/dns/server.cjs?raw';
 import hydraSrc from '../../backend/hydra/server.cjs?raw';
 
+// Real on-disk files, for the "download all files" bundle.
+import corsProxyDockerfile from '../../backend/cors-proxy/Dockerfile?raw';
+import nmapDockerfile from '../../backend/nmap/Dockerfile?raw';
+import tlsDockerfile from '../../backend/tls-inspector/Dockerfile?raw';
+import dnsDockerfile from '../../backend/dns/Dockerfile?raw';
+import hydraDockerfile from '../../backend/hydra/Dockerfile?raw';
+import repoCompose from '../../backend/docker-compose.yml?raw';
+import backendReadme from '../../backend/README.md?raw';
+
 // Every service. `src` present => a Node service we can embed in a single-file
 // compose; `image`-only services (zap) run a stock image with their own command.
+// Ports are an uncommon, contiguous 471xx block chosen to avoid the common dev
+// ports (3000/5000/8000/8080/9000) and Windows' reserved/excluded ranges.
 export const SERVICES = [
   {
-    id: 'cors-proxy', name: 'CORS Proxy', port: 8080, baseImage: 'node:20-alpine', src: corsProxySrc,
+    id: 'cors-proxy', name: 'CORS Proxy', port: 47101, baseImage: 'node:20-alpine', src: corsProxySrc,
     description: 'Generic HTTP(S) forwarder that adds permissive CORS so the browser-fetch tools can read any target. Also reaches sibling services by name.',
     role: 'Sets the shared proxy URL used by netClient.',
   },
   {
-    id: 'nmap', name: 'Nmap', port: 8091, baseImage: 'node:20-alpine', apk: ['nmap', 'nmap-scripts'], src: nmapSrc,
+    id: 'nmap', name: 'Nmap', port: 47102, baseImage: 'node:20-alpine', apk: ['nmap', 'nmap-scripts'], src: nmapSrc,
     description: 'Runs the real nmap binary for true service/version detection and non-HTTP ports.',
     role: 'POST /scan { target, ports, profile }.',
   },
   {
-    id: 'tls-inspector', name: 'TLS Inspector', port: 8094, baseImage: 'node:20-alpine', src: tlsSrc,
+    id: 'tls-inspector', name: 'TLS Inspector', port: 47103, baseImage: 'node:20-alpine', src: tlsSrc,
     description: "Live TLS handshake to fetch the certificate a server actually serves now (vs. Certificate Transparency history).",
     role: 'GET /cert?host=&port=.',
   },
   {
-    id: 'dns', name: 'DNS', port: 8095, baseImage: 'node:20-alpine', src: dnsSrc,
+    id: 'dns', name: 'DNS', port: 47104, baseImage: 'node:20-alpine', src: dnsSrc,
     description: 'Resolves any record type against the system resolver or a custom nameserver.',
     role: 'GET /resolve?name=&type=&server=.',
   },
   {
-    id: 'zap', name: 'OWASP ZAP', port: 8093, image: 'ghcr.io/zaproxy/zaproxy:stable',
-    command: 'zap.sh -daemon -host 0.0.0.0 -port 8093 -config api.disablekey=true -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true',
+    id: 'zap', name: 'OWASP ZAP', port: 47105, image: 'ghcr.io/zaproxy/zaproxy:stable',
+    command: 'zap.sh -daemon -host 0.0.0.0 -port 47105 -config api.disablekey=true -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true',
     description: 'OWASP ZAP daemon with its REST API. The browser reaches it through the CORS proxy.',
-    role: 'Reached via cors-proxy at http://zap:8093.',
+    role: 'Reached via cors-proxy at http://zap:47105.',
     viaProxy: true,
   },
   {
-    id: 'hydra', name: 'Hydra', port: 8092, baseImage: 'node:20-alpine', apk: ['hydra'], src: hydraSrc,
+    id: 'hydra', name: 'Hydra', port: 47106, baseImage: 'node:20-alpine', apk: ['hydra'], src: hydraSrc,
     offensive: true,
     description: 'THC-Hydra online credential testing. AUTHORIZED TESTING ONLY. Off by default; needs the offensive profile and an authorization flag.',
     role: 'POST /attack { target, service, ... }.',
@@ -58,6 +69,26 @@ export const SERVICES = [
 ];
 
 export const serviceById = (id) => SERVICES.find((s) => s.id === id) || null;
+
+// The full /backend tree, so the tool can hand over the real Docker files (not
+// just the single-file compose): the build-based compose, every Dockerfile and
+// server, and the README. Paths are relative to the zip root.
+export function backendFileBundle() {
+  return [
+    { path: 'docker-compose.yml', content: repoCompose },
+    { path: 'README.md', content: backendReadme },
+    { path: 'cors-proxy/Dockerfile', content: corsProxyDockerfile },
+    { path: 'cors-proxy/server.cjs', content: corsProxySrc },
+    { path: 'nmap/Dockerfile', content: nmapDockerfile },
+    { path: 'nmap/server.cjs', content: nmapSrc },
+    { path: 'tls-inspector/Dockerfile', content: tlsDockerfile },
+    { path: 'tls-inspector/server.cjs', content: tlsSrc },
+    { path: 'dns/Dockerfile', content: dnsDockerfile },
+    { path: 'dns/server.cjs', content: dnsSrc },
+    { path: 'hydra/Dockerfile', content: hydraDockerfile },
+    { path: 'hydra/server.cjs', content: hydraSrc },
+  ];
+}
 
 // Which backend service each tool uses. Tools not listed need no backend.
 export const TOOL_BACKENDS = {

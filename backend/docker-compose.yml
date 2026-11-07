@@ -9,6 +9,9 @@
 #   Include the offensive ones:   docker compose --profile offensive up -d
 #   Stop everything:              docker compose down
 #
+# Ports use an uncommon 471xx block so they don't clash with common dev servers
+# (3000/5000/8000/8080/9000) or anything already running.
+#
 # Only use these against systems you own or are explicitly authorized to assess.
 # ------------------------------------------------------------------------------
 
@@ -21,13 +24,13 @@ services:
     image: skons-usb-tool/cors-proxy
     container_name: skons-cors-proxy
     ports:
-      - "8080:8080"
+      - "47101:47101"
     environment:
-      - PORT=8080
+      - PORT=47101
       # - ALLOW_HOSTS=example.com,api.example.com   # optional allowlist
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:47101/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -38,12 +41,12 @@ services:
     image: skons-usb-tool/nmap
     container_name: skons-nmap
     ports:
-      - "8091:8091"
+      - "47102:47102"
     environment:
-      - PORT=8091
+      - PORT=47102
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8091/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:47102/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -55,12 +58,12 @@ services:
     image: skons-usb-tool/tls-inspector
     container_name: skons-tls-inspector
     ports:
-      - "8094:8094"
+      - "47103:47103"
     environment:
-      - PORT=8094
+      - PORT=47103
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8094/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:47103/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -71,28 +74,28 @@ services:
     image: skons-usb-tool/dns
     container_name: skons-dns
     ports:
-      - "8095:8095"
+      - "47104:47104"
     environment:
-      - PORT=8095
+      - PORT=47104
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8095/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:47104/health"]
       interval: 30s
       timeout: 5s
       retries: 3
 
   # OWASP ZAP daemon with its REST API. Backs the OWASP ZAP tool. The browser
-  # reaches it through cors-proxy (http://localhost:8080/fetch?url=http://zap:8093/...).
+  # reaches it through cors-proxy (http://localhost:47101/fetch?url=http://zap:47105/...).
   zap:
     image: ghcr.io/zaproxy/zaproxy:stable
     container_name: skons-zap
     command: >
-      zap.sh -daemon -host 0.0.0.0 -port 8093
+      zap.sh -daemon -host 0.0.0.0 -port 47105
       -config api.disablekey=true
       -config api.addrs.addr.name=.*
       -config api.addrs.addr.regex=true
     ports:
-      - "8093:8093"
+      - "47105:47105"
     restart: unless-stopped
 
   # THC-Hydra — AUTHORIZED SECURITY TESTING ONLY. Not started by default; runs
@@ -103,9 +106,9 @@ services:
     container_name: skons-hydra
     profiles: ["offensive"]
     ports:
-      - "8092:8092"
+      - "47106:47106"
     environment:
-      - PORT=8092
+      - PORT=47106
       # Set to "yes" to confirm you are authorized to test the targets:
       - I_HAVE_AUTHORIZATION=${I_HAVE_AUTHORIZATION:-no}
     restart: unless-stopped

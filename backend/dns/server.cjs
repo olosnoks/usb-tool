@@ -15,7 +15,7 @@
 const http = require('http');
 const dns = require('dns');
 
-const PORT = Number(process.env.PORT) || 8095;
+const PORT = Number(process.env.PORT) || 47104;
 const NAME_RE = /^[a-zA-Z0-9._-]{1,255}$/;
 const IP_RE = /^[0-9a-fA-F.:]{1,45}$/;
 const TYPES = new Set(['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'SRV', 'PTR', 'CAA', 'NAPTR', 'ANY']);

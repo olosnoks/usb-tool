@@ -20,7 +20,7 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 
-const PORT = Number(process.env.PORT) || 8080;
+const PORT = Number(process.env.PORT) || 47101;
 // Optional comma-separated allowlist of target hosts. Empty = allow any.
 const ALLOW_HOSTS = (process.env.ALLOW_HOSTS || '')
   .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);

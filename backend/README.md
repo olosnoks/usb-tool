@@ -33,12 +33,12 @@ docker compose up -d
 
 | Service | Port | Image | Backs | Capability |
 |---|---|---|---|---|
-| `cors-proxy` | 8080 | node:20-alpine | Web Analyzer, HTTP Workbench, API Client, URL Inspector, Burp, OSINT, crt.sh, Pwned Passwords, DB Browser | Forwards HTTP(S) with permissive CORS; reaches sibling services by name |
-| `nmap` | 8091 | node:20-alpine + nmap | Port Scanner | Real `nmap` scans with service/version detection |
-| `tls-inspector` | 8094 | node:20-alpine | Certificate Inspector | Live TLS handshake → the cert the server serves now |
-| `dns` | 8095 | node:20-alpine | DNS Toolkit | Any record type against any nameserver |
-| `zap` | 8093 | ghcr.io/zaproxy/zaproxy:stable | OWASP ZAP | ZAP daemon + REST API (reached via cors-proxy) |
-| `hydra` | 8092 | node:20-alpine + hydra | HTTP Basic Auth Tester | **Authorized testing only.** Off by default |
+| `cors-proxy` | 47101 | node:20-alpine | Web Analyzer, HTTP Workbench, API Client, URL Inspector, Burp, OSINT, crt.sh, Pwned Passwords, DB Browser | Forwards HTTP(S) with permissive CORS; reaches sibling services by name |
+| `nmap` | 47102 | node:20-alpine + nmap | Port Scanner | Real `nmap` scans with service/version detection |
+| `tls-inspector` | 47103 | node:20-alpine | Certificate Inspector | Live TLS handshake → the cert the server serves now |
+| `dns` | 47104 | node:20-alpine | DNS Toolkit | Any record type against any nameserver |
+| `zap` | 47105 | ghcr.io/zaproxy/zaproxy:stable | OWASP ZAP | ZAP daemon + REST API (reached via cors-proxy) |
+| `hydra` | 47106 | node:20-alpine + hydra | HTTP Basic Auth Tester | **Authorized testing only.** Off by default |
 
 ## Wiring in the app
 
