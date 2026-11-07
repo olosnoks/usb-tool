@@ -27,7 +27,7 @@ describe('Bus Pirate binary mode', () => {
 
   it('reads registers with a repeated start and writes them', async () => {
     const { client, devices } = await connected();
-    client.initSimulatedRegisters(0x68);
+    client.activeAddress = 0x68;
     expect(await client.readRegisters(0x75, 1)).toEqual([0x68]);
     await client.writeRegister(0x6b, 0x00);
     expect(devices[0x68][0x6b]).toBe(0x00);
@@ -36,7 +36,7 @@ describe('Bus Pirate binary mode', () => {
 
   it('reports a missing device instead of returning zeros', async () => {
     const { client } = await connected();
-    client.initSimulatedRegisters(0x50);
+    client.activeAddress = 0x50;
     await expect(client.readRegisters(0, 4)).rejects.toThrow(/No ACK from 0x50/);
   });
 

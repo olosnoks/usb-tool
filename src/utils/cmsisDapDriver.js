@@ -58,29 +58,11 @@ export class CmsisDapClient {
     this.info = null;
     this.logger = logger;
     this.connected = false;
-    this.simulated = false;
     this.targetState = 'disconnected'; // 'running' | 'halted' | 'disconnected'
-
-    // Virtual target state for simulation
-    this.virtualRegisters = new Uint32Array(20);
-    this.virtualSram = new Uint32Array(1024); // 4KB virtual SRAM (0x20000000)
-    this.initVirtualState();
   }
 
   log(msg, type = 'sys') {
     this.logger?.(`[CMSIS-DAP] ${msg}`, type);
-  }
-
-  initVirtualState() {
-    this.virtualRegisters[13] = 0x20001000; // SP (top of SRAM)
-    this.virtualRegisters[14] = 0x08000425; // LR (Return address in Flash)
-    this.virtualRegisters[15] = 0x080001D0; // PC (Reset Handler / Main)
-    this.virtualRegisters[16] = 0x01000000; // xPSR (Thumb mode active)
-
-    // Fill some realistic SRAM variables
-    this.virtualSram[0] = 0xDEADBEEF; // 0x20000000: Magic signature
-    this.virtualSram[1] = 42;         // 0x20000004: Global loop counter
-    this.virtualSram[2] = 0x000003E8; // 0x20000008: Delay ms (1000)
   }
 
   /**
@@ -103,7 +85,6 @@ export class CmsisDapClient {
       this.watchpoints = null;
       this.swo = null;
       this.connected = true;
-      this.simulated = false;
       this.targetState = status.halted ? 'halted' : 'running';
       this.info = {
         probe: p.product,
@@ -135,7 +116,6 @@ export class CmsisDapClient {
     this.watchpoints = null;
     this.swo = null;
     this.connected = false;
-    this.simulated = false;
     this.targetState = 'disconnected';
     this.log('Disconnected from probe.');
   }
@@ -147,16 +127,6 @@ export class CmsisDapClient {
     if (!this.connected) throw new Error('Probe not connected.');
 
     this.log('Asserting DHCSR C_DEBUGEN | C_HALT (0xA05F0003)...');
-    if (this.simulated) {
-      await new Promise(r => setTimeout(r, 100));
-      this.targetState = 'halted';
-      this.virtualRegisters[15] = 0x0800021A; // PC halted in main loop
-      this.virtualRegisters[0] = 0x00000001;  // R0
-      this.virtualRegisters[1] = this.virtualSram[1]++; // Incremented counter
-      this.log(`CPU Halted at PC: 0x${this.virtualRegisters[15].toString(16).toUpperCase()}`);
-      return this.virtualRegisters;
-    }
-
     await this.target.halt();
     this.targetState = 'halted';
     const regs = await this.target.readCoreRegisters();
@@ -171,13 +141,6 @@ export class CmsisDapClient {
     if (!this.connected) throw new Error('Probe not connected.');
 
     this.log('Releasing DHCSR halt. Resuming CPU execution...');
-    if (this.simulated) {
-      await new Promise(r => setTimeout(r, 80));
-      this.targetState = 'running';
-      this.log('CPU resumed and running.');
-      return true;
-    }
-
     // Resuming on an active breakpoint would stop again at once: step past it first.
     if (this.breakpoints?.active.length) {
       const pc = (await this.target.readCoreRegister(15)) & ~1;
@@ -198,14 +161,6 @@ export class CmsisDapClient {
     if (!this.connected) throw new Error('Probe not connected.');
 
     this.log('Executing single instruction step (C_STEP)...');
-    if (this.simulated) {
-      this.targetState = 'halted';
-      this.virtualRegisters[15] += 2; // Advance Thumb PC by 2 bytes
-      this.virtualRegisters[2] = (this.virtualRegisters[2] + 1) & 0xFFFFFFFF;
-      this.log(`Stepped to PC: 0x${this.virtualRegisters[15].toString(16).toUpperCase()}`);
-      return this.virtualRegisters;
-    }
-
     await this.target.step();
     this.targetState = 'halted';
     return this.target.readCoreRegisters();
@@ -217,11 +172,6 @@ export class CmsisDapClient {
   async readRegisters() {
     if (!this.connected) throw new Error('Probe not connected.');
 
-    if (this.simulated) {
-      await new Promise(r => setTimeout(r, 50));
-      return Array.from(this.virtualRegisters);
-    }
-
     if (this.targetState !== 'halted') throw new Error('Halt the CPU first: core registers are only readable while halted.');
     return this.target.readCoreRegisters();
   }
@@ -231,23 +181,6 @@ export class CmsisDapClient {
    */
   async readMemory(address = 0x20000000, wordCount = 16) {
     if (!this.connected) throw new Error('Probe not connected.');
-
-    if (this.simulated) {
-      await new Promise(r => setTimeout(r, 60));
-      const words = [];
-      const sramBase = 0x20000000;
-      for (let i = 0; i < wordCount; i++) {
-        const curAddr = address + (i * 4);
-        if (curAddr >= sramBase && curAddr < sramBase + (this.virtualSram.length * 4)) {
-          const idx = (curAddr - sramBase) / 4;
-          words.push({ address: curAddr, value: this.virtualSram[idx] || 0 });
-        } else {
-          // Flash simulation
-          words.push({ address: curAddr, value: 0x4800B510 ^ (i * 0x1010) });
-        }
-      }
-      return words;
-    }
 
     const values = await this.target.readWords(address & ~3, wordCount);
     return values.map((value, i) => ({ address: ((address & ~3) + i * 4) >>> 0, value }));
@@ -260,16 +193,6 @@ export class CmsisDapClient {
     if (!this.connected) throw new Error('Probe not connected.');
 
     this.log(`Writing 0x${value.toString(16).toUpperCase().padStart(8, '0')} to [0x${address.toString(16).toUpperCase().padStart(8, '0')}]...`);
-    if (this.simulated) {
-      const sramBase = 0x20000000;
-      if (address >= sramBase && address < sramBase + (this.virtualSram.length * 4)) {
-        const idx = (address - sramBase) / 4;
-        this.virtualSram[idx] = value >>> 0;
-      }
-      this.log('Write confirmed!');
-      return true;
-    }
-
     await this.target.writeWord(address & ~3, value >>> 0);
     const back = await this.target.readWord(address & ~3);
     if (back !== (value >>> 0)) this.log(`Read back 0x${back.toString(16).toUpperCase()}: the location is read-only, a peripheral register, or flash.`);
@@ -280,11 +203,6 @@ export class CmsisDapClient {
   /** Reset the target; with halt, stop at the first instruction. */
   async reset({ halt = false } = {}) {
     if (!this.connected) throw new Error('Probe not connected.');
-    if (this.simulated) {
-      this.initVirtualState();
-      this.targetState = halt ? 'halted' : 'running';
-      return halt ? Array.from(this.virtualRegisters) : null;
-    }
     await this.target.reset({ halt });
     this.targetState = halt ? 'halted' : 'running';
     this.log(halt ? 'Reset and halted at the reset vector.' : 'Target reset.');
@@ -293,7 +211,7 @@ export class CmsisDapClient {
 
   /** Poll whether the core is halted (e.g. hit a breakpoint) or running. */
   async pollState() {
-    if (!this.connected || this.simulated) return this.targetState;
+    if (!this.connected) return this.targetState;
     const st = await this.target.coreStatus();
     this.targetState = st.halted ? 'halted' : 'running';
     return this.targetState;
@@ -303,13 +221,11 @@ export class CmsisDapClient {
 
   _hw(what) {
     if (!this.connected) throw new Error('Probe not connected.');
-    if (this.simulated) throw new Error(`${what} needs a real probe and target; the demo has no memory to scan.`);
   }
 
   /** Write one core register (index into CORTEX_REG_NAMES) while halted. */
   async writeRegister(index, value) {
     if (!this.connected) throw new Error('Probe not connected.');
-    if (this.simulated) { this.virtualRegisters[index] = value >>> 0; return; }
     if (this.targetState !== 'halted') throw new Error('Halt the CPU first.');
     await this.target.writeCoreRegister(CORE_REG_SELECT[index], value >>> 0);
   }

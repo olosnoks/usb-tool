@@ -98,6 +98,7 @@ export default function BusExplorerWorkbench() {
 
   const handleSelectAddress = (addr, fresh = false) => {
     setSelectedAddr(addr);
+    client.activeAddress = addr;
     if (fresh) refreshRegisters();
     else setInspectRegs([]);
   };

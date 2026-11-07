@@ -6,7 +6,6 @@
  * Simulation: five common sensors on a virtual I2C bus.
  */
 
-import { createSimulatedSensorBus } from './sensorDrivers';
 import { SerialLink } from './serialLink';
 
 
@@ -214,11 +213,9 @@ export class BusExplorerClient {
   constructor(logger = console.log) {
     this.logger = logger;
     this.isConnected = false;
-    this.isSimulated = false;
     this.busType = 'i2c'; // 'i2c' | 'spi'
     this.detectedDevices = [];
     this.activeAddress = 0x68;
-    this.registers = new Uint8Array(256);
     this.link = null;
     this.bp = null;
     this.settings = { power: false, pullups: false, i2cSpeed: 2, spiSpeed: 3 };
@@ -235,7 +232,6 @@ export class BusExplorerClient {
       await this.bp.enterBinary();
       await this.setBus('i2c');
       this.isConnected = true;
-      this.isSimulated = false;
       this.detectedDevices = [];
       this.log('Bus Pirate in binary mode, raw I2C selected.');
       return true;
@@ -250,7 +246,7 @@ export class BusExplorerClient {
   /** Switch between I2C and SPI, re-applying power / pull-up / speed settings. */
   async setBus(type) {
     this.busType = type;
-    if (this.isSimulated || !this.bp) return;
+    if (!this.bp) return;
     if (type === 'i2c') {
       await this.bp.enterI2c();
       await this.bp.setSpeed(this.settings.i2cSpeed);
@@ -265,36 +261,13 @@ export class BusExplorerClient {
   /** Change power / pull-ups / speeds; applied to the live adapter. */
   async configure(changes) {
     this.settings = { ...this.settings, ...changes };
-    if (this.isSimulated || !this.bp) return this.settings;
+    if (!this.bp) return this.settings;
     if (this.busType === 'i2c' && 'i2cSpeed' in changes) await this.bp.setSpeed(this.settings.i2cSpeed);
     if (this.busType === 'spi' && 'spiSpeed' in changes) await this.bp.setSpeed(this.settings.spiSpeed);
     await this.bp.configurePeripherals({ power: this.settings.power, pullups: this.settings.pullups, cs: this.busType === 'spi' });
     return this.settings;
   }
 
-  initSimulatedRegisters(addr) {
-    this.activeAddress = addr;
-    if (!this.isSimulated) return;
-    this.registers.fill(0);
-
-    // Realistic register defaults for MPU-6050 (0x68)
-    if (addr === 0x68) {
-      this.registers[0x75] = 0x68; // WHO_AM_I register
-      this.registers[0x6B] = 0x00; // PWR_MGMT_1 (Awake)
-      this.registers[0x1B] = 0x18; // GYRO_CONFIG (+/-2000 deg/s)
-      this.registers[0x1C] = 0x08; // ACCEL_CONFIG (+/-4g)
-      this.registers[0x3B] = 0x01; this.registers[0x3C] = 0x80;
-      this.registers[0x3D] = 0x00; this.registers[0x3E] = 0x40;
-      this.registers[0x3F] = 0x0F; this.registers[0x40] = 0xA0;
-      this.registers[0x41] = 0x09; this.registers[0x42] = 0x24;
-    } else if (addr === 0x76) {
-      this.registers[0xD0] = 0x58; // BMP280 CHIP_ID
-      this.registers[0xF4] = 0x27; this.registers[0xF5] = 0xA0;
-      this.registers[0xF7] = 0x50; this.registers[0xF8] = 0x82; this.registers[0xFA] = 0x84;
-    } else {
-      for (let i = 0; i < 32; i++) this.registers[i] = (i * 7 + addr) & 0xFF;
-    }
-  }
 
   async disconnect() {
     const link = this.link;
@@ -307,7 +280,6 @@ export class BusExplorerClient {
     this.bp = null;
     if (link) await link.close();
     this.isConnected = false;
-    this.isSimulated = false;
     this.detectedDevices = [];
     this.log('Disconnected.');
   }
@@ -315,70 +287,39 @@ export class BusExplorerClient {
   /** Probe every 7-bit address from 0x08 to 0x77. */
   async scanI2cBus(onProgress) {
     if (!this.isConnected) return [];
-    if (this.isSimulated) {
-      await sleep(200);
-      this.detectedDevices = [0x3C, 0x40, 0x48, 0x50, 0x68, 0x76];
-    } else {
-      if (this.busType !== 'i2c') await this.setBus('i2c');
-      const found = [];
-      for (let a = 0x08; a <= 0x77; a++) {
-        if (await this.bp.i2cProbe(a)) found.push(a);
-        onProgress?.(a);
-      }
-      this.detectedDevices = found;
-      if (!found.length) this.log('No device ACKed. Check SDA/SCL wiring, a shared ground, and pull-ups (turn them on here if the board has none).');
+    if (this.busType !== 'i2c') await this.setBus('i2c');
+    const found = [];
+    for (let a = 0x08; a <= 0x77; a++) {
+      if (await this.bp.i2cProbe(a)) found.push(a);
+      onProgress?.(a);
     }
+    this.detectedDevices = found;
+    if (!found.length) this.log('No device ACKed. Check SDA/SCL wiring, a shared ground, and pull-ups (turn them on here if the board has none).');
     this.log(`Scan complete: ${this.detectedDevices.length} device(s) ACKed.`);
     return this.detectedDevices;
   }
 
   /** Read `count` consecutive registers from the active device. */
   async readRegisters(start, count) {
-    if (this.isSimulated) {
-      const out = [];
-      for (let r = start; r < start + count; r++) {
-        if (this.activeAddress === 0x68 && r >= 0x3B && r <= 0x42) {
-          this.registers[r] = (this.registers[r] + Math.floor(Math.random() * 3) - 1) & 0xFF;
-        }
-        out.push(this.registers[r & 0xff]);
-      }
-      return out;
-    }
     if (this.busType !== 'i2c') await this.setBus('i2c');
     return this.bp.i2cReadRegisters(this.activeAddress, start, count);
   }
 
   async writeRegister(reg, val) {
-    if (this.isSimulated) this.registers[reg & 0xff] = val & 0xFF;
-    else {
-      if (this.busType !== 'i2c') await this.setBus('i2c');
-      await this.bp.i2cWriteRegister(this.activeAddress, reg, [val & 0xff]);
-    }
+    if (this.busType !== 'i2c') await this.setBus('i2c');
+    await this.bp.i2cWriteRegister(this.activeAddress, reg, [val & 0xff]);
     this.log(`Wrote 0x${(val & 0xFF).toString(16).padStart(2, '0').toUpperCase()} to reg 0x${reg.toString(16).padStart(2, '0').toUpperCase()} of 0x${this.activeAddress.toString(16)}`);
     return true;
   }
 
   /** SPI full-duplex exchange (CS held low). Returns the bytes clocked in. */
   async spiTransfer(bytes) {
-    if (this.isSimulated) {
-      // A simulated W25Q64 answers JEDEC ID and READ; everything else reads 0xFF.
-      if (bytes[0] === 0x9f) return [0xff, 0xef, 0x40, 0x17, ...bytes.slice(4).map(() => 0xff)].slice(0, bytes.length);
-      if (bytes[0] === 0x03) {
-        const a = (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
-        return bytes.map((_, i) => (i < 4 ? 0xff : simFlashByte(a + i - 4)));
-      }
-      return bytes.map(() => 0xff);
-    }
     if (this.busType !== 'spi') await this.setBus('spi');
     return this.bp.spiTransfer(bytes);
   }
 
   /** Register-level access for the sensor drivers: { read(addr, reg, n), write(addr, reg, bytes) }. */
   sensorBus() {
-    if (this.isSimulated) {
-      if (!this._simSensors) this._simSensors = createSimulatedSensorBus();
-      return this._simSensors;
-    }
     return {
       read: async (addr, reg, n) => { if (this.busType !== 'i2c') await this.setBus('i2c'); return this.bp.i2cReadRegisters(addr, reg, n); },
       write: async (addr, reg, values) => { if (this.busType !== 'i2c') await this.setBus('i2c'); return this.bp.i2cWriteRegister(addr, reg, values); }
@@ -406,8 +347,3 @@ export class BusExplorerClient {
   }
 }
 
-// Contents of the simulated SPI flash: a text header, then a counting pattern.
-const SIM_FLASH_HEADER = new TextEncoder().encode('BUS PIRATE SIMULATED W25Q64\0');
-function simFlashByte(a) {
-  return a < SIM_FLASH_HEADER.length ? SIM_FLASH_HEADER[a] : a < 0x100 ? 0xff : (a * 7) & 0xff;
-}
