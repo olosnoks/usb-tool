@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  Ch341, SpiFlash, I2cEeprom, Ch341aClient, createSimulatedCh341, reverseBits, identifyChip, decodeStatus, diffBuffers, CH341_USB
+  Ch341, SpiFlash, I2cEeprom, Ch341aClient, reverseBits, identifyChip, decodeStatus, diffBuffers, CH341_USB
 } from '../src/utils/ch341aDriver';
+import { createSimulatedCh341 } from './helpers/sim/ch341';
 
 const setup = async (opts) => {
   const t = createSimulatedCh341(opts);
@@ -115,7 +116,8 @@ describe('I2C EEPROM', () => {
 describe('client and diffs', () => {
   it('runs the workbench flow in simulation', async () => {
     const c = new Ch341aClient(() => {});
-    const chip = await c.connectSimulation();
+    await c._attach(createSimulatedCh341());
+    const chip = await c.readJedecId();
     expect(chip.model).toBe('W25Q64');
     const dump = await c.readFlash(0, 4096);
     expect(dump[0]).toBe(0x41);

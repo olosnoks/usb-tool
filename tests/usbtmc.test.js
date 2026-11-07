@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  UsbTmcDevice, buildMsgOut, buildRequestIn, parseMsgIn, findUsbtmcInterface, createSimulatedUsbTmc, MSGID
+  UsbTmcDevice, buildMsgOut, buildRequestIn, parseMsgIn, findUsbtmcInterface, MSGID
 } from '../src/utils/usbtmcDriver';
+import { createSimulatedUsbTmc } from './helpers/sim/usbtmc';
 
 const td = new TextDecoder();
 

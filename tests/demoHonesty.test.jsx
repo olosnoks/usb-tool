@@ -5,6 +5,7 @@ import { CmsisDapClient } from '../src/utils/cmsisDapDriver';
 import { SerialLink, FakeSerialPort } from '../src/utils/serialLink';
 import { UsbPdClient } from '../src/utils/usbPdDriver';
 import { JtagClient } from '../src/utils/jtagDriver';
+import { simulateCmsis } from './helpers/sim/clientSim';
 import SensorHubDeck from '../src/components/tools/hackrf/SensorHubDeck';
 import HamRadioDeck from '../src/components/tools/hackrf/HamRadioDeck';
 import ReceiverDeck from '../src/components/tools/hackrf/ReceiverDeck';
@@ -22,7 +23,7 @@ describe('simulated data is never passed off as hardware', () => {
 
   it('CMSIS-DAP demo still works', async () => {
     const c = new CmsisDapClient(() => {});
-    c.connectSimulation();
+    simulateCmsis(c);
     const regs = await c.halt();
     expect(regs.length).toBeGreaterThan(0);
   });
@@ -35,13 +36,12 @@ describe('simulated data is never passed off as hardware', () => {
     expect(c.isConnected).toBe(false);
   }, 10000);
 
-  it('JTAG SVF playback says it was simulated, not that TDO passed', async () => {
+  it('JTAG never reports a TDO pass without a probe (simulation removed)', async () => {
     const logs = [];
     const c = new JtagClient((m) => logs.push(m));
-    c.connectSimulation();
-    await c.playSvf('SIR 8 TDI (FE);\nSDR 32 TDI (00000000) TDO (12345678);');
-    const last = logs[logs.length - 1];
-    expect(last).toMatch(/Simulated run/);
+    // No probe connected and no simulation mode: playback must refuse rather
+    // than fabricate a verification result.
+    await expect(c.playSvf('SIR 8 TDI (FE);\nSDR 32 TDI (00000000) TDO (12345678);')).rejects.toThrow(/not connected/i);
     expect(logs.join('\n')).not.toMatch(/verification PASSED/);
   });
 

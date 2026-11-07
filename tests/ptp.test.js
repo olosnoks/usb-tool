@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   PtpDevice, buildContainer, parseContainerHeader, parseDeviceInfo, parseObjectInfo,
-  DataReader, findPtpInterface, objectFormatName, createSimulatedPtp, PTP_TYPE, PTP_OP
+  DataReader, findPtpInterface, objectFormatName, PTP_TYPE, PTP_OP
 } from '../src/utils/ptpDriver';
+import { createSimulatedPtp } from './helpers/sim/ptp';
 
 const td = new TextDecoder();
 

@@ -238,19 +238,3 @@ function concat(parts) {
   return out;
 }
 
-/** A phone-shaped demo screen: status bar, a few app tiles. */
-export function demoPhoneScreen(width = 216, height = 432) {
-  const px = new Uint8Array(width * height * 4);
-  const fill = (x0, y0, w, h, [r, g, b]) => {
-    for (let y = y0; y < Math.min(height, y0 + h); y++) for (let x = x0; x < Math.min(width, x0 + w); x++) {
-      const o = (y * width + x) * 4;
-      px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = 255;
-    }
-  };
-  fill(0, 0, width, height, [16, 24, 40]);
-  fill(0, 0, width, 16, [0, 0, 0]);
-  const colors = [[52, 211, 153], [34, 211, 238], [251, 191, 36], [244, 114, 182], [129, 140, 248], [248, 113, 113]];
-  colors.forEach((c, i) => fill(24 + (i % 3) * 64, 60 + Math.floor(i / 3) * 72, 40, 40, c));
-  fill(width / 2 - 30, height - 24, 60, 6, [148, 163, 184]);
-  return encodePng(width, height, px);
-}

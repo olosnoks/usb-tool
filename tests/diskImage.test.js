@@ -3,7 +3,8 @@ import {
   DiskReader, memoryReader, readPartitionTable, detectFilesystem, FatVolume, ExFatVolume, openVolume, Sha256,
   buildFatVolume, buildMbrDisk, guidToString
 } from '../src/utils/diskImage';
-import { MassStorageDevice, createSimulatedMassStorage, parseSense, buildDemoDisk } from '../src/utils/massStorageDriver';
+import { MassStorageDevice, parseSense } from '../src/utils/massStorageDriver';
+import { createSimulatedMassStorage, buildDemoDisk } from './helpers/sim/massStorage';
 
 const text = (b) => new TextDecoder().decode(b);
 const enc = (s) => new TextEncoder().encode(s);

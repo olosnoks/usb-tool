@@ -3,7 +3,8 @@ import {
   parseGetprop, deviceSummary, parseBattery, parseLogcatLine, LogcatPoller, parsePackages, installApk, uninstallPackage,
   packagePaths, packageVersion, inputTextCommand, tapCommand, parseWmSize, crc32, encodePng
 } from '../src/utils/adbTools';
-import { AdbConnection, createSimulatedAdb } from '../src/utils/adbDriver';
+import { AdbConnection } from '../src/utils/adbDriver';
+import { createSimulatedAdb } from './helpers/sim/adb';
 import { generateAdbKey } from '../src/utils/adbCrypto';
 
 const keyStore = () => {
