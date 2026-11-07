@@ -36,7 +36,10 @@ import {
   MapPin,
   Database,
   Globe,
-  Regex
+  Regex,
+  Calculator,
+  Hash,
+  Radar
 } from 'lucide-react';
 
 import { windowKeyFor } from '../../utils/windowManager';
@@ -100,7 +103,11 @@ export const SIDEBAR_SECTIONS = [
       { id: 'db-browser', name: 'Lite DB Browser', icon: Database, accent: 'emerald', desc: 'Open SQLite files read-only & query DB/REST endpoints (PostgREST, CouchDB, Elasticsearch, Datasette)', keywords: ['database', 'db', 'sqlite', 'sql', 'postgrest', 'couchdb', 'elasticsearch', 'datasette', 'rest', 'endpoint', 'table', 'browser', 'viewer'] },
       { id: 'regex-tester', name: 'Regex Tester', icon: Regex, accent: 'purple', desc: 'Live regex match highlighting, capture groups & replace preview (regex101-style, fully offline)', keywords: ['regex', 'regexp', 'regular expression', 'regex101', 'match', 'capture group', 'pattern', 'replace'] },
       { id: 'jwt-inspector', name: 'JWT Inspector', icon: KeyRound, accent: 'amber', desc: 'Decode JWT header/claims & verify HS/RS/ES/PS signatures with Web Crypto (jwt.io-style, offline)', keywords: ['jwt', 'jwt.io', 'json web token', 'jws', 'bearer', 'claims', 'hs256', 'rs256', 'es256', 'verify', 'signature', 'decode'] },
-      { id: 'dns-mail-doctor', name: 'DNS / Mail Doctor', icon: Globe, accent: 'cyan', desc: 'A/MX/NS/TXT/CAA + SPF/DMARC/DKIM parsing & DNSBL checks over DNS-over-HTTPS (MXToolbox-style)', keywords: ['dns', 'mail', 'mxtoolbox', 'spf', 'dmarc', 'dkim', 'dnsbl', 'blacklist', 'mx', 'txt', 'caa', 'doh', 'email', 'deliverability'] }
+      { id: 'dns-mail-doctor', name: 'DNS / Mail Doctor', icon: Globe, accent: 'cyan', desc: 'A/MX/NS/TXT/CAA + SPF/DMARC/DKIM parsing & DNSBL checks over DNS-over-HTTPS (MXToolbox-style)', keywords: ['dns', 'mail', 'mxtoolbox', 'spf', 'dmarc', 'dkim', 'dnsbl', 'blacklist', 'mx', 'txt', 'caa', 'doh', 'email', 'deliverability'] },
+      { id: 'crtsh-finder', name: 'crt.sh Subdomain Finder', icon: Search, accent: 'emerald', desc: 'Passive subdomain enumeration from Certificate Transparency logs (crt.sh, via proxy)', keywords: ['crt.sh', 'crtsh', 'certificate transparency', 'ct logs', 'subdomain', 'enumeration', 'passive', 'recon', 'osint'] },
+      { id: 'ip-calculator', name: 'IP / CIDR Calculator', icon: Calculator, accent: 'purple', desc: 'IPv4 & IPv6 subnet math: network, broadcast, mask, host range & counts (fully offline)', keywords: ['ip', 'cidr', 'subnet', 'netmask', 'wildcard', 'ipv4', 'ipv6', 'calculator', 'network', 'broadcast', 'range'] },
+      { id: 'hash-calculator', name: 'Hash & HMAC Calculator', icon: Hash, accent: 'amber', desc: 'MD5 / SHA-1 / SHA-256/384/512 + HMAC for text and files via Web Crypto (fully offline)', keywords: ['hash', 'md5', 'sha', 'sha256', 'sha1', 'sha512', 'hmac', 'checksum', 'digest', 'fingerprint', 'file hash'] },
+      { id: 'osint-clients', name: 'OSINT API Clients', icon: Radar, accent: 'cyan', desc: 'Shodan, urlscan.io & HackerTarget clients — bring your own API key (via proxy)', keywords: ['osint', 'shodan', 'urlscan', 'hackertarget', 'recon', 'intelligence', 'api', 'host lookup', 'reverse ip'] }
     ]
   },
   {

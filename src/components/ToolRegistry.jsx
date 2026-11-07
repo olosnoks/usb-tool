@@ -34,6 +34,10 @@ const DbBrowserWorkbench = React.lazy(() => import('./tools/DbBrowserWorkbench')
 const RegexTesterWorkbench = React.lazy(() => import('./tools/RegexTesterWorkbench'));
 const JwtInspectorWorkbench = React.lazy(() => import('./tools/JwtInspectorWorkbench'));
 const DnsMailDoctorWorkbench = React.lazy(() => import('./tools/DnsMailDoctorWorkbench'));
+const IpCalculatorWorkbench = React.lazy(() => import('./tools/IpCalculatorWorkbench'));
+const HashCalculatorWorkbench = React.lazy(() => import('./tools/HashCalculatorWorkbench'));
+const CrtShFinderWorkbench = React.lazy(() => import('./tools/CrtShFinderWorkbench'));
+const OsintClientsWorkbench = React.lazy(() => import('./tools/OsintClientsWorkbench'));
 
 const LogicAnalyzerWorkbench = React.lazy(() => import('./tools/LogicAnalyzerWorkbench'));
 const UsbPdWorkbench = React.lazy(() => import('./tools/UsbPdWorkbench'));
@@ -103,6 +107,7 @@ export const KNOWN_TOOL_IDS = [
   'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-enumerator',
   'owasp-zap', 'pwned-passwords', 'cert-inspect', 'api-client',
   'db-browser', 'regex-tester', 'jwt-inspector', 'dns-mail-doctor',
+  'ip-calculator', 'hash-calculator', 'crtsh-finder', 'osint-clients',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
 
@@ -210,6 +215,10 @@ export function renderTool(toolId, serial) {
     case 'regex-tester': return <RegexTesterWorkbench />;
     case 'jwt-inspector': return <JwtInspectorWorkbench onLogMessage={addLog} />;
     case 'dns-mail-doctor': return <DnsMailDoctorWorkbench onLogMessage={addLog} />;
+    case 'ip-calculator': return <IpCalculatorWorkbench />;
+    case 'hash-calculator': return <HashCalculatorWorkbench onLogMessage={addLog} />;
+    case 'crtsh-finder': return <CrtShFinderWorkbench onLogMessage={addLog} />;
+    case 'osint-clients': return <OsintClientsWorkbench onLogMessage={addLog} />;
     default:
       return (
         <div className="py-16 text-center font-mono text-xs text-slate-500">
