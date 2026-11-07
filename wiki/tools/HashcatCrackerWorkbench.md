@@ -25,7 +25,15 @@ keyspace/iteration), `src/utils/md5.js`, `src/utils/md4.js` (for NTLM). Verified
 in `tests/hashCrack.test.js` against RFC MD4 vectors, NTLM("password"), MD5/SHA
 digests, salted ordering, rule expansion and mask iteration.
 
+**GPU acceleration (WebGPU)**: for **MD5 + mask** attacks, tick "Use GPU" to run
+the brute-force as a WGSL compute shader on the GPU (`src/utils/gpuCrack.js`),
+which is dramatically faster than the CPU loop for large keyspaces. The engine
+**self-tests on your actual hardware** (cracks a known plaintext) before it is
+trusted; if the self-test fails or WebGPU is unavailable, it falls back to the
+CPU engine and says so. GPU path limits: MD5 only, candidate length ≤ 55,
+keyspace ≤ 2³².
+
 **Notes**: SHA family uses Web Crypto (async); MD5/MD4/NTLM run from local
-implementations. A browser is far slower than native hashcat and has no GPU
-access — use it for audits, teaching and CTF-scale work. Only crack hashes you
-are authorized to.
+implementations. Apart from the WebGPU MD5 path, cracking runs on the CPU and is
+far slower than native hashcat — use it for audits, teaching and CTF-scale work.
+Only crack hashes you are authorized to.

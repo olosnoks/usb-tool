@@ -1,7 +1,8 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { Play, Square, Download, Zap, KeyRound } from 'lucide-react';
+import { Play, Square, Download, Zap, KeyRound, Cpu } from 'lucide-react';
 import WordlistPicker from './common/WordlistPicker';
 import { HASH_MODES, RULE_SETS, hashOne, normalizeHash, expandRules, ruleMultiplier, parseMask, maskKeyspace, maskCandidates } from '../../utils/hashCrack';
+import { gpuAvailable, GpuMd5Cracker } from '../../utils/gpuCrack';
 
 /**
  * Hash cracker (password-audit / CTF), hashcat-style but fully client-side.
@@ -23,10 +24,14 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
   const [running, setRunning] = useState(false);
   const [stats, setStats] = useState({ tried: 0, rate: 0, elapsed: 0, total: 0, found: 0 });
   const [pot, setPot] = useState([]); // [{ hash, password|null }]
+  const [useGpu, setUseGpu] = useState(false);
+  const [gpuNote, setGpuNote] = useState('');
   const cancelRef = useRef(false);
+  const gpuRef = useRef(null);
 
   const log = (m) => onLogMessage?.(m);
   const mode = HASH_MODES.find((m) => m.id === modeId);
+  const gpuEligible = gpuAvailable() && modeId === 'md5' && attack === 'mask';
 
   const words = useMemo(() => wordlist.split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean), [wordlist]);
   const maskSets = useMemo(() => parseMask(mask), [mask]);
@@ -58,6 +63,27 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
     const found = new Map();
     setPot(targets.map((h) => ({ hash: h, password: null })));
     setStats({ tried: 0, rate: 0, elapsed: 0, total: estTotal, found: 0 });
+
+    // --- GPU (WebGPU) path: MD5 + mask only, self-tested before trusting ---
+    if (useGpu && gpuEligible) {
+      try {
+        if (!gpuRef.current) { const g = new GpuMd5Cracker(); await g.init(); const ok = await g.selfTest(); if (!ok) throw new Error('self-test mismatch'); gpuRef.current = g; log(`WebGPU engine verified (${g.adapterInfo?.vendor || 'gpu'} ${g.adapterInfo?.architecture || ''})`); }
+        setGpuNote('Running on GPU (WebGPU).');
+        const t0 = performance.now();
+        await gpuRef.current.crackMask(maskSets, targets, {
+          shouldStop: () => cancelRef.current,
+          onFound: (hit) => { found.set(hit.hex, hit.password); setPot((prev) => prev.map((row) => (row.hash === hit.hex ? { ...row, password: hit.password } : row))); log(`Cracked ${hit.hex.slice(0, 16)}… = "${hit.password}" (GPU)`); },
+          onProgress: (done, total) => { const el = (performance.now() - t0) / 1000; setStats({ tried: done, rate: Math.round(done / Math.max(el, 0.001)), elapsed: Math.round(el * 10) / 10, total, found: found.size }); },
+        });
+        log(cancelRef.current ? `Stopped — ${found.size}/${targets.length} cracked (GPU)` : `Done — ${found.size}/${targets.length} cracked (GPU)`);
+        setRunning(false);
+        return;
+      } catch (e) {
+        setGpuNote(`GPU unavailable (${e.message}). Falling back to CPU.`);
+        log(`GPU path failed: ${e.message} — using CPU`);
+      }
+    }
+
     log(`Cracking ${targets.length} ${mode.label} hash(es), attack=${attack}${attack === 'rules' ? `(${ruleSet})` : ''}${attack === 'mask' ? ` mask=${mask} (${maskSpace.toLocaleString()} candidates)` : ''}…`);
 
     const t0 = performance.now();
@@ -143,8 +169,16 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
           <label className="block text-xs text-slate-400 mb-1">Mask — <span className="font-mono">?l</span> lower · <span className="font-mono">?u</span> upper · <span className="font-mono">?d</span> digit · <span className="font-mono">?s</span> symbol · <span className="font-mono">?a</span> all · literals allowed</label>
           <input value={mask} onChange={(e) => setMask(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-sm font-mono" placeholder="?l?l?l?d" />
           <div className={`text-[11px] mt-1 ${maskSpace > 5_000_000 ? 'text-red-400' : maskSpace > 500_000 ? 'text-amber-400' : 'text-slate-500'}`}>
-            keyspace: {maskSpace.toLocaleString()} candidate(s){maskSpace > 5_000_000 ? ' — very large; a browser will be slow, consider narrowing' : ''}
+            keyspace: {maskSpace.toLocaleString()} candidate(s){maskSpace > 5_000_000 ? ' — large; GPU recommended' : ''}
           </div>
+          {gpuEligible && (
+            <label className="flex items-center gap-1.5 text-xs text-gray-300 mt-2">
+              <input type="checkbox" checked={useGpu} onChange={(e) => { setUseGpu(e.target.checked); setGpuNote(''); }} />
+              <Cpu size={13} className="text-emerald-400" /> Use GPU (WebGPU) — MD5 mask only; verified on-device before use
+            </label>
+          )}
+          {!gpuEligible && gpuAvailable() && <div className="text-[10px] text-slate-500 mt-1">GPU acceleration is available for MD5 + mask attacks.</div>}
+          {gpuNote && <div className="text-[11px] text-emerald-400 mt-1">{gpuNote}</div>}
         </div>
       )}
 
