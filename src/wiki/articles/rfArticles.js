@@ -1012,12 +1012,12 @@ ESP32 Marauder is **external firmware** controlled over its serial CLI — there
     category: 'rf',
     title: 'Wardrive Vector Art Generator — Synthetic APs, SVG Tracing, WiGLE & Kepler Exporter',
     summary: 'Comprehensive guide to generating geometric words and custom SVG vector art from synthetic Wi-Fi Access Points for wardriving visualization, Kepler.gl heatmaps, and WiGLE CSV benchmarks with authentic ISP router profiles (Xfinity, AT&T, Spectrum), 10k/km density, 666 mph drive simulation, and multi-part file splitting.',
-    tags: ['Wardrive', 'WiGLE', 'Kepler.gl', 'Synthetic APs', 'SVG Art', 'GPS', 'Xfinity', 'AT&T', 'Spectrum', 'OSINTIAL'],
+    tags: ['Wardrive', 'WiGLE', 'Kepler.gl', 'Synthetic APs', 'SVG Art', 'GPS', 'Xfinity', 'AT&T', 'Spectrum', 'OSINTI4L'],
     readTime: '15 min read',
     content: `
 # Wardrive Vector Art Generator — Synthetic APs, SVG Tracing & Geospatial Art Manual
 
-The **Wardrive Vector Art Generator** turns arbitrary words, phrases, and custom SVG vector graphics into synthetic Wi-Fi Access Point (AP) datasets ready for upload into **WiGLE.net**, **Kepler.gl**, or local GIS visualization pipelines. Inspired by **OSINTIAL**'s creative wardriving demonstrations, this workbench provides end-to-end vector path tracing, authentic ISP router profile generation (Xfinity, AT&T, Spectrum), vehicle timeline simulation up to 666 mph, and automated multi-part file splitting.
+The **Wardrive Vector Art Generator** turns arbitrary words, phrases, and custom SVG vector graphics into synthetic Wi-Fi Access Point (AP) datasets ready for upload into **WiGLE.net**, **Kepler.gl**, or local GIS visualization pipelines. Inspired by **OSINTI4L**'s creative wardriving demonstrations, this workbench provides end-to-end vector path tracing, authentic ISP router profile generation (Xfinity, AT&T, Spectrum), vehicle timeline simulation up to 666 mph, and automated multi-part file splitting.
 
 ---
 
@@ -1141,7 +1141,7 @@ Need to generate or automate vector art datasets on a headless server or offline
 
 | Component / Organization | Reference & Link | Role / Attribution |
 | :--- | :--- | :--- |
-| **OSINTIAL** | [x.com/OSINTIAL](https://x.com/OSINTIAL) | Inspiration for wardriving vector art and creative GIS mapping demonstrations. |
+| **OSINTI4L** | OSINTI4L from Discord | Inspiration for wardriving vector art and creative GIS mapping demonstrations. |
 | **WiGLE.net** | [wigle.net](https://wigle.net) | Wireless Geographic Logging Engine and specification for the \`WigleWifi-1.4\` CSV format. |
 | **Kepler.gl** | [kepler.gl](https://kepler.gl) (Urban Computing Foundation / Uber Open Source) | Open-source geospatial visualization engine. |
 | **Leaflet** | [leafletjs.com](https://leafletjs.com) | Client-side interactive mapping library used for the in-app preview canvas. |

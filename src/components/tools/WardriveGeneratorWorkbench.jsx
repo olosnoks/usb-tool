@@ -1168,7 +1168,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 Kepler.gl & WiGLE
               </span>
               <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
-                Inspired by OSINTIAL
+                Inspired by OSINTI4L
               </span>
             </div>
             <p className="text-[11px] text-slate-400 leading-tight">
@@ -2641,12 +2641,12 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               </div>
             </div>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
-              Inspired by OSINTIAL
+              Inspired by OSINTI4L
             </span>
           </div>
 
           <div className="p-2.5 bg-cyan-950/20 border border-cyan-800/40 rounded-lg text-xs text-cyan-300 flex items-center justify-between gap-2">
-            <span>Special credit to <strong>OSINTIAL</strong> for inspiring this tool and the concept of drawing vector words and shapes onto wardriving maps using synthesized AP trails.</span>
+            <span>Special credit to <strong>OSINTI4L</strong> for inspiring this tool and the concept of drawing vector words and shapes onto wardriving maps using synthesized AP trails.</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">

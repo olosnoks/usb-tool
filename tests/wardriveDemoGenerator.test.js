@@ -399,7 +399,7 @@ describe('Wardrive Demo Generator', () => {
     expect(py).toContain('SVG_SCALE = 2.5');
     expect(py).toContain('FLIP_H = True');
     expect(py).toContain('FLIP_V = False');
-    expect(py).toContain('Inspired by OSINTIAL');
+    expect(py).toContain('Inspired by OSINTI4L');
   });
 
   it('splits APs into smaller standalone files to meet file size limits', () => {

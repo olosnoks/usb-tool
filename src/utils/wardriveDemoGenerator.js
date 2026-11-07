@@ -1137,7 +1137,7 @@ from datetime import datetime, timedelta
 
 # ==============================================================================
 # WARDRIVING VECTOR ART & ROAD ROUTE GENERATOR
-# Inspired by OSINTIAL
+# Inspired by OSINTI4L
 # Creates words, road routes, or SVG art made from generated APs to test or visualize on wardriving maps
 # View your results here: https://kepler.gl/demo
 # ==============================================================================
