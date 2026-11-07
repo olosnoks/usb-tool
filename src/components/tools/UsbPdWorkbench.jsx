@@ -6,7 +6,6 @@ import {
   RotateCcw,
   AlertTriangle,
   CheckCircle2,
-  Sparkles,
   ShieldAlert,
   Flame,
   Info,
@@ -20,19 +19,16 @@ import {
   UsbPdClient,
   FIXED_PDO_PROFILES,
   PPS_PROFILE,
-  SAMPLE_CABLE_EMARKERS,
   NVM_CURRENTS,
   nvmToText,
   nvmFromText
 } from '../../utils/usbPdDriver';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { confirmAction, useSessionError } from '../../utils/sessionLog';
 export default function UsbPdWorkbench() {
   const [client] = useState(() => new UsbPdClient(console.log));
   const [isConnected, setIsConnected] = useState(false);
-  const [isSimulated, setIsSimulated] = useState(false);
 
   // Active PDO / Voltage settings
   const [activePdoId, setActivePdoId] = useState(1);
@@ -49,32 +45,8 @@ export default function UsbPdWorkbench() {
     accumulatedMwh: 0
   });
 
-  const [cable, setCable] = useState(SAMPLE_CABLE_EMARKERS[0]);
 
   // Telemetry loop
-  useEffect(() => {
-    let interval = null;
-    if (isConnected && isSimulated) {
-      interval = setInterval(() => {
-        const data = client.readTelemetry();
-        setTelemetry(data);
-      }, 100);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isConnected, isSimulated, client]);
-
-  const handleConnectSimulation = () => {
-    client.connectSimulation();
-    setIsConnected(true);
-    setIsSimulated(true);
-    setActivePdoId(1);
-    setIsPps(false);
-    setPpsVoltage(5.0);
-    setCable(SAMPLE_CABLE_EMARKERS[0]);
-  };
-
   const [error, setError] = useSessionError('USB-PD');
   const [connecting, setConnecting] = useState(false);
 
@@ -84,7 +56,6 @@ export default function UsbPdWorkbench() {
     try {
       await client.connectHardware();
       setIsConnected(true);
-      setIsSimulated(false);
     } catch (err) {
       setError(`Connection failed: ${err.message}`);
     } finally {
@@ -95,7 +66,6 @@ export default function UsbPdWorkbench() {
   const handleDisconnect = async () => {
     await client.disconnect();
     setIsConnected(false);
-    setIsSimulated(false);
     setTelemetry({
       voltageV: 0,
       currentA: 0,
@@ -124,7 +94,6 @@ export default function UsbPdWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && <DemoBanner>Simulated 100 W charger: the voltages, currents and cable data below are invented.</DemoBanner>}
       {error && (
         <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
           <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
@@ -145,24 +114,15 @@ export default function UsbPdWorkbench() {
 
           <div className="flex items-center gap-2">
             {!isConnected ? (
-              <>
-                <button
-                  onClick={handleConnectHardware}
-                  disabled={connecting}
-                  title="STUSB4500 at I2C 0x28 through a Bus Pirate v3/v4 (binary mode)"
-                  className="disabled:opacity-40 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-amber-glow transition-all active:scale-95"
-                >
-                  <Power className="w-3.5 h-3.5" />
-                  <span>{connecting ? 'CONNECTING...' : 'CONNECT STUSB4500 (BUS PIRATE)'}</span>
-                </button>
-                <button
-                  onClick={handleConnectSimulation}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>DEMO</span>
-                </button>
-              </>
+              <button
+                onClick={handleConnectHardware}
+                disabled={connecting}
+                title="STUSB4500 at I2C 0x28 through a Bus Pirate v3/v4 (binary mode)"
+                className="disabled:opacity-40 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-amber-glow transition-all active:scale-95"
+              >
+                <Power className="w-3.5 h-3.5" />
+                <span>{connecting ? 'CONNECTING...' : 'CONNECT STUSB4500 (BUS PIRATE)'}</span>
+              </button>
             ) : (
               <button
                 onClick={handleDisconnect}
@@ -175,7 +135,7 @@ export default function UsbPdWorkbench() {
         </div>
 
         {/* Live VBUS Multimeter Dials (simulation only: the STUSB4500 has no VBUS meter) */}
-        {(isSimulated || !isConnected) && (
+        {(!isConnected) && (
         <div className="pt-4 grid grid-cols-2 @sm:grid-cols-4 @lg:grid-cols-6 gap-3">
           {/* Voltage */}
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
@@ -243,10 +203,10 @@ export default function UsbPdWorkbench() {
         )}
       </div>
 
-      {isConnected && !isSimulated && <Stusb4500Panel client={client} onError={setError} />}
+      {isConnected && <Stusb4500Panel client={client} onError={setError} />}
 
       {/* Contract Negotiator & PPS Slider */}
-      {(isSimulated || !isConnected) && (
+      {(!isConnected) && (
       <div className="grid grid-cols-1 @lg:grid-cols-3 gap-4">
         {/* Left: Fixed PDO Contract Buttons */}
         <div className="@lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
@@ -325,45 +285,6 @@ export default function UsbPdWorkbench() {
           </div>
         </div>
 
-        {/* Right: E-Marker Cable Diagnostics */}
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl flex flex-col justify-between space-y-3">
-          <div>
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
-                <Cpu className="w-4 h-4 text-emerald-400" />
-                <span>E-MARKER CABLE DECODER</span>
-              </span>
-              <span className="text-[10px] text-emerald-400 font-bold">Decoded</span>
-            </div>
-
-            <div className="space-y-2 pt-2 text-[11px]">
-              <div>
-                <span className="text-[10px] text-slate-500 uppercase font-bold block">Manufacturer</span>
-                <span className="font-bold text-slate-200">{cable.manufacturer}</span>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-slate-500 uppercase font-bold block">Max Power Rating</span>
-                <span className="font-bold text-amber-300">{cable.maxCurrent} • {cable.maxVoltage}</span>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-slate-500 uppercase font-bold block">USB Data Capability</span>
-                <span className="font-bold text-cyan-300">{cable.speed}</span>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-slate-500 uppercase font-bold block">Cable Type</span>
-                <span className="text-slate-300">{cable.type}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-850 text-[10px] text-slate-400 flex items-center gap-2">
-            <Info className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span>5A / 240W cables require an internal E-Marker chip to unlock &gt;60W charging.</span>
-          </div>
-        </div>
       </div>
       )}
     </div>

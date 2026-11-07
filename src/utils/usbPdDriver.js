@@ -163,7 +163,6 @@ export class UsbPdClient {
     this.pd = null;
     this._owner = { name: 'USB-PD', release: () => this.disconnect() };
     this.isConnected = false;
-    this.isSimulated = false;
     this.activeVoltageV = 5.0;
     this.targetVoltageV = 5.0;
     this.currentA = 0.45;
@@ -195,7 +194,6 @@ export class UsbPdClient {
       // The PDOs in RAM right now came from NVM at power-up: keep them to check the NVM layout against.
       this.bootSink = await this.pd.readSinkPdos();
       this.isConnected = true;
-      this.isSimulated = false;
       this.logger(`[USB-PD] STUSB4500 (ID 0x${this.chipId.toString(16)}) found at 0x${addr.toString(16)} through the Bus Pirate.`);
       return true;
     } catch (e) {
@@ -248,24 +246,9 @@ export class UsbPdClient {
     await new Stusb4500Nvm(this.pd).write(sectors);
   }
 
-  connectSimulation() {
-    this.isConnected = true;
-    this.isSimulated = true;
-    this.activeVoltageV = 5.0;
-    this.targetVoltageV = 5.0;
-    this.currentA = 0.42;
-    this.activePdoId = 1;
-    this.isPps = false;
-    this.cableInfo = SAMPLE_CABLE_EMARKERS[0];
-    this.lastTimestamp = Date.now();
-    this.logger('[USB-PD] Virtual USB-PD Charger simulation online (100W GaN PD 3.0 / PPS).');
-    return true;
-  }
-
   async disconnect() {
     await this._closeHardware();
     this.isConnected = false;
-    this.isSimulated = false;
     this.activeVoltageV = 0.0;
     this.currentA = 0.0;
     this.logger('[USB-PD] Disconnected.');
@@ -290,56 +273,6 @@ export class UsbPdClient {
     this.ppsVoltageV = Number(clamped.toFixed(2));
     this.targetVoltageV = this.ppsVoltageV;
     this.logger(`[USB-PD] PPS Voltage set to ${this.ppsVoltageV}V`);
-  }
-
-  // Poll live VBUS measurements (smoothly steps toward target voltage with load noise)
-  readTelemetry() {
-    const now = Date.now();
-    const deltaHours = (now - this.lastTimestamp) / (1000 * 3600);
-    this.lastTimestamp = now;
-
-    if (!this.isConnected) {
-      return {
-        voltageV: 0,
-        currentA: 0,
-        powerW: 0,
-        tempC: 25.0,
-        accumulatedMah: this.accumulatedMah,
-        accumulatedMwh: this.accumulatedMwh
-      };
-    }
-
-    // Step active voltage toward target
-    const step = (this.targetVoltageV - this.activeVoltageV) * 0.35;
-    this.activeVoltageV += step;
-    if (Math.abs(this.targetVoltageV - this.activeVoltageV) < 0.02) {
-      this.activeVoltageV = this.targetVoltageV;
-    }
-
-    // Jitter/noise for realistic multimeter reading
-    const vNoise = (Math.random() - 0.5) * 0.015;
-    const finalV = Math.max(0, this.activeVoltageV + vNoise);
-
-    // Dynamic current draw based on requested voltage (simulated 15 ohm load)
-    const baseCurrent = finalV / 18.0;
-    const iNoise = (Math.random() - 0.5) * 0.025;
-    const finalI = Math.max(0.05, Number((baseCurrent + iNoise).toFixed(3)));
-
-    const finalW = Number((finalV * finalI).toFixed(2));
-    const tempC = Number((28.0 + finalW * 0.22).toFixed(1));
-
-    // Integrate energy
-    this.accumulatedMah += finalI * 1000 * deltaHours;
-    this.accumulatedMwh += finalW * 1000 * deltaHours;
-
-    return {
-      voltageV: Number(finalV.toFixed(3)),
-      currentA: finalI,
-      powerW: finalW,
-      tempC: tempC,
-      accumulatedMah: Math.round(this.accumulatedMah * 10) / 10,
-      accumulatedMwh: Math.round(this.accumulatedMwh * 10) / 10
-    };
   }
 
   resetEnergyCounter() {
