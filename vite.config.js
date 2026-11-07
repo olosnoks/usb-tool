@@ -34,14 +34,5 @@ export default defineConfig({
       }
     }
   }
-    target: 'esnext',
-    outDir: 'dist',
-    sourcemap: true,
-    rollupOptions: {
-      input: {
-        main: resolve(__dirname, 'index.html'),
-        wiki: resolve(__dirname, 'wiki/index.html')
-      }
-    }
-  }
+
 });

@@ -18,3 +18,4 @@
 **Notes**:
 - Performance depends on the device’s CPU/GPU; WebGPU can be leveraged if the WASM build includes it.
 - Only a subset of hashcat’s massive algorithm set is compiled; unsupported modes will show an error message.
+

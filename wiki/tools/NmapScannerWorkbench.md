@@ -17,3 +17,4 @@
 **Notes**:
 - Scanning large port ranges may be CPU intensive; the WASM engine can leverage WebGPU if compiled with it.
 - Results are purely client‑side; no network traffic is sent beyond the target host.
+
