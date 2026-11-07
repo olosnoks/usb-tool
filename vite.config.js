@@ -15,6 +15,28 @@ export default defineConfig({
     target: 'esnext',
     outDir: 'dist',
     sourcemap: true,
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        wiki: resolve(__dirname, 'wiki/index.html')
+      },
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            // Separate large vendor libs
+            if (id.includes('react')) return 'react';
+            if (id.includes('react-dom')) return 'react-dom';
+            if (id.includes('cyberchef')) return 'cyberchef';
+            return 'vendor';
+          }
+        }
+      }
+    }
+  }
+    target: 'esnext',
+    outDir: 'dist',
+    sourcemap: true,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),

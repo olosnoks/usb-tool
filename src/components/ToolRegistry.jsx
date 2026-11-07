@@ -1,6 +1,4 @@
-// Maps a tool id to the component that renders it, plus its title / icon /
-// accent for window chrome. App.jsx used to hold this as one long switch; the
-// window manager renders several tools at once, so it lives here.
+// Maps a tool id to the component that renders it, plus its title / icon / accent for window chrome. App.jsx used to hold this as one long switch; the window manager renders several tools at once, so it lives here.
 import React from 'react';
 import { SIDEBAR_SECTIONS } from './layout/Sidebar';
 import { windowKeyFor } from '../utils/windowManager';
@@ -20,7 +18,6 @@ import TelemetryDashboard from './TelemetryDashboard';
 
 // Lazy-loaded workbenches keep the initial load light.
 const CanBusWorkbench = React.lazy(() => import('./tools/CanBusWorkbench'));
-// New hacker tools lazy imports
 const NmapScannerWorkbench = React.lazy(() => import('./tools/NmapScannerWorkbench'));
 const HashcatCrackerWorkbench = React.lazy(() => import('./tools/HashcatCrackerWorkbench'));
 const BurpProxyWorkbench = React.lazy(() => import('./tools/BurpProxyWorkbench'));
@@ -72,7 +69,7 @@ export const DEFAULT_NATURAL_WIDTH = 1100;
 export const TOOL_NATURAL_WIDTH = {
   mayhem: 1180, 'alfa-wifi': 1280, 'warhog-piglet': 1200, 'logic-analyzer': 1200, 'packet-analyzer': 1200,
   terminal: 900, flasher: 1000, hardware: 900, setup: 900, 'session-log': 900,
-  cyberchef: 1200, ducky: 1000
+  cyberchef: 1200, ducky: 1000,
 };
 
 /** Title, icon and accent for a tool id (aliases resolve to their group's entry). */
@@ -98,16 +95,7 @@ export const KNOWN_TOOL_IDS = [
   'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-enumerator',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
-  'flasher', 'terminal', 'hardware', 'setup', 'plotter', 'packet-analyzer', 'hex', 'packets', 'kismet', 'bridge',
-  'micropython', 'improv', 'telemetry', 'wardrive', 'ubx', 'alerts', 'automation', 'autopsy', 'esp-dump',
-  'programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp', 'can-bus', 'logic-analyzer', 'usb-pd', 'dfu',
-  'fastboot', 'adb', 'usb-descriptors', 'hid', 'usbtmc', 'mass-storage', 'ptp', 'fido2', 'session-log', 'ble',
-  'bus-explorer', 'modbus-rtu', 'alfa-wifi', 'wifi-scanner', 'warhog-piglet', 'mayhem', 'flipper', 'proxmark', 'rfid-nfc',
-  'ducky', 'cyberchef', 'wardrive-generator',
-  'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
-];
 
-// Sub-tab aliases that deep-link into the WarHog & Piglet suite's inner tabs.
 const WARHOG_SUBTABS = {
   'warhog-sd': 'sd', 'warhog-config': 'config', 'warhog-console': 'live',
   'warhog-flasher': 'flasher', 'warhog-pinouts': 'pinouts'
@@ -129,11 +117,16 @@ export function renderTool(toolId, serial) {
     case 'hardware': return <HardwareControlsTab />;
     case 'setup': return <HelpTroubleshootingTab />;
     case 'plotter': return <SerialPlotter latestTextStream={latestRxText} isConnected={isConnected} />;
-    case 'packet-analyzer': case 'hex': case 'packets': case 'kismet':
+    case 'packet-analyzer':
+    case 'hex':
+    case 'packets':
+    case 'kismet':
       return (
         <ProtocolPacketLab
           initialTab={toolId === 'hex' ? 'hex' : toolId === 'packets' ? 'packets' : toolId === 'kismet' ? 'kismet' : 'analyzer'}
-          hexByteStream={hexByteStream} onClearHex={clearHexStream} isConnected={isConnected}
+          hexByteStream={hexByteStream}
+          onClearHex={clearHexStream}
+          isConnected={isConnected}
         />
       );
     case 'bridge': return <SerialBridgeDeck boards={boards} onSendRawBytes={sendRawBytes} onLogMessage={addLog} />;
@@ -143,14 +136,19 @@ export function renderTool(toolId, serial) {
       return <ImprovWifiDeck isConnected={isConnected} onSendRawBytes={sendRawBytes} onSendString={sendString} latestRxText={latestRxText} onLogMessage={addLog} boards={boards} activeBoardId={activeBoardId} onSelectBoard={setActiveBoardId} />;
     case 'telemetry':
       return <TelemetryDashboard latestTextStream={latestRxText} isConnected={isConnected} boards={boards} activeBoardId={activeBoardId} onSelectBoard={setActiveBoardId} />;
-    case 'wardrive': case 'ubx':
+    case 'wardrive':
+    case 'ubx':
       return <GpsNavigationSuite initialTab={toolId === 'ubx' ? 'ubx' : 'wardrive'} latestTextStream={latestRxText} isConnected={isConnected} onLogMessage={addLog} onSendRawBytes={sendRawBytes} />;
     case 'alerts': return <CrashAlertDeck latestTextStream={latestRxText} onPauseTerminal={setConsolePaused} onLogMessage={addLog} />;
     case 'automation': return <ScriptRunner isConnected={isConnected} onSendString={sendString} latestRxText={latestRxText} onLogMessage={addLog} />;
     case 'autopsy':
       return <UsbReconDeck isConnected={isConnected} onSendRawBytes={sendRawBytes} onSendString={sendString} onToggleSignal={toggleSignal} onBaudRateChange={setBaudRate} currentBaudRate={baudRate} onLogMessage={addLog} boards={boards} activeBoardId={activeBoardId} onSelectBoard={setActiveBoardId} />;
     case 'esp-dump': return <EspMemoryInspector isConnected={isConnected} port={port} onLogMessage={addLog} />;
-    case 'programmers': case 'ch341a': case 'cmsis-dap': case 'jtag-programmer': case 'avr-isp':
+    case 'programmers':
+    case 'ch341a':
+    case 'cmsis-dap':
+    case 'jtag-programmer':
+    case 'avr-isp':
       return <HardwareProgrammersSuite initialTab={toolId} />;
     case 'can-bus': return <CanBusWorkbench />;
     case 'logic-analyzer': return <LogicAnalyzerWorkbench />;
@@ -168,13 +166,20 @@ export function renderTool(toolId, serial) {
     case 'ble': return <BleExplorer />;
     case 'bus-explorer': return <BusExplorerWorkbench />;
     case 'modbus-rtu': return <ModbusWorkbench />;
-    case 'alfa-wifi': case 'wifi-scanner': return <div className="w-full min-w-0 max-w-full"><AlfaWifiWorkbench /></div>;
+    case 'alfa-wifi':
+    case 'wifi-scanner':
+      return <div className="w-full min-w-0 max-w-full"><AlfaWifiWorkbench /></div>;
     case 'warhog-piglet':
-    case 'warhog-sd': case 'warhog-config': case 'warhog-console': case 'warhog-flasher': case 'warhog-pinouts':
+    case 'warhog-sd':
+    case 'warhog-config':
+    case 'warhog-console':
+    case 'warhog-flasher':
+    case 'warhog-pinouts':
       return <div className="w-full min-w-0 max-w-full"><WarhogPigletWorkbench initialTab={WARHOG_SUBTABS[toolId] || 'sd'} /></div>;
     case 'mayhem': return <PortapackWorkbench />;
     case 'flipper': return <FlipperWorkbench />;
-    case 'proxmark': case 'rfid-nfc': return <ProxmarkWorkbench />;
+    case 'proxmark':
+    case 'rfid-nfc': return <ProxmarkWorkbench />;
     case 'ducky': return <DuckyScriptStudio onLogMessage={addLog} />;
     case 'cyberchef': return <CyberChefWorkbench onLogMessage={addLog} />;
     case 'wardrive-generator': return <WardriveGeneratorWorkbench onLogMessage={addLog} />;
@@ -187,7 +192,6 @@ export function renderTool(toolId, serial) {
     case 'hydra-bruteforce': return <HydraBruteforceWorkbench onLogMessage={addLog} />;
     case 'tcpdump-viewer': return <TcpdumpViewerWorkbench onLogMessage={addLog} />;
     case 'dns-enumerator': return <DnsEnumeratorWorkbench onLogMessage={addLog} />;
-
     default:
       return (
         <div className="py-16 text-center font-mono text-xs text-slate-500">
