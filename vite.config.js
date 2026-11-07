@@ -14,8 +14,22 @@ export default defineConfig({
   build: {
     target: 'esnext',
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false, // do not ship source maps; they reconstruct original source in dev tools
     chunkSizeWarningLimit: 1000,
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: true, // strip console.* from production
+        drop_debugger: true,
+        passes: 2
+      },
+      mangle: {
+        toplevel: true // also mangle top-level names, not just locals
+      },
+      format: {
+        comments: false // remove all comments from output
+      }
+    },
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
