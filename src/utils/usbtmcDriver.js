@@ -13,7 +13,6 @@
  * References: USBTMC 1.0 and USBTMC-USB488 1.0 (USB-IF).
  */
 
-import { buildIeeeBlock, demoWaveform, demoScreenshotBmp } from './scpiTools';
 
 export const USBTMC_CLASS = { classCode: 0xfe, subclassCode: 0x03 }; // Application / Test & Measurement
 export const MSGID = { DEV_DEP_MSG_OUT: 1, REQUEST_DEV_DEP_MSG_IN: 2, DEV_DEP_MSG_IN: 2 };
@@ -175,46 +174,3 @@ export async function requestUsbTmcDevice() {
   return new UsbTmcUsbTransport(device);
 }
 
-/**
- * A simulated SCPI instrument for the workbench demo (opt-in, labeled). Answers
- * *IDN?, measurements, waveform (:WAV:PRE? / :WAV:DATA?) and screenshot
- * (:DISP:DATA?) queries, and echoes unknown queries.
- */
-export function createSimulatedUsbTmc() {
-  let pending = null; // bytes to return on next IN
-  const state = { simulated: true, voltage: 1.0, lastWrite: null };
-  const answer = (q) => {
-    const Q = q.trim().toUpperCase();
-    if (Q === '*IDN?') return 'Simulated Instruments,SIM-SCOPE 1000,SN000123,1.0.0';
-    if (Q === '*OPC?') return '1';
-    if (Q.startsWith('MEAS') || Q.startsWith('MEASURE')) return (3.300 + Math.random() * 0.01).toFixed(4);
-    if (Q === 'SYST:ERR?' || Q === 'SYSTEM:ERROR?') return '0,"No error"';
-    if (Q === ':WAV:PRE?') return demoWaveform().preamble;
-    if (Q === ':WAV:DATA?') return buildIeeeBlock(demoWaveform().data);
-    if (Q.startsWith(':DISP:DATA?')) return buildIeeeBlock(demoScreenshotBmp());
-    if (Q.endsWith('?')) return `SIMULATED response to ${q.trim()}`;
-    return null;
-  };
-  return {
-    state,
-    async open() {}, async close() {},
-    async write(bytes) {
-      if (bytes[0] === MSGID.DEV_DEP_MSG_OUT) {
-        const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-        const size = dv.getUint32(4, true);
-        const cmd = td.decode(bytes.slice(12, 12 + size));
-        state.lastWrite = cmd.trim();
-        const resp = answer(cmd);
-        pending = resp == null ? null : resp instanceof Uint8Array ? resp : te.encode(resp + '\n');
-      } else if (bytes[0] === MSGID.REQUEST_DEV_DEP_MSG_IN) {
-        const data = pending || new Uint8Array();
-        const out = new Uint8Array(12 + align4(data.length));
-        const dv = new DataView(out.buffer);
-        out[0] = MSGID.DEV_DEP_MSG_IN; out[1] = bytes[1]; out[2] = (~bytes[1]) & 0xff;
-        dv.setUint32(4, data.length, true); out[8] = 0x01; out.set(data, 12);
-        pending = out;
-      }
-    },
-    async read() { const out = pending; pending = null; return out || new Uint8Array(); }
-  };
-}

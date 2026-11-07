@@ -1,11 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Gauge, Usb, Power, ShieldAlert, Sparkles, Play, Loader2, Activity, Camera, Download, Square, FileCode, Terminal } from 'lucide-react';
-import { UsbTmcDevice, requestUsbTmcDevice, createSimulatedUsbTmc } from '../../utils/usbtmcDriver';
+import { UsbTmcDevice, requestUsbTmcDevice } from '../../utils/usbtmcDriver';
 import {
   detectProfile, presetsFor, fetchWaveform, waveformStats, waveformCsv, fetchScreenshot, DMM_FUNCTIONS, parseNumber
 } from '../../utils/scpiTools';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 import { record } from '../../utils/sessionLog';
 
 const CH_COLORS = ['#facc15', '#22d3ee', '#f472b6', '#60a5fa'];
@@ -69,7 +68,6 @@ function LineChart({ series, height = 220, xLabel = '', yLabel = '' }) {
 
 export default function UsbTmcWorkbench({ initialTab = 'console' }) {
   const [inst, setInst] = useState(null);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [status, setStatus] = useState('offline');
   const [idn, setIdn] = useState('');
   const [profile, setProfile] = useState(null);
@@ -115,15 +113,15 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
     try { return await fn(); } finally { busyRef.current = false; setBusy(false); }
   };
 
-  const connect = async (simulated) => {
+  const connect = async () => {
     setBusy(true);
     try {
-      const transport = simulated ? createSimulatedUsbTmc() : await requestUsbTmcDevice();
+      const transport = await requestUsbTmcDevice();
       const d = new UsbTmcDevice(transport);
       await d.open();
       const id = await d.identify();
       const p = detectProfile(id);
-      setInst(d); setIsSimulated(simulated); setIdn(id); setProfile(p); setStatus(simulated ? 'warning' : 'online');
+      setInst(d); setIdn(id); setProfile(p); setStatus('online');
       if (p.kind === 'scope' && initialTab === 'console') setTab('scope');
       else if ((p.kind === 'dmm' || p.kind === 'psu') && initialTab === 'console') setTab('logger');
       if (p.kind === 'psu') setCustomQuery(p.family === 'rigol' ? ':MEAS:VOLT? CH1' : 'MEAS:VOLT? CH1');
@@ -138,7 +136,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
     setLogging(false);
     stopScript.current = true;
     try { await inst?.close(); } catch (e) { /* ignore */ }
-    setInst(null); setIsSimulated(false); setIdn(''); setProfile(null); setStatus('offline'); setWaves({}); setShot(null);
+    setInst(null); setIdn(''); setProfile(null); setStatus('offline'); setWaves({}); setShot(null);
   };
 
   const send = async (command) => {
@@ -258,7 +256,6 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && <DemoBanner>Simulated instrument: *IDN?, measurements, waveforms and the screenshot are generated, not from a device.</DemoBanner>}
 
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -271,7 +268,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
               waveforms and screenshots (Rigol, Keysight, Siglent, Tektronix), log meter readings to CSV and run command scripts.
             </p>
           </div>
-          <StatusBadge status={status} label={status === 'online' ? 'SCPI' : status === 'warning' ? 'SIM' : 'IDLE'} value={inst ? (isSimulated ? 'Demo' : 'Connected') : 'Offline'} />
+          <StatusBadge status={status} label={status === 'online' ? 'SCPI' : status === 'warning' ? 'ERR' : 'IDLE'} value={inst ? 'Connected' : 'Offline'} />
         </div>
 
         {!webUsbAvailable && (
@@ -282,14 +279,9 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
 
         <div className="pt-3 flex flex-wrap items-center gap-2">
           {!inst ? (
-            <>
-              <button onClick={() => connect(false)} disabled={!webUsbAvailable || busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 text-xs font-bold disabled:opacity-40">
-                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} CONNECT INSTRUMENT (WEBUSB)
-              </button>
-              <button onClick={() => connect(true)} disabled={busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
-                <Sparkles className="w-3.5 h-3.5" /> DEMO
-              </button>
-            </>
+            <button onClick={() => connect()} disabled={!webUsbAvailable || busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 text-xs font-bold disabled:opacity-40">
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} CONNECT INSTRUMENT (WEBUSB)
+            </button>
           ) : (
             <button onClick={disconnect} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
               <Power className="w-3.5 h-3.5" /> DISCONNECT

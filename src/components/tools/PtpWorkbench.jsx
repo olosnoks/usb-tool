@@ -1,10 +1,9 @@
 import React, { useState, useCallback } from 'react';
 import { Camera, Usb, Power, ShieldAlert, Sparkles, Download, RefreshCw, Loader2, Image as ImageIcon, Trash2, Aperture } from 'lucide-react';
 import JSZip from 'jszip';
-import { PtpDevice, requestPtpDevice, createSimulatedPtp, objectFormatName, PTP_OP } from '../../utils/ptpDriver';
+import { PtpDevice, requestPtpDevice, objectFormatName, PTP_OP } from '../../utils/ptpDriver';
 import { imageMime } from '../../utils/scpiTools';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { confirmAction, useSessionError } from '../../utils/sessionLog';
 const fmtBytes = (n) => {
@@ -15,7 +14,6 @@ const fmtBytes = (n) => {
 
 export default function PtpWorkbench() {
   const [ptp, setPtp] = useState(null);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [status, setStatus] = useState('offline');
   const [info, setInfo] = useState(null);
   const [objects, setObjects] = useState([]); // { handle, info }
@@ -38,15 +36,15 @@ export default function PtpWorkbench() {
     setObjects(list.filter((o) => o.info.objectFormat !== 0x3001));
   };
 
-  const connect = async (simulated) => {
+  const connect = async () => {
     setBusy('connect'); setError('');
     try {
-      const transport = simulated ? createSimulatedPtp() : await requestPtpDevice();
+      const transport = await requestPtpDevice();
       const dev = new PtpDevice(transport);
       await dev.open();
       await dev.openSession();
       setInfo(await dev.getDeviceInfo());
-      setPtp(dev); setIsSimulated(simulated); setStatus(simulated ? 'warning' : 'online');
+      setPtp(dev); setStatus('online');
       const ids = await dev.getStorageIds().catch(() => []);
       const st = [];
       for (const id of ids) { try { st.push({ id, ...(await dev.getStorageInfo(id)) }); } catch (e) { /* not supported */ } }
@@ -59,7 +57,7 @@ export default function PtpWorkbench() {
 
   const disconnect = async () => {
     try { await ptp?.closeSession(); await ptp?.close(); } catch (e) { /* ignore */ }
-    setPtp(null); setIsSimulated(false); setStatus('offline'); setInfo(null); setObjects([]);
+    setPtp(null); setStatus('offline'); setInfo(null); setObjects([]);
     Object.values(thumbs).forEach((u) => URL.revokeObjectURL(u));
     setThumbs({}); setSelected(new Set()); setStorage([]); setBattery(null);
   };
@@ -150,7 +148,6 @@ export default function PtpWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && <DemoBanner>Simulated camera: the device info and photos below are invented, not from hardware.</DemoBanner>}
 
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -163,7 +160,7 @@ export default function PtpWorkbench() {
               battery, browse with thumbnails, download one, several or all files, delete, and fire the shutter remotely on cameras that allow it.
             </p>
           </div>
-          <StatusBadge status={status} label={status === 'online' ? 'PTP' : status === 'warning' ? 'SIM' : 'IDLE'} value={ptp ? (isSimulated ? 'Demo' : 'Connected') : 'Offline'} />
+          <StatusBadge status={status} label={status === 'online' ? 'PTP' : status === 'warning' ? 'ERR' : 'IDLE'} value={ptp ? 'Connected' : 'Offline'} />
         </div>
 
         {!webUsbAvailable && (
@@ -179,14 +176,9 @@ export default function PtpWorkbench() {
 
         <div className="pt-3 flex flex-wrap items-center gap-2">
           {!ptp ? (
-            <>
-              <button onClick={() => connect(false)} disabled={!webUsbAvailable || !!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-xs font-bold disabled:opacity-40">
-                {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} CONNECT CAMERA (WEBUSB)
-              </button>
-              <button onClick={() => connect(true)} disabled={!!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-purple-300 border border-purple-500/40 text-xs font-bold">
-                <Sparkles className="w-3.5 h-3.5" /> DEMO
-              </button>
-            </>
+            <button onClick={() => connect()} disabled={!webUsbAvailable || !!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-xs font-bold disabled:opacity-40">
+              {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} CONNECT CAMERA (WEBUSB)
+            </button>
           ) : (
             <>
               <button onClick={disconnect} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">

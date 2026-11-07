@@ -12,7 +12,6 @@ import {
   Trash2,
   Rocket,
   Info,
-  Sparkles,
   Loader2,
   Package
 } from 'lucide-react';
@@ -21,14 +20,12 @@ import {
   FastbootUsbTransport,
   findFastbootInterface,
   requestFastbootDevice,
-  createSimulatedFastboot,
   summarizeVars
 } from '../../utils/fastbootDriver';
 import {
   isSparse, parseSparse, imageParts, resolvePartition, flashImage, readFactoryZip, flashFactory, checkRequirements
 } from '../../utils/fastbootTools';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { confirmAction, record } from '../../utils/sessionLog';
 const REBOOT_TARGETS = [
@@ -40,7 +37,6 @@ const REBOOT_TARGETS = [
 
 export default function FastbootWorkbench() {
   const [dev, setDev] = useState(null);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [status, setStatus] = useState('offline');
   const [statusMsg, setStatusMsg] = useState('No fastboot device connected');
   const [summary, setSummary] = useState(null);
@@ -81,7 +77,6 @@ export default function FastbootWorkbench() {
   const reconnect = async (timeoutMs = 90000) => {
     const old = devRef.current;
     if (!old) throw new Error('No device.');
-    if (isSimulated) return old; // the simulated bootloader keeps its state across "reboots"
     const serial = old.transport.device?.serialNumber;
     try { await old.close(); } catch (e) { /* already gone */ }
     addLog('Waiting for the device to come back in fastboot mode...', 'info');
@@ -103,18 +98,17 @@ export default function FastbootWorkbench() {
     throw new Error('The device did not come back in fastboot mode. Reconnect it manually and continue.');
   };
 
-  const connect = async (simulated) => {
+  const connect = async () => {
     setBusy('connect');
     try {
-      const transport = simulated ? createSimulatedFastboot() : await requestFastbootDevice();
+      const transport = await requestFastbootDevice();
       const device = new FastbootDevice(transport, { logger: addLog });
       await device.open();
       setDev(device);
-      setIsSimulated(simulated);
       await refreshVars(device);
-      setStatus(simulated ? 'warning' : 'online');
-      setStatusMsg(simulated ? 'Simulated bootloader' : 'Fastboot device connected');
-      addLog(simulated ? 'Connected to a simulated bootloader.' : 'Connected to fastboot device.', 'ok');
+      setStatus('online');
+      setStatusMsg('Fastboot device connected');
+      addLog('Connected to fastboot device.', 'ok');
     } catch (err) {
       setStatus('warning');
       setStatusMsg(err.message);
@@ -127,7 +121,6 @@ export default function FastbootWorkbench() {
   const disconnect = async () => {
     try { await dev?.close(); } catch (e) { /* ignore */ }
     setDev(null);
-    setIsSimulated(false);
     setSummary(null);
     setVars(null);
     setStatus('offline');
@@ -245,9 +238,6 @@ export default function FastbootWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && (
-        <DemoBanner>Simulated bootloader: nothing here touches a real phone. Values, partitions and flash results are invented.</DemoBanner>
-      )}
 
       {/* Header + connect */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
@@ -266,8 +256,8 @@ export default function FastbootWorkbench() {
           </div>
           <StatusBadge
             status={status}
-            label={status === 'online' ? 'FASTBOOT' : status === 'warning' ? 'SIM' : 'IDLE'}
-            value={status === 'online' ? 'Connected' : status === 'warning' && isSimulated ? 'Demo' : 'Offline'}
+            label={status === 'online' ? 'FASTBOOT' : status === 'warning' ? 'ERR' : 'IDLE'}
+            value={status === 'online' ? 'Connected' : 'Offline'}
           />
         </div>
 
@@ -279,24 +269,14 @@ export default function FastbootWorkbench() {
 
         <div className="pt-3 flex flex-wrap items-center gap-2">
           {!dev ? (
-            <>
-              <button
-                onClick={() => connect(false)}
-                disabled={!webUsbAvailable || !!busy}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 text-xs font-bold disabled:opacity-40"
-              >
-                {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />}
-                <span>CONNECT FASTBOOT (WEBUSB)</span>
-              </button>
-              <button
-                onClick={() => connect(true)}
-                disabled={!!busy}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-emerald-300 border border-emerald-500/40 text-xs font-bold"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>DEMO</span>
-              </button>
-            </>
+            <button
+              onClick={() => connect()}
+              disabled={!webUsbAvailable || !!busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 text-xs font-bold disabled:opacity-40"
+            >
+              {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />}
+              <span>CONNECT FASTBOOT (WEBUSB)</span>
+            </button>
           ) : (
             <>
               <button onClick={disconnect} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">

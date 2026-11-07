@@ -1,9 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { HardDrive, Usb, Power, ShieldAlert, Sparkles, Search, Loader2, Folder, FileText, Download, ChevronRight, Trash2, Square, Hash } from 'lucide-react';
-import { MassStorageDevice, requestMassStorageDevice, createSimulatedMassStorage } from '../../utils/massStorageDriver';
+import { MassStorageDevice, requestMassStorageDevice } from '../../utils/massStorageDriver';
 import { DiskReader, readPartitionTable, detectFilesystem, openVolume, Sha256 } from '../../utils/diskImage';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { confirmAction, useSessionError } from '../../utils/sessionLog';
 const fmtBytes = (n) => {
@@ -23,7 +22,6 @@ const saveBlob = (parts, name) => {
 
 export default function MassStorageWorkbench() {
   const [dev, setDev] = useState(null);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [status, setStatus] = useState('offline');
   const [inquiry, setInquiry] = useState(null);
   const [capacity, setCapacity] = useState(null);
@@ -55,18 +53,18 @@ export default function MassStorageWorkbench() {
     }
   };
 
-  const connect = async (simulated) => {
-    if (!simulated && !confirmAction('Inspect a USB mass-storage device?\n\nThis CLAIMS the drive for this tab, taking it away from the operating system for the session. Use a drive that is NOT mounted/in use, and never one with data you cannot lose mounted elsewhere. This tool is read-only (no writes), but unmounting an in-use disk can still disrupt the OS.')) return;
+  const connect = async () => {
+    if (!confirmAction('Inspect a USB mass-storage device?\n\nThis CLAIMS the drive for this tab, taking it away from the operating system for the session. Use a drive that is NOT mounted/in use, and never one with data you cannot lose mounted elsewhere. This tool is read-only (no writes), but unmounting an in-use disk can still disrupt the OS.')) return;
     setBusy('connect'); setError('');
     try {
-      const transport = simulated ? createSimulatedMassStorage() : await requestMassStorageDevice();
+      const transport = await requestMassStorageDevice();
       const d = new MassStorageDevice(transport);
       await d.open();
       await d.testUnitReady();
       setInquiry(await d.inquiry());
       const cap = await d.readCapacity();
       setCapacity(cap);
-      setDev(d); setIsSimulated(simulated); setStatus(simulated ? 'warning' : 'online');
+      setDev(d); setStatus('online');
       await scanPartitions(d, cap);
     } catch (err) { setError(err.message); setStatus('warning'); }
     finally { setBusy(''); }
@@ -75,7 +73,7 @@ export default function MassStorageWorkbench() {
   const disconnect = async () => {
     cancelDump.current = true;
     try { await dev?.close(); } catch (e) { /* ignore */ }
-    setDev(null); setIsSimulated(false); setStatus('offline'); setInquiry(null); setCapacity(null); setSector(null);
+    setDev(null); setStatus('offline'); setInquiry(null); setCapacity(null); setSector(null);
     setTable(null); setBrowser(null); setPreview(null); setDump(null);
   };
 
@@ -186,7 +184,6 @@ export default function MassStorageWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && <DemoBanner>Simulated 8 MiB drive: the identity, partition, files and sectors below are generated.</DemoBanner>}
 
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
@@ -200,7 +197,7 @@ export default function MassStorageWorkbench() {
               Connecting claims the drive from the OS for this tab, so use an unmounted drive.
             </p>
           </div>
-          <StatusBadge status={status} label={status === 'online' ? 'SCSI' : status === 'warning' ? 'SIM' : 'IDLE'} value={dev ? (isSimulated ? 'Demo' : 'Connected') : 'Offline'} />
+          <StatusBadge status={status} label={status === 'online' ? 'SCSI' : status === 'warning' ? 'ERR' : 'IDLE'} value={dev ? 'Connected' : 'Offline'} />
         </div>
 
         {!webUsbAvailable && (
@@ -216,14 +213,9 @@ export default function MassStorageWorkbench() {
 
         <div className="pt-3 flex flex-wrap items-center gap-2">
           {!dev ? (
-            <>
-              <button onClick={() => connect(false)} disabled={!webUsbAvailable || !!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 text-xs font-bold disabled:opacity-40">
-                {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} INSPECT A DRIVE (WEBUSB)
-              </button>
-              <button onClick={() => connect(true)} disabled={!!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-amber-300 border border-amber-500/40 text-xs font-bold">
-                <Sparkles className="w-3.5 h-3.5" /> DEMO
-              </button>
-            </>
+            <button onClick={() => connect()} disabled={!webUsbAvailable || !!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 text-xs font-bold disabled:opacity-40">
+              {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} INSPECT A DRIVE (WEBUSB)
+            </button>
           ) : (
             <button onClick={disconnect} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
               <Power className="w-3.5 h-3.5" /> DISCONNECT
