@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
-import { Link2, ShieldAlert, FolderSearch } from 'lucide-react';
+import { Link2, ShieldAlert, FolderSearch, Fingerprint, Cookie, Waypoints } from 'lucide-react';
 import ProxyConfig from './common/ProxyConfig';
 import UrlInspectorWorkbench from './UrlInspectorWorkbench';
 import OwaspZapWorkbench from './OwaspZapWorkbench';
 import NiktoScannerWorkbench from './NiktoScannerWorkbench';
+import TechFingerprintTab from './webanalyzer/TechFingerprintTab';
+import CookieAnalyzerTab from './webanalyzer/CookieAnalyzerTab';
+import CrawlerTab from './webanalyzer/CrawlerTab';
 
 /**
  * Web Analyzer — combines the URL-analysis tools under one roof with a single
@@ -19,8 +22,11 @@ import NiktoScannerWorkbench from './NiktoScannerWorkbench';
 
 const TABS = [
   { id: 'links', label: 'Links & Resources', icon: Link2, comp: UrlInspectorWorkbench },
+  { id: 'tech', label: 'Tech Fingerprint', icon: Fingerprint, comp: TechFingerprintTab },
   { id: 'passive', label: 'Passive Scan', icon: ShieldAlert, comp: OwaspZapWorkbench },
+  { id: 'cookies', label: 'Cookies', icon: Cookie, comp: CookieAnalyzerTab },
   { id: 'paths', label: 'Path Prober', icon: FolderSearch, comp: NiktoScannerWorkbench },
+  { id: 'crawler', label: 'Crawler', icon: Waypoints, comp: CrawlerTab },
 ];
 
 export default function WebAnalyzerWorkbench({ onLogMessage, initialTab = 'links' }) {
