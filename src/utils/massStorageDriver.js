@@ -224,7 +224,10 @@ export class MscUsbTransport {
   }
 }
 
-export const MSC_USB_FILTERS = [{ classCode: 0x08, protocolCode: 0x50 }];
+// WebUSB rejects a filter that has protocolCode without subclassCode. Match the
+// standard Bulk-Only / SCSI-transparent triple, then fall back to any class 0x08
+// device so drives that report an unusual subclass still appear in the chooser.
+export const MSC_USB_FILTERS = [MSC_CLASS, { classCode: MSC_CLASS.classCode }];
 
 export async function requestMassStorageDevice() {
   if (typeof navigator === 'undefined' || !navigator.usb) throw new MassStorageError('WebUSB needs Chrome or Edge over HTTPS.');
