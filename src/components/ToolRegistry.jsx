@@ -38,6 +38,7 @@ const IpCalculatorWorkbench = React.lazy(() => import('./tools/IpCalculatorWorkb
 const HashCalculatorWorkbench = React.lazy(() => import('./tools/HashCalculatorWorkbench'));
 const CrtShFinderWorkbench = React.lazy(() => import('./tools/CrtShFinderWorkbench'));
 const OsintClientsWorkbench = React.lazy(() => import('./tools/OsintClientsWorkbench'));
+const UrlInspectorWorkbench = React.lazy(() => import('./tools/UrlInspectorWorkbench'));
 
 const LogicAnalyzerWorkbench = React.lazy(() => import('./tools/LogicAnalyzerWorkbench'));
 const UsbPdWorkbench = React.lazy(() => import('./tools/UsbPdWorkbench'));
@@ -107,7 +108,7 @@ export const KNOWN_TOOL_IDS = [
   'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-enumerator',
   'owasp-zap', 'pwned-passwords', 'cert-inspect', 'api-client',
   'db-browser', 'regex-tester', 'jwt-inspector', 'dns-mail-doctor',
-  'ip-calculator', 'hash-calculator', 'crtsh-finder', 'osint-clients',
+  'ip-calculator', 'hash-calculator', 'crtsh-finder', 'osint-clients', 'url-inspector',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
 
@@ -219,6 +220,7 @@ export function renderTool(toolId, serial) {
     case 'hash-calculator': return <HashCalculatorWorkbench onLogMessage={addLog} />;
     case 'crtsh-finder': return <CrtShFinderWorkbench onLogMessage={addLog} />;
     case 'osint-clients': return <OsintClientsWorkbench onLogMessage={addLog} />;
+    case 'url-inspector': return <UrlInspectorWorkbench onLogMessage={addLog} />;
     default:
       return (
         <div className="py-16 text-center font-mono text-xs text-slate-500">

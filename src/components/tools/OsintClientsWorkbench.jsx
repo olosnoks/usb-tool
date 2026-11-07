@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Radar, Search, RefreshCw, KeyRound, Globe } from 'lucide-react';
+import { Radar, Search, RefreshCw, KeyRound, Globe, Eye, EyeOff, Check, Trash2 } from 'lucide-react';
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
 
@@ -20,21 +20,49 @@ const KEY_STORE = {
 const getKey = (s) => { try { return localStorage.getItem(KEY_STORE[s]) || ''; } catch { return ''; } };
 const setKey = (s, v) => { try { v ? localStorage.setItem(KEY_STORE[s], v) : localStorage.removeItem(KEY_STORE[s]); } catch { /* ignore */ } };
 
-function ApiKeyField({ service, label, required }) {
+function ApiKeyField({ service, label, required, hint }) {
   const [val, setVal] = useState(getKey(service));
+  const [stored, setStored] = useState(getKey(service));
+  const [show, setShow] = useState(false);
   const [saved, setSaved] = useState(false);
-  const save = () => { setKey(service, val.trim()); setSaved(true); setTimeout(() => setSaved(false), 1200); };
+  const save = () => { setKey(service, val.trim()); setStored(val.trim()); setSaved(true); setTimeout(() => setSaved(false), 1400); };
+  const clear = () => { setKey(service, ''); setVal(''); setStored(''); };
+  const dirty = val.trim() !== stored;
   return (
-    <div className="flex items-center gap-2 mb-2">
-      <KeyRound size={13} className="text-amber-400 shrink-0" />
-      <input
-        type="password"
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        placeholder={`${label} API key${required ? '' : ' (optional)'}`}
-        className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono"
-      />
-      <button onClick={save} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">{saved ? 'Saved' : 'Save key'}</button>
+    <div className="mb-3 p-2 border border-slate-800 rounded bg-slate-900/50">
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-[11px] font-semibold text-amber-300 flex items-center gap-1.5">
+          <KeyRound size={13} /> {label} API key {required ? <span className="text-red-400">*</span> : <span className="text-slate-500 font-normal">(optional)</span>}
+        </label>
+        <span className="text-[10px]">
+          {stored
+            ? <span className="text-emerald-400 inline-flex items-center gap-1"><Check size={11} /> key saved in this browser</span>
+            : <span className="text-slate-500">no key saved</span>}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type={show ? 'text' : 'password'}
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          placeholder={`paste your ${label} API key here`}
+          autoComplete="off"
+          spellCheck={false}
+          className="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs font-mono text-gray-200"
+        />
+        <button onClick={() => setShow((s) => !s)} title={show ? 'Hide' : 'Show'} className="px-2 py-1.5 bg-slate-800 rounded hover:bg-slate-700 text-gray-300">
+          {show ? <EyeOff size={13} /> : <Eye size={13} />}
+        </button>
+        <button onClick={save} disabled={!dirty} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-40">
+          {saved ? 'Saved ✓' : 'Save'}
+        </button>
+        {stored && (
+          <button onClick={clear} title="Remove saved key" className="px-2 py-1.5 bg-slate-800 rounded hover:bg-red-900/50 text-slate-400 hover:text-red-300">
+            <Trash2 size={13} />
+          </button>
+        )}
+      </div>
+      {hint && <p className="text-[10px] text-slate-500 mt-1">{hint}</p>}
     </div>
   );
 }
@@ -66,7 +94,7 @@ function ShodanTab({ log }) {
 
   return (
     <div>
-      <ApiKeyField service="shodan" label="Shodan" required />
+      <ApiKeyField service="shodan" label="Shodan" required hint="Find your key at account.shodan.io → API. A free account includes a key." />
       <div className="flex gap-2 mb-2">
         <input value={ip} onChange={(e) => setIp(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} placeholder="IP address (e.g. 8.8.8.8)" className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono" />
         <button onClick={run} disabled={busy} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">{busy ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />} Lookup</button>
@@ -108,8 +136,8 @@ function UrlscanTab({ log }) {
 
   return (
     <div>
-      <ApiKeyField service="urlscan" label="urlscan.io" />
-      <p className="text-[10px] text-slate-500 mb-2">Public search needs no key. A key is only required to submit scans (not done here). Query syntax e.g. <code>domain:example.com</code> or <code>page.url:"login"</code>.</p>
+      <ApiKeyField service="urlscan" label="urlscan.io" hint="Public search works without a key. A key (urlscan.io → Settings & API) only raises rate limits." />
+      <p className="text-[10px] text-slate-500 mb-2">Query syntax e.g. <code>domain:example.com</code> or <code>page.url:"login"</code>.</p>
       <div className="flex gap-2 mb-2">
         <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} placeholder='domain:example.com' className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono" />
         <button onClick={run} disabled={busy} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">{busy ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />} Search</button>
@@ -164,8 +192,7 @@ function HackerTargetTab({ log }) {
 
   return (
     <div>
-      <ApiKeyField service="hackertarget" label="HackerTarget" />
-      <p className="text-[10px] text-slate-500 mb-2">Free tier works without a key (rate-limited by IP); a key raises limits.</p>
+      <ApiKeyField service="hackertarget" label="HackerTarget" hint="Free tier works without a key (IP rate-limited); a key (hackertarget.com → membership) raises limits." />
       <div className="flex flex-wrap gap-2 mb-2">
         <select value={endpoint} onChange={(e) => setEndpoint(e.target.value)} className="bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm">
           {HT_ENDPOINTS.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
