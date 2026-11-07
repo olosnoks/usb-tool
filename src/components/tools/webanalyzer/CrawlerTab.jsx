@@ -8,7 +8,14 @@ import { extractLinks } from '../../../utils/urlinspect.js';
  * pages via the proxy, following only same-origin links, up to a depth and page
  * cap. Read-only GETs. Stoppable.
  */
-export default function CrawlerTab({ onLogMessage }) {
+function toMarkdown(seed, pages) {
+  if (!pages || pages.length === 0) return 'No pages crawled.';
+  const out = [`${pages.length} page(s) discovered:`, ''];
+  pages.forEach((p) => out.push(`- \`${p.status}\` (d${p.depth}) ${p.url}`));
+  return out.join('\n');
+}
+
+export default function CrawlerTab({ onLogMessage, onReport }) {
   const [seed, setSeed] = useState('');
   const [maxDepth, setMaxDepth] = useState(2);
   const [maxPages, setMaxPages] = useState(40);
@@ -52,6 +59,7 @@ export default function CrawlerTab({ onLogMessage }) {
       }
     }
     onLogMessage?.(cancelRef.current ? `Crawl stopped at ${found.length} pages` : `Crawl complete: ${found.length} pages`);
+    onReport?.({ url: start, markdown: toMarkdown(start, found) });
     setBusy(false);
   };
 

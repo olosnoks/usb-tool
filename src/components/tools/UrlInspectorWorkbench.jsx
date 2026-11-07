@@ -35,7 +35,24 @@ function Card({ icon: Icon, title, count, children }) {
   );
 }
 
-export default function UrlInspectorWorkbench({ onLogMessage, hideProxyConfig = false }) {
+function reportMarkdown(r) {
+  const out = [];
+  out.push(`- **Status:** ${r.status} ${r.statusText} · ${(r.size / 1024).toFixed(1)} KB · ${r.timeMs} ms`);
+  out.push(`- **Final URL:** ${r.finalUrl}`);
+  if (r.title) out.push(`- **Title:** ${r.title}`);
+  out.push('');
+  out.push('**Security headers:**');
+  r.security.forEach((h) => out.push(`- ${h.present ? '✅' : '❌'} ${h.header}${h.value ? `: \`${h.value}\`` : ''}`));
+  out.push('');
+  out.push(`**Counts:** ${r.links.length} links · ${r.resources.scripts.length} scripts · ${r.resources.styles.length} styles · ${r.resources.images.length} images · ${r.forms.length} forms`);
+  if (r.forms.length) {
+    out.push('', '**Forms:**');
+    r.forms.forEach((f) => out.push(`- ${f.method} ${f.action} — inputs: ${f.inputs.map((i) => `${i.name || '—'}:${i.type}`).join(', ') || 'none'}`));
+  }
+  return out.join('\n');
+}
+
+export default function UrlInspectorWorkbench({ onLogMessage, hideProxyConfig = false, onReport }) {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -54,7 +71,7 @@ export default function UrlInspectorWorkbench({ onLogMessage, hideProxyConfig = 
       const resp = await proxiedFetch(target, { redirect: 'follow' });
       const html = await resp.text();
       const headers = Object.fromEntries([...resp.headers.entries()]);
-      setRes({
+      const result = {
         finalUrl: resp.url || target,
         status: resp.status,
         statusText: resp.statusText,
@@ -67,7 +84,9 @@ export default function UrlInspectorWorkbench({ onLogMessage, hideProxyConfig = 
         links: extractLinks(html, target),
         resources: extractResources(html, target),
         forms: extractForms(html, target),
-      });
+      };
+      setRes(result);
+      onReport?.({ url: target, markdown: reportMarkdown(result) });
       log(`${resp.status} · ${(html.length / 1024).toFixed(1)} KB`);
     } catch (e) {
       setError(describeNetworkError(e));

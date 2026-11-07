@@ -25,7 +25,14 @@ function isInteresting(status) {
 }
 const norm = (p) => (p.startsWith('/') || /^https?:\/\//.test(p) ? p : `/${p}`);
 
-export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = false }) {
+function reportMarkdown(base, server, found, probed) {
+  const out = [`- **Server:** ${server || 'unknown'}`, `- **Probed:** ${probed} path(s) · ${found.length} interesting`, ''];
+  if (found.length === 0) out.push('No interesting paths found.');
+  else found.forEach((r) => out.push(`- \`${r.status}\` ${base}${r.path}`));
+  return out.join('\n');
+}
+
+export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = false, onReport }) {
   const [target, setTarget] = useState('');
   const [paths, setPaths] = useState(null); // loaded wordlist, or null => builtin
   const [results, setResults] = useState([]); // interesting only
@@ -47,12 +54,14 @@ export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = 
     cancelRef.current = false;
     log(`Probing ${list.length} path(s) on ${base}${isProxyEnabled() ? ' (via proxy)' : ' (direct, CORS-limited)'}…`);
 
+    let serverVal;
     try {
       const resp = await proxiedFetch(base, { method: 'HEAD' });
-      setServer(resp.headers.get('server') || 'not disclosed');
+      serverVal = resp.headers.get('server') || 'not disclosed';
     } catch (e) {
-      setServer(`unreadable (${describeNetworkError(e)})`);
+      serverVal = `unreadable (${describeNetworkError(e)})`;
     }
+    setServer(serverVal);
 
     let done = 0;
     let blocked = 0;
@@ -80,6 +89,7 @@ export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = 
     setProgress({ done, total: list.length, blocked });
     if (!isProxyEnabled() && blocked === list.length) log('All responses blocked by CORS. Configure a proxy to read real statuses.');
     log(cancelRef.current ? 'Scan cancelled' : `Scan complete — ${found.length} interesting of ${list.length}`);
+    onReport?.({ url: base, markdown: reportMarkdown(base, serverVal, [...found].sort((a, b) => a.path.localeCompare(b.path)), done) });
     setBusy(false);
   };
 

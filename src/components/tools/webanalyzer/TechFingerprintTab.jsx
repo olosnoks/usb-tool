@@ -10,7 +10,19 @@ import { cookieNames } from '../../../utils/cookies.js';
  * stack from response headers, HTML markers, Set-Cookie names and script URLs.
  * Heuristic; evidence is shown for each hit. Via the shared proxy (CORS).
  */
-export default function TechFingerprintTab({ onLogMessage }) {
+function toMarkdown(url, tech) {
+  if (!tech || tech.length === 0) return 'No technologies matched the signature set.';
+  const byCat = tech.reduce((m, t) => { (m[t.category] ||= []).push(t); return m; }, {});
+  const out = [];
+  for (const [cat, items] of Object.entries(byCat)) {
+    out.push(`### ${cat}`);
+    items.forEach((t) => out.push(`- **${t.name}** — \`${t.evidence}\``));
+    out.push('');
+  }
+  return out.join('\n').trim();
+}
+
+export default function TechFingerprintTab({ onLogMessage, onReport }) {
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -31,6 +43,7 @@ export default function TechFingerprintTab({ onLogMessage }) {
       const names = headers['set-cookie'] ? cookieNames(headers['set-cookie']) : [];
       const found = detectTech({ headers, html, cookieNames: names, scripts });
       setTech(found);
+      onReport?.({ url: target, markdown: toMarkdown(target, found) });
       onLogMessage?.(`Fingerprint: ${found.length} technolog${found.length === 1 ? 'y' : 'ies'} detected`);
     } catch (e) { setError(describeNetworkError(e)); }
     setBusy(false);

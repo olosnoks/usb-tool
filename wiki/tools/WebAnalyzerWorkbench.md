@@ -28,6 +28,11 @@ switching tabs keeps their state. Pure logic: `src/utils/urlinspect.js`,
 `src/utils/fingerprint.js`, `src/utils/cookies.js` — verified in
 `tests/urlinspect.test.js` and `tests/ptkTools.test.js`.
 
+**Export**: the header's **Export report (.md)** button compiles the latest
+findings from every tab that has been run into a single Markdown file (target
+URLs, per-section results; tabs not yet run are marked "Not run"). A green dot on
+a tab indicates it has findings to include.
+
 **Notes**: The legacy ids `url-inspector`, `owasp-zap` and `nikto-scanner` still
 open this tool at the matching tab. Requests go through `fetch` and are
 CORS-limited; set a proxy to reach arbitrary hosts. Analyze only targets you own

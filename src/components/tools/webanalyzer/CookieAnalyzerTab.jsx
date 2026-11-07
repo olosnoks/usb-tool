@@ -11,7 +11,20 @@ import { analyzeSetCookies } from '../../../utils/cookies.js';
  * Caveat: browsers hide Set-Cookie from fetch() unless a proxy forwards it, so
  * the "paste" box is provided for when the live fetch can't see it.
  */
-export default function CookieAnalyzerTab({ onLogMessage }) {
+function toMarkdown(list, note) {
+  if (!list || list.length === 0) return note || 'No cookies analyzed.';
+  const out = [];
+  for (const c of list) {
+    out.push(`### \`${c.name}\``);
+    out.push(`- Secure: ${c.secure ? '✅' : '❌'} · HttpOnly: ${c.httpOnly ? '✅' : '❌'} · SameSite: ${c.sameSite || '❌ (none)'}`);
+    out.push(`- ${c.session ? 'session' : 'persistent'}${c.domain ? ` · domain ${c.domain}` : ''} · path ${c.path}`);
+    c.warnings.forEach((w) => out.push(`- ⚠ ${w}`));
+    out.push('');
+  }
+  return out.join('\n').trim();
+}
+
+export default function CookieAnalyzerTab({ onLogMessage, onReport }) {
   const [url, setUrl] = useState('');
   const [pasted, setPasted] = useState('');
   const [busy, setBusy] = useState(false);
@@ -19,7 +32,10 @@ export default function CookieAnalyzerTab({ onLogMessage }) {
   const [cookies, setCookies] = useState(null);
   const [note, setNote] = useState('');
 
-  const show = (list, msg) => { setCookies(list); setNote(msg || ''); };
+  const show = (list, msg, reportUrl) => {
+    setCookies(list); setNote(msg || '');
+    onReport?.({ url: reportUrl, markdown: toMarkdown(list, msg) });
+  };
 
   const run = async () => {
     let target = url.trim();
@@ -31,8 +47,8 @@ export default function CookieAnalyzerTab({ onLogMessage }) {
       const resp = await proxiedFetch(target, { redirect: 'follow' });
       await resp.text();
       const sc = resp.headers.get('set-cookie');
-      if (!sc) { show([], 'No Set-Cookie header was visible to the browser on this response. Browsers hide Set-Cookie from fetch() unless a proxy forwards it — paste the header below to analyze it.'); }
-      else { const list = analyzeSetCookies(sc); show(list, `${list.length} cookie(s) from the live response.`); onLogMessage?.(`Cookies: ${list.length}, ${list.filter((c) => !c.ok).length} with warnings`); }
+      if (!sc) { show([], 'No Set-Cookie header was visible to the browser on this response. Browsers hide Set-Cookie from fetch() unless a proxy forwards it — paste the header below to analyze it.', target); }
+      else { const list = analyzeSetCookies(sc); show(list, `${list.length} cookie(s) from the live response.`, target); onLogMessage?.(`Cookies: ${list.length}, ${list.filter((c) => !c.ok).length} with warnings`); }
     } catch (e) { setError(describeNetworkError(e)); }
     setBusy(false);
   };

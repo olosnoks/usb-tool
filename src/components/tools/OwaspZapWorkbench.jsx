@@ -19,7 +19,14 @@ import ProxyConfig from './common/ProxyConfig';
  */
 const SEV_COLOR = { High: 'text-red-400', Medium: 'text-orange-400', Low: 'text-yellow-400', Info: 'text-gray-400' };
 
-export default function OwaspZapWorkbench({ onLogMessage, hideProxyConfig = false }) {
+function reportMarkdown(url, alerts) {
+  if (!alerts || alerts.length === 0) return 'No passive findings.';
+  const out = [`${alerts.length} finding(s):`, ''];
+  alerts.forEach((a) => out.push(`- **${a.severity}**${a.cwe ? ` (CWE-${a.cwe})` : ''} — ${a.desc}`));
+  return out.join('\n');
+}
+
+export default function OwaspZapWorkbench({ onLogMessage, hideProxyConfig = false, onReport }) {
   const [target, setTarget] = useState('');
   const [running, setRunning] = useState(false);
   const [alerts, setAlerts] = useState([]);
@@ -65,6 +72,7 @@ export default function OwaspZapWorkbench({ onLogMessage, hideProxyConfig = fals
       }
     }
     setAlerts(combined);
+    onReport?.({ url, markdown: reportMarkdown(url, combined) });
     setRunning(false);
   };
 
