@@ -15,9 +15,13 @@ function toMarkdown(seed, pages) {
   return out.join('\n');
 }
 
-export default function CrawlerTab({ onLogMessage, onReport, initialTarget = '' }) {
+export default function CrawlerTab({ onLogMessage, onReport, initialTarget = '', fixedTarget }) {
+  // When fixedTarget is provided (embedded in Web Analyzer), the parent owns the
+  // URL and this component renders no URL input of its own.
+  const controlled = fixedTarget !== undefined;
   const [seed, setSeed] = useState(initialTarget);
   useEffect(() => { if (initialTarget) setSeed(initialTarget); }, [initialTarget]);
+  const effectiveSeed = controlled ? fixedTarget : seed;
   const [maxDepth, setMaxDepth] = useState(2);
   const [maxPages, setMaxPages] = useState(40);
   const [busy, setBusy] = useState(false);
@@ -26,7 +30,7 @@ export default function CrawlerTab({ onLogMessage, onReport, initialTarget = '' 
   const cancelRef = useRef(false);
 
   const run = async () => {
-    let start = seed.trim();
+    let start = (effectiveSeed || '').trim();
     if (!start) return;
     if (!/^https?:\/\//i.test(start)) start = 'https://' + start;
     let origin;
@@ -73,11 +77,11 @@ export default function CrawlerTab({ onLogMessage, onReport, initialTarget = '' 
   return (
     <div className="px-4 pb-4">
       <div className="flex flex-wrap gap-2 my-3 items-center">
-        <input value={seed} onChange={(e) => setSeed(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && run()} placeholder="https://example.com" className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono" />
+        {!controlled && <input value={seed} onChange={(e) => setSeed(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && run()} placeholder="https://example.com" className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono" />}
         <label className="text-xs text-slate-400">depth <input type="number" min={0} max={5} value={maxDepth} onChange={(e) => setMaxDepth(e.target.value)} className="w-14 bg-slate-900 border border-slate-800 rounded px-1 py-1 ml-1 font-mono" /></label>
         <label className="text-xs text-slate-400">max pages <input type="number" min={1} max={200} value={maxPages} onChange={(e) => setMaxPages(e.target.value)} className="w-16 bg-slate-900 border border-slate-800 rounded px-1 py-1 ml-1 font-mono" /></label>
         {!busy
-          ? <button onClick={run} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 inline-flex items-center gap-1"><Play size={13} /> Crawl</button>
+          ? <button onClick={run} disabled={!effectiveSeed?.trim()} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-40 inline-flex items-center gap-1"><Play size={13} /> Crawl</button>
           : <button onClick={() => { cancelRef.current = true; }} className="px-3 py-1.5 bg-slate-700 text-gray-200 rounded text-sm hover:bg-slate-600 inline-flex items-center gap-1"><Square size={13} /> Stop</button>}
       </div>
       {error && <div className="mb-3 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{error}</div>}

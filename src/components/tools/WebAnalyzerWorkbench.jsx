@@ -129,7 +129,6 @@ export default function WebAnalyzerWorkbench({ onLogMessage }) {
   };
 
   const d = data;
-  const seedTarget = d?.target || '';
 
   return (
     <div className="w-full min-w-0 max-w-full text-gray-200 px-4 pt-3 pb-4">
@@ -223,11 +222,11 @@ export default function WebAnalyzerWorkbench({ onLogMessage }) {
       {/* On-demand, long-running sections */}
       <details className="mt-2 border-t border-slate-800 pt-3" open={false}>
         <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-rose-300">Path Prober (on-demand)</summary>
-        <div className="mt-1"><NiktoScannerWorkbench onLogMessage={onLogMessage} hideProxyConfig initialTarget={seedTarget} onReport={(p) => onExtraReport('paths', p)} /></div>
+        <div className="mt-1"><NiktoScannerWorkbench onLogMessage={onLogMessage} hideProxyConfig fixedTarget={normalized()} onReport={(p) => onExtraReport('paths', p)} /></div>
       </details>
       <details className="mt-2 border-t border-slate-800 pt-3">
         <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-emerald-300">Crawler (on-demand)</summary>
-        <div className="mt-1"><CrawlerTab onLogMessage={onLogMessage} initialTarget={seedTarget} onReport={(p) => onExtraReport('crawler', p)} /></div>
+        <div className="mt-1"><CrawlerTab onLogMessage={onLogMessage} fixedTarget={normalized()} onReport={(p) => onExtraReport('crawler', p)} /></div>
       </details>
 
       {!d && !error && <p className="text-[10px] text-slate-500 mt-3">One Analyze fetches the page once and shows its security headers, technology stack, cookie flags, passive-scan findings, links/resources and forms together. Path Prober and Crawler run on demand below. Export compiles everything to one Markdown file.</p>}

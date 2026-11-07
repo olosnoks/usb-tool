@@ -32,9 +32,13 @@ function reportMarkdown(base, server, found, probed) {
   return out.join('\n');
 }
 
-export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = false, onReport, initialTarget = '' }) {
+export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = false, onReport, initialTarget = '', fixedTarget }) {
+  // When fixedTarget is provided (embedded in Web Analyzer), the parent owns the
+  // URL and this component renders no URL input of its own.
+  const controlled = fixedTarget !== undefined;
   const [target, setTarget] = useState(initialTarget);
   useEffect(() => { if (initialTarget) setTarget(initialTarget); }, [initialTarget]);
+  const effectiveTarget = controlled ? fixedTarget : target;
   const [paths, setPaths] = useState(null); // loaded wordlist, or null => builtin
   const [results, setResults] = useState([]); // interesting only
   const [server, setServer] = useState(null);
@@ -45,7 +49,7 @@ export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = 
   const log = (msg) => onLogMessage?.(msg);
 
   const runScan = async () => {
-    const base = target.trim().replace(/\/+$/, '');
+    const base = (effectiveTarget || '').trim().replace(/\/+$/, '');
     if (!base) return;
     const list = (paths && paths.length ? paths : BUILTIN_PATHS).map(norm);
     setBusy(true);
@@ -101,8 +105,8 @@ export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = 
       <WordlistPicker category="paths" max={5000} label="Path list" onLoad={(lines, meta) => { setPaths(lines); log(`Path list: ${lines.length} entries (${meta.name})`); }} />
       <div className="text-xs text-gray-500 mb-2">{paths ? `${paths.length.toLocaleString()} paths loaded` : `Using built-in list (${BUILTIN_PATHS.length} paths)`}</div>
       <div className="flex gap-2 mb-3">
-        <input type="text" placeholder="https://example.com" value={target} onChange={(e) => setTarget(e.target.value)} className="flex-1 bg-slate-900 border border-slate-800 rounded p-1 text-sm text-gray-200" />
-        <button onClick={runScan} disabled={busy} className="px-3 py-1 bg-rose-600 text-white rounded hover:bg-rose-500 disabled:opacity-40">{busy ? `Scanning ${progress.done}/${progress.total}` : 'Scan'}</button>
+        {!controlled && <input type="text" placeholder="https://example.com" value={target} onChange={(e) => setTarget(e.target.value)} className="flex-1 bg-slate-900 border border-slate-800 rounded p-1 text-sm text-gray-200" />}
+        <button onClick={runScan} disabled={busy || !effectiveTarget?.trim()} className="px-3 py-1 bg-rose-600 text-white rounded hover:bg-rose-500 disabled:opacity-40">{busy ? `Scanning ${progress.done}/${progress.total}` : 'Scan'}</button>
         {busy && <button onClick={() => { cancelRef.current = true; }} className="px-3 py-1 bg-slate-700 text-gray-200 rounded hover:bg-slate-600">Stop</button>}
       </div>
       {server && <div className="mb-2 text-sm text-gray-300">Server: <span className="font-mono text-gray-100">{server}</span></div>}
