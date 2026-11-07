@@ -574,10 +574,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
 
   return (
     <div className="flex flex-col gap-4 font-mono">
-      {isSimulated && (
-        <DemoBanner>CAN frames, gauges, OBD and UDS answers come from a simulated ECU; no adapter or vehicle is involved.</DemoBanner>
-      )}
-      {notice && <div className="p-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 text-xs flex justify-between gap-2"><span>{notice}</span><button onClick={() => setNotice('')}>×</button></div>}
+      {notice &&<div className="p-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 text-xs flex justify-between gap-2"><span>{notice}</span><button onClick={() => setNotice('')}>×</button></div>}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>

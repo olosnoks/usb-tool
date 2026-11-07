@@ -6,7 +6,6 @@ import {
   Check,
   ShieldAlert,
   Cpu,
-  Sparkles,
   ChevronRight,
   ArrowDownToLine,
   ArrowUpFromLine
@@ -18,36 +17,13 @@ import {
   listGrantedUsbDevices
 } from '../../utils/usbDescriptors';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { useSessionError } from '../../utils/sessionLog';
 // An illustrative device (a composite CDC + MSC dongle) for exploring the view
 // without hardware. Clearly labeled as an example, not a live read.
-const EXAMPLE_DEVICE = {
-  vendorId: 0x0483, productId: 0x5740,
-  deviceClass: 0xef, deviceSubclass: 0x02, deviceProtocol: 0x01,
-  usbVersionMajor: 2, usbVersionMinor: 0, usbVersionSubminor: 0,
-  deviceVersionMajor: 2, deviceVersionMinor: 0, deviceVersionSubminor: 0,
-  manufacturerName: 'STMicroelectronics', productName: 'Composite Demo', serialNumber: '00EXAMPLE',
-  configurations: [{
-    configurationValue: 1, configurationName: 'Composite',
-    interfaces: [
-      { interfaceNumber: 0, alternates: [{ alternateSetting: 0, interfaceClass: 0x02, interfaceSubclass: 0x02, interfaceProtocol: 0x01, interfaceName: 'CDC Control', endpoints: [{ endpointNumber: 3, direction: 'in', type: 'interrupt', packetSize: 8 }] }] },
-      { interfaceNumber: 1, alternates: [{ alternateSetting: 0, interfaceClass: 0x0a, interfaceSubclass: 0, interfaceProtocol: 0, interfaceName: 'CDC Data', endpoints: [
-        { endpointNumber: 1, direction: 'out', type: 'bulk', packetSize: 64 },
-        { endpointNumber: 1, direction: 'in', type: 'bulk', packetSize: 64 }
-      ] }] },
-      { interfaceNumber: 2, alternates: [{ alternateSetting: 0, interfaceClass: 0x08, interfaceSubclass: 0x06, interfaceProtocol: 0x50, interfaceName: 'Mass Storage', endpoints: [
-        { endpointNumber: 2, direction: 'out', type: 'bulk', packetSize: 64 },
-        { endpointNumber: 2, direction: 'in', type: 'bulk', packetSize: 64 }
-      ] }] }
-    ]
-  }]
-};
 
 export default function UsbDescriptorExplorer() {
   const [info, setInfo] = useState(null);
-  const [isExample, setIsExample] = useState(false);
   const [granted, setGranted] = useState([]);
   const [error, setError] = useSessionError('USB Descriptors');
   const [copied, setCopied] = useState(false);
@@ -64,7 +40,6 @@ export default function UsbDescriptorExplorer() {
     setError('');
     try {
       setInfo(describeDevice(device));
-      setIsExample(false);
     } catch (err) {
       setError(err.message);
     }
@@ -91,21 +66,16 @@ export default function UsbDescriptorExplorer() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isExample && <DemoBanner>Example device: this is an illustrative descriptor set, not a device read from your machine.</DemoBanner>}
 
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Usb className="w-4 h-4 text-cyan-400" />
-              <span>USB DESCRIPTOR EXPLORER</span>
-            </h2>
             <p className="text-[11px] text-slate-400 max-w-3xl">
               A WebUSB "lsusb -v": pick any USB device and read its configurations, interfaces, endpoints and
               string descriptors, with class / subclass / protocol codes decoded. Read-only — it never sends data to the device.
             </p>
           </div>
-          <StatusBadge status={info && !isExample ? 'online' : 'offline'} label="USB" value={info && !isExample ? 'Inspected' : 'Idle'} />
+          <StatusBadge status={info ? 'online' : 'offline'} label="USB" value={info ? 'Inspected' : 'Idle'} />
         </div>
 
         {!webUsbAvailable && (
@@ -122,9 +92,6 @@ export default function UsbDescriptorExplorer() {
         <div className="pt-3 flex flex-wrap items-center gap-2">
           <button onClick={pickDevice} disabled={!webUsbAvailable} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 text-xs font-bold disabled:opacity-40">
             <Search className="w-3.5 h-3.5" /> INSPECT A USB DEVICE
-          </button>
-          <button onClick={() => { setInfo(describeDevice(EXAMPLE_DEVICE)); setIsExample(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
-            <Sparkles className="w-3.5 h-3.5" /> EXAMPLE
           </button>
         </div>
 
