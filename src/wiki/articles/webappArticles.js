@@ -342,4 +342,64 @@ The parser reads the pcap global header (both byte orders and the nanosecond mag
 pcapng (\`.pcapng\`) is detected and reported as unsupported — convert first with \`editcap -F pcap in.pcapng out.pcap\`.
 `,
   },
+  {
+    id: 'docker-backends',
+    toolId: 'web-analyzer',
+    category: 'webapp',
+    title: 'Docker Backends — local services for the web tools',
+    summary: 'Optional local Docker containers that give the browser security tools capabilities a browser lacks: cross-origin fetches, real nmap scans, live TLS handshakes and arbitrary DNS. Each tool has a Docker backend button that hands you a ready-to-run compose file.',
+    tags: ['Docker', 'docker-compose', 'Backend', 'CORS Proxy', 'nmap', 'OWASP ZAP', 'Hydra', 'TLS', 'DNS', 'Self-hosted'],
+    readTime: '5 min read',
+    content: `
+# Docker Backends
+
+The whole app runs in your browser, which is safe but limited: a page can't open raw sockets, do a TLS handshake, run \`nmap\`, or read most cross-origin responses (CORS). These **optional** local Docker services add exactly those abilities, each as its own small container, on your own machine. Nothing is sent anywhere — the containers run on \`localhost\`.
+
+> Only use these against systems you own or are explicitly authorized to assess.
+
+---
+
+### Getting the files from a tool
+There is no separate "Docker" page. Every tool that can use a backend has a **Docker backend** button in its **proxy bar** (the Port Scanner, Certificate Inspector, DNS Toolkit, Web Analyzer, HTTP Repeater, API Client, and so on). Click it to expand a small panel with two ways to get the files:
+
+- **compose.yml** (or **Copy**) — a single, self-contained \`docker-compose.yml\`. Each Node service's source is embedded directly in the file, so there is nothing else to download. Best when you just want it running.
+- **All files (.zip)** — the real project: a build-based \`docker-compose.yml\`, every \`Dockerfile\`, every \`server.cjs\`, and the README. Best if you want to read or modify the services.
+
+### Running it
+Save the file (or unzip the bundle), then from that folder:
+
+\`\`\`bash
+docker compose up -d                       # start the safe services
+docker compose --profile offensive up -d   # also start Hydra (authorized use only)
+docker compose down                        # stop everything
+\`\`\`
+
+### The services
+
+| Service | Port | Image | Used by | What it adds |
+|---|---|---|---|---|
+| \`cors-proxy\` | 47101 | node:20-alpine | Web Analyzer, HTTP Repeater, API Client, URL Inspector, OSINT, crt.sh, DB Browser | Forwards HTTP(S) and adds permissive CORS so the page can read any target; also reaches the other services by name |
+| \`nmap\` | 47102 | node:20-alpine + nmap | Port Scanner | Real \`nmap\` with service/version detection and non-HTTP ports |
+| \`tls-inspector\` | 47103 | node:20-alpine | Certificate Inspector | Live TLS handshake — the certificate the server serves *right now* |
+| \`dns\` | 47104 | node:20-alpine | DNS Toolkit | Any record type against any nameserver |
+| \`zap\` | 47105 | ghcr.io/zaproxy/zaproxy:stable | OWASP ZAP | ZAP daemon + REST API (reached through the CORS proxy) |
+| \`hydra\` | 47106 | node:20-alpine + hydra | HTTP Basic Auth Tester | Online credential testing. **Authorized testing only** — off by default |
+
+Ports use an uncommon \`471xx\` block so they don't clash with common dev servers (3000/5000/8000/8080/9000) or anything already running.
+
+### Wiring a tool to its service
+Inside the same Docker backend panel you can:
+
+- **Set the service URL** (defaults to \`http://localhost:<port>\`) and **Save** it.
+- **Check** — a health probe that confirms the container is reachable.
+- **Use as proxy for fetch tools** (CORS proxy only) — one click points every browser-fetch tool at the proxy.
+
+The **Port Scanner** and **Certificate Inspector** call their services directly once configured (real scan results; the live certificate vs. the crt.sh history), and fall back to the in-browser behavior when no backend is set. The DNS, ZAP and Hydra services are provisioned and health-checked; their tool-side calls are being wired in.
+
+### Safety
+- **Hydra** performs online credential attacks. It only starts under the \`offensive\` Compose profile **and** refuses every request unless you set \`I_HAVE_AUTHORIZATION=yes\` (the panel's authorization checkbox writes this into the compose).
+- \`cors-proxy\` accepts an optional \`ALLOW_HOSTS\` allowlist to restrict which targets it will forward to.
+- Every service binds to its published port on your host. Don't expose these to untrusted networks.
+`,
+  },
 ];
