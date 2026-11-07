@@ -74,7 +74,16 @@ export const SIDEBAR_SECTIONS = [
       { id: 'wardrive', name: 'GPS & Wardrive Suite', icon: Compass, accent: 'emerald', desc: 'Warhog CYD, Piglet, Panda PAU09, NMEA tracker & u-blox UBX', keywords: ['wardrive', 'gps', 'nmea', 'ubx', 'u-blox', 'wigle', 'mapper', 'kml', 'tracking'] },
       { id: 'warhog-piglet', name: 'Warhog CYD & Piglet Suite', icon: Sparkles, accent: 'amber', desc: 'Warhog CYD (ESP32-2432S028R) & Piglet ESP32-C5/S3 wardriver deck', keywords: ['warhog', 'piglet', 'cyd', 'cheap yellow display', 'esp32-2432s028r', 'esp32-c5', 'esp32-s3', 'sd card', 'wardriver.cfg', 'screen mirror'] },
       { id: 'wardrive-generator', name: 'Demo Wardrive Generator', icon: MapPin, accent: 'emerald', desc: 'Synthetic wardriving vector art for Kepler.gl & WiGLE (inspired by OSINTIAL)', keywords: ['demo generator', 'wardrive generator', 'kepler', 'kepler.gl', 'wigle', 'vector', 'svg', 'map art', 'osintial', 'synthetic'] },
-      { id: 'ble', name: 'Bluetooth LE Explorer', icon: Bluetooth, accent: 'cyan', desc: 'Web Bluetooth GATT client: services, notify, typed writes, Nordic DFU updates', keywords: ['ble', 'bluetooth', 'gatt', 'nordic', 'dfu', 'nrf', 'nrf52', 'services', 'characteristics', 'wireless'] }
+      { id: 'ble', name: 'Bluetooth LE Explorer', icon: Bluetooth, accent: 'cyan', desc: 'Web Bluetooth GATT client: services, notify, typed writes, Nordic DFU updates', keywords: ['ble', 'bluetooth', 'gatt', 'nordic', 'dfu', 'nrf', 'nrf52', 'services', 'characteristics', 'wireless'] },
+      // New hacker tools
+      { id: 'nmap-scanner', name: 'Nmap Scanner', icon: Radio, accent: 'cyan', desc: 'Browser‑side port and service scanner', keywords: ['nmap', 'port scanner', 'service discovery', 'network'] },
+      { id: 'hashcat-cracker', name: 'Hashcat Cracker', icon: Zap, accent: 'amber', desc: 'GPU‑accelerated password‑hash cracking', keywords: ['hashcat', 'crack', 'hash', 'gpu', 'password'] },
+      { id: 'burp-proxy', name: 'Burp Proxy', icon: ShieldCheck, accent: 'purple', desc: 'Mini HTTP/HTTPS intercepting proxy', keywords: ['burp', 'proxy', 'mitm', 'http', 'https'] },
+      { id: 'aircrack-wifi', name: 'Aircrack Wi‑Fi', icon: Wifi, accent: 'cyan', desc: 'WPA/WPA2 handshake parser & cracker', keywords: ['aircrack', 'wifi', 'wpa', 'handshake', 'crack'] },
+      { id: 'nikto-scan', name: 'Nikto Scanner', icon: Sparkles, accent: 'rose', desc: 'Web‑server vulnerability scanner', keywords: ['nikto', 'vulnerability', 'scanner', 'web'] },
+      { id: 'hydra-bruteforce', name: 'Hydra Bruteforce', icon: Cpu, accent: 'emerald', desc: 'Parallel login brute‑forcer for services', keywords: ['hydra', 'bruteforce', 'login', 'ssh', 'ftp', 'http'] },
+      { id: 'tcpdump-viewer', name: 'Tcpdump Viewer', icon: ShieldAlert, accent: 'rose', desc: 'Interactive PCAP viewer and filter', keywords: ['tcpdump', 'pcap', 'viewer', 'packet'] },
+      { id: 'dns-enumerator', name: 'DNS Enumerator', icon: MapPin, accent: 'indigo', desc: 'DNS zone‑transfer tester and sub‑domain enumerator', keywords: ['dns', 'enumerate', 'zone transfer', 'subdomain'] }
     ]
   },
   {

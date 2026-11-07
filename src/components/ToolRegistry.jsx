@@ -20,6 +20,16 @@ import TelemetryDashboard from './TelemetryDashboard';
 
 // Lazy-loaded workbenches keep the initial load light.
 const CanBusWorkbench = React.lazy(() => import('./tools/CanBusWorkbench'));
+// New hacker tools lazy imports
+const NmapScannerWorkbench = React.lazy(() => import('./tools/NmapScannerWorkbench'));
+const HashcatCrackerWorkbench = React.lazy(() => import('./tools/HashcatCrackerWorkbench'));
+const BurpProxyWorkbench = React.lazy(() => import('./tools/BurpProxyWorkbench'));
+const AircrackWifiWorkbench = React.lazy(() => import('./tools/AircrackWifiWorkbench'));
+const NiktoScannerWorkbench = React.lazy(() => import('./tools/NiktoScannerWorkbench'));
+const HydraBruteforceWorkbench = React.lazy(() => import('./tools/HydraBruteforceWorkbench'));
+const TcpdumpViewerWorkbench = React.lazy(() => import('./tools/TcpdumpViewerWorkbench'));
+const DnsEnumeratorWorkbench = React.lazy(() => import('./tools/DnsEnumeratorWorkbench'));
+
 const LogicAnalyzerWorkbench = React.lazy(() => import('./tools/LogicAnalyzerWorkbench'));
 const UsbPdWorkbench = React.lazy(() => import('./tools/UsbPdWorkbench'));
 const BusExplorerWorkbench = React.lazy(() => import('./tools/BusExplorerWorkbench'));
@@ -77,6 +87,17 @@ export function toolMeta(toolId) {
 
 /** Every id renderTool knows, including workbench-tab aliases. */
 export const KNOWN_TOOL_IDS = [
+  'flasher', 'terminal', 'hardware', 'setup', 'plotter', 'packet-analyzer', 'hex', 'packets', 'kismet', 'bridge',
+  'micropython', 'improv', 'telemetry', 'wardrive', 'ubx', 'alerts', 'automation', 'autopsy', 'esp-dump',
+  'programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp', 'can-bus', 'logic-analyzer', 'usb-pd', 'dfu',
+  'fastboot', 'adb', 'usb-descriptors', 'hid', 'usbtmc', 'mass-storage', 'ptp', 'fido2', 'session-log', 'ble',
+  'bus-explorer', 'modbus-rtu', 'alfa-wifi', 'wifi-scanner', 'warhog-piglet', 'mayhem', 'flipper', 'proxmark', 'rfid-nfc',
+  'ducky', 'cyberchef', 'wardrive-generator',
+  // New hacker tools
+  'nmap-scanner', 'hashcat-cracker', 'burp-proxy', 'aircrack-wifi',
+  'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-enumerator',
+  'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
+];
   'flasher', 'terminal', 'hardware', 'setup', 'plotter', 'packet-analyzer', 'hex', 'packets', 'kismet', 'bridge',
   'micropython', 'improv', 'telemetry', 'wardrive', 'ubx', 'alerts', 'automation', 'autopsy', 'esp-dump',
   'programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp', 'can-bus', 'logic-analyzer', 'usb-pd', 'dfu',
@@ -157,6 +178,16 @@ export function renderTool(toolId, serial) {
     case 'ducky': return <DuckyScriptStudio onLogMessage={addLog} />;
     case 'cyberchef': return <CyberChefWorkbench onLogMessage={addLog} />;
     case 'wardrive-generator': return <WardriveGeneratorWorkbench onLogMessage={addLog} />;
+    // New hacker tools
+    case 'nmap-scanner': return <NmapScannerWorkbench onLogMessage={addLog} />;
+    case 'hashcat-cracker': return <HashcatCrackerWorkbench onLogMessage={addLog} />;
+    case 'burp-proxy': return <BurpProxyWorkbench onLogMessage={addLog} />;
+    case 'aircrack-wifi': return <AircrackWifiWorkbench onLogMessage={addLog} />;
+    case 'nikto-scanner': return <NiktoScannerWorkbench onLogMessage={addLog} />;
+    case 'hydra-bruteforce': return <HydraBruteforceWorkbench onLogMessage={addLog} />;
+    case 'tcpdump-viewer': return <TcpdumpViewerWorkbench onLogMessage={addLog} />;
+    case 'dns-enumerator': return <DnsEnumeratorWorkbench onLogMessage={addLog} />;
+
     default:
       return (
         <div className="py-16 text-center font-mono text-xs text-slate-500">
