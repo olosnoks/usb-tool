@@ -1010,149 +1010,173 @@ ESP32 Marauder is **external firmware** controlled over its serial CLI — there
     id: 'wardrive-generator',
     toolId: 'wardrive-generator',
     category: 'rf',
-    title: 'Wardrive Vector Art Generator — Synthetic APs, SVG Tracing, WiGLE & Kepler Exporter',
-    summary: 'Comprehensive guide to generating geometric words and custom SVG vector art from synthetic Wi-Fi Access Points for wardriving visualization, Kepler.gl heatmaps, and WiGLE CSV benchmarks with authentic ISP router profiles (Xfinity, AT&T, Spectrum), 10k/km density, 666 mph drive simulation, and multi-part file splitting.',
-    tags: ['Wardrive', 'WiGLE', 'Kepler.gl', 'Synthetic APs', 'SVG Art', 'GPS', 'Xfinity', 'AT&T', 'Spectrum', 'OSINTI4L'],
+    title: 'Demo Wardrive Generator — Text, Road Routes & SVG Art from Synthetic APs (WiGLE 1.6 & Kepler CSV)',
+    summary: 'Generate synthetic Wi-Fi AP datasets that trace words, real road routes (snapped to OpenStreetMap roads via OSRM) or SVG vector art. Covers the three art modes, ISP router/SSID profiles, density and speed timing, start clock, reproducible seeds, WiGLE 1.6 and Kepler CSV export, multi-part ZIP splitting and the standalone Python exporter.',
+    tags: ['Wardrive', 'Demo Generator', 'Synthetic APs', 'Road Route', 'OSRM', 'OpenStreetMap', 'SVG Art', 'Kepler.gl', 'WiGLE CSV', 'Xfinity', 'AT&T', 'Spectrum', 'OSINTI4L'],
     readTime: '15 min read',
     content: `
-# Wardrive Vector Art Generator — Synthetic APs, SVG Tracing & Geospatial Art Manual
+# Demo Wardrive Generator — Synthetic APs for Map Art, Routes & Pipeline Testing
 
-The **Wardrive Vector Art Generator** turns arbitrary words, phrases, and custom SVG vector graphics into synthetic Wi-Fi Access Point (AP) datasets ready for upload into **WiGLE.net**, **Kepler.gl**, or local GIS visualization pipelines. Inspired by **OSINTI4L**'s creative wardriving demonstrations, this workbench provides end-to-end vector path tracing, authentic ISP router profile generation (Xfinity, AT&T, Spectrum), vehicle timeline simulation up to 666 mph, and automated multi-part file splitting.
+The **Demo Wardrive Generator** builds **synthetic** Wi-Fi access point (AP) datasets laid out along a path you choose: a word, a real road route, or an SVG drawing. Every AP gets an ISP-style SSID, a vendor-OUI MAC, a channel, an RSSI and a GPS fix with a timestamp, then exports as a **WigleWifi-1.6** CSV or a lightweight **Kepler.gl** CSV. The concept of drawing on wardrive maps with AP trails comes from **OSINTI4L**.
 
----
+Open it from the sidebar (**Demo Wardrive Generator**) or from the **GPS & Wardrive Suite** → **Demo Vector Generator** tab.
 
-### 1. What Is This Tool & Why Do You Need It?
-
-Wardriving maps (like WiGLE.net and Kepler.gl) plot hundreds of thousands of geolocated Wi-Fi networks as heatmaps and points across cities, highways, and rural corridors.
-
-Testing geospatial visualization pipelines, benchmarking high-density mapping software, or creating demonstrative wardriving art requires controlled, predictable datasets. The **Wardrive Vector Art Generator** enables you to:
-- **Draw on the Map**: Render letters, phrases, logos, or geometric icons directly on real-world coordinates using synthetic APs.
-- **Benchmark GIS & Map Rendering**: Stress-test mapping applications with ultra-dense clusters (up to 10,000 APs/km, yielding 1,000,000+ points).
-- **Simulate Authentic Wardriving Expeditions**: Generate realistic drive tracks with consistent speed timelines, RSSI signal falloff, frequency channel distributions, and genuine manufacturer hardware MAC addresses.
-- **Produce Valid Upload Files**: Output standard **WiGLE Wifi 1.4** CSVs with verified preheaders or lightweight **Kepler.gl** CSVs, with optional automatic chunking into multi-part ZIP archives.
+> Everything this tool outputs is fabricated. It is the one deliberately synthetic tool in the app. Use it for map art in Kepler.gl, demos, and for testing parsers, importers and GIS pipelines that read WiGLE-format CSVs. Do **not** upload it to WiGLE.net or any other shared wardriving database: it would pollute real survey data that other people rely on.
 
 ---
 
-### 2. Dual Generation Modes: Text / Word vs. Custom SVG
+### 1. Quick Start
 
-The workbench supports two complementary vector rendering pipelines:
+1. Pick a mode in the control card: **Text / Phrase**, **Road Route (Click Map)** or **SVG Vector Art**.
+2. Place it: click the map (or drag the green crosshair) to set the origin, or use the **Locations** presets / **Current GPS**. In Road Route mode, clicking the map adds waypoints instead.
+3. Choose a **Router / SSID List**, then set **AP Density**, **Drive Speed** and **Start Clock**.
+4. Click **Start Wardrive**. The path and sampled AP markers draw on the map. (A default \`KEPLER\` demo generates automatically when the tool opens.)
+5. Export with **WiGLE CSV** or **Kepler CSV**, or grab the generator from the **Python Script** tab.
 
-#### Mode A: Text / Phrase Mapping
-- Converts alphanumeric strings (\`A-Z\`, \`0-9\`, space) into ordered geometric vector strokes using a clean normalized vector font table.
-- Configurable letter dimensions (\`Letter Width\`, \`Letter Height\`) and inter-character spacing (\`Gap\`).
-- Scales from neighborhood-level typography to massive statewide spans (up to 200x scale factor).
-
-#### Mode B: Custom SVG Vector Art
-- Directly imports local \`.svg\` vector files or parses raw SVG XML pasted from your clipboard.
-- Automatically normalizes vector paths, polylines, polygons, lines, and circles into continuous 2D strokes.
-- **Transformation Controls**:
-  - **Rotation**: Rotate the vector artwork from 0° to 360° around its geographic center.
-  - **SVG Scale**: Dedicated multiplier (0.1x to 50x) to resize the graphic independently of font settings.
-  - **Flip / Mirror**: Horizontal and vertical reflection toggles with centered pivot points.
+The view switcher at the top has four tabs: **Interactive Map**, **AP Table**, **Python Script** and **Kepler Guide**.
 
 ---
 
-### 3. Authentic ISP Router Profiles & SSID Lists
+### 2. The Three Modes
 
-Rather than generic sequential numbers, the generator includes authentic North American residential and commercial ISP router profiles with matching manufacturer MAC address OUIs, security modes, and channels:
+#### Text / Phrase
+- Draws \`A–Z\`, \`0–9\` and spaces with a built-in single-stroke vector font. Other characters render as blanks.
+- Letters are laid out left to right from the origin. Size comes from **Size & Scale** (a multiplier with presets from \`0.5x (~3 km)\` to \`100x (~660 km)\`, manual entry up to 200x) and, under the advanced settings, **Base Width (°)**, **Base Height (°)** and **Letter Gap (°)**.
+- **Text Rotation** (0–360°, with −90° / +90° / 180° quick buttons) and **Flip / Mirror Text** (Horiz / Vert) transform the whole phrase around its centre.
+- The live **Span** readout shows the physical width × height in km and miles.
 
-| Profile | Key SSID Patterns | Security Modes | Manufacturer OUI Vendors |
+#### Road Route (Click Map)
+- Click the map to drop waypoints; drag a marker to move it, or delete one from the waypoint list. **Undo**, **Reverse** and **Clear Route** edit the list.
+- **Snap to Actual Roads (OSRM)** (on by default) sends the waypoints to the public OpenStreetMap OSRM router (\`router.project-osrm.org\`, driving profile) and follows the returned road geometry. Turn it off to join waypoints with straight lines.
+- If OSRM fails or takes longer than 8 seconds, the route falls back to straight lines between the waypoints and the status line says so.
+- **Road Presets**: Las Vegas Strip (the default route), San Francisco Waterfront, Austin Congress Ave and Miami Ocean Drive.
+- Needs at least two waypoints. Size, rotation and flip settings do not apply; the route is used exactly as drawn. With snapping on, the route's waypoint coordinates are sent to the OSRM server.
+
+#### SVG Vector Art
+- **Upload .SVG File** or **Paste SVG XML**.
+- Supported elements: \`<path>\` (all commands: M, L, H, V, C, S, Q, T, A, Z; curves and arcs are sampled into line segments), \`<polyline>\`, \`<polygon>\`, \`<line>\`, \`<rect>\` and \`<circle>\`. Element \`transform\` attributes are ignored, so flatten transforms in your editor first for accurate shapes.
+- The drawing is normalised to its bounding box with the aspect ratio kept.
+- Controls: **Rotation** (0–360°, −90° / +90° / 180°), **SVG Scale** (slider 0.1–10x, manual entry up to 50x, presets 0.5 / 1 / 2 / 5x; applied on top of the main size multiplier) and **Flip / Mirror** (Horiz / Vert).
+- Separate strokes are joined by a connecting segment, as the "car" drives between them, so those connectors also get APs.
+
+---
+
+### 3. Router / SSID Lists
+
+Each AP's SSID, MAC vendor prefix (OUI), security mode and channel come from the selected profile:
+
+| Option | SSIDs generated | Security | MAC vendor OUIs |
 | :--- | :--- | :--- | :--- |
-| **Realistic Mix** | Balanced suburban distribution: ~42% Xfinity, ~36% AT&T, ~12% Spectrum, ~10% common routers. | Mixed WPA2, WPA3, Enterprise, Open. | Arris, Pace, Humax, Technicolor, Cisco, Nokia, Netgear. |
-| **Xfinity / Comcast** | \`xfinitywifi\` (open), \`XFINITY\` (enterprise), \`Xfinity-XXXX\`, \`HOME-XXXX\`, \`xfinitywifi-5G\`. | \`[ESS]\`, \`[WPA2-EAP-CCMP][ESS]\`, \`[WPA2-PSK-CCMP][ESS]\`. | Arris (\`A4:12:42\`, \`74:9D:79\`), Technicolor (\`00:CD:FE\`), Cisco (\`58:56:E8\`), CommScope (\`E8:89:2C\`), Humax (\`B0:77:AC\`). |
-| **AT&T** | \`ATTXXX\`, \`ATT-WIFI-XXXX\`, \`attwifi\` (open), \`ATT<HEX>\`, \`ATT-Fiber-XXXX\`, \`ATTXXX_5G\`. | \`[ESS]\`, \`[WPA2-PSK-CCMP][ESS]\`, \`[WPA2-PSK+WPA3-SAE][ESS]\`. | Pace (\`94:87:70\`, \`28:16:2E\`), Arris BGW210 (\`F8:E9:03\`), Humax BGW320 (\`3C:CE:73\`), Nokia (\`CC:7B:35\`, \`F0:F2:49\`). |
-| **Spectrum / Charter** | \`SpectrumSetup-XX\`, \`MySpectrumWiFiXX-5G\`, \`SpectrumWiFi\`, \`SpectrumWiFi Plus\`. | \`[ESS]\`, \`[WPA2-PSK-CCMP][ESS]\`, \`[WPA2-EAP-CCMP][ESS]\`. | Sagemcom (\`68:02:B8\`), Askey (\`AC:EC:80\`), Sercomm (\`E0:22:04\`), Charter (\`18:35:D1\`), Hitron (\`38:35:FB\`). |
-| **Custom Prefix** | \`\${PREFIX}-000001\`, \`\${PREFIX}-000002\`... | Configurable generic auth. | Standard unicast random MAC addresses. |
+| **Realistic Mix** (default) | ~42% Xfinity, ~36% AT&T, ~12% Spectrum, ~10% retail routers (\`NETGEARxx\`, \`Linksysxxxxx\`, \`TP-Link_xxxx\`, \`ASUS_xx\`, \`CenturyLinkxxxx\`). | Per sub-profile. | Per sub-profile; retail: Netgear, Belkin/Linksys, TP-Link, ASUSTek. |
+| **Xfinity / Comcast** | \`xfinitywifi\` (open), \`XFINITY\` (802.1X), \`Xfinity-XXXX\`, \`HOME-XXXX\`, \`xfinitywifi-5G\`. | \`[ESS]\`, \`[WPA2-EAP-CCMP][ESS]\`, WPA2-PSK, WPA2/WPA3 mixed. | Arris, Technicolor, Cisco, CommScope, Humax. |
+| **AT&T** | \`ATTxxx\`, \`ATT-WIFI-xxxx\`, \`ATT<hex>\`, \`attwifi\` (open), \`ATTxxx_5G\`, \`ATT-Fiber-XXXX\`. | \`[ESS]\`, WPA2-PSK, WPA2/WPA3 mixed. | Pace/2Wire, Arris (BGW210), Humax (BGW320), Nokia, Cisco, Motorola. |
+| **Spectrum / Charter** | \`SpectrumSetup-XX\`, \`MySpectrumWiFiXX-5G\` / \`-2G\`, \`SpectrumWiFi\`, \`SpectrumWiFi Plus\`. | \`[ESS]\`, WPA2-PSK, \`[WPA2-EAP-CCMP][ESS]\`. | Sagemcom, Askey, Sercomm, Charter, Hitron. |
+| **Prefix / Word Only** | \`<TEXT>-000001\`, \`<TEXT>-000002\`… using your phrase (\`ROUTE\` or \`SVG_ART\` when there's no text). | Random from WPA2, WPA3-SAE, WPA2/WPA3, Open. | Random unicast, globally-administered MACs. |
+
+Channels are drawn from 2.4 GHz \`1/6/11\` and 5 GHz \`36–48\` / \`149–161\`; 5G-named SSIDs stay on 5 GHz. Frequency (MHz) is derived from the channel. MACs are unique within a run.
 
 ---
 
-### 4. Density, Speed & Timeline Simulation
+### 4. Density, Speed & Timing
 
-#### AP Density Control (per km or per mile)
-- Select whether density is calculated per kilometer (\`/km\`) or per mile (\`/mi\`).
-- Slider spans from **5 APs/km** up to **10,000 APs/km**, with manual input up to **100,000**.
-- Preset buttons: \`50\`, \`200\`, \`1,000\`, \`5,000\`, and \`10k (~1M APs)\`.
-- High-density sampling protection ensures the interactive Leaflet preview maintains 60 FPS by rendering a clean preview while exporting 100% of the synthesized points to CSV.
+#### AP Density
+- Choose **/km** or **/mi**. Slider 5–10,000; manual entry 1–100,000.
+- Presets: \`50\`, \`200\`, \`1,000\`, \`5,000\`, \`10k (~1M)\`.
+- APs are spaced evenly by distance along the whole path (spacing in metres = 1000 ÷ APs per km). The stats bar shows the total **Synthesized APs**, **Stroke Distance** and **Footprint**.
 
-#### Vehicle Drive Speed & Start Clock
-- **Simulated Speed**: Configure virtual driving speed from **5 km/h** (walking, 3 mph) up to **1,072 km/h** (**666 mph / Hyper**).
-- **Timeline Calculation**: The algorithm tracks elapsed drive time along every vector stroke segment:
-  $$\text{duration} = \frac{\text{totalPathLengthKm}}{\text{speedKmh}} \times 3600\text{ seconds}$$
-  Every AP receives an authentic \`FirstSeen\` timestamp formatted to \`YYYY-MM-DD HH:MM:SS\`.
-- **Start Clock Presets**: Quick-action buttons to anchor the drive start time to **Now**, **-1 Hour**, **Yesterday (-24h)**, or **-7 Days**.
+#### Drive Speed
+- Slider 5–1,072 km/h. Presets: **Walk (3 mph)**, **City (30 mph)**, **Hwy (65 mph)**, **Jet (250 mph)**, **666 mph (Hyper)**.
+- Total drive time is \`path length (km) ÷ speed (km/h) × 3600\` seconds, split evenly across the APs, so every row has a \`FirstSeen\` timestamp (\`YYYY-MM-DD HH:MM:SS\`, local time) moving forward along the path. In Road Route mode the timing uses your speed setting, not OSRM's travel-time estimate.
 
----
+#### Start Clock
+- A date-time picker sets when the drive starts. Default: 24 hours before the tool opened.
+- Quick buttons: **Now**, **-1h**, **-24h**, **-7d**.
 
-### 5. Multi-Part File Splitting & ZIP Packaging
-
-Large wardriving runs and high-density vector art often generate CSVs exceeding 10 MB, 25 MB, or 50 MB, which can trigger upload limits or cause browser memory exhaustion in Kepler.gl:
-
-- **Split Limit Selector**:
-  - **No Limit**: Exports a single unified CSV file.
-  - **1 MB limit** (~8,000 APs)
-  - **2 MB limit** (~16,000 APs)
-  - **5 MB limit** (~40,000 APs)
-  - **10 MB limit** (Standard WiGLE web upload ceiling)
-  - **25 MB limit** (Email and Discord attachment cap)
-  - **50 MB limit** (Kepler.gl browser heap safeguard)
-  - **100 MB limit**
-- **Independent Standalone Validity**: When split into parts, **every single chunk** includes the full \`WigleWifi-1.4\` preheader and standard column header row. This guarantees that each split file (\`filename_wigle_part01_of_04.csv\`) can be uploaded and processed independently without header errors.
-- **Automated ZIP Download**: When a file size limit is active and the dataset requires multiple chunks, clicking **WiGLE CSV** or **Kepler CSV** automatically packages the files into a single compressed \`.zip\` archive for instant download.
+#### Fixed values
+- RSSI is random between −90 and −45 dBm; altitude is 15 m; accuracy is 3–8 m; each fix gets a tiny coordinate jitter.
 
 ---
 
-### 6. Step-by-Step Walkthrough: Visualizing in Kepler.gl
+### 5. Advanced Settings & Reproducibility
 
-1. **Configure Your Art**:
-   - In the workbench, set your origin coordinates (or click **Use My Location** / choose a preset city).
-   - Enter your phrase (e.g., \`DEFCON\`) or upload an SVG graphic.
-   - Choose your **Router / SSID List** profile (e.g., *Realistic Mix* or *Xfinity Defaults*).
-   - Adjust density (e.g., \`200 /km\`) and speed (\`65 mph\`).
-2. **Generate**:
-   - Click **Start Wardrive**. The preview renders on the interactive dark-matter map.
-3. **Export**:
-   - Click **Kepler CSV** (or **WiGLE CSV** if uploading to WiGLE).
-4. **Load into Kepler.gl**:
-   - Open [kepler.gl/demo](https://kepler.gl/demo) in a new tab.
-   - Drag and drop your downloaded \`.csv\` file into Kepler.
-5. **Style the Visualization**:
-   - In Kepler's left panel, add a **Point** layer with \`lat\` and \`lon\`.
-   - Set **Color By** to \`rssi\` with a green-to-red gradient to visualize signal strength.
-   - Optional: Switch layer type to **Grid** or **Hexbin** and toggle **3D Mode** to view a volumetric Wi-Fi density sculpture!
+The sliders button opens **Base Font Geometry & PRNG**:
+
+- **Base Width / Base Height / Letter Gap (°)**: base letter geometry in degrees before the size multiplier (defaults 0.04 / 0.06 / 0.02). SVG art also uses width and height as its base span.
+- **Random Seed** with **Fixed Seed** (on by default): the same settings and seed give the same dataset every time. Turn it off for a fresh random seed per run.
+- **WiGLE Header**: include or drop the \`WigleWifi-1.6\` pre-header line in WiGLE exports.
 
 ---
 
-### 7. Standalone Python Exporter
+### 6. Map, Table & Preview Limits
 
-Need to generate or automate vector art datasets on a headless server or offline machine?
-
-1. Click the **Python Script** tab in the workbench.
-2. The tab displays a self-contained, dependency-free Python script pre-filled with your exact coordinates, letter dimensions, SVG stroke definitions, density settings, speed, and ISP SSID profiles.
-3. Click **Download .py** to save \`filename_generator.py\`.
-4. Run anywhere with standard Python 3:
-   \`\`\`bash
-   python3 demo_generator.py
-   \`\`\`
-   The script outputs both \`*_wigle.csv\` and \`*_test.csv\` in seconds.
+- **Interactive Map**: the full path draws as a dashed line. Up to ~1,500 AP markers are sampled evenly for display so the map stays responsive; exports always contain every AP. Markers are coloured by RSSI (green above −75, amber −75 to −85, red below −85 dBm). Click one for SSID, BSSID, channel/frequency, auth and time.
+- **Tiles**: Tactical Dark (Esri, default), OpenStreetMap, World Imagery.
+- **AP Table**: shows the first 500 rows, or the first 500 matches for an SSID / MAC / auth search. **Copy WiGLE CSV** and **Copy Kepler CSV** copy the full dataset to the clipboard.
 
 ---
 
-### 8. Upstream Project & Engineering Attribution
+### 7. Export Formats & Splitting
 
-| Component / Organization | Reference & Link | Role / Attribution |
+| Button | Columns | File name |
 | :--- | :--- | :--- |
-| **OSINTI4L** | OSINTI4L from Discord | Inspiration for wardriving vector art and creative GIS mapping demonstrations. |
-| **WiGLE.net** | [wigle.net](https://wigle.net) | Wireless Geographic Logging Engine and specification for the \`WigleWifi-1.4\` CSV format. |
-| **Kepler.gl** | [kepler.gl](https://kepler.gl) (Urban Computing Foundation / Uber Open Source) | Open-source geospatial visualization engine. |
-| **Leaflet** | [leafletjs.com](https://leafletjs.com) | Client-side interactive mapping library used for the in-app preview canvas. |
+| **WiGLE CSV** | Optional \`WigleWifi-1.6\` pre-header, then \`MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type\` (\`Type\` = \`WIFI\`). | \`<text>_wigle.csv\` |
+| **Kepler CSV** | \`mac,ssid,auth,first_seen,channel,rssi,lat,lon\` | \`<text>_kepler.csv\` |
+
+The file name comes from your phrase, lower-cased with non-alphanumerics replaced by \`_\` (\`demo\` if empty).
+
+#### Split limit
+- **Split** sets a per-file size cap: No Limit, 1, 2, 5, 10, 25, 50 or 100 MB.
+- When the data needs more than one file, each part carries the full header (and pre-header for WiGLE), so every part opens on its own. Parts are named \`<text>_wigle_part01_of_04.csv\` and downloaded together as \`<text>_wigle_<N>_parts.zip\` (Kepler likewise). The export button shows an estimated part count.
+
+---
+
+### 8. Kepler.gl Walkthrough
+
+1. Generate your dataset and click **Kepler CSV**.
+2. Open [kepler.gl/demo](https://kepler.gl/demo) (or use **Open Kepler.gl** in the tool) and drop in the CSV.
+3. Add a **Point** layer using \`lat\` / \`lon\`.
+4. Set **Color By** to \`rssi\` for signal strength, or switch to **Grid** / **Hexbin** with 3D on for a density sculpture.
+5. To animate the drive, add a time filter on \`first_seen\` and press play.
+
+The **Kepler Guide** tab in the tool has the same steps.
+
+---
+
+### 9. Standalone Python Exporter
+
+The **Python Script** tab generates a dependency-free Python 3 script pre-filled with your current settings: mode, phrase or SVG strokes, road route coordinates (already snapped, so the script needs no network access), position, geometry, density, speed, start time, SSID profile and pre-header choice.
+
+- **Copy Python Code** or **Download .py** (saved as \`<text>_generator.py\`).
+- Run it anywhere:
+
+\`\`\`bash
+python3 kepler_generator.py
+\`\`\`
+
+- It writes \`<text>_wigle.csv\` and \`<text>_test.csv\` (Kepler columns) to the current folder. It does not split files.
+- The script always uses Python's \`random\` with seed 42, so its output matches its own previous runs but not the browser's rows exactly. Path, density and timing are the same.
+
+---
+
+### 10. Attribution
+
+| Component | Reference | Role |
+| :--- | :--- | :--- |
+| **OSINTI4L** | OSINTI4L (Discord) | Inspiration for wardrive vector art. |
+| **WiGLE.net** | [wigle.net](https://wigle.net) | Defines the \`WigleWifi\` CSV format used for export. |
+| **Kepler.gl** | [kepler.gl](https://kepler.gl) | Open-source geospatial visualisation. |
+| **OSRM / OpenStreetMap** | [project-osrm.org](https://project-osrm.org) · [openstreetmap.org](https://www.openstreetmap.org) | Road snapping for Road Route mode (public demo server, © OpenStreetMap contributors). |
+| **Leaflet** | [leafletjs.com](https://leafletjs.com) | In-app map preview. |
+| **JSZip** | [stuk.github.io/jszip](https://stuk.github.io/jszip/) | Multi-part ZIP packaging. |
 
 ---
 
 ### Implementation & Architecture
 
-- **Workbench:** [\`src/components/tools/WardriveGeneratorWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/WardriveGeneratorWorkbench.jsx) hosts the interactive controls, Leaflet map canvas, AP data table, and multi-part exporter.
-- **Generator Core:** [\`src/utils/wardriveDemoGenerator.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/wardriveDemoGenerator.js) implements continuous stroke interpolation, polyline walking, authentic ISP router profile generation, and \`splitApsIntoFileChunks\`.
-- **SVG Engine:** [\`src/utils/svgPathParser.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/svgPathParser.js) parses raw SVG XML elements (\`<path>\`, \`<line>\`, \`<polyline>\`, \`<polygon>\`, \`<circle>\`) into normalized 2D coordinate paths.
+- **Workbench:** [\`src/components/tools/WardriveGeneratorWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/WardriveGeneratorWorkbench.jsx): controls, Leaflet map, route plotter, AP table, Python tab and exports. Also embedded in \`GpsNavigationSuite.jsx\` as the **Demo Vector Generator** tab.
+- **Generator core:** [\`src/utils/wardriveDemoGenerator.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/wardriveDemoGenerator.js): \`generateDemoAps\` (modes \`text\` / \`svg\` / \`route\`, metric polyline walker, timing), \`generateApIdentity\` (SSID profiles), \`fetchOsrmRoadRoute\`, \`generateWigleCsv\`, \`generateTestCsv\`, \`splitApsIntoFileChunks\` and \`exportPythonScriptSource\`.
+- **SVG engine:** [\`src/utils/svgPathParser.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/svgPathParser.js): \`extractAllSvgStrokes\` and \`parseSvgToNormalizedStrokes\` (DOMParser with a regex fallback).
+- **Tests:** \`tests/wardriveDemoGenerator.test.js\`.
 `
   },
   {
