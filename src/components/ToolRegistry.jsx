@@ -25,7 +25,7 @@ const AircrackWifiWorkbench = React.lazy(() => import('./tools/AircrackWifiWorkb
 const NiktoScannerWorkbench = React.lazy(() => import('./tools/NiktoScannerWorkbench'));
 const HydraBruteforceWorkbench = React.lazy(() => import('./tools/HydraBruteforceWorkbench'));
 const TcpdumpViewerWorkbench = React.lazy(() => import('./tools/TcpdumpViewerWorkbench'));
-const DnsEnumeratorWorkbench = React.lazy(() => import('./tools/DnsEnumeratorWorkbench'));
+const DnsToolkitWorkbench = React.lazy(() => import('./tools/DnsToolkitWorkbench'));
 const OwaspZapWorkbench = React.lazy(() => import('./tools/OwaspZapWorkbench'));
 const ApiClientWorkbench = React.lazy(() => import('./tools/ApiClientWorkbench'));
 const PwnedPasswordsCheckerWorkbench = React.lazy(() => import('./tools/PwnedPasswordsCheckerWorkbench'));
@@ -33,7 +33,6 @@ const CertInspectWorkbench = React.lazy(() => import('./tools/CertInspectWorkben
 const DbBrowserWorkbench = React.lazy(() => import('./tools/DbBrowserWorkbench'));
 const RegexTesterWorkbench = React.lazy(() => import('./tools/RegexTesterWorkbench'));
 const JwtInspectorWorkbench = React.lazy(() => import('./tools/JwtInspectorWorkbench'));
-const DnsMailDoctorWorkbench = React.lazy(() => import('./tools/DnsMailDoctorWorkbench'));
 const IpCalculatorWorkbench = React.lazy(() => import('./tools/IpCalculatorWorkbench'));
 const HashCalculatorWorkbench = React.lazy(() => import('./tools/HashCalculatorWorkbench'));
 const CrtShFinderWorkbench = React.lazy(() => import('./tools/CrtShFinderWorkbench'));
@@ -105,9 +104,9 @@ export const KNOWN_TOOL_IDS = [
   'ducky', 'cyberchef', 'wardrive-generator',
   // New hacker tools
   'nmap-scanner', 'hashcat-cracker', 'burp-proxy', 'aircrack-wifi',
-  'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-enumerator',
+  'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-toolkit', 'dns-enumerator', 'dns-mail-doctor',
   'owasp-zap', 'pwned-passwords', 'cert-inspect', 'api-client',
-  'db-browser', 'regex-tester', 'jwt-inspector', 'dns-mail-doctor',
+  'db-browser', 'regex-tester', 'jwt-inspector',
   'ip-calculator', 'hash-calculator', 'crtsh-finder', 'osint-clients', 'url-inspector',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
@@ -207,7 +206,8 @@ export function renderTool(toolId, serial) {
     case 'nikto-scanner': return <NiktoScannerWorkbench onLogMessage={addLog} />;
     case 'hydra-bruteforce': return <HydraBruteforceWorkbench onLogMessage={addLog} />;
     case 'tcpdump-viewer': return <TcpdumpViewerWorkbench onLogMessage={addLog} />;
-    case 'dns-enumerator': return <DnsEnumeratorWorkbench onLogMessage={addLog} />;
+    case 'dns-toolkit': return <DnsToolkitWorkbench onLogMessage={addLog} />;
+    case 'dns-enumerator': return <DnsToolkitWorkbench onLogMessage={addLog} initialTab="records" />;
     case 'owasp-zap': return <OwaspZapWorkbench onLogMessage={addLog} />;
     case 'api-client': return <ApiClientWorkbench onLogMessage={addLog} />;
     case 'pwned-passwords': return <PwnedPasswordsCheckerWorkbench onLogMessage={addLog} />;
@@ -215,7 +215,7 @@ export function renderTool(toolId, serial) {
     case 'db-browser': return <DbBrowserWorkbench onLogMessage={addLog} />;
     case 'regex-tester': return <RegexTesterWorkbench />;
     case 'jwt-inspector': return <JwtInspectorWorkbench onLogMessage={addLog} />;
-    case 'dns-mail-doctor': return <DnsMailDoctorWorkbench onLogMessage={addLog} />;
+    case 'dns-mail-doctor': return <DnsToolkitWorkbench onLogMessage={addLog} initialTab="email" />;
     case 'ip-calculator': return <IpCalculatorWorkbench />;
     case 'hash-calculator': return <HashCalculatorWorkbench onLogMessage={addLog} />;
     case 'crtsh-finder': return <CrtShFinderWorkbench onLogMessage={addLog} />;

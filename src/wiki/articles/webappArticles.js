@@ -195,9 +195,9 @@ For real scanning past these limits, build \`public/wasm/portscanner.wasm\` (the
   },
   {
     id: 'dns-enumerator',
-    toolId: 'dns-enumerator',
+    toolId: 'dns-toolkit',
     category: 'webapp',
-    title: 'DNS Enumerator — DoH records & subdomain brute-force',
+    title: 'DNS Toolkit — DoH records, email auth & subdomain brute-force',
     summary: 'Resolve A/AAAA/MX/TXT/NS/CNAME/SOA/CAA records over DNS-over-HTTPS, and brute-force subdomains from a SecLists wordlist.',
     tags: ['DNS', 'DoH', 'Subdomains', 'Recon', 'SecLists'],
     readTime: '3 min read',

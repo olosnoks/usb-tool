@@ -29,7 +29,9 @@ export const TOOL_GROUPS = {
   'rfid-nfc': 'proxmark',
   'wifi-scanner': 'alfa-wifi',
   'warhog-sd': 'warhog-piglet', 'warhog-config': 'warhog-piglet', 'warhog-console': 'warhog-piglet',
-  'warhog-flasher': 'warhog-piglet', 'warhog-pinouts': 'warhog-piglet'
+  'warhog-flasher': 'warhog-piglet', 'warhog-pinouts': 'warhog-piglet',
+  // legacy DNS tools merged into the DNS Toolkit
+  'dns-enumerator': 'dns-toolkit', 'dns-mail-doctor': 'dns-toolkit'
 };
 
 export const windowKeyFor = (toolId) => TOOL_GROUPS[toolId] || toolId;
