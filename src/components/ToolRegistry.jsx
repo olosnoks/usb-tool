@@ -139,6 +139,7 @@ export function renderTool(toolId, serial) {
           hexByteStream={hexByteStream}
           onClearHex={clearHexStream}
           isConnected={isConnected}
+          onLogMessage={addLog}
         />
       );
     case 'bridge': return <SerialBridgeDeck boards={boards} onSendRawBytes={sendRawBytes} onLogMessage={addLog} />;

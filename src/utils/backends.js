@@ -97,6 +97,9 @@ export const TOOL_BACKENDS = {
   'http-workbench': 'cors-proxy', 'api-client': 'cors-proxy', 'burp-proxy': 'cors-proxy',
   'osint-clients': 'cors-proxy', 'crtsh-finder': 'cors-proxy', 'pwned-passwords': 'cors-proxy',
   'db-browser': 'cors-proxy',
+  // Kismet Studio reaches a user-run Kismet REST server; the proxy gets an https
+  // page past a non-CORS/plain-http Kismet. Kismet does the radio capture itself.
+  'kismet-studio': 'cors-proxy',
   // Tools with a dedicated capability image.
   'nmap-scanner': 'nmap',
   'cert-inspect': 'tls-inspector',

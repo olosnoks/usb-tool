@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { fetchKismetDevices, fetchKismetAlerts, fetchKismetStatus } from '../../utils/kismetClient';
+import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
+import ProxyConfig from './common/ProxyConfig';
 import {
   Radio,
   Wifi,
@@ -106,10 +108,8 @@ const ALFA_PROFILES = [
   }
 ];
 
-// Rich simulated Alfa + Kismet capture telemetry
-
-
-export default function KismetStudioWorkbench() {
+export default function KismetStudioWorkbench({ onLogMessage = () => {} }) {
+  const log = onLogMessage;
   // Connection states
   const [serverUrl, setServerUrl] = useState('http://localhost:2501');
   const [apiKey, setApiKey] = useState('');
@@ -123,8 +123,8 @@ export default function KismetStudioWorkbench() {
   const [copiedCmd, setCopiedCmd] = useState(false);
 
   // Data states
-  // Empty until connected. The demo fills these with MOCK_*; a real server
-  // connection polls Kismet's REST API (src/utils/kismetClient.js).
+  // Empty until connected; a real server connection polls Kismet's REST API
+  // (src/utils/kismetClient.js), reached directly or via the local cors-proxy.
   const [devices, setDevices] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [kismetError, setKismetError] = useState('');
@@ -133,9 +133,11 @@ export default function KismetStudioWorkbench() {
   const [filterType, setFilterType] = useState('ALL'); // ALL, AP, STA, 5G, 2.4G, WPA3, OPEN
   const [selectedDevice, setSelectedDevice] = useState(null);
 
-  // Telemetry stats
-  const [packetRate, setPacketRate] = useState(1420);
-  const [serverUptime, setServerUptime] = useState('02:45:12');
+  // Telemetry stats. packetRate is a real packets/sec derived from the change in
+  // total device packets between polls (null until we have two samples).
+  const [packetRate, setPacketRate] = useState(null);
+  const [serverUptime, setServerUptime] = useState('--:--:--');
+  const packetSampleRef = useRef(null); // { total, ts } from the previous poll
 
   // Command generator text based on selected Alfa & OS
   const launchCommands = useMemo(() => {
@@ -187,21 +189,28 @@ kismet -c ${monIface} --no-ncurses`;
   const handleToggleConnect = async () => {
     if (isConnected) {
       setIsConnected(false);
+      packetSampleRef.current = null;
+      setPacketRate(null);
       return;
     }
 
     setIsConnecting(true);
     // Real Kismet server: check status (and the login), then poll below.
+    // Requests route through the local cors-proxy when one is configured, so an
+    // https page can reach a Kismet server that doesn't send CORS headers.
     try {
-      const st = await fetchKismetStatus(serverUrl, apiKey);
+      const st = await fetchKismetStatus(serverUrl, apiKey, { fetchImpl: proxiedFetch });
       setDevices([]);
       setAlerts([]);
+      packetSampleRef.current = null;
+      setPacketRate(null);
       setServerUptime(st.uptime || '--:--:--');
       setKismetError('');
       setLastUpdate(null);
       setIsConnected(true);
+      log(`Kismet connected: ${serverUrl}${isProxyEnabled() ? ' (via cors-proxy)' : ''}${st.version ? ` · v${st.version}` : ''}`);
     } catch (err) {
-      alert(`${err.message}\n\nStart Kismet with a source, e.g.: kismet -c wlan1mon`);
+      alert(`${describeNetworkError(err)}\n\nStart Kismet with a source, e.g.: kismet -c wlan1mon\nIf this page is https and Kismet isn't, run the cors-proxy Docker backend and set it as the proxy.`);
     } finally {
       setIsConnecting(false);
     }
@@ -214,18 +223,26 @@ kismet -c ${monIface} --no-ncurses`;
     const poll = async () => {
       try {
         const [devs, alts, st] = await Promise.all([
-          fetchKismetDevices(serverUrl, apiKey),
-          fetchKismetAlerts(serverUrl, apiKey),
-          fetchKismetStatus(serverUrl, apiKey)
+          fetchKismetDevices(serverUrl, apiKey, { fetchImpl: proxiedFetch }),
+          fetchKismetAlerts(serverUrl, apiKey, { fetchImpl: proxiedFetch }),
+          fetchKismetStatus(serverUrl, apiKey, { fetchImpl: proxiedFetch })
         ]);
         if (stopped) return;
         setDevices(devs);
         setAlerts(alts);
         if (st.uptime) setServerUptime(st.uptime);
+        // Real packets/sec: delta of total device packets over elapsed time.
+        const totalPackets = devs.reduce((n, d) => n + (d.packets || 0), 0);
+        const nowMs = Date.now();
+        const prev = packetSampleRef.current;
+        if (prev && nowMs > prev.ts && totalPackets >= prev.total) {
+          setPacketRate(Math.round(((totalPackets - prev.total) * 1000) / (nowMs - prev.ts)));
+        }
+        packetSampleRef.current = { total: totalPackets, ts: nowMs };
         setKismetError('');
         setLastUpdate(new Date());
       } catch (err) {
-        if (!stopped) setKismetError(err.message);
+        if (!stopped) setKismetError(describeNetworkError(err));
       }
     };
     poll();
@@ -306,6 +323,7 @@ kismet -c ${monIface} --no-ncurses`;
 
   return (
     <div className="flex flex-col gap-4 font-mono text-slate-100">
+      <ProxyConfig onLogMessage={log} backend="cors-proxy" />
       {isConnected && (
         <div role="note" className={`p-2.5 rounded-lg border text-xs ${kismetError ? 'border-rose-500/40 bg-rose-500/10 text-rose-200' : 'border-sky-500/40 bg-sky-500/10 text-sky-200'}`}>
           {kismetError
@@ -393,7 +411,7 @@ kismet -c ${monIface} --no-ncurses`;
           <div>
             <div className="text-[10px] uppercase text-slate-400 font-semibold">Packet Telemetry</div>
             <div className="text-sm font-bold text-purple-400 mt-0.5">
-              {isConnected ? `${packetRate.toLocaleString()} pkts/s` : "-- pkts/s"}
+              {isConnected && packetRate !== null ? `${packetRate.toLocaleString()} pkts/s` : "-- pkts/s"}
             </div>
             <div className="text-[10px] text-slate-500">Uptime: {isConnected ? serverUptime : '--:--:--'}</div>
           </div>
