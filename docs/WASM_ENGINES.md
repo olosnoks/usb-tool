@@ -10,11 +10,14 @@ interface; it never fabricates results.
 
 Build engines with the `emsdk` submodule and drop the output into `public/wasm/`.
 
-## Port scanner — `public/wasm/portscanner.wasm`
+## Port scanner — `public/wasm/portscanner.wasm` (optional)
 
-Used by the Port Scanner workbench. A browser cannot open raw TCP connections, so
-the engine must carry its own transport (for example a WebSocket/WebTransport
-relay it connects to).
+The Port Scanner workbench works without this engine, using a connect-timing
+heuristic over `fetch` (`src/utils/portScan.js`). That approach cannot reach
+Chrome-restricted ports (21, 22, 25, …) or non-HTTP services. This optional engine
+replaces the heuristic with real scanning; because a browser cannot open raw TCP
+connections, the engine must carry its own transport (for example a
+WebSocket/WebTransport relay it connects to).
 
 Exports:
 
