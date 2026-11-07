@@ -32,14 +32,6 @@ import {
 import { parse80211Frame } from '../utils/wifiParser';
 
 const WARDRIVE_CHANNELS_DUALBAND = [1, 6, 11, 36, 40, 44, 48, 149, 153, 157, 161];
-const SIMULATED_PAU09_APS = [
-  { bssid: '9C:EF:D5:44:12:01', ssid: 'PandaNet-5G-Uplink', rssi: -52, channel: 36, auth: 'WPA3-SAE', deviceType: 'WIFI' },
-  { bssid: '9C:EF:D5:88:3A:10', ssid: 'Tactical-Mesh-Node', rssi: -61, channel: 149, auth: 'WPA2-PSK', deviceType: 'WIFI' },
-  { bssid: '00:C0:CA:A8:19:42', ssid: 'Corp-Guest-WiFi', rssi: -68, channel: 6, auth: 'OPEN', deviceType: 'WIFI' },
-  { bssid: '24:5E:BE:11:90:CC', ssid: 'BuildingB-IoT-24', rssi: -64, channel: 1, auth: 'WPA2-PSK', deviceType: 'WIFI' },
-  { bssid: 'F0:9F:C2:71:0B:55', ssid: 'UniFi-Lab-5GHz', rssi: -58, channel: 44, auth: 'WPA2-EAP', deviceType: 'WIFI' },
-  { bssid: 'B4:FB:E4:33:E1:09', ssid: 'Field-Sensor-Bridge', rssi: -74, channel: 11, auth: 'WPA2-PSK', deviceType: 'WIFI' }
-];
 
 export default function GpsWardriverDeck({
   latestTextStream = '',
@@ -79,7 +71,6 @@ export default function GpsWardriverDeck({
   const [isUsbScanning, setIsUsbScanning] = useState(false);
   const [isSerialRigConnected, setIsSerialRigConnected] = useState(false);
   const [isBrowserGps, setIsBrowserGps] = useState(false);
-  const [isSimulatingWardrive, setIsSimulatingWardrive] = useState(false);
   const [scanChannel, setScanChannel] = useState(6);
   const [statusNotice, setStatusNotice] = useState(null);
 
@@ -416,56 +407,6 @@ export default function GpsWardriverDeck({
     return () => navigator.geolocation.clearWatch(watchId);
   }, [isBrowserGps]);
 
-  // Simulated Panda PAU09 / Alfa / Warhog CYD / Piglet Wardrive Stream
-  useEffect(() => {
-    if (!isSimulatingWardrive) return;
-    let tick = 0;
-    const interval = setInterval(() => {
-      tick += 1;
-      const ch = WARDRIVE_CHANNELS_DUALBAND[tick % WARDRIVE_CHANNELS_DUALBAND.length];
-      setScanChannel(ch);
-
-      setGpsData(prev => {
-        const nextLat = prev.lat + (Math.cos(tick * 0.25) * 0.00014);
-        const nextLon = prev.lon + (Math.sin(tick * 0.25) * 0.00014);
-        const nextHeading = (prev.heading + 12) % 360;
-        setTrackHistory(track => [...track.slice(-200), { lat: nextLat, lon: nextLon }]);
-        return {
-          ...prev,
-          lat: nextLat,
-          lon: nextLon,
-          speedKmh: 28.4,
-          speedMph: 17.6,
-          heading: nextHeading,
-          fixLabel:
-            wardriveSource === 'warhog-cyd'
-              ? 'Warhog CYD Lock'
-              : wardriveSource === 'piglet'
-              ? 'Piglet ATGM336H Lock'
-              : wardriveSource === 'pau09'
-              ? 'PAU09 + Sim GPS Fix'
-              : 'Sim GPS Fix (3D)',
-          valid: true,
-          time: new Date().toISOString().slice(11, 19) + ' UTC'
-        };
-      });
-
-      const template = SIMULATED_PAU09_APS[tick % SIMULATED_PAU09_APS.length];
-      const jitterRssi = Math.max(-92, Math.min(-38, template.rssi + Math.round((Math.random() - 0.5) * 8)));
-      const apEntry = {
-        ...template,
-        rssi: jitterRssi,
-        seenTime: new Date().toLocaleTimeString()
-      };
-      setCapturedAps(prev => {
-        const map = new Map(prev.map(ap => [ap.bssid, ap]));
-        map.set(apEntry.bssid, apEntry);
-        return Array.from(map.values()).slice(-200);
-      });
-    }, 900);
-
-    return () => clearInterval(interval);
-  }, [isSimulatingWardrive, wardriveSource]);
 
   // Process incoming text stream for NMEA or WiFi lines
   useEffect(() => {
@@ -647,7 +588,6 @@ export default function GpsWardriverDeck({
       <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-cyber-border">
         <div className="flex items-center gap-2">
           <Compass className="w-4 h-4 text-cyber-emerald" />
-          <h2 className="font-bold text-slate-100 tracking-wider">LIVE GPS & WARDRIVER TELEMETRY DECK</h2>
           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
             {wardriveSource === 'pau09'
               ? 'Panda PAU09 (RT5572)'
@@ -816,20 +756,6 @@ export default function GpsWardriverDeck({
             <span>{isBrowserGps ? 'Browser GPS Active' : 'Browser GPS Lock'}</span>
           </button>
 
-          {/* Simulate Wardrive Stream Toggle */}
-          <button
-            type="button"
-            onClick={() => setIsSimulatingWardrive(s => !s)}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition ${
-              isSimulatingWardrive
-                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
-            }`}
-            title="Simulate wardriving stream with Warhog CYD, Piglet, or Panda PAU09 beacons"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-            <span>{isSimulatingWardrive ? `Simulating (CH ${scanChannel})` : 'Simulate Wardrive Stream'}</span>
-          </button>
         </div>
       </div>
 
@@ -1012,7 +938,7 @@ export default function GpsWardriverDeck({
               {filteredAps.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-6 text-center text-slate-600">
-                    No WiFi beacons captured yet. Connect your wardriver or click "Simulate Wardrive Stream" above.
+                    No WiFi beacons captured yet. Connect your wardriver to capture beacons.
                   </td>
                 </tr>
               ) : (

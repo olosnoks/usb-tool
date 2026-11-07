@@ -6,7 +6,6 @@ import {
   ZoomOut,
   Maximize2,
   Layers,
-  Sparkles,
   Download,
   AlertTriangle,
   Usb,
@@ -29,10 +28,8 @@ import {
   exportSigrok,
   importSigrok
 } from '../../utils/logicDecoders';
-import { demoCapture } from '../../utils/logicSynth';
 import { SerialLink } from '../../utils/serialLink';
 import { parseIntelHex } from '../../utils/firmwareParser';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { useSessionError } from '../../utils/sessionLog';
 const CHANNEL_DEFAULTS = [
@@ -85,7 +82,7 @@ export default function LogicAnalyzerWorkbench() {
   const [sampleRate, setSampleRate] = useState(4000000); // 4 MHz
   const [sampleDepth, setSampleDepth] = useState(25000);
   const [isCapturing, setIsCapturing] = useState(false);
-  // Where captures come from: null (nothing connected), 'sump', 'fx2', 'demo' or 'file'.
+  // Where captures come from: null (nothing connected), 'sump', 'fx2' or 'file'.
   const [source, setSource] = useState(null);
   const [deviceLabel, setDeviceLabel] = useState('');
   const [error, setError] = useSessionError('Logic Analyzer');
@@ -98,7 +95,6 @@ export default function LogicAnalyzerWorkbench() {
   const fx2Ref = useRef(null);
   const fwInputRef = useRef(null);
   const importRef = useRef(null);
-  const isSimulated = source === 'demo';
 
   // Digital Sample Buffer (Uint8Array: each byte is 8 channels). Empty until a capture.
   const [samples, setSamples] = useState(() => new Uint8Array(0));
@@ -405,13 +401,7 @@ export default function LogicAnalyzerWorkbench() {
     setIsCapturing(true);
     setProgress(0);
     try {
-      if (source === 'demo') {
-        await new Promise((r) => setTimeout(r, 200));
-        const d = demoCapture(decoderId);
-        // Demo traffic is drawn on the decoder's default channels.
-        setDecoderConfig((prev) => ({ ...prev, [decoderId]: { ...prev[decoderId], channels: { ...DECODERS[decoderId].channels } } }));
-        loadSamples(d.samples, d.sampleRate);
-      } else if (source === 'sump') {
+      if (source === 'sump') {
         const mask = parseInt(triggerMask, 16) || 0;
         const value = parseInt(triggerValue, 16) || 0;
         const r = await sumpRef.current.la.capture({ sampleRate, samples: sampleDepth, triggerMask: mask, triggerValue: value });
@@ -474,7 +464,6 @@ export default function LogicAnalyzerWorkbench() {
 
   return (
     <div className="flex flex-col gap-4 font-mono">
-      {isSimulated && <DemoBanner>Demo capture: the waveforms and decodes below are generated, not sampled. Each decoder tab has its own demo traffic.</DemoBanner>}
       {error && (
         <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
           <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
@@ -496,10 +485,6 @@ export default function LogicAnalyzerWorkbench() {
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-cyan-400" />
-              <span>24MHz 8-CHANNEL LOGIC ANALYZER & PROTOCOL DECODER</span>
-            </h2>
             <p className="text-[11px] text-slate-400">
               Capture 8 channels (D0–D7) from a SUMP device over serial or an FX2 "24MHz 8CH" board running fx2lafw over WebUSB, or open a VCD / PulseView .sr file.
               Decoders: I2C, UART, SPI, 1-Wire, CAN, WS2812, IR (NEC / RC-5) and SWD.
@@ -514,9 +499,6 @@ export default function LogicAnalyzerWorkbench() {
                 </button>
                 <button onClick={handleConnectFx2} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
                   <Usb className="w-3.5 h-3.5" /> CONNECT FX2 (USB)
-                </button>
-                <button onClick={() => { setSource('demo'); setDeviceLabel('Demo signal generator'); setError(''); setNotice(''); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-amber-300 border border-amber-500/40 text-xs font-bold">
-                  <Sparkles className="w-3.5 h-3.5" /> DEMO
                 </button>
               </>
             ) : (
