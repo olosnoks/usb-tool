@@ -1,38 +1,39 @@
-# Port Scanner Workbench
+# Port Scanner
 
-**Purpose**: Scan a host for open TCP ports from the browser.
+**Purpose**: Discover open TCP ports on a host from the browser. Because a
+browser cannot open raw sockets, this is a **connect-timing heuristic over
+fetch**, not a SYN scan:
+- **open** — an HTTP(S) service answered
+- **closed** — connection refused quickly (TCP RST)
+- **open|filtered** — the handshake stalled or packets were dropped
+- **blocked** — a port Chrome refuses to fetch (ERR_UNSAFE_PORT), so it can't be
+  probed from a browser
 
-**How it works**: Browsers cannot open raw sockets, so by default this uses a
-**connect-timing heuristic** over `fetch` (`src/utils/portScan.js`):
+If `public/wasm/portscanner.wasm` is present, the real WASM engine is used
+instead (see docs/WASM_ENGINES.md).
 
-- The fetch resolves (opaque response) → **open** (an HTTP service answered).
-- It is refused quickly (TCP RST) → **closed**.
-- It stalls until timeout → **open|filtered** (handshake stalled or packets
-  dropped; the two are indistinguishable from a page).
+**Ports**:
+- **Profiles** (toggle & combine): Top 20, Web, Databases, Remote/Admin, Mail,
+  Well-known 1-1024, 1-10000, All 1-65535. Heavy sets are marked ⚠.
+- **Custom ports** field (nmap syntax: `1-100,8080,9000`), unioned with the
+  selected profiles. A live count warns when the selection is large.
 
-If a WebAssembly engine is present at `public/wasm/portscanner.wasm`, it is used
-instead for real results. See [docs/WASM_ENGINES.md](../../docs/WASM_ENGINES.md).
+**Flags**:
+- **Timing templates** (nmap -T analog): Sneaky / Polite / Normal / Aggressive /
+  Insane — tune per-port timeout, the closed-vs-filtered threshold, and default
+  concurrency.
+- **Concurrency** — parallel probes (1-64).
+- **Scheme** — auto (https for 443/8443/9443, else http) or force http/https.
+- **show closed/all** — include closed ports in the table.
 
-**Usage**:
-- Optionally set a proxy (empty = direct).
-- Enter a target host (e.g. `scanme.nmap.org` or `127.0.0.1`).
-- Enter ports as a list and/or ranges (e.g. `80,443,8000-8100`).
-- Click **Scan**. Open and browser-blocked ports are listed with timing; the run
-  shows progress and can be stopped.
+**Output**: live table (port / state / service / latency) with a running
+summary (open · open|filtered · closed · blocked · elapsed ms), and **export to
+.txt or .md**.
 
-**Implementation Details**:
-- `scanHost` probes with bounded concurrency (8 at a time).
-- Default ports target web services Chrome permits (80, 443, 8080, 8443, 8000,
-  3000, 5000, 5173, 9000).
-- `parsePorts` accepts comma lists and `a-b` ranges.
+**Implementation**: `src/utils/portScan.js` (profiles, timing templates,
+`buildPortSpec`, `parsePorts`, `scanPort`/`scanHost`), verified in
+`tests/portScan.test.js`.
 
-**Honest limitations**:
-- **Browser-restricted ports**: Chrome refuses `fetch` to many classic service
-  ports (21, 22, 23, 25, 110, 143, 993, 995, …). These are reported as **blocked**,
-  not scanned. Use the WASM engine or a proxy for them.
-- **Mixed content**: from an HTTPS page, only HTTPS targets and `localhost` can be
-  probed; plain-HTTP targets are blocked by the browser.
-- **Private Network Access**: Chrome blocks pages from probing `localhost` /
-  private IPs, so local scans may all show as closed.
-- **Non-HTTP services** on allowed ports look the same as filtered (timeout).
-- No service/version banner detection without the WASM engine.
+**Notes**: From an HTTPS page only HTTPS targets and localhost are reachable
+without a proxy (mixed-content blocks plain HTTP). Scan only hosts you own or
+are authorized to test.
