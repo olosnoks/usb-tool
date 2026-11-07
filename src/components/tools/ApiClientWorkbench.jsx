@@ -39,7 +39,7 @@ function parseVars(text) {
 
 const METHOD_COLORS = { GET: 'text-green-400', POST: 'text-amber-400', PUT: 'text-blue-400', PATCH: 'text-purple-400', DELETE: 'text-red-400', HEAD: 'text-gray-400', OPTIONS: 'text-gray-400' };
 
-export default function ApiClientWorkbench({ onLogMessage }) {
+export default function ApiClientWorkbench({ onLogMessage, hideProxyConfig = false }) {
   const [specText, setSpecText] = useState('');
   const [specUrl, setSpecUrl] = useState('');
   const [spec, setSpec] = useState(null);
@@ -124,7 +124,7 @@ export default function ApiClientWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4 text-sm">
-      <ProxyConfig onLogMessage={onLogMessage} />
+      {!hideProxyConfig && <ProxyConfig onLogMessage={onLogMessage} />}
 
       {!spec ? (
         <div className="space-y-2">

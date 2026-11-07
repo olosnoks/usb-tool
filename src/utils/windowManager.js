@@ -31,7 +31,9 @@ export const TOOL_GROUPS = {
   'warhog-sd': 'warhog-piglet', 'warhog-config': 'warhog-piglet', 'warhog-console': 'warhog-piglet',
   'warhog-flasher': 'warhog-piglet', 'warhog-pinouts': 'warhog-piglet',
   // legacy DNS tools merged into the DNS Toolkit
-  'dns-enumerator': 'dns-toolkit', 'dns-mail-doctor': 'dns-toolkit'
+  'dns-enumerator': 'dns-toolkit', 'dns-mail-doctor': 'dns-toolkit',
+  // HTTP repeater + API client merged into the HTTP Workbench
+  'burp-proxy': 'http-workbench', 'api-client': 'http-workbench'
 };
 
 export const windowKeyFor = (toolId) => TOOL_GROUPS[toolId] || toolId;

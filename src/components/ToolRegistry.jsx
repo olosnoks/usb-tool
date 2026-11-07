@@ -20,14 +20,13 @@ import TelemetryDashboard from './TelemetryDashboard';
 const CanBusWorkbench = React.lazy(() => import('./tools/CanBusWorkbench'));
 const NmapScannerWorkbench = React.lazy(() => import('./tools/NmapScannerWorkbench'));
 const HashcatCrackerWorkbench = React.lazy(() => import('./tools/HashcatCrackerWorkbench'));
-const BurpProxyWorkbench = React.lazy(() => import('./tools/BurpProxyWorkbench'));
+const HttpWorkbench = React.lazy(() => import('./tools/HttpWorkbench'));
 const AircrackWifiWorkbench = React.lazy(() => import('./tools/AircrackWifiWorkbench'));
 const NiktoScannerWorkbench = React.lazy(() => import('./tools/NiktoScannerWorkbench'));
 const HydraBruteforceWorkbench = React.lazy(() => import('./tools/HydraBruteforceWorkbench'));
 const TcpdumpViewerWorkbench = React.lazy(() => import('./tools/TcpdumpViewerWorkbench'));
 const DnsToolkitWorkbench = React.lazy(() => import('./tools/DnsToolkitWorkbench'));
 const OwaspZapWorkbench = React.lazy(() => import('./tools/OwaspZapWorkbench'));
-const ApiClientWorkbench = React.lazy(() => import('./tools/ApiClientWorkbench'));
 const PwnedPasswordsCheckerWorkbench = React.lazy(() => import('./tools/PwnedPasswordsCheckerWorkbench'));
 const CertInspectWorkbench = React.lazy(() => import('./tools/CertInspectWorkbench'));
 const DbBrowserWorkbench = React.lazy(() => import('./tools/DbBrowserWorkbench'));
@@ -81,7 +80,7 @@ export const DEFAULT_NATURAL_WIDTH = 1100;
 export const TOOL_NATURAL_WIDTH = {
   mayhem: 1180, 'alfa-wifi': 1280, 'warhog-piglet': 1200, 'logic-analyzer': 1200, 'packet-analyzer': 1200,
   terminal: 900, flasher: 1000, hardware: 900, setup: 900, 'session-log': 900,
-  cyberchef: 1200, ducky: 1000,
+  cyberchef: 1200, ducky: 1000, 'http-workbench': 1200,
 };
 
 /** Title, icon and accent for a tool id (aliases resolve to their group's entry). */
@@ -103,7 +102,7 @@ export const KNOWN_TOOL_IDS = [
   'bus-explorer', 'modbus-rtu', 'alfa-wifi', 'wifi-scanner', 'warhog-piglet', 'mayhem', 'flipper', 'proxmark', 'rfid-nfc',
   'ducky', 'cyberchef', 'wardrive-generator',
   // New hacker tools
-  'nmap-scanner', 'hashcat-cracker', 'burp-proxy', 'aircrack-wifi',
+  'nmap-scanner', 'hashcat-cracker', 'http-workbench', 'burp-proxy', 'aircrack-wifi',
   'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-toolkit', 'dns-enumerator', 'dns-mail-doctor',
   'owasp-zap', 'pwned-passwords', 'cert-inspect', 'api-client',
   'db-browser', 'regex-tester', 'jwt-inspector',
@@ -201,7 +200,8 @@ export function renderTool(toolId, serial) {
     // New hacker tools
     case 'nmap-scanner': return <NmapScannerWorkbench onLogMessage={addLog} />;
     case 'hashcat-cracker': return <HashcatCrackerWorkbench onLogMessage={addLog} />;
-    case 'burp-proxy': return <BurpProxyWorkbench onLogMessage={addLog} />;
+    case 'http-workbench': return <HttpWorkbench onLogMessage={addLog} />;
+    case 'burp-proxy': return <HttpWorkbench onLogMessage={addLog} initialSection="request" />;
     case 'aircrack-wifi': return <AircrackWifiWorkbench onLogMessage={addLog} />;
     case 'nikto-scanner': return <NiktoScannerWorkbench onLogMessage={addLog} />;
     case 'hydra-bruteforce': return <HydraBruteforceWorkbench onLogMessage={addLog} />;
@@ -209,7 +209,7 @@ export function renderTool(toolId, serial) {
     case 'dns-toolkit': return <DnsToolkitWorkbench onLogMessage={addLog} />;
     case 'dns-enumerator': return <DnsToolkitWorkbench onLogMessage={addLog} initialTab="records" />;
     case 'owasp-zap': return <OwaspZapWorkbench onLogMessage={addLog} />;
-    case 'api-client': return <ApiClientWorkbench onLogMessage={addLog} />;
+    case 'api-client': return <HttpWorkbench onLogMessage={addLog} initialSection="api" />;
     case 'pwned-passwords': return <PwnedPasswordsCheckerWorkbench onLogMessage={addLog} />;
     case 'cert-inspect': return <CertInspectWorkbench onLogMessage={addLog} />;
     case 'db-browser': return <DbBrowserWorkbench onLogMessage={addLog} />;

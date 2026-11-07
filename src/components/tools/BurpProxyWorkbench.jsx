@@ -94,7 +94,7 @@ function Highlighted({ text, term }) {
   return <>{parts}</>;
 }
 
-export default function BurpProxyWorkbench({ onLogMessage }) {
+export default function BurpProxyWorkbench({ onLogMessage, hideProxyConfig = false }) {
   const [tab, setTab] = useState('repeater');
   const [method, setMethod] = useState('GET');
   const [url, setUrl] = useState('');
@@ -109,7 +109,7 @@ export default function BurpProxyWorkbench({ onLogMessage }) {
 
   return (
     <div className="p-4">
-      <ProxyConfig onLogMessage={onLogMessage} />
+      {!hideProxyConfig && <ProxyConfig onLogMessage={onLogMessage} />}
       <div className="flex gap-1 mb-3 border-b border-slate-800">
         {['repeater', 'intruder', 'comparer', 'decoder'].map((t) => (
           <button key={t} onClick={() => setTab(t)}
