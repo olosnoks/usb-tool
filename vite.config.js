@@ -20,17 +20,6 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         wiki: resolve(__dirname, 'wiki/index.html')
-      },
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            // Separate large vendor libs
-            if (id.includes('react')) return 'react';
-            if (id.includes('react-dom')) return 'react-dom';
-            if (id.includes('cyberchef')) return 'cyberchef';
-            return 'vendor';
-          }
-        }
       }
     }
   }
