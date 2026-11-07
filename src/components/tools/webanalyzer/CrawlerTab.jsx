@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Waypoints, Play, Square, Download } from 'lucide-react';
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../../utils/netClient';
 import { extractLinks } from '../../../utils/urlinspect.js';
@@ -15,8 +15,9 @@ function toMarkdown(seed, pages) {
   return out.join('\n');
 }
 
-export default function CrawlerTab({ onLogMessage, onReport }) {
-  const [seed, setSeed] = useState('');
+export default function CrawlerTab({ onLogMessage, onReport, initialTarget = '' }) {
+  const [seed, setSeed] = useState(initialTarget);
+  useEffect(() => { if (initialTarget) setSeed(initialTarget); }, [initialTarget]);
   const [maxDepth, setMaxDepth] = useState(2);
   const [maxPages, setMaxPages] = useState(40);
   const [busy, setBusy] = useState(false);

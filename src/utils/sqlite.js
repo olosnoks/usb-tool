@@ -210,6 +210,47 @@ export function listSchema(db) {
   return rows;
 }
 
+/**
+ * Best-effort column definitions from a CREATE TABLE statement:
+ * [{ name, type, pk, notnull, dflt }]. Table-level constraints are skipped.
+ */
+export function parseColumnDefs(sql) {
+  if (!sql || typeof sql !== 'string') return [];
+  const open = sql.indexOf('(');
+  const close = sql.lastIndexOf(')');
+  if (open < 0 || close <= open) return [];
+  const inner = sql.slice(open + 1, close);
+  const parts = [];
+  let depth = 0; let cur = '';
+  for (const ch of inner) {
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; } else cur += ch;
+  }
+  if (cur.trim()) parts.push(cur);
+  const constraintKw = /^(constraint|primary|unique|check|foreign|key)\b/i;
+  const cols = [];
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed || constraintKw.test(trimmed)) continue;
+    const m = trimmed.match(/^("([^"]+)"|`([^`]+)`|\[([^\]]+)\]|(\w+))\s*(.*)$/);
+    if (!m) continue;
+    const name = m[2] || m[3] || m[4] || m[5];
+    const rest = (m[6] || '').trim();
+    const typeMatch = rest.match(/^(.*?)(?=\s+(?:PRIMARY|NOT|NULL|DEFAULT|UNIQUE|CHECK|REFERENCES|COLLATE|AUTOINCREMENT|GENERATED|AS)\b|$)/i);
+    const type = typeMatch ? typeMatch[1].trim() : '';
+    const dfltMatch = rest.match(/default\s+('[^']*'|"[^"]*"|[^\s,]+)/i);
+    cols.push({
+      name,
+      type: type || '',
+      pk: /primary\s+key/i.test(rest),
+      notnull: /not\s+null/i.test(rest),
+      dflt: dfltMatch ? dfltMatch[1] : null,
+    });
+  }
+  return cols;
+}
+
 /** Best-effort extraction of column names from a CREATE TABLE statement. */
 export function parseColumns(sql) {
   if (!sql || typeof sql !== 'string') return [];

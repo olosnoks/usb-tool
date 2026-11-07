@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { Database, Table as TableIcon, FileUp, Globe, RefreshCw, ChevronLeft, ChevronRight, Download } from 'lucide-react';
-import { openDatabase, listSchema, readRows, countRows } from '../../utils/sqlite.js';
+import { Database, Table as TableIcon, FileUp, Globe, RefreshCw, ChevronLeft, ChevronRight, Download, Boxes, Terminal, Play } from 'lucide-react';
+import { openDatabase, listSchema, readRows, countRows, parseColumnDefs } from '../../utils/sqlite.js';
+import { openSqlDatabase, runSql } from '../../utils/sqljs.js';
 import { proxiedFetch, isProxyEnabled, describeNetworkError } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
 
@@ -85,25 +86,47 @@ function DataGrid({ columns, rows, rowIds }) {
   );
 }
 
+function downloadText(name, text, type = 'text/plain') {
+  const blob = new Blob([text], { type });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+function toCsv(columns, rows) {
+  const esc = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  return [columns.map(esc).join(','), ...rows.map((r) => r.map(esc).join(','))].join('\n');
+}
+
 function SqliteTab({ log }) {
-  const [db, setDb] = useState(null);
+  const [db, setDb] = useState(null);           // dependency-free parser handle
+  const [bytes, setBytes] = useState(null);     // raw bytes for sql.js
   const [fileName, setFileName] = useState('');
+  const [fileSize, setFileSize] = useState(0);
   const [schema, setSchema] = useState([]);
   const [active, setActive] = useState(null);
   const [page, setPage] = useState(0);
+  const [filter, setFilter] = useState('');
   const [error, setError] = useState('');
+  const [mode, setMode] = useState('browse');   // browse | structure | sql
+
+  // sql.js engine (lazy)
+  const [engine, setEngine] = useState({ state: 'idle', err: '' }); // idle|loading|ready|error
+  const [sqlDb, setSqlDb] = useState(null);
+  const [sqlText, setSqlText] = useState('SELECT name, type FROM sqlite_master ORDER BY type, name;');
+  const [sqlResults, setSqlResults] = useState(null);
+  const [sqlError, setSqlError] = useState('');
+  const [sqlRunning, setSqlRunning] = useState(false);
 
   const tables = useMemo(() => schema.filter((s) => s.type === 'table' && s.rootpage), [schema]);
 
   const onFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setError(''); setDb(null); setSchema([]); setActive(null); setPage(0);
+    setError(''); setDb(null); setSchema([]); setActive(null); setPage(0); setFilter('');
+    setEngine({ state: 'idle', err: '' }); setSqlDb(null); setSqlResults(null); setSqlError('');
     try {
       const ab = await file.arrayBuffer();
       const handle = openDatabase(ab);
       const sch = listSchema(handle);
-      setDb(handle); setFileName(file.name); setSchema(sch);
+      setDb(handle); setBytes(new Uint8Array(ab)); setFileName(file.name); setFileSize(file.size); setSchema(sch);
       const firstTable = sch.find((s) => s.type === 'table' && s.rootpage);
       if (firstTable) selectTable(handle, firstTable);
       log?.(`Opened ${file.name} (${(file.size / 1024).toFixed(0)} KB) — ${sch.filter((s) => s.type === 'table').length} table(s)`);
@@ -116,74 +139,240 @@ function SqliteTab({ log }) {
   const selectTable = (handle, t) => {
     const count = countRows(handle, t.rootpage, 2000000);
     setActive({ ...t, count });
-    setPage(0);
+    setPage(0); setFilter('');
   };
 
+  // Browse view (dependency-free parser), with an optional client-side page filter.
   const view = useMemo(() => {
     if (!db || !active) return null;
     const { rows } = readRows(db, active.rootpage, { limit: PAGE_SIZE, offset: page * PAGE_SIZE });
     const columns = active.columns?.length ? active.columns : (rows[0]?.values.map((_, i) => `col${i}`) || []);
-    return {
-      columns,
-      rowIds: rows.map((r) => r.rowid),
-      rows: rows.map((r) => r.values.map(cellText)),
-    };
-  }, [db, active, page]);
+    let mapped = rows.map((r) => ({ rowid: r.rowid, cells: r.values.map(cellText) }));
+    if (filter.trim()) {
+      const q = filter.trim().toLowerCase();
+      mapped = mapped.filter((m) => m.cells.some((c) => c.toLowerCase().includes(q)));
+    }
+    return { columns, rowIds: mapped.map((m) => m.rowid), rows: mapped.map((m) => m.cells) };
+  }, [db, active, page, filter]);
 
   const totalPages = active ? Math.max(1, Math.ceil(active.count / PAGE_SIZE)) : 1;
 
+  const exportTableCsv = () => {
+    if (!view) return;
+    downloadText(`${active.name}-page${page + 1}.csv`, toCsv(view.columns, view.rows), 'text/csv');
+  };
+
+  // Lazily bring up sql.js when the Execute-SQL tab is first used.
+  const ensureEngine = useCallback(async () => {
+    if (sqlDb || engine.state === 'loading') return sqlDb;
+    setEngine({ state: 'loading', err: '' });
+    try {
+      const d = await openSqlDatabase(bytes);
+      setSqlDb(d); setEngine({ state: 'ready', err: '' });
+      log?.('sql.js engine ready');
+      return d;
+    } catch (e) {
+      setEngine({ state: 'error', err: e.message || String(e) });
+      log?.(`sql.js engine failed: ${e.message}`);
+      return null;
+    }
+  }, [bytes, sqlDb, engine.state, log]);
+
+  const runQuery = async () => {
+    setSqlRunning(true); setSqlError(''); setSqlResults(null);
+    const d = sqlDb || await ensureEngine();
+    if (!d) { setSqlRunning(false); return; }
+    try {
+      const sets = runSql(d, sqlText);
+      setSqlResults(sets);
+      log?.(`SQL ok — ${sets.length} result set(s)`);
+    } catch (e) { setSqlError(e.message || String(e)); }
+    setSqlRunning(false);
+  };
+
+  const MODES = [
+    { id: 'browse', label: 'Browse Data', icon: TableIcon },
+    { id: 'structure', label: 'Structure', icon: Boxes },
+    { id: 'sql', label: 'Execute SQL', icon: Terminal },
+  ];
+
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <label className="inline-flex items-center gap-2 px-3 py-1.5 bg-cyan-900/40 border border-cyan-800 rounded text-xs text-cyan-200 cursor-pointer hover:bg-cyan-900/60">
           <FileUp size={14} /> Open .sqlite / .db file
           <input type="file" accept=".sqlite,.sqlite3,.db,.db3,.s3db,application/x-sqlite3,application/vnd.sqlite3" className="hidden" onChange={onFile} />
         </label>
-        {fileName && <span className="text-xs text-gray-400 font-mono">{fileName}</span>}
+        {fileName && <span className="text-xs text-gray-400 font-mono">{fileName} · {(fileSize / 1024).toFixed(0)} KB · {db?.pageSize}B pages · {db?.encoding}</span>}
       </div>
       {error && <div className="mb-3 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{error}</div>}
+
       {db && (
-        <div className="grid grid-cols-[minmax(10rem,14rem)_1fr] gap-3">
-          <div className="border border-slate-800 rounded bg-slate-900/40 p-2 max-h-[60vh] overflow-auto">
-            <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Tables</div>
-            {tables.map((t) => (
-              <button
-                key={t.name}
-                onClick={() => selectTable(db, t)}
-                className={`w-full text-left px-2 py-1 rounded text-xs font-mono flex items-center gap-1.5 mb-0.5 ${active?.name === t.name ? 'bg-cyan-900/50 text-cyan-200' : 'text-gray-300 hover:bg-slate-800'}`}
-              >
-                <TableIcon size={12} className="shrink-0" /> <span className="truncate">{t.name}</span>
-              </button>
-            ))}
-            {tables.length === 0 && <div className="text-xs text-slate-600">No tables.</div>}
+        <>
+          <div className="flex rounded overflow-hidden border border-slate-800 text-xs w-fit mb-3">
+            {MODES.map((m) => {
+              const Icon = m.icon;
+              return (
+                <button key={m.id} onClick={() => { setMode(m.id); if (m.id === 'sql') ensureEngine(); }}
+                  className={`px-3 py-1.5 inline-flex items-center gap-1.5 ${mode === m.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>
+                  <Icon size={12} /> {m.label}
+                </button>
+              );
+            })}
           </div>
-          <div className="min-w-0">
-            {active && (
-              <>
-                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                  <div className="text-xs text-gray-300 font-mono">
-                    <span className="text-cyan-300">{active.name}</span> · {active.count.toLocaleString()} row(s)
-                  </div>
-                  <div className="flex items-center gap-1 text-xs">
-                    <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} className="px-2 py-1 bg-slate-800 rounded disabled:opacity-40"><ChevronLeft size={12} /></button>
-                    <span className="text-gray-400">page {page + 1} / {totalPages}</span>
-                    <button disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)} className="px-2 py-1 bg-slate-800 rounded disabled:opacity-40"><ChevronRight size={12} /></button>
-                  </div>
-                </div>
-                {active.sql && <pre className="mb-2 p-2 bg-slate-950 border border-slate-800 rounded text-[10px] text-slate-400 overflow-auto max-h-24 whitespace-pre-wrap">{active.sql}</pre>}
-                {view && <DataGrid columns={view.columns} rows={view.rows} rowIds={view.rowIds} />}
-              </>
-            )}
-          </div>
-        </div>
+
+          {mode !== 'sql' && (
+            <div className="grid grid-cols-[minmax(10rem,14rem)_1fr] gap-3">
+              <div className="border border-slate-800 rounded bg-slate-900/40 p-2 max-h-[60vh] overflow-auto">
+                <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Tables ({tables.length})</div>
+                {tables.map((t) => (
+                  <button key={t.name} onClick={() => selectTable(db, t)}
+                    className={`w-full text-left px-2 py-1 rounded text-xs font-mono flex items-center gap-1.5 mb-0.5 ${active?.name === t.name ? 'bg-cyan-900/50 text-cyan-200' : 'text-gray-300 hover:bg-slate-800'}`}>
+                    <TableIcon size={12} className="shrink-0" /> <span className="truncate">{t.name}</span>
+                  </button>
+                ))}
+                {tables.length === 0 && <div className="text-xs text-slate-600">No tables.</div>}
+              </div>
+
+              <div className="min-w-0">
+                {mode === 'browse' && active && (
+                  <>
+                    <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                      <div className="text-xs text-gray-300 font-mono"><span className="text-cyan-300">{active.name}</span> · {active.count.toLocaleString()} row(s)</div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="filter this page…" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 font-mono w-40" />
+                        <button onClick={exportTableCsv} className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300"><Download size={11} /> CSV</button>
+                        <button disabled={page === 0} onClick={() => { setPage((p) => Math.max(0, p - 1)); setFilter(''); }} className="px-2 py-1 bg-slate-800 rounded disabled:opacity-40"><ChevronLeft size={12} /></button>
+                        <span className="text-gray-400">page {page + 1} / {totalPages}</span>
+                        <button disabled={page + 1 >= totalPages} onClick={() => { setPage((p) => p + 1); setFilter(''); }} className="px-2 py-1 bg-slate-800 rounded disabled:opacity-40"><ChevronRight size={12} /></button>
+                      </div>
+                    </div>
+                    {view && <DataGrid columns={view.columns} rows={view.rows} rowIds={view.rowIds} />}
+                  </>
+                )}
+
+                {mode === 'structure' && (
+                  <StructureView db={db} schema={schema} />
+                )}
+              </div>
+            </div>
+          )}
+
+          {mode === 'sql' && (
+            <ExecuteSql
+              engine={engine} ensureEngine={ensureEngine} runQuery={runQuery}
+              sqlText={sqlText} setSqlText={setSqlText} sqlResults={sqlResults} sqlError={sqlError} sqlRunning={sqlRunning}
+              tables={tables}
+            />
+          )}
+        </>
       )}
+
       {!db && !error && (
         <p className="text-xs text-slate-500">
-          Open a local SQLite database to browse its tables and rows. Parsing is read-only and fully in-browser —
-          the file is never uploaded. <code className="text-slate-400">INTEGER PRIMARY KEY</code> columns alias the
-          <code className="text-slate-400"> rowid</code> shown in the first column.
+          Open a local SQLite database to browse data, inspect its structure, and run SQL. The file never leaves the
+          browser. Browse & Structure are read-only and dependency-free; Execute SQL loads an in-browser SQLite engine
+          (sql.js, WASM) and can modify the in-memory copy — the original file on disk is never changed.
         </p>
       )}
+    </div>
+  );
+}
+
+function StructureView({ db, schema }) {
+  const tables = schema.filter((s) => s.type === 'table');
+  const indexes = schema.filter((s) => s.type === 'index');
+  const views = schema.filter((s) => s.type === 'view');
+  const triggers = schema.filter((s) => s.type === 'trigger');
+  return (
+    <div className="text-xs max-h-[60vh] overflow-auto pr-1">
+      <div className="mb-3 text-slate-400 font-mono">DB: {db.pageSize}B pages · {db.encoding} · {db.pageCount.toLocaleString()} pages · {(db.byteLength / 1024).toFixed(0)} KB</div>
+      <div className="text-[10px] uppercase tracking-wide text-cyan-400 mb-1">Tables ({tables.length})</div>
+      {tables.map((t) => {
+        const cols = parseColumnDefs(t.sql);
+        const count = t.rootpage ? countRows(db, t.rootpage, 2000000) : 0;
+        return (
+          <div key={t.name} className="mb-2 border border-slate-800 rounded bg-slate-950 p-2">
+            <div className="font-mono text-gray-100 mb-1">{t.name} <span className="text-slate-500">· {count.toLocaleString()} row(s)</span></div>
+            <table className="w-full font-mono text-[11px]">
+              <thead><tr className="text-slate-500 text-left"><th className="pr-2">column</th><th className="pr-2">type</th><th className="pr-2">pk</th><th className="pr-2">notnull</th><th>default</th></tr></thead>
+              <tbody>
+                {cols.map((c) => (
+                  <tr key={c.name} className="border-t border-slate-900">
+                    <td className="pr-2 text-gray-200">{c.name}</td>
+                    <td className="pr-2 text-cyan-300">{c.type || '—'}</td>
+                    <td className="pr-2">{c.pk ? '🔑' : ''}</td>
+                    <td className="pr-2">{c.notnull ? '•' : ''}</td>
+                    <td className="text-slate-400">{c.dflt ?? ''}</td>
+                  </tr>
+                ))}
+                {cols.length === 0 && <tr><td colSpan={5} className="text-slate-600">(could not parse columns)</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+      {[['Indexes', indexes], ['Views', views], ['Triggers', triggers]].map(([label, items]) => items.length > 0 && (
+        <div key={label}>
+          <div className="text-[10px] uppercase tracking-wide text-cyan-400 mb-1 mt-2">{label} ({items.length})</div>
+          {items.map((o) => (
+            <div key={o.name} className="mb-1 border border-slate-800 rounded bg-slate-950 p-2">
+              <div className="font-mono text-gray-200">{o.name} {o.tblName ? <span className="text-slate-500">on {o.tblName}</span> : null}</div>
+              {o.sql && <pre className="text-[10px] text-slate-500 whitespace-pre-wrap mt-1">{o.sql}</pre>}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ExecuteSql({ engine, ensureEngine, runQuery, sqlText, setSqlText, sqlResults, sqlError, sqlRunning, tables }) {
+  const samples = [
+    "SELECT name, type FROM sqlite_master ORDER BY type, name;",
+    tables[0] ? `SELECT * FROM "${tables[0].name}" LIMIT 50;` : 'SELECT 1;',
+    tables[0] ? `SELECT COUNT(*) AS n FROM "${tables[0].name}";` : 'SELECT sqlite_version();',
+  ];
+  const exportCsv = (set, i) => downloadText(`query-result-${i + 1}.csv`, toCsv(set.columns, set.rows), 'text/csv');
+
+  return (
+    <div>
+      {engine.state === 'loading' && <div className="mb-2 p-2 border border-slate-800 rounded bg-slate-900/50 text-xs text-gray-400">Loading SQLite (sql.js) engine…</div>}
+      {engine.state === 'error' && (
+        <div className="mb-2 p-2 border border-yellow-900 rounded bg-yellow-950/20 text-xs text-yellow-300">
+          Could not load the sql.js engine ({engine.err}). Browse Data and Structure still work read-only.
+          <button onClick={ensureEngine} className="ml-2 underline">retry</button>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1 mb-1">
+        {samples.map((s, i) => <button key={i} onClick={() => setSqlText(s)} className="px-2 py-0.5 text-[10px] bg-slate-800 text-gray-300 rounded hover:bg-slate-700 border border-slate-700 font-mono truncate max-w-[16rem]" title={s}>{s}</button>)}
+      </div>
+      <textarea
+        value={sqlText}
+        onChange={(e) => setSqlText(e.target.value)}
+        onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runQuery(); }}
+        rows={5}
+        spellCheck={false}
+        className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-xs font-mono text-gray-200 resize-y"
+        placeholder="SELECT * FROM table;  — Ctrl/Cmd+Enter to run"
+      />
+      <div className="flex items-center gap-2 my-2">
+        <button onClick={runQuery} disabled={sqlRunning || engine.state === 'loading'} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
+          {sqlRunning ? <RefreshCw size={12} className="animate-spin" /> : <Play size={12} />} Run (Ctrl+Enter)
+        </button>
+        <span className="text-[10px] text-slate-500">Runs against an in-memory copy; your file on disk is never modified.</span>
+      </div>
+      {sqlError && <div className="mb-2 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300 font-mono">{sqlError}</div>}
+      {sqlResults && sqlResults.length === 0 && <div className="text-xs text-slate-500">Statement executed. No rows returned.</div>}
+      {sqlResults && sqlResults.map((set, i) => (
+        <div key={i} className="mb-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] text-slate-400">{set.rows.length} row(s){sqlResults.length > 1 ? ` · set ${i + 1}` : ''}</span>
+            <button onClick={() => exportCsv(set, i)} className="inline-flex items-center gap-1 text-[11px] text-cyan-400 hover:text-cyan-300"><Download size={11} /> CSV</button>
+          </div>
+          <DataGrid columns={set.columns} rows={set.rows.map((r) => r.map(cellText))} />
+        </div>
+      ))}
     </div>
   );
 }

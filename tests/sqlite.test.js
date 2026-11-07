@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openDatabase, listSchema, readRows, countRows, parseColumns } from '../src/utils/sqlite.js';
+import { openDatabase, listSchema, readRows, countRows, parseColumns, parseColumnDefs } from '../src/utils/sqlite.js';
 
 // Build a real SQLite file with the sqlite3 CLI (available in CI/dev images),
 // then read it back with our dependency-free parser.
@@ -81,5 +81,16 @@ describe('parseColumns', () => {
   });
   it('returns [] for non-strings', () => {
     expect(parseColumns(null)).toEqual([]);
+  });
+});
+
+describe('parseColumnDefs', () => {
+  it('extracts types, pk, notnull and defaults', () => {
+    const defs = parseColumnDefs('CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL, score REAL DEFAULT 0, note VARCHAR(50), PRIMARY KEY(id))');
+    expect(defs.map((d) => d.name)).toEqual(['id', 'name', 'score', 'note']);
+    expect(defs[0]).toMatchObject({ type: 'INTEGER', pk: true });
+    expect(defs[1]).toMatchObject({ type: 'TEXT', notnull: true });
+    expect(defs[2]).toMatchObject({ type: 'REAL', dflt: '0' });
+    expect(defs[3].type).toBe('VARCHAR(50)');
   });
 });

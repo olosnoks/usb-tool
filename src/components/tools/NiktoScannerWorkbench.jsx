@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { proxiedFetch, isProxyEnabled, describeNetworkError } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
 import WordlistPicker from './common/WordlistPicker';
@@ -32,8 +32,9 @@ function reportMarkdown(base, server, found, probed) {
   return out.join('\n');
 }
 
-export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = false, onReport }) {
-  const [target, setTarget] = useState('');
+export default function NiktoScannerWorkbench({ onLogMessage, hideProxyConfig = false, onReport, initialTarget = '' }) {
+  const [target, setTarget] = useState(initialTarget);
+  useEffect(() => { if (initialTarget) setTarget(initialTarget); }, [initialTarget]);
   const [paths, setPaths] = useState(null); // loaded wordlist, or null => builtin
   const [results, setResults] = useState([]); // interesting only
   const [server, setServer] = useState(null);
