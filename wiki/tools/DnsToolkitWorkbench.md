@@ -1,22 +1,30 @@
 # DNS Toolkit
 
-**Purpose**: One DNS tool (merges the former DNS Enumerator and DNS/Mail
-Doctor). A single domain field feeds three tabs, all over DNS-over-HTTPS
-(dns.google); set a proxy for networks that block DoH.
+**Purpose**: One domain lookup, all the DNS info. A single **Look up** resolves
+every record type and the email-authentication posture together; a subdomain
+brute-force section sits at the bottom; everything exports to one Markdown file.
+All over DNS-over-HTTPS (dns.google); set a proxy for networks that block DoH.
 
-**Tabs**:
-- **Records** — resolve selected record types (A/AAAA/MX/TXT/NS/CNAME/SOA/CAA)
-  with TTLs.
-- **Email auth** — SPF (incl. `+all` warning and the 10-lookup limit), DMARC
-  (policy + strength), DKIM (by selector), the mail/zone records, and a DNSBL
-  reputation check of the mail-server IPs (Spamhaus ZEN, SpamCop, Barracuda,
-  SORBS).
-- **Subdomains** — wordlist brute-force resolving `{word}.domain` concurrently,
-  with progress and a stop button (SecLists lists via the shared picker).
+**Look up** (one pass):
+- Records: A / AAAA / CNAME / MX / NS / SOA / CAA / TXT (with TTLs).
+- Email auth: SPF (incl. `+all` warning and the 10-lookup limit), DMARC (policy
+  + strength), DKIM (by selector).
+- Mail servers (MX + resolved IPs) and a DNSBL reputation check of those IPs
+  (Spamhaus ZEN, SpamCop, Barracuda, SORBS).
+- TXT records, classified (SPF / DMARC / DKIM / verification / other).
+
+**Subdomain brute-force** (bottom): load a SecLists subdomain list (or custom),
+resolve `{word}.domain` concurrently over DoH, Stop any time. A **verbose** toggle
+streams a live log of every attempt (`[+]` found / `[-]` miss / `[!]` error),
+capped to the last 400 lines; the found table always shows hits.
+
+**Export (.md)**: one Markdown file with the records table, email-auth summary,
+mail servers, DNSBL results, TXT records and discovered subdomains for the
+domain.
 
 **Implementation**: `src/components/tools/DnsToolkitWorkbench.jsx`; SPF/DMARC/
 DNSBL parsing in `src/utils/mailDns.js` (verified in `tests/webTools.test.js`).
 
-**Notes**: The old `dns-enumerator` and `dns-mail-doctor` IDs still open this
-tool (Records / Email tab respectively). Browsers can't do TCP AXFR zone
-transfers. Assess only domains you own or are authorized to test.
+**Notes**: The legacy ids `dns-enumerator` and `dns-mail-doctor` still open this
+tool. Browsers can't do TCP AXFR zone transfers. Assess only domains you own or
+are authorized to test.

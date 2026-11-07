@@ -1,89 +1,28 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Globe, Mail, Network, Search, RefreshCw, ShieldCheck, ShieldAlert, Server } from 'lucide-react';
+import { Globe, Mail, Search, RefreshCw, ShieldCheck, ShieldAlert, Server, FileDown, Play, Square } from 'lucide-react';
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
 import WordlistPicker from './common/WordlistPicker';
 import { parseSpf, parseDmarc, classifyTxt, DNSBL_ZONES, dnsblName, interpretDnsbl } from '../../utils/mailDns.js';
 
 /**
- * DNS Toolkit — a single tool combining the former DNS Enumerator and DNS/Mail
- * Doctor. One domain field feeds three tabs:
- *   • Records     — resolve chosen record types over DoH
- *   • Email auth  — SPF / DMARC / DKIM parsing + DNSBL reputation of mail IPs
- *   • Subdomains  — wordlist brute-force via DoH
- * All over DNS-over-HTTPS (dns.google), which is CORS-enabled; a proxy can be
- * set for networks that block it. Browsers cannot do TCP AXFR zone transfers.
+ * DNS Toolkit — one domain lookup resolves every record type AND the email-auth
+ * posture (SPF/DMARC/DKIM/DNSBL) in a single pass, shown together. A subdomain
+ * brute-force section sits at the bottom with a verbose live log. Everything for
+ * the domain exports to one Markdown file. All over DNS-over-HTTPS (dns.google);
+ * a proxy can be set for networks that block it.
  */
 
 const RRTYPE = { 1: 'A', 2: 'NS', 5: 'CNAME', 6: 'SOA', 15: 'MX', 16: 'TXT', 28: 'AAAA', 257: 'CAA' };
-const RECORD_TYPES = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'SOA', 'CAA'];
+const LOOKUP_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'SOA', 'CAA', 'TXT'];
 
 async function doh(name, type) {
   const resp = await proxiedFetch(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${type}`, { headers: { accept: 'application/dns-json' } });
   const data = await resp.json();
   return (data.Answer || []).map((a) => ({ ...a, typeName: RRTYPE[a.type] || a.type }));
 }
-function unquote(s) { return String(s).replace(/^"|"$/g, '').replace(/"\s+"/g, ''); }
+const unquote = (s) => String(s).replace(/^"|"$/g, '').replace(/"\s+"/g, '');
 
-// ---------- Records tab ----------
-function RecordsTab({ domain, log }) {
-  const [types, setTypes] = useState({ A: true, AAAA: true, MX: true, TXT: true, NS: true, CNAME: false, SOA: false, CAA: false });
-  const [records, setRecords] = useState([]);
-  const [busy, setBusy] = useState(false);
-  const toggle = (t) => setTypes((s) => ({ ...s, [t]: !s[t] }));
-
-  const resolve = async () => {
-    const name = domain.trim();
-    if (!name) return;
-    setBusy(true); setRecords([]);
-    const out = [];
-    const selected = RECORD_TYPES.filter((t) => types[t]);
-    log(`Resolving ${name} (${selected.join(', ')})…`);
-    for (const type of selected) {
-      try {
-        const answers = await doh(name, type);
-        if (answers.length === 0) out.push({ type, name: '—', data: '(no records)' });
-        else for (const a of answers) out.push({ type, name: a.name, data: a.data, ttl: a.TTL });
-      } catch (e) {
-        out.push({ type, name: '—', data: `Error: ${describeNetworkError(e)}` });
-      }
-      setRecords([...out]);
-    }
-    setBusy(false);
-  };
-
-  return (
-    <div>
-      <div className="flex flex-wrap gap-3 mb-3 text-xs text-gray-300">
-        {RECORD_TYPES.map((t) => (
-          <label key={t} className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={types[t]} onChange={() => toggle(t)} /> {t}</label>
-        ))}
-        <button onClick={resolve} disabled={busy} className="ml-auto px-3 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
-          {busy ? <RefreshCw size={12} className="animate-spin" /> : <Search size={12} />} {busy ? 'Resolving…' : 'Resolve'}
-        </button>
-      </div>
-      {records.length > 0 && (
-        <div className="border border-slate-800 rounded bg-slate-950 overflow-auto max-h-[55vh]">
-          <table className="w-full text-xs text-gray-200 border-collapse font-mono">
-            <thead className="sticky top-0 bg-slate-900"><tr className="text-left"><th className="px-2 py-1">Type</th><th className="px-2 py-1">Name</th><th className="px-2 py-1">Data</th><th className="px-2 py-1">TTL</th></tr></thead>
-            <tbody>
-              {records.map((r, i) => (
-                <tr key={i} className="border-b border-slate-900 last:border-0">
-                  <td className="px-2 py-1 text-cyan-400">{r.type}</td>
-                  <td className="px-2 py-1 break-all text-slate-400">{r.name}</td>
-                  <td className="px-2 py-1 break-all text-gray-200">{r.data}</td>
-                  <td className="px-2 py-1 text-slate-600">{r.ttl ?? ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------- Email auth tab ----------
 function Section({ icon: Icon, title, children, accent = 'text-cyan-400' }) {
   return (
     <section className="mb-3">
@@ -93,21 +32,33 @@ function Section({ icon: Icon, title, children, accent = 'text-cyan-400' }) {
   );
 }
 
-function EmailTab({ domain, log }) {
+export default function DnsToolkitWorkbench({ onLogMessage }) {
+  const [domain, setDomain] = useState('');
   const [dkimSelector, setDkimSelector] = useState('default');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [res, setRes] = useState(null);
+  const [info, setInfo] = useState(null);
 
-  const run = async () => {
-    const name = domain.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  // subdomain brute-force
+  const [subList, setSubList] = useState(null);
+  const [subBusy, setSubBusy] = useState(false);
+  const [found, setFound] = useState([]);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [verbose, setVerbose] = useState(true);
+  const [vlog, setVlog] = useState([]);
+  const cancelRef = useRef(false);
+  const vbufRef = useRef([]);
+
+  const log = (m) => onLogMessage?.(m);
+  const cleanDomain = () => domain.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^\*?\.+/, '');
+
+  const lookup = async () => {
+    const name = cleanDomain();
     if (!name) return;
-    setBusy(true); setError(''); setRes(null);
-    log(`DNS/Mail check for ${name}…`);
+    setBusy(true); setError(''); setInfo(null);
+    log(`DNS lookup for ${name}${isProxyEnabled() ? ' (via proxy)' : ''}…`);
     try {
-      const [a, aaaa, mx, ns, soa, caa, txt] = await Promise.all([
-        doh(name, 'A'), doh(name, 'AAAA'), doh(name, 'MX'), doh(name, 'NS'), doh(name, 'SOA'), doh(name, 'CAA'), doh(name, 'TXT'),
-      ]);
+      const [a, aaaa, cname, mx, ns, soa, caa, txt] = await Promise.all(LOOKUP_TYPES.map((t) => doh(name, t)));
       const txtStrings = txt.map((r) => unquote(r.data));
       const spfTxt = txtStrings.find((t) => /^v=spf1/i.test(t));
       const dmarcAns = await doh(`_dmarc.${name}`, 'TXT');
@@ -133,26 +84,138 @@ function EmailTab({ domain, log }) {
           } catch { /* NXDOMAIN = not listed */ }
         }
       }
-      setRes({ name, a, aaaa, mx, ns, soa, caa, txtStrings, spf: parseSpf(spfTxt), dmarc: parseDmarc(dmarcTxt), dkim: dkimTxt ? { selector: dkimSelector.trim(), raw: dkimTxt } : null, mxIps, dnsbl });
-      log(`Done: ${mx.length} MX, SPF ${spfTxt ? 'yes' : 'no'}, DMARC ${dmarcTxt ? 'yes' : 'no'}, DNSBL hits ${dnsbl.length}`);
+      setInfo({
+        name, a, aaaa, cname, mx, ns, soa, caa, txtStrings,
+        spf: parseSpf(spfTxt), dmarc: parseDmarc(dmarcTxt),
+        dkim: dkimTxt ? { selector: dkimSelector.trim(), raw: dkimTxt } : null,
+        mxIps, dnsbl,
+      });
+      log(`Lookup done: ${a.length} A, ${mx.length} MX, SPF ${spfTxt ? 'yes' : 'no'}, DMARC ${dmarcTxt ? 'yes' : 'no'}, DNSBL hits ${dnsbl.length}`);
     } catch (e) { setError(describeNetworkError(e)); }
     setBusy(false);
   };
 
-  const spf = res?.spf; const dmarc = res?.dmarc;
+  const flushVerbose = () => setVlog(vbufRef.current.slice(-400));
+
+  const brute = useCallback(async () => {
+    const name = cleanDomain();
+    if (!name || !subList || !subList.length) return;
+    setSubBusy(true); setFound([]); setProgress({ done: 0, total: subList.length });
+    vbufRef.current = []; setVlog([]);
+    cancelRef.current = false;
+    log(`Brute-forcing ${subList.length} subdomains of ${name} via DoH…`);
+    let done = 0; const hits = []; const queue = [...subList];
+    const worker = async () => {
+      while (queue.length) {
+        if (cancelRef.current) return;
+        const sub = queue.shift();
+        const fqdn = `${sub}.${name}`;
+        let line;
+        try {
+          const ans = await doh(fqdn, 'A');
+          if (ans.length) {
+            const ips = ans.filter((a) => a.type === 1).map((a) => a.data);
+            const data = (ips.length ? ips : ans.map((a) => a.data)).join(', ');
+            hits.push({ fqdn, data });
+            setFound([...hits].sort((a, b) => a.fqdn.localeCompare(b.fqdn)));
+            line = `[+] ${fqdn} → ${data}`;
+          } else {
+            line = `[-] ${fqdn}`;
+          }
+        } catch { line = `[!] ${fqdn} (error)`; }
+        done += 1;
+        if (verbose) vbufRef.current.push(line);
+        else if (line.startsWith('[+]')) vbufRef.current.push(line);
+        if (done % 10 === 0 || !queue.length) { setProgress({ done, total: subList.length }); flushVerbose(); }
+      }
+    };
+    await Promise.all(Array.from({ length: 10 }, worker));
+    setProgress({ done, total: subList.length }); flushVerbose();
+    log(cancelRef.current ? `Subdomain brute stopped (${hits.length} found)` : `Found ${hits.length} subdomain(s)`);
+    setSubBusy(false);
+  }, [domain, subList, verbose, log]);
+
+  const buildMarkdown = () => {
+    const now = new Date().toISOString();
+    const L = [`# DNS report — ${info?.name || cleanDomain()}`, '', `_Generated ${now} by Skon's USB Tool — DNS Toolkit._`, ''];
+    if (info) {
+      const i = info;
+      L.push('## Records', '');
+      const rows = [];
+      const push = (type, arr) => arr.forEach((r) => rows.push(`| ${type} | ${r.name || i.name} | ${String(r.data).replace(/\|/g, '\\|')} | ${r.TTL ?? ''} |`));
+      L.push('| Type | Name | Data | TTL |', '|---|---|---|---|');
+      push('A', i.a); push('AAAA', i.aaaa); push('CNAME', i.cname); push('MX', i.mx);
+      push('NS', i.ns); push('SOA', i.soa); push('CAA', i.caa);
+      i.txtStrings.forEach((t) => rows.push(`| TXT | ${i.name} | ${t.replace(/\|/g, '\\|')} | |`));
+      L.push(rows.join('\n') || '| | | (none) | |', '');
+
+      L.push('## Email authentication', '');
+      L.push(`- **SPF:** ${i.spf ? `present — all = ${i.spf.all ? i.spf.all.qualifier + 'all (' + i.spf.all.meaning + ')' : 'none'}, ${i.spf.lookups} lookup(s)` : 'MISSING'}`);
+      if (i.spf) L.push(`  - \`${i.spf.raw}\``);
+      L.push(`- **DMARC:** ${i.dmarc ? `p=${i.dmarc.policy} (${i.dmarc.strength})${i.dmarc.pct !== 100 ? `, pct=${i.dmarc.pct}` : ''}` : 'MISSING'}`);
+      if (i.dmarc) L.push(`  - \`${i.dmarc.raw}\`${i.dmarc.rua ? `\n  - reports → ${i.dmarc.rua}` : ''}`);
+      L.push(`- **DKIM (${i.dkim?.selector || dkimSelector || '—'}):** ${i.dkim ? 'found' : 'not found for this selector'}`);
+      if (i.dkim) L.push(`  - \`${i.dkim.raw}\``);
+      L.push('');
+
+      L.push('## Mail servers', '');
+      if (i.mx.length) { [...i.mx].sort((a, b) => Number(a.data.split(/\s+/)[0]) - Number(b.data.split(/\s+/)[0])).forEach((r) => L.push(`- ${r.data}`)); i.mxIps.forEach((m) => L.push(`  - ${m.host} → ${m.ip}`)); }
+      else L.push('- none');
+      L.push('');
+
+      L.push('## DNSBL reputation', '');
+      if (i.mxIps.length === 0) L.push('- No mail-server IPs resolved.');
+      else if (i.dnsbl.length === 0) L.push(`- Not listed on any checked DNSBL (${DNSBL_ZONES.join(', ')}).`);
+      else i.dnsbl.forEach((d) => L.push(`- ⚠ ${d.ip} (${d.host}) listed on ${d.zone} → ${d.code}`));
+      L.push('');
+    } else {
+      L.push('_No lookup has been run._', '');
+    }
+
+    L.push('## Subdomains (brute-force)', '');
+    if (found.length) { L.push(`${found.length} discovered of ${progress.total} tried:`, ''); found.forEach((f) => L.push(`- ${f.fqdn} → ${f.data}`)); }
+    else L.push(progress.total ? `None of ${progress.total} tried resolved.` : '_Not run._');
+    L.push('');
+    return L.join('\n');
+  };
+
+  const exportMd = () => {
+    const name = info?.name || cleanDomain() || 'dns';
+    const blob = new Blob([buildMarkdown()], { type: 'text/markdown' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `dns-${name}-${new Date().toISOString().slice(0, 10)}.md`; a.click(); URL.revokeObjectURL(a.href);
+    log('Exported DNS report (.md)');
+  };
+
+  const i = info;
+  const spf = i?.spf; const dmarc = i?.dmarc;
+  const canExport = !!info || found.length > 0;
+
   return (
-    <div>
+    <div className="w-full min-w-0 max-w-full text-gray-200">
+      <ProxyConfig onLogMessage={log} />
       <div className="flex flex-wrap gap-2 mb-3 items-center">
-        <div className="flex items-center gap-1 text-xs">
-          <span className="text-slate-500">DKIM selector:</span>
-          <input value={dkimSelector} onChange={(e) => setDkimSelector(e.target.value)} className="w-24 bg-slate-900 border border-slate-800 rounded px-2 py-1 font-mono" />
-        </div>
-        <button onClick={run} disabled={busy} className="ml-auto px-3 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
-          {busy ? <RefreshCw size={12} className="animate-spin" /> : <Mail size={12} />} {busy ? 'Checking…' : 'Check email auth'}
+        <input
+          value={domain}
+          onChange={(e) => setDomain(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && !busy && lookup()}
+          placeholder="example.com"
+          className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono"
+        />
+        <label className="flex items-center gap-1 text-xs text-slate-500">DKIM selector
+          <input value={dkimSelector} onChange={(e) => setDkimSelector(e.target.value)} className="w-24 bg-slate-900 border border-slate-800 rounded px-2 py-1 font-mono ml-1" />
+        </label>
+        <button onClick={lookup} disabled={busy} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
+          {busy ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />} {busy ? 'Looking up…' : 'Look up'}
+        </button>
+        <button onClick={exportMd} disabled={!canExport} title={canExport ? 'Export everything for this domain to Markdown' : 'Run a lookup first'} className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-gray-200 rounded text-sm hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
+          <FileDown size={14} /> Export (.md)
         </button>
       </div>
+
       {error && <div className="mb-3 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{error}</div>}
-      {res && (
+
+      {i && (
         <>
           <Section icon={Mail} title="Email authentication" accent="text-emerald-400">
             <div className="mb-2">
@@ -176,135 +239,76 @@ function EmailTab({ domain, log }) {
               )}
             </div>
             <div>
-              <span className={res.dkim ? 'text-emerald-300' : 'text-slate-400'}>DKIM ({dkimSelector || '—'}): {res.dkim ? 'found' : 'not found for this selector'}</span>
-              {res.dkim && <div className="pl-3 break-all text-slate-500">{res.dkim.raw}</div>}
+              <span className={i.dkim ? 'text-emerald-300' : 'text-slate-400'}>DKIM ({dkimSelector || '—'}): {i.dkim ? 'found' : 'not found for this selector'}</span>
+              {i.dkim && <div className="pl-3 break-all text-slate-500">{i.dkim.raw}</div>}
             </div>
           </Section>
-          <Section icon={ShieldCheck} title={`DNSBL reputation (${res.mxIps.length} mail IP${res.mxIps.length === 1 ? '' : 's'})`} accent={res.dnsbl.length ? 'text-red-400' : 'text-emerald-400'}>
-            {res.mxIps.length === 0 && <div className="text-slate-500">No mail-server IPs resolved.</div>}
-            {res.mxIps.length > 0 && res.dnsbl.length === 0 && <div className="text-emerald-300 flex items-center gap-1"><ShieldCheck size={13} /> Not listed on any checked DNSBL ({DNSBL_ZONES.join(', ')}).</div>}
-            {res.dnsbl.map((d, i) => (<div key={i} className="text-red-300 flex items-center gap-1"><ShieldAlert size={13} /> {d.ip} ({d.host}) listed on {d.zone} → {d.code}</div>))}
+
+          <Section icon={ShieldCheck} title={`DNSBL reputation (${i.mxIps.length} mail IP${i.mxIps.length === 1 ? '' : 's'})`} accent={i.dnsbl.length ? 'text-red-400' : 'text-emerald-400'}>
+            {i.mxIps.length === 0 && <div className="text-slate-500">No mail-server IPs resolved.</div>}
+            {i.mxIps.length > 0 && i.dnsbl.length === 0 && <div className="text-emerald-300 flex items-center gap-1"><ShieldCheck size={13} /> Not listed on any checked DNSBL ({DNSBL_ZONES.join(', ')}).</div>}
+            {i.dnsbl.map((d, idx) => (<div key={idx} className="text-red-300 flex items-center gap-1"><ShieldAlert size={13} /> {d.ip} ({d.host}) listed on {d.zone} → {d.code}</div>))}
           </Section>
+
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(16rem,1fr))]">
             <Section icon={Server} title="Mail servers (MX)">
-              {res.mx.length === 0 && <div className="text-slate-500">none</div>}
-              {[...res.mx].sort((a, b) => Number(a.data.split(/\s+/)[0]) - Number(b.data.split(/\s+/)[0])).map((r, i) => (<div key={i} className="text-gray-300">{r.data}</div>))}
-              {res.mxIps.map((m, i) => <div key={`ip${i}`} className="text-slate-500 pl-3">{m.host} → {m.ip}</div>)}
+              {i.mx.length === 0 && <div className="text-slate-500">none</div>}
+              {[...i.mx].sort((a, b) => Number(a.data.split(/\s+/)[0]) - Number(b.data.split(/\s+/)[0])).map((r, idx) => (<div key={idx} className="text-gray-300">{r.data}</div>))}
+              {i.mxIps.map((m, idx) => <div key={`ip${idx}`} className="text-slate-500 pl-3">{m.host} → {m.ip}</div>)}
             </Section>
             <Section icon={Globe} title="Addresses & zone">
-              {res.a.map((r, i) => <div key={`a${i}`} className="text-gray-300">A {r.data}</div>)}
-              {res.aaaa.map((r, i) => <div key={`aa${i}`} className="text-gray-300">AAAA {r.data}</div>)}
-              {res.ns.map((r, i) => <div key={`ns${i}`} className="text-slate-400">NS {r.data}</div>)}
-              {res.caa.map((r, i) => <div key={`caa${i}`} className="text-slate-400">CAA {r.data}</div>)}
-              {res.soa.map((r, i) => <div key={`soa${i}`} className="text-slate-500 break-all">SOA {r.data}</div>)}
+              {i.a.map((r, idx) => <div key={`a${idx}`} className="text-gray-300">A {r.data} <span className="text-slate-600">ttl {r.TTL}</span></div>)}
+              {i.aaaa.map((r, idx) => <div key={`aa${idx}`} className="text-gray-300">AAAA {r.data}</div>)}
+              {i.cname.map((r, idx) => <div key={`c${idx}`} className="text-slate-400">CNAME {r.data}</div>)}
+              {i.ns.map((r, idx) => <div key={`ns${idx}`} className="text-slate-400">NS {r.data}</div>)}
+              {i.caa.map((r, idx) => <div key={`caa${idx}`} className="text-slate-400">CAA {r.data}</div>)}
+              {i.soa.map((r, idx) => <div key={`soa${idx}`} className="text-slate-500 break-all">SOA {r.data}</div>)}
             </Section>
           </div>
-          <Section icon={Search} title={`TXT records (${res.txtStrings.length})`}>
-            {res.txtStrings.length === 0 && <div className="text-slate-500">none</div>}
-            {res.txtStrings.map((t, i) => (<div key={i} className="break-all mb-0.5"><span className="text-cyan-500 mr-1">[{classifyTxt(t)}]</span><span className="text-slate-400">{t}</span></div>))}
+
+          <Section icon={Search} title={`TXT records (${i.txtStrings.length})`}>
+            {i.txtStrings.length === 0 && <div className="text-slate-500">none</div>}
+            {i.txtStrings.map((t, idx) => (<div key={idx} className="break-all mb-0.5"><span className="text-cyan-500 mr-1">[{classifyTxt(t)}]</span><span className="text-slate-400">{t}</span></div>))}
           </Section>
         </>
       )}
-    </div>
-  );
-}
 
-// ---------- Subdomains tab ----------
-function SubdomainsTab({ domain, log }) {
-  const [subList, setSubList] = useState(null);
-  const [found, setFound] = useState([]);
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const cancelRef = useRef(false);
-
-  const brute = useCallback(async () => {
-    const name = domain.trim().replace(/^\*?\./, '');
-    if (!name || !subList || !subList.length) return;
-    setBusy(true); setFound([]); setProgress({ done: 0, total: subList.length });
-    cancelRef.current = false;
-    log(`Brute-forcing ${subList.length} subdomains of ${name} via DoH…`);
-    let done = 0; const hits = []; const queue = [...subList];
-    const worker = async () => {
-      while (queue.length) {
-        if (cancelRef.current) return;
-        const sub = queue.shift();
-        const fqdn = `${sub}.${name}`;
-        try {
-          const ans = await doh(fqdn, 'A');
-          if (ans.length) {
-            const ips = ans.filter((a) => a.type === 1).map((a) => a.data);
-            hits.push({ fqdn, data: (ips.length ? ips : ans.map((a) => a.data)).join(', ') });
-            setFound([...hits].sort((a, b) => a.fqdn.localeCompare(b.fqdn)));
-          }
-        } catch { /* ignore */ }
-        done += 1;
-        if (done % 10 === 0 || !queue.length) setProgress({ done, total: subList.length });
-      }
-    };
-    await Promise.all(Array.from({ length: 10 }, worker));
-    setProgress({ done, total: subList.length });
-    log(cancelRef.current ? 'Subdomain brute cancelled' : `Found ${hits.length} subdomain(s)`);
-    setBusy(false);
-  }, [domain, subList, log]);
-
-  return (
-    <div>
-      <div className="text-sm text-gray-300 mb-1">Resolves <span className="font-mono">{'{word}'}.{domain || 'domain'}</span> via DoH</div>
-      <WordlistPicker category="subdomains" max={20000} label="Subdomain list" onLoad={(lines, meta) => { setSubList(lines); log(`Subdomain list: ${lines.length} (${meta.name})`); }} />
-      <div className="flex gap-2 items-center mb-2">
-        <button onClick={brute} disabled={busy || !subList || !domain.trim()} className="px-3 py-1 bg-indigo-900/50 border border-indigo-800 text-indigo-200 rounded text-xs hover:bg-indigo-900/70 disabled:opacity-40">
-          {busy ? `Brute-forcing ${progress.done}/${progress.total}` : 'Brute subdomains'}
-        </button>
-        {busy && <button onClick={() => { cancelRef.current = true; }} className="px-3 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Stop</button>}
-        {!subList && <span className="text-xs text-gray-500">load a subdomain list first</span>}
-      </div>
-      {found.length > 0 && (
-        <div className="border border-slate-800 rounded bg-slate-950 overflow-auto max-h-[50vh]">
-          <table className="w-full text-xs text-gray-200 border-collapse font-mono">
-            <thead className="sticky top-0 bg-slate-900"><tr className="text-left"><th className="px-2 py-1">Subdomain</th><th className="px-2 py-1">A records</th></tr></thead>
-            <tbody>
-              {found.map((r, i) => (<tr key={i} className="border-b border-slate-900 last:border-0"><td className="px-2 py-1 break-all text-green-400">{r.fqdn}</td><td className="px-2 py-1 text-gray-300">{r.data}</td></tr>))}
-            </tbody>
-          </table>
+      {/* Subdomain brute-force */}
+      <div className="mt-4 pt-3 border-t border-slate-800">
+        <h3 className="text-xs font-semibold uppercase tracking-wide mb-2 text-indigo-300 flex items-center gap-1.5"><Search size={13} /> Subdomain brute-force</h3>
+        <div className="text-[11px] text-slate-500 mb-1">Resolves <span className="font-mono">{'{word}'}.{cleanDomain() || 'domain'}</span> via DoH</div>
+        <WordlistPicker category="subdomains" max={20000} label="Subdomain list" onLoad={(lines, meta) => { setSubList(lines); log(`Subdomain list: ${lines.length} (${meta.name})`); }} />
+        <div className="flex gap-2 items-center flex-wrap mb-2">
+          {!subBusy
+            ? <button onClick={brute} disabled={!subList || !cleanDomain()} className="px-3 py-1 bg-indigo-900/50 border border-indigo-800 text-indigo-200 rounded text-xs hover:bg-indigo-900/70 disabled:opacity-40 inline-flex items-center gap-1"><Play size={12} /> Brute subdomains</button>
+            : <button onClick={() => { cancelRef.current = true; }} className="px-3 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600 inline-flex items-center gap-1"><Square size={12} /> Stop ({progress.done}/{progress.total})</button>}
+          <label className="flex items-center gap-1 text-xs text-slate-300"><input type="checkbox" checked={verbose} onChange={(e) => setVerbose(e.target.checked)} /> verbose</label>
+          {!subList && <span className="text-xs text-gray-500">load a subdomain list first</span>}
+          {progress.total > 0 && <span className="text-xs text-slate-500 ml-auto">{progress.done}/{progress.total} tried · {found.length} found</span>}
         </div>
-      )}
-    </div>
-  );
-}
 
-const TABS = [
-  { id: 'records', label: 'Records', icon: Network, comp: RecordsTab },
-  { id: 'email', label: 'Email auth', icon: Mail, comp: EmailTab },
-  { id: 'subdomains', label: 'Subdomains', icon: Search, comp: SubdomainsTab },
-];
+        {vlog.length > 0 && (
+          <div className="mb-2 bg-slate-950 border border-slate-800 rounded p-2 font-mono text-[11px] max-h-48 overflow-auto">
+            {vlog.map((line, idx) => (
+              <div key={idx} className={line.startsWith('[+]') ? 'text-green-400' : line.startsWith('[!]') ? 'text-red-400' : 'text-slate-600'}>{line}</div>
+            ))}
+            {subBusy && <div className="text-slate-500 animate-pulse">…</div>}
+          </div>
+        )}
 
-export default function DnsToolkitWorkbench({ onLogMessage, initialTab = 'records' }) {
-  const [tab, setTab] = useState(TABS.some((t) => t.id === initialTab) ? initialTab : 'records');
-  const [domain, setDomain] = useState('');
-  const log = (m) => onLogMessage?.(m);
-  const Active = TABS.find((t) => t.id === tab).comp;
-
-  return (
-    <div className="w-full min-w-0 max-w-full text-gray-200">
-      <ProxyConfig onLogMessage={log} />
-      <input
-        value={domain}
-        onChange={(e) => setDomain(e.target.value)}
-        placeholder="example.com"
-        className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono mb-3"
-      />
-      <div className="flex rounded overflow-hidden border border-slate-800 text-xs mb-3 w-fit">
-        {TABS.map((t) => {
-          const Icon = t.icon;
-          return (
-            <button key={t.id} onClick={() => setTab(t.id)} className={`px-3 py-1.5 inline-flex items-center gap-1.5 ${tab === t.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>
-              <Icon size={12} /> {t.label}
-            </button>
-          );
-        })}
+        {found.length > 0 && (
+          <div className="border border-slate-800 rounded bg-slate-950 overflow-auto max-h-[40vh]">
+            <table className="w-full text-xs text-gray-200 border-collapse font-mono">
+              <thead className="sticky top-0 bg-slate-900"><tr className="text-left"><th className="px-2 py-1">Subdomain</th><th className="px-2 py-1">A records</th></tr></thead>
+              <tbody>
+                {found.map((r, idx) => (<tr key={idx} className="border-b border-slate-900 last:border-0"><td className="px-2 py-1 break-all text-green-400">{r.fqdn}</td><td className="px-2 py-1 text-gray-300">{r.data}</td></tr>))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-      <Active domain={domain} log={log} />
-      <p className="text-[10px] text-slate-500 mt-3">All lookups use DNS-over-HTTPS (dns.google). Browsers can't perform TCP AXFR zone transfers. Assess only domains you own or are authorized to test.</p>
+
+      {!i && !error && <p className="text-[10px] text-slate-500 mt-3">One lookup resolves A/AAAA/CNAME/MX/NS/SOA/CAA/TXT and the email-auth posture (SPF/DMARC/DKIM/DNSBL) together. All over DNS-over-HTTPS; browsers can't do TCP AXFR zone transfers. Assess only domains you own or are authorized to test.</p>}
     </div>
   );
 }
