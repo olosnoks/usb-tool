@@ -4,6 +4,7 @@ import {
   ads1115Config, decodeDs3231, encodeDs3231, ssd1306Fill, SSD1306_INIT
 } from '../src/utils/sensorDrivers';
 import { BusExplorerClient } from '../src/utils/busExplorerDriver';
+import { simulateBusExplorer } from './helpers/sim/clientSim';
 
 const calibBytes = () => {
   const b = new Uint8Array(26);
@@ -87,7 +88,7 @@ describe('other sensors', () => {
 describe('Bus Explorer client', () => {
   it('reads SPI flash ID and contents in simulation', async () => {
     const c = new BusExplorerClient(() => {});
-    c.connectSimulation();
+    simulateBusExplorer(c);
     expect((await c.spiFlashId()).toString(16)).toBe('ef4017');
     const data = await c.spiFlashRead(0, 5000);
     expect(new TextDecoder().decode(data.subarray(0, 27))).toBe('BUS PIRATE SIMULATED W25Q64');

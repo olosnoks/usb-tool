@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  MassStorageDevice, buildCbw, parseCsw, parseInquiry, parseCapacity, findMscInterface, createSimulatedMassStorage
+  MassStorageDevice, buildCbw, parseCsw, parseInquiry, parseCapacity, findMscInterface
 } from '../src/utils/massStorageDriver';
+import { createSimulatedMassStorage } from './helpers/sim/massStorage';
 
 describe('BOT framing', () => {
   it('builds a CBW with the USBC signature and direction flag', () => {

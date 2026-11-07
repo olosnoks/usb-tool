@@ -3,7 +3,8 @@ import {
   parseIeeeBlock, buildIeeeBlock, imageMime, detectProfile, parsePreamble, fetchWaveform, waveformStats, waveformCsv,
   fetchScreenshot, parseNumber, presetsFor, dmmRead
 } from '../src/utils/scpiTools';
-import { UsbTmcDevice, createSimulatedUsbTmc } from '../src/utils/usbtmcDriver';
+import { UsbTmcDevice } from '../src/utils/usbtmcDriver';
+import { createSimulatedUsbTmc } from './helpers/sim/usbtmc';
 
 const enc = (s) => new TextEncoder().encode(s);
 

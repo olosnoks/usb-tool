@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  Fido2Device, buildPackets, decodeCbor, parseGetInfo, aaguidToString, createSimulatedFido2, CTAPHID
+  Fido2Device, buildPackets, decodeCbor, parseGetInfo, aaguidToString, CTAPHID
 } from '../src/utils/fido2Driver';
+import { createSimulatedFido2 } from './helpers/sim/fido2';
 
 describe('CBOR decode (GetInfo subset)', () => {
   it('decodes ints, text, arrays, maps and booleans', () => {

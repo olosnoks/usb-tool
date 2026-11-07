@@ -4,7 +4,8 @@ import {
   isSparse, parseSparse, toSparse, unsparse, splitSparse, imageParts, imageRawSize, resolvePartition, flashImage,
   parseAndroidInfo, checkRequirements, readFactoryZip, flashFactory, CHUNK
 } from '../src/utils/fastbootTools';
-import { FastbootDevice, createSimulatedFastboot } from '../src/utils/fastbootDriver';
+import { FastbootDevice } from '../src/utils/fastbootDriver';
+import { createSimulatedFastboot } from './helpers/sim/fastboot';
 
 // A raw image with zero runs, a repeating fill and random-ish data.
 function testImage(blocks = 40, bs = 4096) {

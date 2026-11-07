@@ -355,17 +355,23 @@ export default function BusExplorerWorkbench() {
           </button>
         </div>
 
-        <div className="grid grid-cols-4 @sm:grid-cols-8 gap-2">
-          {inspectRegs.map(({ reg, val }) => (
-            <div key={reg} className="bg-slate-950 p-2 rounded-lg border border-slate-800 text-center font-mono">
-              <span className="text-[9px] text-slate-500 block">R_0x{reg.toString(16).padStart(2, '0').toUpperCase()}</span>
-              <span className="text-xs font-bold text-amber-300 block mt-0.5">
-                0x{val.toString(16).padStart(2, '0').toUpperCase()}
-              </span>
-              <span className="text-[9px] text-slate-600 block">{val} (dec)</span>
-            </div>
-          ))}
-        </div>
+        {isConnected ? (
+          <div className="grid grid-cols-4 @sm:grid-cols-8 gap-2">
+            {inspectRegs.map(({ reg, val }) => (
+              <div key={reg} className="bg-slate-950 p-2 rounded-lg border border-slate-800 text-center font-mono">
+                <span className="text-[9px] text-slate-500 block">R_0x{reg.toString(16).padStart(2, '0').toUpperCase()}</span>
+                <span className="text-xs font-bold text-amber-300 block mt-0.5">
+                  0x{val.toString(16).padStart(2, '0').toUpperCase()}
+                </span>
+                <span className="text-[9px] text-slate-600 block">{val} (dec)</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-[11px] text-slate-500 py-3 text-center">
+            Connect a device and press <span className="text-slate-300 font-semibold">Read Registers</span> to see live register values.
+          </div>
+        )}
       </div>
       {/* SPI transfer */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">

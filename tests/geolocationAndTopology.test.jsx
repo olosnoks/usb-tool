@@ -8,6 +8,11 @@ describe('Geolocation API Mock & Distance Calculation', () => {
   let originalGeolocation;
 
   beforeEach(() => {
+    // Node 20 (used in CI) has no global `navigator`; create one so the
+    // geolocation mock below can be defined. Node 21+ already provides it.
+    if (!globalThis.navigator) {
+      Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true, writable: true });
+    }
     originalGeolocation = globalThis.navigator?.geolocation;
   });
 
