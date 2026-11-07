@@ -44,7 +44,8 @@ const CATEGORY_ICONS = {
   Keyboard,
   Cpu,
   Wrench,
-  AlertTriangle
+  AlertTriangle,
+  ShieldAlert
 };
 
 export const TOOL_TO_ARTICLE_MAP = {

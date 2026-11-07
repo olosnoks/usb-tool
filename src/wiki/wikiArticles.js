@@ -10,12 +10,14 @@ import { PAYLOAD_ARTICLES } from './articles/payloadArticles';
 import { HARDWARE_ARTICLES } from './articles/hardwareArticles';
 import { UTILITY_ARTICLES } from './articles/utilityArticles';
 import { REFERENCE_ARTICLES } from './articles/referenceArticles';
+import { WEBAPP_ARTICLES } from './articles/webappArticles';
 
 export const WIKI_CATEGORIES = [
   { id: 'all', name: 'All Guides', icon: 'BookOpen' },
   { id: 'core', name: 'Core Operations', icon: 'Terminal', desc: 'Terminal, Flasher & Hardware' },
   { id: 'analysis', name: 'Analysis & Protocols', icon: 'Activity', desc: 'Packet Lab, Logic Analyzer, CAN, I2C/SPI, Modbus' },
   { id: 'rf', name: 'RF, Wireless & Badges', icon: 'Radio', desc: 'Flipper, Proxmark3, Mayhem, Wardrive, Marauder' },
+  { id: 'webapp', name: 'Web App & API Testing', icon: 'ShieldAlert', desc: 'Repeater, API client, scanners, recon & crackers' },
   { id: 'pentesting', name: 'Pentesting & Payloads', icon: 'Keyboard', desc: 'RocketGod, Bruce & BadUSB Studio' },
   { id: 'programmers', name: 'Hardware & Power', icon: 'Cpu', desc: 'CH341A, CMSIS-DAP, JTAG, AVR, USB-PD' },
   { id: 'utilities', name: 'Device Utilities', icon: 'Wrench', desc: 'MicroPython, Improv, Telemetry, Autopsy' },
@@ -29,5 +31,6 @@ export const WIKI_ARTICLES = [
   ...PAYLOAD_ARTICLES,
   ...HARDWARE_ARTICLES,
   ...UTILITY_ARTICLES,
-  ...REFERENCE_ARTICLES
+  ...REFERENCE_ARTICLES,
+  ...WEBAPP_ARTICLES
 ];

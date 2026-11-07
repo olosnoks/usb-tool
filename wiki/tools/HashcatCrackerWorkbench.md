@@ -18,6 +18,9 @@ browser; no backend, no WASM.
 
 **Dependencies**: `src/utils/md5.js`.
 
+**Wordlists**: load a SecLists password list with the wordlist picker (via the
+jsDelivr CDN), or paste/upload your own.
+
 **Notes**:
 - This is a dictionary (wordlist) attack, not brute force over a keyspace.
 - Throughput is JavaScript-bound; it suits testing and small lists, not large

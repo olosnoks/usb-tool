@@ -91,6 +91,9 @@ Wireshark dissector conventions; ChibiOS/RT (PortaPack shell); DuckyScript
 - **Esri** World Imagery / World Dark Gray Base (satellite & dark basemaps).
 - **WiGLE.net** (WiGLE CSV wardriving format) — Bobzilla & Arkasha.
 - **OUI / MAC vendor data** derived from the IEEE registration authority.
+- **SecLists** (wordlists for the web/security tools) — Daniel Miessler, Jason Haddix & contributors — MIT; fetched on demand from the **jsDelivr** CDN.
+- **HaveIBeenPwned** Pwned Passwords range API (k-anonymity) — Troy Hunt.
+- **Google Public DNS** DNS-over-HTTPS endpoint (DNS Enumerator).
 
 ---
 

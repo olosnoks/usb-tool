@@ -18,6 +18,9 @@ CORS-permissive targets. Configure a proxy (see below) to test arbitrary hosts.
 
 **Dependencies**: `src/utils/netClient.js`, `src/components/tools/common/ProxyConfig.jsx`.
 
+**Wordlists**: load SecLists username and password lists with the wordlist
+pickers (via the jsDelivr CDN), or paste/upload your own.
+
 **Notes**:
 - A browser cannot distinguish a CORS rejection from a connection failure; both
   appear as a failed request. The tool says so rather than guessing.
