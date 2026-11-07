@@ -1,26 +1,39 @@
-# HTTP Repeater Workbench
+# Web Request Toolkit Workbench
 
-**Purpose**: Compose an HTTP request (method, headers, body) and inspect the full
-response (status, headers, body).
+**Purpose**: A Burp-style web request toolkit with three panels: Repeater,
+Intruder, and Decoder.
 
-**Network limitation**: A browser cannot act as a transparent MITM proxy. Direct
-requests are CORS-limited; configure a proxy to reach arbitrary hosts and read
-their responses.
+**Network limitation**: A browser cannot act as a transparent intercepting proxy.
+Requests go through `fetch` and are CORS-limited; configure a proxy (see the proxy
+bar) to reach arbitrary hosts and read their full responses.
 
-**Usage**:
-- Set an optional proxy in the proxy bar (empty = direct).
-- Pick a method and enter the URL.
-- Optionally add request headers (one `Key: Value` per line) and, for non-GET/HEAD
-  methods, a request body.
-- Click **Send**. The response status, headers, and body are displayed.
+## Repeater
+
+- Choose a method, enter a URL, add request headers (one `Key: Value` per line)
+  and a body for non-GET/HEAD methods.
+- **Send** shows the response status, timing, size, headers, and body.
+- Every send is kept in **History**; click an entry to restore that request and
+  response.
+
+## Intruder (sniper)
+
+- Mark fuzz positions anywhere in the URL, headers, or body with `{{value}}`
+  markers. The text inside the braces is the baseline default.
+- Provide a payload list (one per line). The attack replaces each marker position
+  with each payload in turn (positions × payloads).
+- A baseline request (markers at defaults) is sent first; result rows whose status
+  or length differs from the baseline are highlighted, so anomalies stand out.
+- Runs with bounded concurrency and can be stopped mid-attack.
+
+## Decoder
+
+- Encode or decode text as Base64, URL, Hex, or HTML entities (UTF-8 safe).
+- "output → input" chains transforms.
 
 **Implementation Details**:
-- Uses `proxiedFetch` from `src/utils/netClient.js`.
-- Headers are parsed from the textarea; the body is attached for methods that allow
-  one.
-
-**Dependencies**: `src/utils/netClient.js`, `src/components/tools/common/ProxyConfig.jsx`.
+- `src/utils/intruder.js` (`countMarkers`, `stripMarkers`, `applyMarkers`),
+  `src/utils/codec.js` (encoders/decoders), `src/utils/netClient.js` (proxy).
 
 **Notes**:
-- Some request headers are forbidden by the browser's fetch implementation and
-  cannot be overridden from a page.
+- Some request headers (Host, Content-Length, etc.) are controlled by the browser
+  and cannot be overridden from a page.
