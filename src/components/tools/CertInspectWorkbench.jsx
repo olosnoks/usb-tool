@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Globe, FileUp, ClipboardPaste, Search, RefreshCw, ShieldCheck, ShieldAlert, Download } from 'lucide-react';
 import { parseCertificate, toDER, splitPemChain } from '../../utils/x509';
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
+import { isBackendConfigured, tlsCert } from '../../utils/backendClient';
 import ProxyConfig from './common/ProxyConfig';
 
 /**
@@ -115,6 +116,20 @@ export default function CertInspectWorkbench({ onLogMessage }) {
     setBusy(false);
   };
 
+  // Live certificate via the TLS backend — what the server serves right now.
+  const liveLookup = async () => {
+    const h = host.trim().replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
+    if (!h) return;
+    setBusy(true); setError(''); setCertList(null); setResult(null);
+    log(`Live TLS certificate for ${h} (TLS backend)…`);
+    try {
+      const data = await tlsCert({ host: h, port: 443 });
+      if (!data.pem) throw new Error('Backend returned no PEM (update the tls-inspector image).');
+      await show(toDER(data.pem), `Live certificate for ${h} (${data.protocol || 'TLS'})`);
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
   const loadById = async (id) => {
     setBusy(true);
     try {
@@ -168,6 +183,11 @@ export default function CertInspectWorkbench({ onLogMessage }) {
             <button onClick={lookup} disabled={busy} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
               {busy ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />} Fetch certs
             </button>
+            {isBackendConfigured('tls-inspector') && (
+              <button onClick={liveLookup} disabled={busy} title="Fetch the certificate the server serves right now, via the TLS backend" className="px-3 py-1.5 bg-emerald-900/40 border border-emerald-800 text-emerald-200 rounded text-sm hover:bg-emerald-900/60 disabled:opacity-50 inline-flex items-center gap-1">
+                <ShieldCheck size={14} /> Live cert
+              </button>
+            )}
           </div>
           <p className="text-[10px] text-slate-500 mt-1">Certificates come from Certificate Transparency logs (crt.sh) and are the most recent <em>issued</em> for the host — this may differ from what the server serves right now. Requires the proxy (crt.sh sends no CORS headers).</p>
           {certList && certList.length > 0 && (

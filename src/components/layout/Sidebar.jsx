@@ -40,7 +40,8 @@ import {
   Calculator,
   Hash,
   Radar,
-  Link2
+  Link2,
+  Container
 } from 'lucide-react';
 
 import { windowKeyFor } from '../../utils/windowManager';
@@ -106,6 +107,7 @@ export const SIDEBAR_SECTIONS = [
       { id: 'ip-calculator', name: 'IP / CIDR Calculator', icon: Calculator, accent: 'purple', desc: 'IPv4 & IPv6 subnet math: network, broadcast, mask, host range & counts (fully offline)', keywords: ['ip', 'cidr', 'subnet', 'netmask', 'wildcard', 'ipv4', 'ipv6', 'calculator', 'network', 'broadcast', 'range'] },
       { id: 'hash-calculator', name: 'Hash & HMAC Calculator', icon: Hash, accent: 'amber', desc: 'MD5 / SHA-1 / SHA-256/384/512 + HMAC for text and files via Web Crypto (fully offline)', keywords: ['hash', 'md5', 'sha', 'sha256', 'sha1', 'sha512', 'hmac', 'checksum', 'digest', 'fingerprint', 'file hash'] },
       { id: 'osint-clients', name: 'OSINT API Clients', icon: Radar, accent: 'cyan', desc: 'Shodan, urlscan.io & HackerTarget clients — bring your own API key (via proxy)', keywords: ['osint', 'shodan', 'urlscan', 'hackertarget', 'recon', 'intelligence', 'api', 'host lookup', 'reverse ip'] },
+      { id: 'docker-backends', name: 'Docker Backends', icon: Container, accent: 'cyan', desc: 'Download a self-contained docker-compose.yml of local backend services (CORS proxy, real nmap, live TLS, DNS, ZAP, Hydra) and wire each tool to its service', keywords: ['docker', 'docker-compose', 'compose', 'backend', 'proxy', 'cors', 'container', 'service', 'nmap', 'zap', 'hydra', 'tls', 'dns', 'self-hosted', 'localhost'] },
     ]
   },
   {

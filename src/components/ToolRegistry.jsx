@@ -35,6 +35,7 @@ const HashCalculatorWorkbench = React.lazy(() => import('./tools/HashCalculatorW
 const CrtShFinderWorkbench = React.lazy(() => import('./tools/CrtShFinderWorkbench'));
 const OsintClientsWorkbench = React.lazy(() => import('./tools/OsintClientsWorkbench'));
 const WebAnalyzerWorkbench = React.lazy(() => import('./tools/WebAnalyzerWorkbench'));
+const DockerBackendsWorkbench = React.lazy(() => import('./tools/DockerBackendsWorkbench'));
 
 const LogicAnalyzerWorkbench = React.lazy(() => import('./tools/LogicAnalyzerWorkbench'));
 const UsbPdWorkbench = React.lazy(() => import('./tools/UsbPdWorkbench'));
@@ -105,7 +106,7 @@ export const KNOWN_TOOL_IDS = [
   'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-toolkit', 'dns-enumerator', 'dns-mail-doctor',
   'owasp-zap', 'pwned-passwords', 'cert-inspect', 'api-client',
   'db-browser', 'regex-tester', 'jwt-inspector',
-  'ip-calculator', 'hash-calculator', 'crtsh-finder', 'osint-clients', 'web-analyzer', 'url-inspector',
+  'ip-calculator', 'hash-calculator', 'crtsh-finder', 'osint-clients', 'web-analyzer', 'url-inspector', 'docker-backends',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
 
@@ -221,6 +222,7 @@ export function renderTool(toolId, serial) {
     case 'crtsh-finder': return <CrtShFinderWorkbench onLogMessage={addLog} />;
     case 'osint-clients': return <OsintClientsWorkbench onLogMessage={addLog} />;
     case 'web-analyzer': return <WebAnalyzerWorkbench onLogMessage={addLog} />;
+    case 'docker-backends': return <DockerBackendsWorkbench onLogMessage={addLog} />;
     case 'url-inspector': return <WebAnalyzerWorkbench onLogMessage={addLog} initialTab="links" />;
     default:
       return (

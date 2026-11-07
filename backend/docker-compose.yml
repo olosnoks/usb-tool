@@ -1,0 +1,111 @@
+# Skon's USB Tool — local backend services
+# ------------------------------------------------------------------------------
+# The web app is a static, browser-only site. These containers give its security
+# tools capabilities a browser cannot have on its own (cross-origin fetches, real
+# port scans, live TLS handshakes, arbitrary DNS). Each tool talks to its own
+# service on localhost; configure the URLs in the app's "Docker Backends" panel.
+#
+#   Start the safe services:      docker compose up -d
+#   Include the offensive ones:   docker compose --profile offensive up -d
+#   Stop everything:              docker compose down
+#
+# Only use these against systems you own or are explicitly authorized to assess.
+# ------------------------------------------------------------------------------
+
+services:
+  # Generic CORS forwarder. Serves the browser-fetch tools: Web Analyzer, HTTP
+  # Workbench, API Client, URL Inspector, OSINT clients, crt.sh / Cert Inspect
+  # lookups, Pwned Passwords. Also reaches sibling services by name (e.g. zap).
+  cors-proxy:
+    build: ./cors-proxy
+    image: skons-usb-tool/cors-proxy
+    container_name: skons-cors-proxy
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      # - ALLOW_HOSTS=example.com,api.example.com   # optional allowlist
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Real nmap. Backs the Nmap tool with true service/version detection.
+  nmap:
+    build: ./nmap
+    image: skons-usb-tool/nmap
+    container_name: skons-nmap
+    ports:
+      - "8091:8091"
+    environment:
+      - PORT=8091
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Live TLS certificate chain. Backs Cert Inspect with what the server serves
+  # now (vs. what Certificate Transparency recorded).
+  tls-inspector:
+    build: ./tls-inspector
+    image: skons-usb-tool/tls-inspector
+    container_name: skons-tls-inspector
+    ports:
+      - "8094:8094"
+    environment:
+      - PORT=8094
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8094/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Arbitrary DNS record lookups against any nameserver. Backs the DNS Toolkit.
+  dns:
+    build: ./dns
+    image: skons-usb-tool/dns
+    container_name: skons-dns
+    ports:
+      - "8095:8095"
+    environment:
+      - PORT=8095
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8095/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # OWASP ZAP daemon with its REST API. Backs the OWASP ZAP tool. The browser
+  # reaches it through cors-proxy (http://localhost:8080/fetch?url=http://zap:8093/...).
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: skons-zap
+    command: >
+      zap.sh -daemon -host 0.0.0.0 -port 8093
+      -config api.disablekey=true
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+    ports:
+      - "8093:8093"
+    restart: unless-stopped
+
+  # THC-Hydra — AUTHORIZED SECURITY TESTING ONLY. Not started by default; runs
+  # only with `--profile offensive` AND requires the authorization flag below.
+  hydra:
+    build: ./hydra
+    image: skons-usb-tool/hydra
+    container_name: skons-hydra
+    profiles: ["offensive"]
+    ports:
+      - "8092:8092"
+    environment:
+      - PORT=8092
+      # Set to "yes" to confirm you are authorized to test the targets:
+      - I_HAVE_AUTHORIZATION=${I_HAVE_AUTHORIZATION:-no}
+    restart: unless-stopped

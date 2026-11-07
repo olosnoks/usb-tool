@@ -3,6 +3,7 @@ import { Radio, Play, Square, Download, AlertTriangle } from 'lucide-react';
 import { loadWasmStatus } from '../../utils/wasmLoader';
 import { scanHost, parsePorts, buildPortSpec, PORT_PROFILES, TIMINGS, isBrowserBlockedPort } from '../../utils/portScan';
 import { isProxyEnabled } from '../../utils/netClient';
+import { isBackendConfigured, nmapScan } from '../../utils/backendClient';
 import ProxyConfig from './common/ProxyConfig';
 
 /**
@@ -23,6 +24,8 @@ export default function NmapScannerWorkbench({ onLogMessage }) {
   const [method, setMethod] = useState('browser');
   const [wasmExports, setWasmExports] = useState(null);
   const [scanning, setScanning] = useState(false);
+  const [useBackend, setUseBackend] = useState(false);
+  const backendAvailable = isBackendConfigured('nmap');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [elapsed, setElapsed] = useState(0);
   const cancelRef = useRef(false);
@@ -41,6 +44,9 @@ export default function NmapScannerWorkbench({ onLogMessage }) {
 
   // Keep concurrency in sync when the timing template changes.
   useEffect(() => { setConcurrency(TIMINGS[timing].concurrency); }, [timing]);
+
+  // Default to the real nmap backend when one is configured.
+  useEffect(() => { setUseBackend(isBackendConfigured('nmap')); }, []);
 
   const ports = useMemo(() => parsePorts(buildPortSpec(selected, customPorts)), [selected, customPorts]);
   const heavy = ports.length > 1500;
@@ -68,9 +74,22 @@ export default function NmapScannerWorkbench({ onLogMessage }) {
     setScanning(true); setResults([]); setProgress({ done: 0, total: ports.length }); setElapsed(0);
     cancelRef.current = false; startRef.current = performance.now();
     const t = TIMINGS[timing];
-    log(`Scanning ${host} — ${ports.length} port(s), ${t.label}, concurrency ${concurrency}, via ${method}${isProxyEnabled() ? ' + proxy' : ''}…`);
+    const via = useBackend && backendAvailable ? 'nmap backend' : method;
+    log(`Scanning ${host} — ${ports.length} port(s), ${t.label}, concurrency ${concurrency}, via ${via}${isProxyEnabled() && via !== 'nmap backend' ? ' + proxy' : ''}…`);
     try {
-      if (method === 'wasm') {
+      if (useBackend && backendAvailable) {
+        const spec = buildPortSpec(selected, customPorts);
+        const res = await nmapScan({ target: host, ports: spec, profile: 'version' });
+        const mapped = (res.hosts || []).map((h) => ({
+          port: h.port,
+          state: h.state === 'open' ? 'open' : h.state === 'filtered' ? 'open|filtered' : 'closed',
+          service: [h.service, h.version].filter(Boolean).join(' ').trim(),
+          ms: null,
+        })).sort((a, b) => a.port - b.port);
+        setResults(mapped);
+        setProgress({ done: ports.length, total: ports.length });
+        log(`nmap backend: ${mapped.filter((r) => r.state === 'open').length} open of ${mapped.length} reported`);
+      } else if (method === 'wasm') {
         const parsed = runWasmScan(host, ports);
         setResults(parsed); setProgress({ done: ports.length, total: ports.length });
       } else {
@@ -131,6 +150,13 @@ export default function NmapScannerWorkbench({ onLogMessage }) {
         {method === 'wasm' ? 'Scanning via the WebAssembly engine.' : 'Connect-timing scan over fetch (browser heuristic): open = a service answered; closed = refused fast; open|filtered = stalled; blocked = port Chrome refuses to fetch.'}
       </p>
       <ProxyConfig onLogMessage={onLogMessage} />
+
+      {backendAvailable && (
+        <label className="mb-2 inline-flex items-center gap-1.5 text-xs text-emerald-300">
+          <input type="checkbox" checked={useBackend} onChange={(e) => setUseBackend(e.target.checked)} />
+          Use real nmap backend (Docker) — true service/version detection
+        </label>
+      )}
 
       <div className="flex flex-wrap gap-2 mb-2">
         <input type="text" placeholder="target host (e.g. scanme.nmap.org or 127.0.0.1)" value={target} onChange={(e) => setTarget(e.target.value)} className="flex-1 min-w-[14rem] bg-slate-900 border border-slate-800 rounded p-1.5 text-sm font-mono" />

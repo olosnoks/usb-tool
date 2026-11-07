@@ -35,6 +35,7 @@ export default function ProxyConfig({ onLogMessage }) {
       <p className="text-[10px] text-gray-500 mt-1">
         Empty = direct browser fetch (only CORS-permissive targets). Set a proxy URL with a{' '}
         <code>{'{url}'}</code> placeholder, or a prefix the target URL is appended to, to reach any host.
+        No proxy? The <strong>Docker Backends</strong> tool gives you a one-file <code>docker-compose.yml</code> for a local one.
       </p>
     </div>
   );
