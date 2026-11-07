@@ -46,7 +46,6 @@ const FlipperWorkbench = React.lazy(() => import('./tools/flipper/FlipperWorkben
 const ProxmarkWorkbench = React.lazy(() => import('./tools/proxmark/ProxmarkWorkbench'));
 const CrashAlertDeck = React.lazy(() => import('./CrashAlertDeck'));
 const ScriptRunner = React.lazy(() => import('./ScriptRunner'));
-const UsbReconDeck = React.lazy(() => import('./UsbReconDeck'));
 const EspMemoryInspector = React.lazy(() => import('./EspMemoryInspector'));
 const AlfaWifiWorkbench = React.lazy(() => import('./workbenches/AlfaWifiWorkbench'));
 const WarhogPigletWorkbench = React.lazy(() => import('./workbenches/WarhogPigletWorkbench'));
@@ -58,7 +57,7 @@ const GpsNavigationSuite = React.lazy(() => import('./tools/GpsNavigationSuite')
 const HardwareProgrammersSuite = React.lazy(() => import('./tools/HardwareProgrammersSuite'));
 const DfuFlasher = React.lazy(() => import('./tools/DfuFlasher'));
 const FastbootWorkbench = React.lazy(() => import('./tools/FastbootWorkbench'));
-const UsbDescriptorExplorer = React.lazy(() => import('./tools/UsbDescriptorExplorer'));
+const UsbInspectorWorkbench = React.lazy(() => import('./tools/UsbInspectorWorkbench'));
 const AdbWorkbench = React.lazy(() => import('./tools/AdbWorkbench'));
 const AndroidWorkbench = React.lazy(() => import('./tools/AndroidWorkbench'));
 const HidInspectorWorkbench = React.lazy(() => import('./tools/HidInspectorWorkbench'));
@@ -98,7 +97,7 @@ export const KNOWN_TOOL_IDS = [
   'flasher', 'terminal', 'hardware', 'setup', 'plotter', 'packet-analyzer', 'hex', 'packets', 'kismet', 'bridge',
   'micropython', 'improv', 'telemetry', 'wardrive', 'ubx', 'alerts', 'automation', 'autopsy', 'esp-dump',
   'programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp', 'can-bus', 'logic-analyzer', 'usb-pd', 'dfu',
-  'android', 'fastboot', 'adb', 'usb-descriptors', 'hid', 'usbtmc', 'mass-storage', 'ptp', 'fido2', 'session-log', 'ble',
+  'android', 'fastboot', 'adb', 'usb-inspector', 'usb-descriptors', 'hid', 'usbtmc', 'mass-storage', 'ptp', 'fido2', 'session-log', 'ble',
   'bus-explorer', 'modbus-rtu', 'alfa-wifi', 'wifi-scanner', 'warhog-piglet', 'mayhem', 'flipper', 'proxmark', 'rfid-nfc',
   'ducky', 'cyberchef', 'wardrive-generator',
   // New hacker tools
@@ -155,8 +154,10 @@ export function renderTool(toolId, serial) {
       return <GpsNavigationSuite initialTab={toolId === 'ubx' ? 'ubx' : 'wardrive'} latestTextStream={latestRxText} isConnected={isConnected} onLogMessage={addLog} onSendRawBytes={sendRawBytes} />;
     case 'alerts': return <CrashAlertDeck latestTextStream={latestRxText} onPauseTerminal={setConsolePaused} onLogMessage={addLog} />;
     case 'automation': return <ScriptRunner isConnected={isConnected} onSendString={sendString} latestRxText={latestRxText} onLogMessage={addLog} />;
+    case 'usb-inspector':
     case 'autopsy':
-      return <UsbReconDeck isConnected={isConnected} onSendRawBytes={sendRawBytes} onSendString={sendString} onToggleSignal={toggleSignal} onBaudRateChange={setBaudRate} currentBaudRate={baudRate} onLogMessage={addLog} boards={boards} activeBoardId={activeBoardId} onSelectBoard={setActiveBoardId} />;
+    case 'usb-descriptors':
+      return <UsbInspectorWorkbench initialTab={toolId === 'usb-descriptors' ? 'descriptors' : 'recon'} isConnected={isConnected} onSendRawBytes={sendRawBytes} onSendString={sendString} onToggleSignal={toggleSignal} onBaudRateChange={setBaudRate} currentBaudRate={baudRate} onLogMessage={addLog} boards={boards} activeBoardId={activeBoardId} onSelectBoard={setActiveBoardId} />;
     case 'esp-dump': return <EspMemoryInspector isConnected={isConnected} port={port} onLogMessage={addLog} />;
     case 'programmers':
     case 'ch341a':
@@ -171,7 +172,6 @@ export function renderTool(toolId, serial) {
     case 'android': return <AndroidWorkbench />;
     case 'fastboot': return <AndroidWorkbench initialMode="fastboot" />;
     case 'adb': return <AndroidWorkbench initialMode="adb" />;
-    case 'usb-descriptors': return <UsbDescriptorExplorer />;
     case 'hid': return <HidInspectorWorkbench />;
     case 'usbtmc': return <UsbTmcWorkbench />;
     case 'mass-storage': return <MassStorageWorkbench />;
