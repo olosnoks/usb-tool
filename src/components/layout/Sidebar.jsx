@@ -35,7 +35,8 @@ import {
   ScrollText,
   MapPin,
   Database,
-  Globe
+  Globe,
+  Regex
 } from 'lucide-react';
 
 import { windowKeyFor } from '../../utils/windowManager';
@@ -97,7 +98,9 @@ export const SIDEBAR_SECTIONS = [
       { id: 'cert-inspect', name: 'Certificate Inspector', icon: ShieldCheck, accent: 'cyan', desc: 'Parse X.509 PEM/DER certificates (TLS/SSL)', keywords: ['certificate', 'x509', 'pem', 'der', 'tls', 'ssl'] },
       { id: 'pwned-passwords', name: 'Pwned Passwords', icon: ShieldCheck, accent: 'rose', desc: 'Check passwords against HaveIBeenPwned (k-anonymity)', keywords: ['pwned', 'hibp', 'breach', 'password', 'haveibeenpwned'] },
       { id: 'db-browser', name: 'Lite DB Browser', icon: Database, accent: 'emerald', desc: 'Open SQLite files read-only & query DB/REST endpoints (PostgREST, CouchDB, Elasticsearch, Datasette)', keywords: ['database', 'db', 'sqlite', 'sql', 'postgrest', 'couchdb', 'elasticsearch', 'datasette', 'rest', 'endpoint', 'table', 'browser', 'viewer'] },
-      { id: 'web-toolbox', name: 'Web Security Toolbox', icon: Globe, accent: 'cyan', desc: 'Launcher for browser-based OSINT, recon, encoding & lab services (Shodan, crt.sh, CyberChef, urlscan, PortSwigger…)', keywords: ['web toolbox', 'osint', 'recon', 'shodan', 'censys', 'urlscan', 'crt.sh', 'cyberchef', 'regex101', 'jwt', 'portswigger', 'tryhackme', 'launcher', 'links', 'bookmarks'] }
+      { id: 'regex-tester', name: 'Regex Tester', icon: Regex, accent: 'purple', desc: 'Live regex match highlighting, capture groups & replace preview (regex101-style, fully offline)', keywords: ['regex', 'regexp', 'regular expression', 'regex101', 'match', 'capture group', 'pattern', 'replace'] },
+      { id: 'jwt-inspector', name: 'JWT Inspector', icon: KeyRound, accent: 'amber', desc: 'Decode JWT header/claims & verify HS/RS/ES/PS signatures with Web Crypto (jwt.io-style, offline)', keywords: ['jwt', 'jwt.io', 'json web token', 'jws', 'bearer', 'claims', 'hs256', 'rs256', 'es256', 'verify', 'signature', 'decode'] },
+      { id: 'dns-mail-doctor', name: 'DNS / Mail Doctor', icon: Globe, accent: 'cyan', desc: 'A/MX/NS/TXT/CAA + SPF/DMARC/DKIM parsing & DNSBL checks over DNS-over-HTTPS (MXToolbox-style)', keywords: ['dns', 'mail', 'mxtoolbox', 'spf', 'dmarc', 'dkim', 'dnsbl', 'blacklist', 'mx', 'txt', 'caa', 'doh', 'email', 'deliverability'] }
     ]
   },
   {

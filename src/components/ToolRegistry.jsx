@@ -30,8 +30,10 @@ const OwaspZapWorkbench = React.lazy(() => import('./tools/OwaspZapWorkbench'));
 const ApiClientWorkbench = React.lazy(() => import('./tools/ApiClientWorkbench'));
 const PwnedPasswordsCheckerWorkbench = React.lazy(() => import('./tools/PwnedPasswordsCheckerWorkbench'));
 const CertInspectWorkbench = React.lazy(() => import('./tools/CertInspectWorkbench'));
-const WebToolboxWorkbench = React.lazy(() => import('./tools/WebToolboxWorkbench'));
 const DbBrowserWorkbench = React.lazy(() => import('./tools/DbBrowserWorkbench'));
+const RegexTesterWorkbench = React.lazy(() => import('./tools/RegexTesterWorkbench'));
+const JwtInspectorWorkbench = React.lazy(() => import('./tools/JwtInspectorWorkbench'));
+const DnsMailDoctorWorkbench = React.lazy(() => import('./tools/DnsMailDoctorWorkbench'));
 
 const LogicAnalyzerWorkbench = React.lazy(() => import('./tools/LogicAnalyzerWorkbench'));
 const UsbPdWorkbench = React.lazy(() => import('./tools/UsbPdWorkbench'));
@@ -100,7 +102,7 @@ export const KNOWN_TOOL_IDS = [
   'nmap-scanner', 'hashcat-cracker', 'burp-proxy', 'aircrack-wifi',
   'nikto-scanner', 'hydra-bruteforce', 'tcpdump-viewer', 'dns-enumerator',
   'owasp-zap', 'pwned-passwords', 'cert-inspect', 'api-client',
-  'web-toolbox', 'db-browser',
+  'db-browser', 'regex-tester', 'jwt-inspector', 'dns-mail-doctor',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
 
@@ -204,8 +206,10 @@ export function renderTool(toolId, serial) {
     case 'api-client': return <ApiClientWorkbench onLogMessage={addLog} />;
     case 'pwned-passwords': return <PwnedPasswordsCheckerWorkbench onLogMessage={addLog} />;
     case 'cert-inspect': return <CertInspectWorkbench onLogMessage={addLog} />;
-    case 'web-toolbox': return <WebToolboxWorkbench />;
     case 'db-browser': return <DbBrowserWorkbench onLogMessage={addLog} />;
+    case 'regex-tester': return <RegexTesterWorkbench />;
+    case 'jwt-inspector': return <JwtInspectorWorkbench onLogMessage={addLog} />;
+    case 'dns-mail-doctor': return <DnsMailDoctorWorkbench onLogMessage={addLog} />;
     default:
       return (
         <div className="py-16 text-center font-mono text-xs text-slate-500">
