@@ -18,11 +18,15 @@ Open a `.sqlite` / `.db` file, then switch between three modes:
   The engine loads lazily on first use; if it can't load, Browse and Structure
   still work. **The original file on disk is never modified.**
 
+The sql.js engine loads automatically when a file is opened, so **Browse Data,
+Structure and Execute SQL all read the same live database** — inserts/updates/DDL
+run in Execute SQL show up immediately in Browse and Structure (the row count
+marker shows "live"). If the engine can't load, Browse/Structure fall back to the
+read-only parser and show "read-only".
+
 **Export database (.sqlite)**: a header button serializes the in-memory database
-— including any inserts/updates/DDL run in Execute SQL — to a downloadable
-`.sqlite` file (`db.export()`), giving you a write-back path. (Browse & Structure
-read the originally opened bytes, so they don't reflect in-session SQL edits;
-the export does.)
+— including any in-session SQL edits — to a downloadable `.sqlite` file
+(`db.export()`), giving you a write-back path.
 
 ## Endpoint
 Query a database/REST endpoint over HTTP (PostgREST, CouchDB, Elasticsearch

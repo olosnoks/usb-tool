@@ -95,17 +95,45 @@ function toCsv(columns, rows) {
   return [columns.map(esc).join(','), ...rows.map((r) => r.map(esc).join(','))].join('\n');
 }
 
+// --- sql.js query helpers (used once the engine is live) ---
+const qid = (n) => '"' + String(n).replace(/"/g, '""') + '"';
+function sqlSchema(db) {
+  const r = runSql(db, "SELECT type,name,tbl_name,rootpage,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY (type='table') DESC, type, name");
+  if (!r.length) return [];
+  const c = Object.fromEntries(r[0].columns.map((x, i) => [x, i]));
+  return r[0].rows.map((row) => ({ type: row[c.type], name: row[c.name], tblName: row[c.tbl_name], rootpage: row[c.rootpage], sql: row[c.sql] }));
+}
+function sqlColumns(db, name) {
+  const r = runSql(db, `PRAGMA table_info(${qid(name)})`);
+  if (!r.length) return [];
+  const c = Object.fromEntries(r[0].columns.map((x, i) => [x, i]));
+  return r[0].rows.map((row) => ({ name: row[c.name], type: row[c.type], notnull: !!row[c.notnull], dflt: row[c.dflt_value], pk: !!row[c.pk] }));
+}
+function sqlCount(db, name) {
+  try { const r = runSql(db, `SELECT COUNT(*) FROM ${qid(name)}`); return r.length ? r[0].rows[0][0] : 0; } catch { return 0; }
+}
+function sqlRows(db, name, limit, offset) {
+  let r;
+  try { r = runSql(db, `SELECT rowid AS __rowid__, * FROM ${qid(name)} LIMIT ${limit} OFFSET ${offset}`); }
+  catch { r = runSql(db, `SELECT * FROM ${qid(name)} LIMIT ${limit} OFFSET ${offset}`); }
+  if (!r.length) return { columns: [], rows: [], rowIds: null };
+  const cols = r[0].columns;
+  const hasRid = cols[0] === '__rowid__';
+  return { columns: hasRid ? cols.slice(1) : cols, rowIds: hasRid ? r[0].rows.map((x) => x[0]) : null, rows: r[0].rows.map((x) => (hasRid ? x.slice(1) : x)) };
+}
+
 function SqliteTab({ log }) {
   const [db, setDb] = useState(null);           // dependency-free parser handle
   const [bytes, setBytes] = useState(null);     // raw bytes for sql.js
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState(0);
-  const [schema, setSchema] = useState([]);
+  const [schema, setSchema] = useState([]);     // parser schema (fallback)
   const [active, setActive] = useState(null);
   const [page, setPage] = useState(0);
   const [filter, setFilter] = useState('');
   const [error, setError] = useState('');
   const [mode, setMode] = useState('browse');   // browse | structure | sql
+  const [refreshKey, setRefreshKey] = useState(0); // bumps after SQL edits
 
   // sql.js engine (lazy)
   const [engine, setEngine] = useState({ state: 'idle', err: '' }); // idle|loading|ready|error
@@ -115,12 +143,20 @@ function SqliteTab({ log }) {
   const [sqlError, setSqlError] = useState('');
   const [sqlRunning, setSqlRunning] = useState(false);
 
-  const tables = useMemo(() => schema.filter((s) => s.type === 'table' && s.rootpage), [schema]);
+  const ready = engine.state === 'ready' && !!sqlDb;
+
+  // Prefer the live sql.js schema (reflects in-session edits) when the engine is up.
+  const liveSchema = useMemo(() => {
+    if (!ready) return null;
+    try { return sqlSchema(sqlDb); } catch { return null; }
+  }, [ready, sqlDb, refreshKey]);
+  const effSchema = liveSchema || schema;
+  const tables = useMemo(() => effSchema.filter((s) => s.type === 'table'), [effSchema]);
 
   const onFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setError(''); setDb(null); setSchema([]); setActive(null); setPage(0); setFilter('');
+    setError(''); setDb(null); setSchema([]); setActive(null); setPage(0); setFilter(''); setRefreshKey(0);
     setEngine({ state: 'idle', err: '' }); setSqlDb(null); setSqlResults(null); setSqlError('');
     try {
       const ab = await file.arrayBuffer();
@@ -128,34 +164,49 @@ function SqliteTab({ log }) {
       const sch = listSchema(handle);
       setDb(handle); setBytes(new Uint8Array(ab)); setFileName(file.name); setFileSize(file.size); setSchema(sch);
       const firstTable = sch.find((s) => s.type === 'table' && s.rootpage);
-      if (firstTable) selectTable(handle, firstTable);
+      if (firstTable) selectTable(firstTable);
       log?.(`Opened ${file.name} (${(file.size / 1024).toFixed(0)} KB) — ${sch.filter((s) => s.type === 'table').length} table(s)`);
+      // Bring up the live engine so Browse/Structure/SQL all share one state.
+      setEngine({ state: 'loading', err: '' });
+      openSqlDatabase(new Uint8Array(ab))
+        .then((d) => { setSqlDb(d); setEngine({ state: 'ready', err: '' }); log?.('sql.js engine ready'); })
+        .catch((err2) => { setEngine({ state: 'error', err: err2.message || String(err2) }); log?.(`sql.js engine failed: ${err2.message}`); });
     } catch (err) {
       setError(err.message || String(err));
       log?.(`SQLite open failed: ${err.message}`);
     }
   };
 
-  const selectTable = (handle, t) => {
-    const count = countRows(handle, t.rootpage, 2000000);
-    setActive({ ...t, count });
-    setPage(0); setFilter('');
-  };
+  const selectTable = (t) => { setActive({ name: t.name, sql: t.sql, rootpage: t.rootpage }); setPage(0); setFilter(''); };
 
-  // Browse view (dependency-free parser), with an optional client-side page filter.
+  const activeCount = useMemo(() => {
+    if (!active) return 0;
+    if (ready) return sqlCount(sqlDb, active.name);
+    return active.rootpage ? countRows(db, active.rootpage, 2000000) : 0;
+  }, [active, ready, sqlDb, db, refreshKey]);
+
+  // Browse view — live via sql.js when ready, else the dependency-free parser.
+  // A client-side filter narrows the current page.
   const view = useMemo(() => {
-    if (!db || !active) return null;
-    const { rows } = readRows(db, active.rootpage, { limit: PAGE_SIZE, offset: page * PAGE_SIZE });
-    const columns = active.columns?.length ? active.columns : (rows[0]?.values.map((_, i) => `col${i}`) || []);
-    let mapped = rows.map((r) => ({ rowid: r.rowid, cells: r.values.map(cellText) }));
+    if (!active) return null;
+    let columns; let rowIds; let rows;
+    if (ready) {
+      const v = sqlRows(sqlDb, active.name, PAGE_SIZE, page * PAGE_SIZE);
+      columns = v.columns; rowIds = v.rowIds; rows = v.rows.map((r) => r.map(cellText));
+    } else if (db) {
+      const r = readRows(db, active.rootpage, { limit: PAGE_SIZE, offset: page * PAGE_SIZE });
+      columns = active.columns?.length ? active.columns : (r.rows[0]?.values.map((_, i) => `col${i}`) || []);
+      rowIds = r.rows.map((x) => x.rowid); rows = r.rows.map((x) => x.values.map(cellText));
+    } else return null;
     if (filter.trim()) {
       const q = filter.trim().toLowerCase();
-      mapped = mapped.filter((m) => m.cells.some((c) => c.toLowerCase().includes(q)));
+      const keep = rows.map((r, i) => (r.some((c) => c.toLowerCase().includes(q)) ? i : -1)).filter((i) => i >= 0);
+      rows = keep.map((i) => rows[i]); rowIds = rowIds ? keep.map((i) => rowIds[i]) : null;
     }
-    return { columns, rowIds: mapped.map((m) => m.rowid), rows: mapped.map((m) => m.cells) };
-  }, [db, active, page, filter]);
+    return { columns, rowIds, rows };
+  }, [ready, sqlDb, db, active, page, filter, refreshKey]);
 
-  const totalPages = active ? Math.max(1, Math.ceil(active.count / PAGE_SIZE)) : 1;
+  const totalPages = Math.max(1, Math.ceil(activeCount / PAGE_SIZE));
 
   const exportTableCsv = () => {
     if (!view) return;
@@ -201,6 +252,7 @@ function SqliteTab({ log }) {
     try {
       const sets = runSql(d, sqlText);
       setSqlResults(sets);
+      setRefreshKey((k) => k + 1);
       log?.(`SQL ok — ${sets.length} result set(s)`);
     } catch (e) { setSqlError(e.message || String(e)); }
     setSqlRunning(false);
@@ -247,7 +299,7 @@ function SqliteTab({ log }) {
               <div className="border border-slate-800 rounded bg-slate-900/40 p-2 max-h-[60vh] overflow-auto">
                 <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Tables ({tables.length})</div>
                 {tables.map((t) => (
-                  <button key={t.name} onClick={() => selectTable(db, t)}
+                  <button key={t.name} onClick={() => selectTable(t)}
                     className={`w-full text-left px-2 py-1 rounded text-xs font-mono flex items-center gap-1.5 mb-0.5 ${active?.name === t.name ? 'bg-cyan-900/50 text-cyan-200' : 'text-gray-300 hover:bg-slate-800'}`}>
                     <TableIcon size={12} className="shrink-0" /> <span className="truncate">{t.name}</span>
                   </button>
@@ -259,7 +311,7 @@ function SqliteTab({ log }) {
                 {mode === 'browse' && active && (
                   <>
                     <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                      <div className="text-xs text-gray-300 font-mono"><span className="text-cyan-300">{active.name}</span> · {active.count.toLocaleString()} row(s)</div>
+                      <div className="text-xs text-gray-300 font-mono"><span className="text-cyan-300">{active.name}</span> · {activeCount.toLocaleString()} row(s) {ready ? <span className="text-emerald-500/70">live</span> : <span className="text-slate-600">read-only</span>}</div>
                       <div className="flex items-center gap-2 text-xs">
                         <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="filter this page…" className="bg-slate-900 border border-slate-800 rounded px-2 py-1 font-mono w-40" />
                         <button onClick={exportTableCsv} className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300"><Download size={11} /> CSV</button>
@@ -273,7 +325,7 @@ function SqliteTab({ log }) {
                 )}
 
                 {mode === 'structure' && (
-                  <StructureView db={db} schema={schema} />
+                  <StructureView db={db} schema={effSchema} ready={ready} sqlDb={sqlDb} refreshKey={refreshKey} />
                 )}
               </div>
             </div>
@@ -300,18 +352,19 @@ function SqliteTab({ log }) {
   );
 }
 
-function StructureView({ db, schema }) {
-  const tables = schema.filter((s) => s.type === 'table');
-  const indexes = schema.filter((s) => s.type === 'index');
-  const views = schema.filter((s) => s.type === 'view');
-  const triggers = schema.filter((s) => s.type === 'trigger');
+function StructureView({ db, schema, ready, sqlDb, refreshKey }) {
+  const data = useMemo(() => schema, [schema, refreshKey]);
+  const tables = data.filter((s) => s.type === 'table');
+  const indexes = data.filter((s) => s.type === 'index');
+  const views = data.filter((s) => s.type === 'view');
+  const triggers = data.filter((s) => s.type === 'trigger');
   return (
     <div className="text-xs max-h-[60vh] overflow-auto pr-1">
-      <div className="mb-3 text-slate-400 font-mono">DB: {db.pageSize}B pages · {db.encoding} · {db.pageCount.toLocaleString()} pages · {(db.byteLength / 1024).toFixed(0)} KB</div>
+      <div className="mb-3 text-slate-400 font-mono">DB: {db.pageSize}B pages · {db.encoding} · {db.pageCount.toLocaleString()} pages · {(db.byteLength / 1024).toFixed(0)} KB {ready ? <span className="text-emerald-500/70">· live</span> : null}</div>
       <div className="text-[10px] uppercase tracking-wide text-cyan-400 mb-1">Tables ({tables.length})</div>
       {tables.map((t) => {
-        const cols = parseColumnDefs(t.sql);
-        const count = t.rootpage ? countRows(db, t.rootpage, 2000000) : 0;
+        const cols = ready ? sqlColumns(sqlDb, t.name) : parseColumnDefs(t.sql);
+        const count = ready ? sqlCount(sqlDb, t.name) : (t.rootpage ? countRows(db, t.rootpage, 2000000) : 0);
         return (
           <div key={t.name} className="mb-2 border border-slate-800 rounded bg-slate-950 p-2">
             <div className="font-mono text-gray-100 mb-1">{t.name} <span className="text-slate-500">· {count.toLocaleString()} row(s)</span></div>
