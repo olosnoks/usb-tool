@@ -9,6 +9,8 @@ bar) to reach arbitrary hosts and read their full responses.
 
 ## Repeater
 
+- Works over both HTTP and HTTPS. Enter a full `http://` or `https://` URL; a URL
+  with no scheme defaults to `https://`.
 - Choose a method, enter a URL, add request headers (one `Key: Value` per line)
   and a body for non-GET/HEAD methods.
 - **Send** shows the response status, timing, size, headers, and body.

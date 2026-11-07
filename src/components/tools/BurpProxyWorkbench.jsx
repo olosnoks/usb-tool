@@ -16,6 +16,14 @@ import ProxyConfig from './common/ProxyConfig';
  */
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 
+// Accept http:// and https:// URLs. If no scheme is given, default to https://.
+function normalizeUrl(raw) {
+  const u = (raw || '').trim();
+  if (!u) return u;
+  if (/^https?:\/\//i.test(u)) return u;
+  return `https://${u}`;
+}
+
 function parseHeaders(text) {
   const h = {};
   (text || '').split('\n').forEach((line) => {
@@ -33,7 +41,7 @@ async function sendRequest({ method, url, headers, body }) {
   const opts = { method, headers: parseHeaders(headers), redirect: 'follow' };
   if (method !== 'GET' && method !== 'HEAD' && body) opts.body = body;
   const start = performance.now();
-  const resp = await proxiedFetch(url, opts);
+  const resp = await proxiedFetch(normalizeUrl(url), opts);
   const text = await resp.text();
   return {
     status: resp.status,

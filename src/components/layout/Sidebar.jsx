@@ -75,18 +75,24 @@ export const SIDEBAR_SECTIONS = [
       { id: 'warhog-piglet', name: 'Warhog CYD & Piglet Suite', icon: Sparkles, accent: 'amber', desc: 'Warhog CYD (ESP32-2432S028R) & Piglet ESP32-C5/S3 wardriver deck', keywords: ['warhog', 'piglet', 'cyd', 'cheap yellow display', 'esp32-2432s028r', 'esp32-c5', 'esp32-s3', 'sd card', 'wardriver.cfg', 'screen mirror'] },
       { id: 'wardrive-generator', name: 'Demo Wardrive Generator', icon: MapPin, accent: 'emerald', desc: 'Synthetic wardriving vector art for Kepler.gl & WiGLE (inspired by OSINTIAL)', keywords: ['demo generator', 'wardrive generator', 'kepler', 'kepler.gl', 'wigle', 'vector', 'svg', 'map art', 'osintial', 'synthetic'] },
       { id: 'ble', name: 'Bluetooth LE Explorer', icon: Bluetooth, accent: 'cyan', desc: 'Web Bluetooth GATT client: services, notify, typed writes, Nordic DFU updates', keywords: ['ble', 'bluetooth', 'gatt', 'nordic', 'dfu', 'nrf', 'nrf52', 'services', 'characteristics', 'wireless'] },
-      // New hacker tools
-      { id: 'nmap-scanner', name: 'Port Scanner', icon: Radio, accent: 'cyan', desc: 'TCP port scanner front-end (requires WASM engine)', keywords: ['nmap', 'port scanner', 'service discovery', 'network'] },
+      // Wireless / crypto / packet security
       { id: 'hashcat-cracker', name: 'Hash Cracker', icon: Zap, accent: 'amber', desc: 'Dictionary attack: MD5/SHA-1/256/384/512', keywords: ['hashcat', 'crack', 'hash', 'md5', 'sha', 'password'] },
-      { id: 'burp-proxy', name: 'HTTP Repeater', icon: ShieldCheck, accent: 'purple', desc: 'Send crafted HTTP requests, inspect responses', keywords: ['burp', 'repeater', 'proxy', 'http', 'request'] },
       { id: 'aircrack-wifi', name: 'WPA PMKID Cracker', icon: Wifi, accent: 'cyan', desc: 'Offline WPA/WPA2 PMKID dictionary attack', keywords: ['aircrack', 'wifi', 'wpa', 'pmkid', 'crack'] },
+      { id: 'tcpdump-viewer', name: 'PCAP Viewer', icon: ShieldAlert, accent: 'rose', desc: 'Parse and filter .pcap captures in-browser', keywords: ['tcpdump', 'pcap', 'viewer', 'packet'] }
+    ]
+  },
+  {
+    id: 'webapp',
+    title: 'WEB APP TESTING',
+    items: [
+      { id: 'burp-proxy', name: 'HTTP/HTTPS Repeater', icon: ShieldCheck, accent: 'purple', desc: 'Repeater, Intruder & Decoder — send crafted HTTP/HTTPS requests', keywords: ['burp', 'repeater', 'intruder', 'decoder', 'proxy', 'http', 'https', 'request', 'web app'] },
+      { id: 'owasp-zap', name: 'Web Scanner', icon: ShieldAlert, accent: 'amber', desc: 'Passive web vuln scan: headers, cookies, CORS, TLS', keywords: ['owasp', 'zap', 'vulnerability', 'scanner', 'web', 'passive', 'headers'] },
       { id: 'nikto-scanner', name: 'Web Path Prober', icon: Sparkles, accent: 'rose', desc: 'Probe common sensitive paths and server header', keywords: ['nikto', 'vulnerability', 'scanner', 'web', 'paths'] },
       { id: 'hydra-bruteforce', name: 'HTTP Basic Auth Tester', icon: Cpu, accent: 'emerald', desc: 'Try credential lists against HTTP Basic auth', keywords: ['hydra', 'bruteforce', 'login', 'basic auth', 'http'] },
-      { id: 'tcpdump-viewer', name: 'PCAP Viewer', icon: ShieldAlert, accent: 'rose', desc: 'Parse and filter .pcap captures in-browser', keywords: ['tcpdump', 'pcap', 'viewer', 'packet'] },
-      { id: 'dns-enumerator', name: 'DNS Enumerator', icon: MapPin, accent: 'indigo', desc: 'Resolve DNS records over DNS-over-HTTPS', keywords: ['dns', 'enumerate', 'doh', 'records', 'subdomain'] },
-      { id: 'owasp-zap', name: 'Web Scanner', icon: ShieldAlert, accent: 'amber', desc: 'Web vuln scanner front-end (requires WASM engine)', keywords: ['owasp', 'zap', 'vulnerability', 'scanner', 'web'] },
-      { id: 'pwned-passwords', name: 'Pwned Passwords', icon: ShieldCheck, accent: 'rose', desc: 'Check passwords against HaveIBeenPwned (k-anonymity)', keywords: ['pwned', 'hibp', 'breach', 'password', 'haveibeenpwned'] },
-      { id: 'cert-inspect', name: 'Certificate Inspector', icon: ShieldCheck, accent: 'cyan', desc: 'Parse X.509 PEM/DER certificates', keywords: ['certificate', 'x509', 'pem', 'der', 'tls', 'ssl'] }
+      { id: 'nmap-scanner', name: 'Port Scanner', icon: Radio, accent: 'cyan', desc: 'Browser connect-timing TCP port scan', keywords: ['nmap', 'port scanner', 'service discovery', 'network', 'recon'] },
+      { id: 'dns-enumerator', name: 'DNS Enumerator', icon: MapPin, accent: 'indigo', desc: 'Resolve DNS records over DNS-over-HTTPS', keywords: ['dns', 'enumerate', 'doh', 'records', 'subdomain', 'recon'] },
+      { id: 'cert-inspect', name: 'Certificate Inspector', icon: ShieldCheck, accent: 'cyan', desc: 'Parse X.509 PEM/DER certificates (TLS/SSL)', keywords: ['certificate', 'x509', 'pem', 'der', 'tls', 'ssl'] },
+      { id: 'pwned-passwords', name: 'Pwned Passwords', icon: ShieldCheck, accent: 'rose', desc: 'Check passwords against HaveIBeenPwned (k-anonymity)', keywords: ['pwned', 'hibp', 'breach', 'password', 'haveibeenpwned'] }
     ]
   },
   {
