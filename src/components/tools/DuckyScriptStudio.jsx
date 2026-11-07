@@ -221,10 +221,6 @@ export default function DuckyScriptStudio() {
             <Keyboard className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <span>DUCKYSCRIPT BADUSB STUDIO</span>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">HID Keystroke Engine</span>
-            </h2>
             <p className="text-xs text-slate-400">
               Compose, validate, simulate, and export DuckyScript payloads to Flipper Zero, Arduino, or CircuitPython.
             </p>

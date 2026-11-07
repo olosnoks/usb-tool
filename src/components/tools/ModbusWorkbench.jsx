@@ -109,10 +109,6 @@ export default function ModbusWorkbench() {
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-emerald-400" />
-              <span>INDUSTRIAL MODBUS RTU & RS-485 FIELD DECK</span>
-            </h2>
             <p className="text-[11px] text-slate-400">
               Poll Coils, Inputs, and Holding Registers from PLCs, solar inverters, and energy meters over USB-RS485 adapters.
             </p>

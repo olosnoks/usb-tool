@@ -1164,9 +1164,6 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-xs font-bold text-slate-100 uppercase tracking-wide">
-                Demo Wardrive Vector Generator
-              </h2>
               <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 Kepler.gl & WiGLE
               </span>

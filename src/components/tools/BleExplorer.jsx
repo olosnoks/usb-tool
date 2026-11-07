@@ -312,7 +312,6 @@ export default function BleExplorer() {
             <Bluetooth className="w-6 h-6 text-blue-400" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-blue-300">Bluetooth LE Explorer</h2>
             <p className="text-xs text-slate-400">
               Web Bluetooth GATT client — every service, characteristic, descriptor and value on the device
             </p>

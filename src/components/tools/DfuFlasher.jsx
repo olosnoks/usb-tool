@@ -244,7 +244,6 @@ export default function DfuFlasher() {
             <Download className="w-6 h-6 text-cyan-400" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-cyan-300">WebUSB DFU Flasher</h2>
             <p className="text-xs text-slate-400">
               USB DFU 1.1 &amp; ST DfuSe firmware download — STM32, nRF, and any DFU-class device
             </p>

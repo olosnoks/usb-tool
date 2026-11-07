@@ -146,10 +146,6 @@ export default function AvrIspWorkbench() {
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-amber-400" />
-              <span>AVR ISP BOOTLOADER & FUSE PROGRAMMER</span>
-            </h2>
             <p className="text-[11px] text-slate-400">
               Uses an Arduino running the ArduinoISP sketch (or any STK500v1 programmer) at 19200 baud.
               Wire programmer pins 10/11/12/13 to the target&apos;s RESET/MOSI/MISO/SCK.

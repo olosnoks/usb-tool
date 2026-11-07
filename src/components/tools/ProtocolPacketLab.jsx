@@ -31,12 +31,6 @@ export default function ProtocolPacketLab({
             <Activity className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              PACKET & PROTOCOL LAB
-              <span className="text-[10px] font-normal uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                Unified Suite
-              </span>
-            </h2>
             <p className="text-xs text-slate-400">
               802.11 Wi-Fi frames, PCAP exporter, real-time hex inspection & SLIP/COBS packet framing
             </p>

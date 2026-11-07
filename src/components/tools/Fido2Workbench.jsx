@@ -46,9 +46,6 @@ export default function Fido2Workbench() {
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-emerald-400" /> <span>FIDO2 / U2F SECURITY KEY</span>
-            </h2>
             <p className="text-[11px] text-slate-400 max-w-3xl">
               Read a FIDO2 / U2F authenticator over CTAP-HID: its supported versions, AAGUID, capabilities and limits, with a PING
               round-trip. Read-only — it does not create, list or delete credentials, change the PIN, or reset the key.

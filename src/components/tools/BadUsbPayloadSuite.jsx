@@ -21,12 +21,6 @@ export default function BadUsbPayloadSuite({ initialTab = 'ducky' }) {
             <Keyboard className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              BADUSB & PAYLOAD LAB
-              <span className="text-[10px] font-normal uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                Studio Suite
-              </span>
-            </h2>
             <p className="text-xs text-slate-400">
               Interactive DuckyScript keystroke compiler, live simulator & CyberChef recipe encoder
             </p>

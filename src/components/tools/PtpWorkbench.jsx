@@ -152,9 +152,6 @@ export default function PtpWorkbench() {
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Camera className="w-4 h-4 text-purple-400" /> <span>PTP / MTP CAMERA</span>
-            </h2>
             <p className="text-[11px] text-slate-400 max-w-3xl">
               Pull photos and metadata off a camera or phone in <b>PTP mode</b> (on a phone: USB → "Transfer photos / PTP"). See storage and
               battery, browse with thumbnails, download one, several or all files, delete, and fire the shutter remotely on cameras that allow it.

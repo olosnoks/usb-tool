@@ -168,10 +168,6 @@ export default function CmsisDapDebugger() {
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-cyan-400" />
-              <span>CMSIS-DAP / ARM CORTEX-M SWD IN-SYSTEM DEBUGGER</span>
-            </h2>
             <p className="text-[11px] text-slate-400">
               Debug Cortex-M microcontrollers over SWD through a CMSIS-DAP probe (Raspberry Pi Debug Probe, DAPLink / micro:bit, LPC-Link2, EDBG). Halt, step, reset, edit registers and memory, RTT console, SWO trace, hardware breakpoints, memory dumps and flash programming with CMSIS-Pack algorithms. ST-Link and J-Link are not CMSIS-DAP.
             </p>

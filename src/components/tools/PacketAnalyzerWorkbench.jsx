@@ -148,10 +148,6 @@ export default function PacketAnalyzerWorkbench() {
             <Activity className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <span>HARDWARE & WIRELESS PACKET ANALYZER</span>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">Wi-Fi & Serial PCAP</span>
-            </h2>
             <p className="text-xs text-slate-400">
               Inspect 802.11 management frames, EAPOL handshakes, NMEA sentences, and binary serial packets.
             </p>

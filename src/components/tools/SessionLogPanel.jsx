@@ -85,9 +85,6 @@ export default function SessionLogPanel() {
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <ScrollText className="w-4 h-4 text-emerald-400" /> <span>SESSION LOG & REPORT</span>
-            </h2>
             <p className="text-[11px] text-slate-400 max-w-3xl">
               What the hardware tools did in this browser tab: every device you picked (with its USB IDs), every destructive
               action you confirmed or declined, errors, and the tools' own log lines. It survives a reload but not closing the tab.

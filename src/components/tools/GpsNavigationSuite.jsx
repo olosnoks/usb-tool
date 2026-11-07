@@ -30,12 +30,6 @@ export default function GpsNavigationSuite({
             <Compass className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              GPS & NAVIGATION SUITE
-              <span className="text-[10px] font-normal uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                GNSS Lab
-              </span>
-            </h2>
             <p className="text-xs text-slate-400">
               Live NMEA sentence parser, tactical wardriving map & u-blox UBX binary protocol configurator
             </p>

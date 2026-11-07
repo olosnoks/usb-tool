@@ -188,9 +188,6 @@ export default function MassStorageWorkbench() {
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <HardDrive className="w-4 h-4 text-amber-400" /> <span>USB MASS STORAGE INSPECTOR (READ-ONLY)</span>
-            </h2>
             <p className="text-[11px] text-slate-400 max-w-3xl">
               Read a USB drive's SCSI identity, capacity, partition table (MBR / GPT) and filesystems; browse FAT and exFAT volumes,
               recover deleted files, view raw sectors and save a full image with its SHA-256. Read-only: it issues no WRITE command.

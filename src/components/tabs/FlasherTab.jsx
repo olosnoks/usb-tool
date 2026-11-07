@@ -391,10 +391,6 @@ export default function FlasherTab() {
           <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 @sm:p-4 shadow-xl">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
               <div>
-                <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                  <HardDrive className="w-4 h-4 text-amber-400" />
-                  <span>MULTI-OFFSET PARTITION FLASHING</span>
-                </h2>
             <p className="text-[11px] text-slate-400">
               Configure 1 to 4 independent binary/HEX slots with absolute memory offsets for ESP32, ESP8266, or custom targets.
             </p>

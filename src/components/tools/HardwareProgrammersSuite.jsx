@@ -35,12 +35,6 @@ export default function HardwareProgrammersSuite({ initialTab = 'ch341a' }) {
             <Cpu className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              HARDWARE PROGRAMMERS & DEBUGGERS
-              <span className="text-[10px] font-normal uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                IC Pro Deck
-              </span>
-            </h2>
             <p className="text-xs text-slate-400">
               SPI/I2C BIOS flash, ARM Cortex-M SWD halt/step, JTAG boundary scan & AVR ISP bootloaders
             </p>

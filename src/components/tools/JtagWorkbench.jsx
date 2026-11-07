@@ -203,10 +203,6 @@ export default function JtagWorkbench() {
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-cyan-400" />
-              <span>JTAG BOUNDARY SCANNER & SVF / CPLD BITSTREAM PLAYER</span>
-            </h2>
             <p className="text-[11px] text-slate-400">
               Scan JTAG chains and identify IDCODEs, play .svf files with TDO checking, and sample boundary-scan cells, through a CMSIS-DAP probe with JTAG (DAPLink, Raspberry Pi Debug Probe, LPC-Link2).
               {probeInfo && <span className="block text-emerald-400">Probe: {probeInfo.product}{probeInfo.firmware ? ` (fw ${probeInfo.firmware})` : ''}</span>}

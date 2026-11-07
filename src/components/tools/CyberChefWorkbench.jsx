@@ -1147,12 +1147,6 @@ export default function CyberChefWorkbench() {
             <Sparkles className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <span>CYBERCHEF & DATA OBFUSCATOR WORKBENCH</span>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono">
-                v3.5 Enterprise Multi-Tab
-              </span>
-            </h2>
             <p className="text-xs text-slate-400">
               Web Worker data pipeline with 80+ operations, Breakpoints, Auto-Bake, Presets, and Magic v2 Chaining.
             </p>
