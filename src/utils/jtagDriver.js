@@ -408,7 +408,6 @@ export class JtagClient {
   constructor(logger = console.log) {
     this.logger = logger;
     this.isConnected = false;
-    this.isSimulated = false;
     this.tapState = 'Test-Logic-Reset';
     this.detectedDevices = [];
     this.pins = [];
@@ -418,28 +417,6 @@ export class JtagClient {
 
   log(m) { this.logger(`[JTAG] ${m}`); }
 
-  connectSimulation() {
-    this.isConnected = true;
-    this.isSimulated = true;
-    this.tapState = 'Run-Test/Idle';
-    this.detectedDevices = [{ index: 0, ...decodeIdcode(0x03628093) }];
-    this.initBoundaryScanPins(144);
-    this.log('Simulated JTAG chain online.');
-    return true;
-  }
-
-  initBoundaryScanPins(count) {
-    this.pins = [];
-    for (let i = 1; i <= count; i++) {
-      let state = 'LOW';
-      if (i === 1 || i === 36 || i === 73 || i === 110) state = 'VCC_3V3';
-      else if (i === 18 || i === 54 || i === 90 || i === 126) state = 'GND';
-      else if (Math.random() > 0.5) state = 'HIGH';
-      this.pins.push({ pinNumber: i, name: `IO_${i}`, state });
-    }
-  }
-
-  /** Open a CMSIS-DAP probe in JTAG mode. `probe` (an opened DapProbe) is for tests. */
   async connectHardware({ kind = 'usb', probe = null, clockHz = 1_000_000 } = {}) {
     const p = probe || await new DapProbe(await requestDapTransport(kind)).open();
     try {
@@ -449,7 +426,6 @@ export class JtagClient {
       this.probe = p;
       this.engine = new JtagEngine(p);
       this.isConnected = true;
-      this.isSimulated = false;
       this.detectedDevices = [];
       this.pins = [];
       this.log(`Connected to ${p.product}${p.firmware ? ` (firmware ${p.firmware})` : ''} in JTAG mode at ${clockHz / 1e6} MHz.`);
@@ -468,7 +444,6 @@ export class JtagClient {
     this.probe = null;
     this.engine = null;
     this.isConnected = false;
-    this.isSimulated = false;
     this.detectedDevices = [];
     this.pins = [];
     this.log('Disconnected.');
@@ -479,10 +454,6 @@ export class JtagClient {
   /** Reset the TAPs and read every IDCODE in the chain (up to 32 devices). */
   async scanChain() {
     if (!this.isConnected) return [];
-    if (this.isSimulated) {
-      this.log(`Simulated chain: ${this.detectedDevices.length} device(s).`);
-      return this.detectedDevices;
-    }
     const e = this.engine;
     e.goto('RESET');
     e.goto('IDLE');
@@ -500,12 +471,6 @@ export class JtagClient {
 
   async playSvf(svfText, onProgress) {
     if (!this.isConnected) throw new Error('JTAG interface not connected.');
-    if (this.isSimulated) {
-      const n = parseSvf(svfText).length;
-      onProgress?.({ current: n, total: n, percent: 100, lastCmd: '' });
-      this.log('Simulated run finished: no JTAG adapter is driven and TDO is not checked.');
-      return { statements: n, checks: 0, simulated: true };
-    }
     try {
       const r = await runSvf(this.engine, svfText, {
         onProgress,
@@ -536,7 +501,7 @@ export class JtagClient {
    * so the raw cells are returned by number.
    */
   async sampleBoundary({ target, irLengths, opcode, bsrLength }) {
-    if (!this.isConnected || this.isSimulated) throw new Error('Connect a probe first.');
+    if (!this.isConnected) throw new Error('Connect a probe first.');
     const n = irLengths.length;
     if (target < 0 || target >= n) throw new Error('Pick a device in the chain.');
     // The first bits shifted in travel furthest and end up in the device
@@ -563,7 +528,7 @@ export class JtagClient {
    * The chip stays in EXTEST until resetTap().
    */
   async extest({ target, irLengths, preloadOp, extestOp, vector }) {
-    if (!this.isConnected || this.isSimulated) throw new Error('Connect a probe first.');
+    if (!this.isConnected) throw new Error('Connect a probe first.');
     const n = irLengths.length;
     if (target < 0 || target >= n) throw new Error('Pick a device in the chain.');
     const irFor = (op) => {

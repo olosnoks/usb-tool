@@ -121,18 +121,6 @@ export class CmsisDapClient {
     }
   }
 
-  /**
-   * Enables simulated live Cortex-M target for testing
-   */
-  connectSimulation() {
-    this.connected = true;
-    this.simulated = true;
-    this.targetState = 'running';
-    this.initVirtualState();
-    this.log('[SIMULATION] Connected to virtual ARM Cortex-M4 target (STM32F4 / RP2040). CPU Running.');
-    return true;
-  }
-
   async disconnect() {
     const p = this.probe;
     this.probe = null;

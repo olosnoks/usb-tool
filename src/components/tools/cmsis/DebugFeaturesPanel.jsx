@@ -35,7 +35,7 @@ const TABS = [
  * CMSIS-DAP debugger. `busyRef` is shared with the parent so background
  * polling never interleaves with other probe commands.
  */
-export default function DebugFeaturesPanel({ client, guard, busyRef, isSimulated, targetState, setTargetState, setError }) {
+export default function DebugFeaturesPanel({ client, guard, busyRef, targetState, setTargetState, setError }) {
   const [tab, setTab] = useState('rtt');
 
   // RTT
@@ -270,7 +270,6 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, isSimulated
         ))}
       </div>
 
-      {isSimulated && <div className="text-amber-300">These tools read and write real target memory, so they need a real probe. The demo target has none.</div>}
 
       {tab === 'rtt' && (
         <div className="flex flex-col gap-2">
@@ -283,7 +282,7 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, isSimulated
             <span className="text-slate-500">or control block at</span>
             <input value={rttAddr} onChange={(e) => setRttAddr(e.target.value)} placeholder="auto" className={`${input} w-28`} />
             {!rtt ? (
-              <button onClick={startRtt} disabled={isSimulated} className={btn}><Play className="w-3.5 h-3.5" /> START RTT</button>
+              <button onClick={startRtt}  className={btn}><Play className="w-3.5 h-3.5" /> START RTT</button>
             ) : (
               <button onClick={() => setRtt(null)} className={btn}><Square className="w-3.5 h-3.5" /> STOP</button>
             )}
@@ -325,7 +324,7 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, isSimulated
             <input value={swoBaud} onChange={(e) => setSwoBaud(e.target.value)} className={`${input} w-24`} />
             <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={stm32} onChange={(e) => setStm32(e.target.checked)} className="accent-cyan-500" /> STM32: enable TRACESWO pin</label>
             {!swo ? (
-              <button onClick={startSwo} disabled={isSimulated} className={btn}><Play className="w-3.5 h-3.5" /> START SWO</button>
+              <button onClick={startSwo}  className={btn}><Play className="w-3.5 h-3.5" /> START SWO</button>
             ) : (
               <button onClick={stopSwo} className={btn}><Square className="w-3.5 h-3.5" /> STOP</button>
             )}
@@ -388,7 +387,7 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, isSimulated
             <label className="flex items-center gap-1"><input type="checkbox" checked={chipErase} onChange={(e) => setChipErase(e.target.checked)} className="accent-rose-500" /> erase whole chip</label>
             <label className="flex items-center gap-1"><input type="checkbox" checked={verify} onChange={(e) => setVerify(e.target.checked)} className="accent-cyan-500" /> verify</label>
             <label className="flex items-center gap-1"><input type="checkbox" checked={runAfter} onChange={(e) => setRunAfter(e.target.checked)} className="accent-cyan-500" /> reset and run after</label>
-            <button onClick={doFlash} disabled={isSimulated || !flm || !image || !!flashProgress} className="flex items-center gap-1 px-3 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 font-bold disabled:opacity-40">
+            <button onClick={doFlash} disabled={!flm || !image || !!flashProgress} className="flex items-center gap-1 px-3 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 font-bold disabled:opacity-40">
               <HardDrive className="w-3.5 h-3.5" /> PROGRAM FLASH
             </button>
           </div>
@@ -406,7 +405,7 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, isSimulated
         <div className="flex flex-col gap-2">
           <p className="text-slate-400">Hardware breakpoints (FPB) stop the core when it fetches an address; watchpoints (DWT) when it reads or writes one. The debugger notices the halt within a second and shows the registers.</p>
           {!units ? (
-            <button onClick={initUnits} disabled={isSimulated} className={`${btn} self-start`}>ENABLE BREAKPOINT UNITS</button>
+            <button onClick={initUnits}  className={`${btn} self-start`}>ENABLE BREAKPOINT UNITS</button>
           ) : (
             <>
               <div className="text-slate-500">{units.breakpoints} breakpoint and {units.watchpoints} watchpoint comparators</div>
@@ -450,7 +449,7 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, isSimulated
             <input value={dumpAddr} onChange={(e) => setDumpAddr(e.target.value)} className={`${input} w-28`} />
             <span className="text-slate-500 font-bold">LENGTH</span>
             <input value={dumpLen} onChange={(e) => setDumpLen(e.target.value)} className={`${input} w-24`} />
-            <button onClick={doDump} disabled={isSimulated || dumpProgress !== null} className={btn}><Download className="w-3.5 h-3.5" /> DUMP TO FILE</button>
+            <button onClick={doDump} disabled={dumpProgress !== null} className={btn}><Download className="w-3.5 h-3.5" /> DUMP TO FILE</button>
             {dumpProgress !== null && <span className="text-slate-400">{Math.round(dumpProgress * 100)}%</span>}
           </div>
         </div>

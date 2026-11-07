@@ -7,7 +7,6 @@ import {
   CornerDownRight,
   Layers,
   Search,
-  Sparkles,
   CheckCircle2,
   AlertTriangle,
   Edit3,
@@ -21,13 +20,11 @@ import {
 } from '../../utils/cmsisDapDriver';
 import StatusBadge from '../common/StatusBadge';
 import DebugFeaturesPanel from './cmsis/DebugFeaturesPanel';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { useSessionError } from '../../utils/sessionLog';
 export default function CmsisDapDebugger() {
   const [client] = useState(() => new CmsisDapClient(console.log));
   const [isConnected, setIsConnected] = useState(false);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [targetState, setTargetState] = useState('disconnected'); // 'running' | 'halted'
   const [registers, setRegisters] = useState([]);
   const [prevRegisters, setPrevRegisters] = useState([]);
@@ -70,7 +67,6 @@ export default function CmsisDapDebugger() {
     const i = await client.connectHardware({ kind });
     setInfo(i);
     setIsConnected(true);
-    setIsSimulated(false);
     setTargetState(client.targetState);
     setRegisters([]);
     setPrevRegisters([]);
@@ -78,19 +74,9 @@ export default function CmsisDapDebugger() {
     try { await readMemoryNow(); } catch (e) { setError(`Connected, but reading ${memAddress} failed: ${e.message}`); }
   });
 
-  const handleConnectSimulation = () => guard('connect', async () => {
-    client.connectSimulation();
-    setInfo(null);
-    setIsConnected(true);
-    setIsSimulated(true);
-    setTargetState('running');
-    await readMemoryNow('0x20000000');
-  });
-
   const handleDisconnect = async () => {
     await client.disconnect();
     setIsConnected(false);
-    setIsSimulated(false);
     setTargetState('disconnected');
     setRegisters([]);
     setMemWords([]);
@@ -132,7 +118,7 @@ export default function CmsisDapDebugger() {
     const targetV = parseInt(writeVal.replace(/^0x/i, ''), 16);
     if (Number.isNaN(targetA) || Number.isNaN(targetV)) throw new Error('Enter a hex address and value.');
     const back = await client.writeMemoryWord(targetA, targetV);
-    if (!client.simulated && back !== (targetV >>> 0)) {
+    if (back !== (targetV >>> 0)) {
       setError(`Wrote 0x${(targetV >>> 0).toString(16).toUpperCase()} but read back 0x${(back >>> 0).toString(16).toUpperCase()}: read-only memory, flash, or a peripheral register.`);
     }
     await readMemoryNow();
@@ -153,7 +139,7 @@ export default function CmsisDapDebugger() {
 
   // While a real core runs, notice when it halts by itself (breakpoint, fault).
   useEffect(() => {
-    if (!isConnected || isSimulated || targetState !== 'running') return undefined;
+    if (!isConnected || targetState !== 'running') return undefined;
     const t = setInterval(async () => {
       if (busyRef.current) return;
       busyRef.current = true;
@@ -169,11 +155,10 @@ export default function CmsisDapDebugger() {
       }
     }, 750);
     return () => clearInterval(t);
-  }, [isConnected, isSimulated, targetState]);
+  }, [isConnected, targetState]);
 
   return (
     <div className="flex flex-col gap-4 font-mono">
-      {isSimulated && <DemoBanner>Virtual Cortex-M target: halting, stepping and memory edits never touch a device.</DemoBanner>}
       {error && (
         <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
           <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
@@ -213,13 +198,6 @@ export default function CmsisDapDebugger() {
                   <Cpu className="w-3.5 h-3.5" />
                   <span>HID PROBE</span>
                 </button>
-                <button
-                  onClick={handleConnectSimulation}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>DEMO</span>
-                </button>
               </>
             ) : (
               <button
@@ -244,7 +222,7 @@ export default function CmsisDapDebugger() {
                 pulse={targetState === 'running'}
               />
               <span className="text-[10px] text-slate-400 hidden @sm:inline">
-                {isSimulated ? 'ARM Cortex-M4 (virtual)' : info ? `${info.core} via ${info.probe} (${info.transport})` : ''}
+                {info ? `${info.core} via ${info.probe} (${info.transport})` : ''}
               </span>
             </div>
 
@@ -449,7 +427,6 @@ export default function CmsisDapDebugger() {
           client={client}
           guard={guard}
           busyRef={busyRef}
-          isSimulated={isSimulated}
           targetState={targetState}
           setTargetState={setTargetState}
           setError={setError}

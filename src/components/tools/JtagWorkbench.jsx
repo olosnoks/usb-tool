@@ -17,7 +17,6 @@ import {
 import { JtagClient } from '../../utils/jtagDriver';
 import { parseBsdl, opcodeValue, idcodeMatches, pinStates, extestVector } from '../../utils/bsdl';
 import StatusBadge from '../common/StatusBadge';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { confirmAction, useSessionError } from '../../utils/sessionLog';
 const SAMPLE_SVF_TEXT = `// Sample SVF: Initialize TAP & Read IDCODE
@@ -35,7 +34,6 @@ RUNTEST 100 TCK;
 export default function JtagWorkbench() {
   const [client] = useState(() => new JtagClient(console.log));
   const [isConnected, setIsConnected] = useState(false);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [tapDevices, setTapDevices] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
 
@@ -79,24 +77,14 @@ export default function JtagWorkbench() {
     const i = await client.connectHardware({ kind });
     setProbeInfo(i);
     setIsConnected(true);
-    setIsSimulated(false);
     setTapDevices([]);
     setPlayResult(null);
     setBsCells(null);
   });
 
-  const handleConnectSimulation = () => {
-    client.connectSimulation();
-    setIsConnected(true);
-    setIsSimulated(true);
-    setProbeInfo(null);
-    setTapDevices(client.detectedDevices);
-  };
-
   const handleDisconnect = async () => {
     await client.disconnect();
     setIsConnected(false);
-    setIsSimulated(false);
     setTapDevices([]);
     setPlayResult(null);
     setProbeInfo(null);
@@ -196,9 +184,7 @@ export default function JtagWorkbench() {
       setIsPlayingSvf(true);
       setPlayResult(null);
       const r = await client.playSvf(svfContent, (p) => setPlayProgress(p));
-      setPlayResult(r.simulated
-        ? `SUCCESS (SIMULATED): ${r.statements} statements parsed; nothing was sent to a device.`
-        : `SUCCESS: ${r.statements} statements played, ${r.checks} TDO check(s) matched.`);
+      setPlayResult(`SUCCESS: ${r.statements} statements played, ${r.checks} TDO check(s) matched.`);
     } catch (err) {
       setPlayResult(`ERROR: ${err.message}`);
     } finally {
@@ -208,7 +194,6 @@ export default function JtagWorkbench() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      {isSimulated && <DemoBanner>Simulated JTAG chain: the devices, pin states and SVF results below are not from hardware.</DemoBanner>}
       {error && (
         <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
           <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
@@ -245,13 +230,6 @@ export default function JtagWorkbench() {
                   className="px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold disabled:opacity-40"
                 >
                   HID PROBE
-                </button>
-                <button
-                  onClick={handleConnectSimulation}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-500/30 text-xs font-bold transition-all"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>DEMO</span>
                 </button>
               </>
             ) : (
@@ -394,7 +372,7 @@ export default function JtagWorkbench() {
           </button>
         </div>
 
-        {isSimulated || !isConnected ? (
+        {!isConnected ? (
         <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
