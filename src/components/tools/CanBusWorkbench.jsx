@@ -226,26 +226,6 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   }, [isSimulated, isConnected, subscribeRx]);
 
   // Simulation traffic generator.
-  useEffect(() => {
-    if (!isSimulated || !isSniffing) {
-      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
-      return undefined;
-    }
-    let simCounter = 0;
-    simIntervalRef.current = setInterval(() => {
-      simCounter++;
-      const simRpm = 1200 + Math.floor(Math.sin(simCounter / 10) * 800) + Math.floor(Math.random() * 50);
-      const simSpeed = Math.max(0, 35 + Math.floor(Math.sin(simCounter / 10) * 25));
-      setObdValues({ rpm: simRpm, speed: simSpeed, temp: 88, load: 28, throttle: 18, voltage: 14.1 });
-      const t = Date.now();
-      ingest([
-        { t, id: 0x1dc, isExtended: false, dlc: 8, data: new Uint8Array([(simRpm >> 8) & 0xff, simRpm & 0xff, simSpeed & 0xff, 0x24, 0x12, 0x88, 0x00, simCounter & 0xff]) },
-        { t, id: 0x205, isExtended: false, dlc: 8, data: new Uint8Array([simSpeed, simSpeed, simSpeed, simSpeed, 0, 0, 0, 0]) },
-        { t, id: 0x0c8, isExtended: false, dlc: 4, data: new Uint8Array([simCounter % 20 < 5 ? 0x01 : 0x00, 0x55, 0xaa, simCounter & 0xff]) }
-      ]);
-    }, 60);
-    return () => clearInterval(simIntervalRef.current);
-  }, [isSimulated, isSniffing]);
 
   // Live gauges: poll mode 01 PIDs one after another while enabled.
   useEffect(() => {
@@ -601,10 +581,6 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-emerald-400" />
-              <span>AUTOMOTIVE CAN BUS & OBD-II DIAGNOSTIC DECK</span>
-            </h2>
             <p className="text-[11px] text-slate-400">
               Sniff CAN through an SLCAN adapter (CANable / Candlelight) with byte-change highlighting and DBC signal decoding, transmit and replay frames, read OBD-II data and talk UDS over ISO-TP.
             </p>
@@ -618,13 +594,6 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                 </button>
               ))}
             </div>
-            <button
-              onClick={toggleSimulation}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${isSimulated ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-amber-glow' : 'bg-slate-900 text-slate-400 hover:text-cyan-300 border-slate-800'}`}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{isSimulated ? 'SIMULATION ACTIVE' : 'TEST SIMULATION'}</span>
-            </button>
           </div>
         </div>
 
@@ -692,7 +661,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                   {filteredMessageList.length === 0 ? (
                     <tr>
                       <td colSpan="6" className="py-12 text-center text-slate-500 italic">
-                        {isSniffing ? 'Listening on CAN bus... Waiting for frames.' : 'Click "START SNIFFER" or "TEST SIMULATION" to capture packets.'}
+                        {isSniffing ? 'Listening on CAN bus... Waiting for frames.' : 'Click "START SNIFFER" to capture packets.'}
                       </td>
                     </tr>
                   ) : (
