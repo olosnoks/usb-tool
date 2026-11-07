@@ -38,29 +38,10 @@ import {
   UdsClient,
   UDS_DIDS,
   formatDidValue,
-  SimulatedEcu,
   OBD_PID_TABLE
 } from '../../utils/canTools';
-import { DemoBanner } from '../common/DemoNotice';
 
 import { confirmAction } from '../../utils/sessionLog';
-// Signals for the simulation's frames, so DBC decoding can be tried without a car.
-const DEMO_DBC = `BO_ 476 ENGINE_STATUS: 8 ECM
- SG_ EngineRPM : 7|16@0+ (1,0) [0|8000] "rpm" DASH
- SG_ VehicleSpeed : 23|8@0+ (1,0) [0|255] "km/h" DASH
- SG_ AliveCounter : 63|8@0+ (1,0) [0|255] "" DASH
-
-BO_ 517 WHEEL_SPEEDS: 8 ABS
- SG_ WheelFL : 7|8@0+ (1,0) [0|255] "km/h" DASH
- SG_ WheelFR : 15|8@0+ (1,0) [0|255] "km/h" DASH
- SG_ WheelRL : 23|8@0+ (1,0) [0|255] "km/h" DASH
- SG_ WheelRR : 31|8@0+ (1,0) [0|255] "km/h" DASH
-
-BO_ 200 BRAKE: 4 ABS
- SG_ BrakePedal : 0|1@1+ (1,0) [0|1] "" DASH
-
-VAL_ 200 BrakePedal 0 "Released" 1 "Pressed" ;
-`;
 
 const MAX_LOG = 200000;
 const hexId = (f) => (f.id ?? 0).toString(16).toUpperCase().padStart(f.isExtended ? 8 : 3, '0');
@@ -88,7 +69,6 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const [mode, setMode] = useState(initialMode);
   const [canBaud, setCanBaud] = useState('S6'); // 500 kbps (standard automotive)
   const [isSniffing, setIsSniffing] = useState(false);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [notice, setNotice] = useState('');
 
   // Sniffer table: key -> { id, isExtended, dlc, data, lastTime, deltaMs, count, diffs }
@@ -143,14 +123,10 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
 
   const sendRef = useRef(sendString);
   sendRef.current = sendString;
-  const simRef = useRef(isSimulated);
-  simRef.current = isSimulated;
-  const simEcuRef = useRef(null);
   const sniffingRef = useRef(false);
   sniffingRef.current = isSniffing;
   const pendingFramesRef = useRef([]);
   const slcanReaderRef = useRef(new SlcanLineReader());
-  const simIntervalRef = useRef(null);
 
   // Every frame (received, simulated, or sent by us) goes through ingest().
   const ingest = (frames, { tx = false } = {}) => {
@@ -164,15 +140,10 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
     }
   };
 
-  // One CAN frame onto the bus (or into the simulated ECU).
+  // One CAN frame onto the bus.
   const sendFrame = (f) => {
     const frame = { ...f, dlc: f.data.length, t: Date.now() };
-    if (simRef.current) {
-      if (!simEcuRef.current) simEcuRef.current = new SimulatedEcu((r) => ingest([{ ...r, t: Date.now() }]));
-      simEcuRef.current.onFrame(frame);
-    } else {
-      sendRef.current(buildSlcanFrame(frame.id, frame.data, frame.isExtended), '');
-    }
+    sendRef.current(buildSlcanFrame(frame.id, frame.data, frame.isExtended), '');
     ingest([frame], { tx: true });
   };
 
@@ -211,7 +182,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
 
   // Real adapter: SLCAN lines from the serial stream.
   useEffect(() => {
-    if (isSimulated || !isConnected || !subscribeRx) return undefined;
+    if (!isConnected || !subscribeRx) return undefined;
     const reader = slcanReaderRef.current;
     const dec = new TextDecoder();
     const unsub = subscribeRx((bytes) => {
@@ -223,13 +194,12 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       if (frames.length) ingest(frames);
     });
     return () => { unsub(); pendingFramesRef.current = []; };
-  }, [isSimulated, isConnected, subscribeRx]);
+  }, [isConnected, subscribeRx]);
 
-  // Simulation traffic generator.
 
   // Live gauges: poll mode 01 PIDs one after another while enabled.
   useEffect(() => {
-    if (!obdLive || isSimulated || !isConnected || mode !== 'obd2') return undefined;
+    if (!obdLive || !isConnected || mode !== 'obd2') return undefined;
     let stopped = false;
     const PIDS = [
       ['rpm', 0x0c, (b) => Math.round(((b[0] * 256) + b[1]) / 4)],
@@ -252,7 +222,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       }
     })();
     return () => { stopped = true; };
-  }, [obdLive, isSimulated, isConnected, mode]);
+  }, [obdLive, isConnected, mode]);
 
   // Periodic transmit.
   useEffect(() => {
@@ -281,25 +251,23 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   };
 
   const startSniffing = async () => {
-    if (!isSimulated) {
-      if (!isConnected) { alert('Connect the SLCAN adapter (CANable / Candlelight) over serial first.'); return false; }
-      await openChannel();
-      const rate = (CAN_BAUD_RATES.find((r) => r.code === canBaud) || {}).label || canBaud;
-      addLog(`[CAN BUS] SLCAN channel opened at ${rate} (${canBaud}, O).`, 'sys');
-    }
+    if (!isConnected) { alert('Connect the SLCAN adapter (CANable / Candlelight) over serial first.'); return false; }
+    await openChannel();
+    const rate = (CAN_BAUD_RATES.find((r) => r.code === canBaud) || {}).label || canBaud;
+    addLog(`[CAN BUS] SLCAN channel opened at ${rate} (${canBaud}, O).`, 'sys');
     setIsSniffing(true);
     sniffingRef.current = true;
     return true;
   };
 
   const ensureBus = async () => {
-    if (isSimulated || sniffingRef.current) return true;
+    if (sniffingRef.current) return true;
     return startSniffing();
   };
 
   const stopSniffing = async () => {
     setIsSniffing(false);
-    if (!isSimulated && isConnected) {
+    if (isConnected) {
       await sendString('C', '\r');
       addLog('[CAN BUS] SLCAN channel closed (C).', 'sys');
     }
@@ -310,7 +278,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
     if (Number.isNaN(id) || id < 0 || id > 0x1fffffff) throw new Error('Invalid hex CAN ID.');
     const bytes = parseBytes(txData);
     if (bytes.length > 8) throw new Error('Classic CAN frames carry at most 8 bytes.');
-    if (!isSimulated && !isConnected) throw new Error('Connect the SLCAN adapter first.');
+    if (!isConnected) throw new Error('Connect the SLCAN adapter first.');
     const ext = txExtended || id > 0x7ff;
     sendFrame({ id, isExtended: ext, data: Uint8Array.from(bytes) });
     return { id, ext, bytes };
@@ -329,14 +297,14 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   // --- OBD-II ---------------------------------------------------------------
 
   const handleScanDtcs = async () => {
-    if (!isSimulated && !isConnected) { alert('Connect the SLCAN adapter over serial first.'); return; }
+    if (!isConnected) { alert('Connect the SLCAN adapter over serial first.'); return; }
     setIsScanningDtcs(true);
     try {
       if (!(await ensureBus())) return;
       const { dtcs, ecus } = await obdRef.current.readDtcs();
       setActiveDtcs(dtcs);
       setDtcStatus(ecus.length
-        ? `${ecus.length} ECU${ecus.length === 1 ? '' : 's'} answered (${ecus.map((e) => '0x' + e.toString(16).toUpperCase()).join(', ')}).${isSimulated ? ' (simulated ECU)' : ''}`
+        ? `${ecus.length} ECU${ecus.length === 1 ? '' : 's'} answered (${ecus.map((e) => '0x' + e.toString(16).toUpperCase()).join(', ')}).`
         : 'No ECU answered. Check the ignition, the CAN bitrate and the OBD-II wiring.');
       addLog(`[OBD-II] Mode 03: ${ecus.length} ECU(s), ${dtcs.length} code(s)${dtcs.length ? ': ' + dtcs.join(', ') : ''}`, 'sys');
     } catch (e) {
@@ -347,7 +315,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   };
 
   const handleClearDtcs = async () => {
-    if (!isSimulated && !confirmAction('Send OBD-II mode 04 to clear stored trouble codes and freeze-frame data on this vehicle?')) return;
+    if (!confirmAction('Send OBD-II mode 04 to clear stored trouble codes and freeze-frame data on this vehicle?')) return;
     setIsScanningDtcs(true);
     try {
       const { confirmed, refused } = await obdRef.current.clearDtcs();
@@ -408,7 +376,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const logUds = (dir, text, kind = 'info') => setUdsLog((prev) => [...prev.slice(-300), { dir, text, kind, time: new Date().toLocaleTimeString() }]);
 
   const runUds = async (label, fn) => {
-    if (!isSimulated && !isConnected) { setNotice('Connect the SLCAN adapter first.'); return; }
+    if (!isConnected) { setNotice('Connect the SLCAN adapter first.'); return; }
     if (Number.isNaN(parseInt(udsTx, 16)) || Number.isNaN(parseInt(udsRx, 16))) { setNotice('Enter hex request and response IDs.'); return; }
     setUdsBusy(label);
     try {
@@ -447,12 +415,12 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   });
 
   const udsClear = () => {
-    if (!isSimulated && !confirmAction('Send UDS ClearDiagnosticInformation (0x14 FFFFFF) to this ECU?')) return;
+    if (!confirmAction('Send UDS ClearDiagnosticInformation (0x14 FFFFFF) to this ECU?')) return;
     runUds('clear', async (uds) => { await uds.clearDtcs(); logUds('<', 'DTCs cleared.', 'ok'); });
   };
 
   const udsReset = () => {
-    if (!isSimulated && !confirmAction('Send UDS ECUReset (hard reset) to this ECU? It restarts immediately.')) return;
+    if (!confirmAction('Send UDS ECUReset (hard reset) to this ECU? It restarts immediately.')) return;
     runUds('reset', async (uds) => { await uds.ecuReset(0x01); logUds('<', 'ECU accepted the hard reset.', 'ok'); });
   };
 
@@ -506,8 +474,8 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const startReplay = () => {
     const frames = currentLogFrames().filter((f) => !f.tx);
     if (!frames.length) { setNotice('Record or load a log first.'); return; }
-    if (!isSimulated && !isConnected) { setNotice('Connect the SLCAN adapter to replay onto a bus.'); return; }
-    if (!isSimulated && !confirmAction(`Transmit ${frames.length} recorded frames onto the CAN bus? Replaying traffic into a vehicle can trigger real actions.`)) return;
+    if (!isConnected) { setNotice('Connect the SLCAN adapter to replay onto a bus.'); return; }
+    if (!confirmAction(`Transmit ${frames.length} recorded frames onto the CAN bus? Replaying traffic into a vehicle can trigger real actions.`)) return;
     ensureBus().then((ok) => {
       if (!ok) return;
       setReplay({ done: 0, total: frames.length });
@@ -545,29 +513,6 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
     .filter((m) => m && filterFn.fn(m.id) && (!changedOnly || now - (m.lastChange || 0) < 2000))
     .sort((a, b) => a.id - b.id);
 
-  const toggleSimulation = () => {
-    // Switching never carries simulated frames or codes over to hardware (or back).
-    const next = !isSimulated;
-    stopReplay();
-    setTxPeriodic(false);
-    setTesterPresent(false);
-    setIsSimulated(next);
-    simRef.current = next;
-    setIsSniffing(next);
-    sniffingRef.current = next;
-    setMessages({});
-    setActiveDtcs([]);
-    setDtcStatus(null);
-    setObdLive(false);
-    setObdValues(EMPTY_OBD);
-    setVin(null);
-    setPidTable(null);
-    setUdsLog([]);
-    simEcuRef.current = null;
-    udsRef.current = null;
-    if (next && !dbc) { setDbc(parseDbc(DEMO_DBC)); setDbcName('demo.dbc (simulation)'); }
-    if (!next && dbcName.endsWith('(simulation)')) { setDbc(null); setDbcName(''); }
-  };
 
   const btn = 'flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 text-xs font-bold disabled:opacity-40';
   const inp = 'bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs outline-none';
@@ -728,7 +673,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       {mode === 'obd2' && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            {!isSimulated && (
+            {(
               <button
                 onClick={() => { if (!isConnected) { alert('Connect the SLCAN adapter over serial first.'); return; } setObdLive((v) => !v); }}
                 className={`px-3 py-1 rounded-lg border font-bold ${obdLive ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-slate-900 text-slate-300 border-slate-800 hover:text-cyan-300'}`}
@@ -803,7 +748,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                       <div className="text-sm font-bold text-rose-300">{code}</div>
                       <div className="text-xs text-slate-300">{COMMON_DTCS[code] || 'Vehicle Manufacturer Specific Code'}</div>
                     </div>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-rose-900 text-rose-200 font-bold">{isSimulated ? 'DEMO' : 'STORED'}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-rose-900 text-rose-200 font-bold">STORED</span>
                   </div>
                 ))
               )}

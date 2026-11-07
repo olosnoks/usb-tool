@@ -19,16 +19,6 @@ import StatusBadge from '../common/StatusBadge';
 import HidReportTools from './hid/HidReportTools';
 
 import { useSessionError } from '../../utils/sessionLog';
-// A simulated mouse, so the live view can be explored with no device.
-const DEMO_COLLECTIONS = [{
-  usagePage: 0x01, usage: 0x02,
-  inputReports: [{ reportId: 0, items: [
-    { reportSize: 1, reportCount: 3, usagePage: 0x09, usageMinimum: 1, usageMaximum: 3, logicalMinimum: 0, logicalMaximum: 1 },
-    { reportSize: 5, reportCount: 1, isConstant: true },
-    { reportSize: 8, reportCount: 2, usagePage: 0x01, usages: [0x30, 0x31], logicalMinimum: -127, logicalMaximum: 127 }
-  ] }],
-  outputReports: [], featureReports: []
-}];
 
 export default function HidInspectorWorkbench() {
   const [device, setDevice] = useState(null);
@@ -38,7 +28,6 @@ export default function HidInspectorWorkbench() {
   const [error, setError] = useSessionError('HID');
   const [lastReport, setLastReport] = useState(null); // { reportId, hex, fields }
   const reportMapRef = useRef({}); // reportId -> describedReport
-  const demoTimer = useRef(null);
   const listenerRef = useRef(null);
   const tapsRef = useRef(new Set());
   // Subscribe to every input report (reportId, bytes, timestamp ms); returns the unsubscribe.
@@ -56,7 +45,6 @@ export default function HidInspectorWorkbench() {
   };
 
   const stopEverything = () => {
-    if (demoTimer.current) { clearInterval(demoTimer.current); demoTimer.current = null; }
     if (device && listenerRef.current) { try { device.removeEventListener('inputreport', listenerRef.current); } catch (e) { /* ignore */ } }
     listenerRef.current = null;
   };
@@ -83,7 +71,6 @@ export default function HidInspectorWorkbench() {
       dev.addEventListener('inputreport', handler);
       listenerRef.current = handler;
       setDevice(dev);
-      setIsSimulated(false);
       setInfo(collections);
       setMeta({ vendorId: dev.vendorId, productId: dev.productId, productName: dev.productName });
       await refreshGranted();
@@ -95,9 +82,8 @@ export default function HidInspectorWorkbench() {
 
   const disconnect = async () => {
     stopEverything();
-    try { if (device && !device.demo) await device.close(); } catch (e) { /* ignore */ }
+    try { if (device) await device.close(); } catch (e) { /* ignore */ }
     setDevice(null);
-    setIsSimulated(false);
     setInfo(null);
     setMeta(null);
     setLastReport(null);

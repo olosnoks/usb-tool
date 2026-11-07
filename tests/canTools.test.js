@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseDbc, decodeFrame, extractBits, signalFits, compileIdFilter, toCandumpLog, parseCandumpLog, toCsv, replayFrames,
-  IsoTpChannel, UdsClient, UdsError, SimulatedEcu, formatDidValue, decodeSupportedPids, OBD_PID_TABLE
+  IsoTpChannel, UdsClient, UdsError, formatDidValue, decodeSupportedPids, OBD_PID_TABLE
 } from '../src/utils/canTools';
+import { SimulatedEcu } from './helpers/sim/canEcu';
 import { ObdOverSlcan, parseSlcanFrame } from '../src/utils/canBusDriver';
 
 const DBC = `VERSION ""
