@@ -1,27 +1,31 @@
-# Hash Cracker Workbench
+# Hash Cracker
 
-**Purpose**: Client-side dictionary attack against a hash. Runs entirely in the
-browser; no backend, no WASM.
+**Purpose**: Client-side password-audit / CTF hash cracking, hashcat-style. All
+work runs in the browser; nothing is uploaded.
 
-**Usage**:
-- Choose an algorithm: MD5, SHA-1, SHA-256, SHA-384, or SHA-512.
-- Paste the target hash (hex).
-- Enter a wordlist, one candidate per line.
-- Click **Crack**. Progress is shown as a percentage and the run can be stopped.
-  On success the matching candidate is displayed.
+**Hash modes** (with hashcat `-m` numbers): MD5 (0), SHA-1 (100), SHA-256 (1400),
+SHA-384 (10800), SHA-512 (1700), NTLM (1000), md5(md5($pass)) (2600), MySQL4.1+
+(300), and salted variants md5/sha1/sha256 `$pass.$salt` / `$salt.$pass`
+(10/20/110/120/1410) with a shared salt field.
 
-**Implementation Details**:
-- SHA-1/256/384/512 use the Web Crypto API (`crypto.subtle.digest`).
-- MD5 is implemented locally in `src/utils/md5.js` because Web Crypto omits it.
-  The implementation is verified against the RFC 1321 test vectors.
-- The loop yields to the event loop every 500 candidates so the UI stays responsive.
+**Attack modes**:
+- **Dictionary** (`-a 0`) — hash each wordlist candidate.
+- **Dictionary + rules** — expand each word with a rule set: case & reverse,
+  leetspeak, append digits/suffixes, or **best64-lite** (all combined).
+- **Mask / brute-force** (`-a 3`) — `?l ?u ?d ?s ?a` charset tokens plus literal
+  characters (e.g. `admin?d?d`), with a live keyspace count and a warning when
+  it gets large.
 
-**Dependencies**: `src/utils/md5.js`.
+**Multi-hash potfile**: paste many target hashes (one per line); each is tracked
+in a table and filled in as it cracks. Live status shows H/s, candidates tried /
+total, elapsed and ETA. Export results as a `hash:password` potfile.
 
-**Wordlists**: load a SecLists password list with the wordlist picker (via the
-jsDelivr CDN), or paste/upload your own.
+**Implementation**: `src/utils/hashCrack.js` (hash modes, rule expansion, mask
+keyspace/iteration), `src/utils/md5.js`, `src/utils/md4.js` (for NTLM). Verified
+in `tests/hashCrack.test.js` against RFC MD4 vectors, NTLM("password"), MD5/SHA
+digests, salted ordering, rule expansion and mask iteration.
 
-**Notes**:
-- This is a dictionary (wordlist) attack, not brute force over a keyspace.
-- Throughput is JavaScript-bound; it suits testing and small lists, not large
-  cracking jobs.
+**Notes**: SHA family uses Web Crypto (async); MD5/MD4/NTLM run from local
+implementations. A browser is far slower than native hashcat and has no GPU
+access — use it for audits, teaching and CTF-scale work. Only crack hashes you
+are authorized to.
