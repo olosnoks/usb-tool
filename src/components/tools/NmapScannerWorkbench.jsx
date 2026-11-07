@@ -149,7 +149,7 @@ export default function NmapScannerWorkbench({ onLogMessage }) {
       <p className="text-xs text-gray-400 mb-2">
         {method === 'wasm' ? 'Scanning via the WebAssembly engine.' : 'Connect-timing scan over fetch (browser heuristic): open = a service answered; closed = refused fast; open|filtered = stalled; blocked = port Chrome refuses to fetch.'}
       </p>
-      <ProxyConfig onLogMessage={onLogMessage} />
+      <ProxyConfig onLogMessage={onLogMessage} backend="nmap" />
 
       {backendAvailable && (
         <label className="mb-2 inline-flex items-center gap-1.5 text-xs text-emerald-300">

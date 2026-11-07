@@ -60,7 +60,7 @@ export default function HydraBruteforceWorkbench({ onLogMessage }) {
   return (
     <div className="p-4">
       <p className="text-sm text-gray-400 mb-3">Try username/password lists against an HTTP Basic-auth endpoint.</p>
-      <ProxyConfig onLogMessage={onLogMessage} />
+      <ProxyConfig onLogMessage={onLogMessage} backend="hydra" />
       <div className="grid gap-2 mb-4">
         <input placeholder="Target URL (e.g. https://example.com/protected)" value={url} onChange={(e) => setUrl(e.target.value)} className="bg-slate-900 border border-slate-800 rounded p-1 text-sm text-gray-200" />
         <WordlistPicker category="usernames" max={5000} label="Usernames" onLoad={(lines) => setUsers(lines.join('\n'))} />

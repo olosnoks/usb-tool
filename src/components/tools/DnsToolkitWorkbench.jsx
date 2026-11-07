@@ -193,7 +193,7 @@ export default function DnsToolkitWorkbench({ onLogMessage }) {
 
   return (
     <div className="w-full min-w-0 max-w-full text-gray-200">
-      <ProxyConfig onLogMessage={log} />
+      <ProxyConfig onLogMessage={log} backend="dns" />
       <div className="flex flex-wrap gap-2 mb-3 items-center">
         <input
           value={domain}

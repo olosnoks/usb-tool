@@ -177,7 +177,7 @@ export default function CertInspectWorkbench({ onLogMessage }) {
 
       {mode === 'url' && (
         <div className="mb-3">
-          <ProxyConfig onLogMessage={log} />
+          <ProxyConfig onLogMessage={log} backend="tls-inspector" />
           <div className="flex flex-wrap gap-2">
             <input value={host} onChange={(e) => setHost(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && lookup()} placeholder="example.com" className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono" />
             <button onClick={lookup} disabled={busy} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">

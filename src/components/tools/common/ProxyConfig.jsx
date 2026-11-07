@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { getProxyUrl, setProxyUrl } from '../../../utils/netClient';
+import DockerBackendControl from './DockerBackendControl';
 
 /**
  * Shared proxy configuration bar for the network security workbenches.
  * Lets the user switch between direct-from-browser requests (CORS-limited) and
- * routing through a local proxy that can reach arbitrary targets.
+ * routing through a local proxy that can reach arbitrary targets. The Docker
+ * button spins that proxy (and, for specialized tools, their own backend) up
+ * locally. Pass `backend` to point the button at this tool's service.
  */
-export default function ProxyConfig({ onLogMessage }) {
+export default function ProxyConfig({ onLogMessage, backend = 'cors-proxy' }) {
   const [url, setUrl] = useState(getProxyUrl());
   const [saved, setSaved] = useState(false);
 
@@ -23,7 +26,7 @@ export default function ProxyConfig({ onLogMessage }) {
         <span className="text-xs text-gray-400 whitespace-nowrap">Proxy:</span>
         <input
           type="text"
-          placeholder="direct (CORS-limited) — e.g. http://localhost:8080/{url}"
+          placeholder="direct (CORS-limited) — e.g. http://localhost:47101/fetch?url={url}"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           className="flex-1 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200"
@@ -35,8 +38,8 @@ export default function ProxyConfig({ onLogMessage }) {
       <p className="text-[10px] text-gray-500 mt-1">
         Empty = direct browser fetch (only CORS-permissive targets). Set a proxy URL with a{' '}
         <code>{'{url}'}</code> placeholder, or a prefix the target URL is appended to, to reach any host.
-        No proxy? The <strong>Docker Backends</strong> tool gives you a one-file <code>docker-compose.yml</code> for a local one.
       </p>
+      <DockerBackendControl backend={backend} onLogMessage={onLogMessage} />
     </div>
   );
 }
