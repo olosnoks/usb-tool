@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
-  bmeCompensate, parseBmeCalibration, BOSCH_EXAMPLE, SENSOR_DRIVERS, detectSensor, createSimulatedSensorBus,
+  bmeCompensate, parseBmeCalibration, BOSCH_EXAMPLE, SENSOR_DRIVERS, detectSensor,
   ads1115Config, decodeDs3231, encodeDs3231, ssd1306Fill, SSD1306_INIT
 } from '../src/utils/sensorDrivers';
 import { BusExplorerClient } from '../src/utils/busExplorerDriver';
-import { simulateBusExplorer } from './helpers/sim/clientSim';
+import { SerialLink } from '../src/utils/serialLink';
+import { fakeBusPirate } from './helpers/fakeBusPirate';
+import { createSimulatedSensorBus } from './helpers/sim/sensorBus';
 
 const calibBytes = () => {
   const b = new Uint8Array(26);
@@ -86,14 +88,17 @@ describe('other sensors', () => {
 });
 
 describe('Bus Explorer client', () => {
-  it('reads SPI flash ID and contents in simulation', async () => {
+  it('reads an SPI flash JEDEC ID over the real Bus Pirate path', async () => {
+    const fake = fakeBusPirate();
+    const link = new SerialLink(fake.port);
+    await link.open({ baudRate: 115200 });
     const c = new BusExplorerClient(() => {});
-    simulateBusExplorer(c);
+    await c.connectHardware({ link });
     expect((await c.spiFlashId()).toString(16)).toBe('ef4017');
-    const data = await c.spiFlashRead(0, 5000);
-    expect(new TextDecoder().decode(data.subarray(0, 27))).toBe('BUS PIRATE SIMULATED W25Q64');
-    expect(data[4999]).toBe((4999 * 7) & 0xff);
-    const bus = c.sensorBus();
-    expect(await detectSensor(bus, 0x76)).toBe('bme280');
+  });
+
+  it('sensor drivers decode a BME280 on a simulated I2C bus', async () => {
+    // The fake bus is a test fixture; the driver code under test is real.
+    expect(await detectSensor(createSimulatedSensorBus(), 0x76)).toBe('bme280');
   });
 });

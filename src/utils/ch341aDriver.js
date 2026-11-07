@@ -430,25 +430,23 @@ export class Ch341aClient {
     this.ch = null;
     this.flash = null;
     this.connected = false;
-    this.simulated = false;
     this.detectedChip = null;
   }
 
   log(msg, type = 'sys') { this.logger?.(`[CH341A] ${msg}`, type); }
 
-  async _attach(transport, simulated) {
+  async _attach(transport) {
     this.transport = transport;
     this.ch = new Ch341(transport);
     await this.ch.configure(1);
     await this.ch.enablePins(true);
     this.flash = new SpiFlash(this.ch);
     this.connected = true;
-    this.simulated = simulated;
   }
 
   async connect() {
     this.log('Requesting CH341A programmer (1A86:5512, the jumper on SPI/I2C)...');
-    await this._attach(await Ch341UsbTransport.request(), false);
+    await this._attach(await Ch341UsbTransport.request());
     this.log('Programmer connected.');
     return true;
   }
@@ -457,7 +455,7 @@ export class Ch341aClient {
     try { await this.ch?.enablePins(false); } catch (e) { /* ignore */ }
     try { await this.transport?.close?.(); } catch (e) { /* ignore */ }
     this.transport = null; this.ch = null; this.flash = null;
-    this.connected = false; this.simulated = false; this.detectedChip = null;
+    this.connected = false; this.detectedChip = null;
     this.log('Disconnected from programmer.');
   }
 

@@ -645,8 +645,8 @@ Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Commu
 
 ### 2b. Implementation & Architecture
 
-- **Component:** [\`src/components/tools/BusExplorerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/BusExplorerWorkbench.jsx) renders the header, scan bar, address grid, and register panel, and holds \`isConnected\`, \`isSimulated\`, \`detectedDevices\`, and scan state.
-- **Driver:** [\`src/utils/busExplorerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/busExplorerDriver.js) drives a Bus Pirate through its binary protocol (\`BusPirate\` class: BBIO entry, I2C START/STOP/bulk write/read with ACK checking, SPI transfers) and also holds the demo bus. \`connectSimulation()\` seeds a model of known chips keyed by 7-bit address; \`scanBus()\` walks \`0x08\`–\`0x77\` and reports which virtual addresses ACK; \`initSimulatedRegisters(addr)\` populates a per-device register map (including identity registers such as the MPU-6050 \`WHO_AM_I\` = \`0x68\`) that the read/write controls operate on.
+- **Component:** [\`src/components/tools/BusExplorerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/BusExplorerWorkbench.jsx) renders the header, scan bar, address grid, and register panel, and holds \`isConnected\`, \`detectedDevices\`, and scan state.
+- **Driver:** [\`src/utils/busExplorerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/busExplorerDriver.js) drives a real Bus Pirate through its binary protocol (\`BusPirate\` class: BBIO entry, I2C START/STOP/bulk write/read with ACK checking, SPI transfers). \`scanI2cBus()\` walks \`0x08\`–\`0x77\` and reports which addresses ACK; \`readRegisters(start, count)\` / \`writeRegister(reg, val)\` operate on the device at \`activeAddress\` (set from the address you select); \`spiTransfer()\` / \`spiFlashId()\` cover SPI. A device must be connected — there is no simulated bus.
 - **Errors:** a missing ACK is reported as an error ("No ACK from 0x50") rather than read as zeros.
 
 ---
@@ -1557,7 +1557,7 @@ SCPI itself is the familiar hierarchical text: \`*IDN?\`, \`MEAS:VOLT:DC?\`, \`S
 
 ### 3. Implementation & Architecture
 
-- **Driver:** [\`src/utils/usbtmcDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/usbtmcDriver.js) — \`buildMsgOut\`/\`buildRequestIn\`/\`parseMsgIn\` for the framing, \`UsbTmcDevice\` with a rolling bTag, \`write\`/\`read\`/\`query\`/\`queryBinary\`, and fragment reassembly until EOM. \`createSimulatedUsbTmc()\` backs the demo.
+- **Driver:** [\`src/utils/usbtmcDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/usbtmcDriver.js) — \`buildMsgOut\`/\`buildRequestIn\`/\`parseMsgIn\` for the framing, \`UsbTmcDevice\` with a rolling bTag, \`write\`/\`read\`/\`query\`/\`queryBinary\`, and fragment reassembly until EOM.
 - **Workbench:** [\`src/components/tools/UsbTmcWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/UsbTmcWorkbench.jsx).
 - **Tests:** [\`tests/usbtmc.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/usbtmc.test.js) checks the header building/parsing and runs \`*IDN?\` and measurement queries against a simulated instrument.
 
