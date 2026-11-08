@@ -191,9 +191,9 @@ WebUSB  →  @openipc-rs/web WASM  →  readRxTransfer()  →  unpackRealtekUsbT
 
 ### Build & Deploy
 `npm run build` (Vite → `dist/`) is a static bundle of HTML/JS/WASM assets, served by
-**Cloudflare Pages** at https://usb.olosnoks.com. It is built on a developer PC and
-pushed with wrangler, not built by GitHub Actions or Cloudflare — see *Releasing from
-your PC* below.
+**Cloudflare** (a Worker with static assets, named `usb-tool` in `wrangler.jsonc`) at
+https://usb.olosnoks.com. It is built on a developer PC and uploaded with wrangler, not
+built by GitHub Actions or Cloudflare — see *Releasing from your PC* below.
 
 ### Releasing from your PC (nothing runs on GitHub)
 Hosted CI is **opt-in**: `.github/workflows/ci.yml` and `deploy.yml` only run while the
@@ -204,7 +204,7 @@ in the Actions tab and bills nothing. The normal path is `scripts/release-local.
 ```bash
 python scripts/release-local.py                     # npm ci (if stale) + test + build -> dist/
 python scripts/release-local.py --assemble          # ... and build the site into _site/ to inspect it
-python scripts/release-local.py --deploy            # ... and publish it to Cloudflare Pages
+python scripts/release-local.py --deploy            # ... and publish it to Cloudflare
 python scripts/release-local.py --deploy --skip-build --skip-tests   # republish the existing dist/
 ```
 
@@ -212,9 +212,9 @@ python scripts/release-local.py --deploy --skip-build --skip-tests   # republish
    before anything is published.
 2. `--deploy` assembles `_site/` (`dist/` minus the GitHub-Pages-only `CNAME`, with the
    `__VERSION__` placeholder in both HTML entry points stamped `<branch>+<sha7>`) and
-   runs `npx --yes wrangler pages deploy` against the Pages project `usb-tool`
-   (`--project` / `CF_PAGES_PROJECT`), creating it on first use. Cloudflare serves the
-   files as-is: no build anywhere, no minutes billed, and the repo stays private.
+   runs `npx --yes wrangler deploy` with `wrangler.jsonc`: the Worker `usb-tool`, static
+   assets only, no code. Cloudflare serves the files as-is: no build anywhere, static
+   asset requests are free, and the repo stays private.
 
 Needs Node (npx runs wrangler) and Cloudflare credentials, one of: `npx wrangler login`
 once (browser sign-in that wrangler keeps for you, nothing stored in the repo), or
@@ -226,11 +226,13 @@ clean checkout of `main`; it warns and stamps `+dirty` otherwise. `_site/` is
 git-ignored. The deployed stamp is the `<meta name="build-version">` tag in the page
 source (`curl -s https://usb.olosnoks.com | grep build-version`).
 
-**First deploy / moving the domain.** After the first `--deploy`, open Cloudflare →
-Workers & Pages → `usb-tool` → *Custom domains* and add `usb.olosnoks.com`; the zone's
-DNS is already on Cloudflare, so it rewrites the CNAME for you. Then disable GitHub
-Pages on the repo (Settings → Pages). `public/CNAME` stays in the repo only so the
-gated GitHub Pages workflow still works as a fallback.
+**Moving the domain (once).** The first `--deploy` serves the site on the Worker's
+`workers.dev` URL (printed at the end). To move `usb.olosnoks.com` over: disable GitHub
+Pages on the repo (Settings → Pages), uncomment the `routes` line in `wrangler.jsonc`
+and deploy again; wrangler creates the DNS record in the zone, which is already on
+Cloudflare. (The dashboard route works too: Workers & Pages → `usb-tool` → Settings →
+Domains & Routes.) `public/CNAME` stays in the repo only so the gated GitHub Pages
+workflow still works as a fallback.
 
 To use hosted CI again: `gh variable set CI_BUILDS_ENABLED --body true --repo
 olosnoks/usb-tool` (and `gh variable delete CI_BUILDS_ENABLED --repo olosnoks/usb-tool`

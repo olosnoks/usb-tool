@@ -10,17 +10,17 @@ Does locally what .github/workflows/ci.yml did on a runner, then deploys:
   2. --assemble  copies dist/ to _site/ without the GitHub-Pages-only CNAME file
      and stamps the page's __VERSION__ placeholder <branch>+<sha7>, so you can
      inspect it.
-  3. --deploy    does that and pushes _site/ to Cloudflare Pages with wrangler
-     (`npx --yes wrangler pages deploy`), creating the project on first use.
-     Cloudflare serves the files as-is; nothing is built or billed anywhere.
+  3. --deploy    does that and uploads _site/ to Cloudflare with wrangler
+     (`npx --yes wrangler deploy`, config in wrangler.jsonc: the Worker `usb-tool`
+     with static assets only). Cloudflare serves the files as-is; no Worker code
+     runs, nothing is built, and asset requests are free.
 
 Usage:
   python scripts/release-local.py                     test + build -> dist/
   python scripts/release-local.py --assemble          ... and build the site into _site/
-  python scripts/release-local.py --deploy            ... and publish it to Cloudflare Pages
+  python scripts/release-local.py --deploy            ... and publish it to Cloudflare
   python scripts/release-local.py --deploy --skip-build --skip-tests
                                                       publish the existing dist/ as-is
-  --project NAME   Cloudflare Pages project (default $CF_PAGES_PROJECT or "usb-tool")
 
 Needs Node (npx runs wrangler) and Cloudflare credentials, one of: `npx wrangler
 login` once (a browser sign-in that wrangler keeps for you; nothing on disk in the
@@ -35,8 +35,8 @@ replaces the live site.
 import argparse, datetime, os, shutil, subprocess, sys
 from pathlib import Path
 
-DEFAULT_PROJECT = "usb-tool"
 ROOT = Path(__file__).resolve().parent.parent
+WRANGLER_CONFIG = ROOT / "wrangler.jsonc"
 DIST = ROOT / "dist"
 # GitHub-Pages-only files (public/CNAME binds the domain there); Cloudflare has no use for them.
 SITE_DROP = ("CNAME", ".nojekyll", ".DS_Store", "Thumbs.db", "*.map")
@@ -166,32 +166,18 @@ def check_cloudflare(npx):
     print("using the wrangler login on this machine")
 
 
-def ensure_project(npx, project):
-    """Create the Pages project on first use (wrangler would otherwise stop to ask)."""
-    lst = wrangler(npx, "pages", "project", "list", capture_output=True, text=True)
-    if lst.returncode != 0:
-        die("could not list Cloudflare Pages projects:\n" + lst.stderr.strip())
-    names = set()
-    for line in lst.stdout.splitlines():
-        cells = [c.strip() for c in line.split("│")]
-        if len(cells) > 1 and cells[1] and cells[1] != "Project Name":
-            names.add(cells[1])
-    if project in names:
-        return
-    print("Cloudflare Pages project '%s' does not exist yet; creating it (production branch main)" % project)
-    if wrangler(npx, "pages", "project", "create", project, "--production-branch", "main").returncode != 0:
-        die("could not create the Pages project '%s'" % project)
-    print("created. Attach the domain in the Cloudflare dashboard: Workers & Pages > %s > Custom domains." % project)
-
-
-def deploy(site, project, sha):
+def deploy(site, stamp):
+    """Upload _site/ as the static assets of the Worker named in wrangler.jsonc."""
     npx = tool("npx")
     check_cloudflare(npx)
-    ensure_project(npx, project)
-    r = wrangler(npx, "pages", "deploy", str(site), "--project-name", project,
-                 "--branch", "main", "--commit-dirty=true", "--commit-hash", sha)
+    if not WRANGLER_CONFIG.exists():
+        die("%s is missing" % WRANGLER_CONFIG)
+    if site != ROOT / "_site":
+        die("wrangler.jsonc serves ./_site; assemble() must write there")
+    r = wrangler(npx, "deploy", "--config", str(WRANGLER_CONFIG), "--cwd", str(ROOT),
+                 "--message", "release-local %s (%s)" % (stamp["version"], stamp["date"]))
     if r.returncode != 0:
-        die("wrangler pages deploy failed")
+        die("wrangler deploy failed — the previous deployment stays live")
 
 
 def main():
@@ -201,14 +187,11 @@ def main():
     ap.add_argument("--skip-tests", action="store_true", help="do not run the Vitest suite before building")
     ap.add_argument("--install", action="store_true", help="force `npm ci` even if node_modules looks current")
     ap.add_argument("--assemble", action="store_true", help="assemble the site into _site/ but do not deploy it")
-    ap.add_argument("--deploy", action="store_true", help="publish the site to Cloudflare Pages")
-    ap.add_argument("--project", default=None, help="Cloudflare Pages project (default: $CF_PAGES_PROJECT or %s)" % DEFAULT_PROJECT)
+    ap.add_argument("--deploy", action="store_true", help="publish the site to Cloudflare (wrangler deploy)")
     a = ap.parse_args()
 
     if load_dotenv(ROOT / ".env"):
         print("loaded %s" % (ROOT / ".env"))
-    if not a.project:
-        a.project = os.environ.get("CF_PAGES_PROJECT", DEFAULT_PROJECT)
 
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     sha = git("rev-parse", "HEAD")
@@ -225,7 +208,7 @@ def main():
         stamp = make_stamp(branch, sha, dirty)
         site = assemble(stamp)
         if a.deploy:
-            deploy(site, a.project, sha)
+            deploy(site, stamp)
 
     print("\ndone.")
 
