@@ -7,6 +7,7 @@ import { setCurrentTool, record } from './utils/sessionLog';
 import TerminalDrawer from './components/layout/TerminalDrawer';
 import { WORKSPACE_PRESETS } from './components/layout/WorkspacePresets';
 import { renderTool, toolMeta } from './components/ToolRegistry';
+import useIsMobile from './hooks/useIsMobile';
 import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize,
   moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, saveState, zoomStep, toggleFit,
@@ -40,6 +41,11 @@ function AppContent() {
   const serial = useSerial();
   const { isConnected, connect, disconnect, clearLogs, setBaudRate, portInfo, boards } = serial;
 
+  // Phone-width sessions open tools at 70% and show the sidebar as an overlay.
+  const isMobile = useIsMobile();
+  const mobileZoomRef = useRef(isMobile ? 0.7 : 1);
+  mobileZoomRef.current = isMobile ? 0.7 : 1;
+
   // ---- window manager --------------------------------------------------------
   const viewportRef = useRef(guessViewport());
   const [viewport, setViewportState] = useState(viewportRef.current);
@@ -49,7 +55,7 @@ function AppContent() {
     // Fresh visit / hard refresh: start with an empty workspace (no tools open).
     // An explicit ?tool= or #tool= link opens that specific tool.
     let s = createInitialState();
-    if (urlTool) s = openWindow(s, urlTool, toolMeta(urlTool), vp);
+    if (urlTool) s = openWindow(s, urlTool, toolMeta(urlTool), vp, { zoom: mobileZoomRef.current });
     return s;
   });
 
@@ -80,7 +86,7 @@ function AppContent() {
     return () => clearTimeout(t);
   }, [wm]);
 
-  const open = useCallback((toolId, opts) => setWm((s) => openWindow(s, toolId, toolMeta(toolId), viewportRef.current, opts)), []);
+  const open = useCallback((toolId, opts) => setWm((s) => openWindow(s, toolId, toolMeta(toolId), viewportRef.current, { zoom: mobileZoomRef.current, ...opts })), []);
   const onDuplicate = useCallback((id) => setWm((s) => duplicateWindow(s, id, viewportRef.current)), []);
   const onSnap = useCallback((id, zone) => setWm((s) => applySnap(s, id, zone, viewportRef.current)), []);
   const onFocus = useCallback((id) => setWm((s) => focusWindow(s, id)), []);
@@ -124,8 +130,11 @@ function AppContent() {
   const metaFor = useCallback((toolId) => toolMeta(toolId), []);
   const renderToolInWindow = useCallback((toolId) => renderTool(toolId, serial), [serial]);
 
-  // Sidebar collapse state (persisted)
+  // Sidebar collapse state (persisted). On phones it doubles as the overlay
+  // drawer's open/closed flag and always starts closed, so the first thing you
+  // see is the full workspace rather than a sidebar covering the screen.
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    if (isMobile) return true;
     try { return localStorage.getItem('skon_sidebar_collapsed') === 'true'; } catch (e) { return false; }
   });
   const handleToggleSidebar = (collapsed) => {
@@ -217,6 +226,9 @@ function AppContent() {
         activeTool={activeTool}
         activePreset={currentActivePreset}
         onSelectPreset={handleSelectPreset}
+        isMobile={isMobile}
+        isSidebarCollapsed={isSidebarCollapsed}
+        onToggleSidebar={handleToggleSidebar}
         isDrawerOpen={isDrawerOpen}
         onToggleDrawer={() => setIsDrawerOpen(!isDrawerOpen)}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
@@ -227,6 +239,7 @@ function AppContent() {
       {/* 2. Main Workspace Layout: Sidebar + windowed desktop */}
       <div className="flex-1 flex overflow-hidden relative">
         <Sidebar
+          isMobile={isMobile}
           activeTool={activeTool}
           openTools={openTools}
           onSelectTool={(toolId, opts) => {
