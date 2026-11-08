@@ -23,3 +23,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local deploy (scripts/release-local.py). .env holds the Cloudflare token; never commit it.
+.env
+.env.*
+!.env.example
+_site/

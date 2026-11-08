@@ -1,10 +1,10 @@
 # Skon's USB Tool // Hardware Hacker Workbench & Serial Tool
 
-![GitHub Pages Deployment](https://img.shields.io/badge/deployment-GitHub%20Pages-success?style=for-the-badge&logo=github)
+![Cloudflare Pages Deployment](https://img.shields.io/badge/deployment-Cloudflare%20Pages-success?style=for-the-badge&logo=cloudflare)
 ![Web Serial API](https://img.shields.io/badge/Web%20Serial%20API-Native%20W3C-cyan?style=for-the-badge&logo=w3c)
 ![License](https://img.shields.io/badge/license-MIT-amber?style=for-the-badge)
 
-**Skon's USB Tool** is a client-side hardware workbench and serial tool built with Vite, React, and Tailwind CSS, designed for static hosting on **GitHub Pages**.
+**Skon's USB Tool** is a client-side hardware workbench and serial tool built with Vite, React, and Tailwind CSS, designed for static hosting (**Cloudflare Pages**).
 
 It turns a Chromium browser into a serial bench: Web Serial terminal and logging, in-browser ESP32 / ESP8266 ROM bootloader flashing with MD5 verification, a multi-channel serial plotter, live hex inspection, U-Boot autoboot interruption and `md.b` memory dumps, and long-running disk logging.
 
@@ -116,7 +116,7 @@ Skon's USB Tool is a **100% client-side single-page app** — there is no server
 no telemetry, and no build step on the user's side. Everything (serial I/O,
 firmware flashing, 802.11 parsing, crypto) runs in the browser tab. That choice
 drives the whole design: it installs nothing, leaks nothing to a backend, and
-deploys as static files to GitHub Pages.
+deploys as static files to Cloudflare Pages.
 
 ### Stack & Entry Points
 - **Vite + React + Tailwind CSS.** Vite bundles two HTML entry points —
@@ -190,9 +190,52 @@ WebUSB  →  @openipc-rs/web WASM  →  readRxTransfer()  →  unpackRealtekUsbT
 - **localStorage** holds per-viewer UI preferences. None of it leaves the device.
 
 ### Build & Deploy
-`npm run build` (Vite → `dist/`) is published to GitHub Pages by
-`.github/workflows/deploy.yml` on every push to `main`. Because the app is static
-and self-contained, the deployed artifact is just HTML/JS/WASM assets.
+`npm run build` (Vite → `dist/`) is a static bundle of HTML/JS/WASM assets, served by
+**Cloudflare Pages** at https://usb.olosnoks.com. It is built on a developer PC and
+pushed with wrangler, not built by GitHub Actions or Cloudflare — see *Releasing from
+your PC* below.
+
+### Releasing from your PC (nothing runs on GitHub)
+Hosted CI is **opt-in**: `.github/workflows/ci.yml` and `deploy.yml` only run while the
+repo variable `CI_BUILDS_ENABLED` is `true`. Until then every push shows as *skipped*
+in the Actions tab and bills nothing. The normal path is `scripts/release-local.py`
+(Python 3, no dependencies):
+
+```bash
+python scripts/release-local.py                     # npm ci (if stale) + test + build -> dist/
+python scripts/release-local.py --assemble          # ... and build the site into _site/ to inspect it
+python scripts/release-local.py --deploy            # ... and publish it to Cloudflare Pages
+python scripts/release-local.py --deploy --skip-build --skip-tests   # republish the existing dist/
+```
+
+1. Runs the Vitest suite and `npm run build`, exactly what CI did. Any failure stops
+   before anything is published.
+2. `--deploy` assembles `_site/` (`dist/` minus the GitHub-Pages-only `CNAME`, with the
+   `__VERSION__` placeholder in both HTML entry points stamped `<branch>+<sha7>`) and
+   runs `npx --yes wrangler pages deploy` against the Pages project `usb-tool`
+   (`--project` / `CF_PAGES_PROJECT`), creating it on first use. Cloudflare serves the
+   files as-is: no build anywhere, no minutes billed, and the repo stays private.
+
+Needs Node (npx runs wrangler) and Cloudflare credentials, one of: `npx wrangler login`
+once (browser sign-in that wrangler keeps for you, nothing stored in the repo), or
+`CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` in a `.env` at the repo root
+(git-ignored; copy `.env.example`; a value exported in the shell wins). GitHub secrets
+can't be read back, so a token for `.env` means a new one from the Cloudflare dashboard
+(My Profile → API Tokens, "Edit Cloudflare Workers" template covers Pages). Run it from a
+clean checkout of `main`; it warns and stamps `+dirty` otherwise. `_site/` is
+git-ignored. The deployed stamp is the `<meta name="build-version">` tag in the page
+source (`curl -s https://usb.olosnoks.com | grep build-version`).
+
+**First deploy / moving the domain.** After the first `--deploy`, open Cloudflare →
+Workers & Pages → `usb-tool` → *Custom domains* and add `usb.olosnoks.com`; the zone's
+DNS is already on Cloudflare, so it rewrites the CNAME for you. Then disable GitHub
+Pages on the repo (Settings → Pages). `public/CNAME` stays in the repo only so the
+gated GitHub Pages workflow still works as a fallback.
+
+To use hosted CI again: `gh variable set CI_BUILDS_ENABLED --body true --repo
+olosnoks/usb-tool` (and `gh variable delete CI_BUILDS_ENABLED --repo olosnoks/usb-tool`
+to turn it off). `deploy.yml` still targets GitHub Pages; it is the fallback, not the
+normal path.
 
 ---
 
@@ -200,7 +243,7 @@ and self-contained, the deployed artifact is just HTML/JS/WASM assets.
 
 ### Online Web App
 Open directly in any Chromium browser (Chrome, Edge, Opera):  
-👉 **[https://olosnoks.github.io/usb-tool/](https://olosnoks.github.io/usb-tool/)**
+👉 **[https://usb.olosnoks.com](https://usb.olosnoks.com)**
 
 ### Local Development
 ```bash

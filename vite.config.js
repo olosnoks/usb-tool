@@ -2,6 +2,7 @@ import { resolve } from 'path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import wasm from 'vite-plugin-wasm';
+import { configDefaults } from 'vitest/config';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -36,6 +37,10 @@ export default defineConfig({
         wiki: resolve(__dirname, 'wiki/index.html')
       }
     }
+  },
+  test: {
+    // The WASM toolchain checkouts (emsdk, aircrack-*) carry their own *.test.js; never ours.
+    exclude: [...configDefaults.exclude, 'emsdk/**', 'aircrack-ng/**', 'aircrack-js/**']
   }
 
 });
