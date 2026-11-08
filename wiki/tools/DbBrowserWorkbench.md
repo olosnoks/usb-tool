@@ -28,6 +28,38 @@ read-only parser and show "read-only".
 — including any in-session SQL edits — to a downloadable `.sqlite` file
 (`db.export()`), giving you a write-back path.
 
+## Combine databases
+Merge several SQLite files into a single database, entirely in the browser
+(sql.js). Click **Combine databases**, add two or more `.sqlite` / `.db` files
+(reorder or remove them as needed), and optionally include the currently open
+database — with any in-session SQL edits — as the first source.
+
+Sources are merged in order; the first file to define a table sets its schema.
+
+- **Tables with the same name**
+  - *Append rows into one table* (default) — rows go into one table; columns a
+    later file has but the target lacks are added (`ALTER TABLE ADD COLUMN`).
+  - *Keep separate (rename)* — later copies become `<table>_<file>` (indexes
+    are copied and renamed too).
+  - *Keep first only* — later same-named tables are ignored.
+- **Duplicate keys when appending** (PRIMARY KEY / UNIQUE collisions)
+  - *Keep existing row* (default, `INSERT OR IGNORE`) — skipped rows are counted
+    in the report.
+  - *Later file wins* (`INSERT OR REPLACE`).
+  - *Keep both (new IDs)* — incoming rows get a fresh `INTEGER PRIMARY KEY`.
+    Foreign keys that pointed at the old IDs are **not** rewritten.
+- **Source column** — optionally add a TEXT column (default `_source`) holding
+  each row's source file name.
+
+Indexes are created with their table before rows are copied (so UNIQUE indexes
+are honoured); views and triggers are created last so triggers don't fire on
+merged rows. FTS / R*Tree virtual tables are rebuilt from their visible columns
+(shadow tables are not copied). A report lists, per source and table, whether it
+was created / appended / renamed / skipped, rows added and duplicates skipped,
+plus any warnings. The result can be **opened in the browser** (Browse /
+Structure / Execute SQL) and/or **downloaded** as one `.sqlite` file. Input files
+are never modified.
+
 ## Endpoint
 Query a database/REST endpoint over HTTP (PostgREST, CouchDB, Elasticsearch
 `_search`, Datasette, or any JSON API) and render the JSON as a table. Presets
@@ -36,6 +68,8 @@ for non-CORS hosts.
 
 **Implementation**: `src/utils/sqlite.js` (read-only reader + `parseColumnDefs`,
 verified in `tests/sqlite.test.js`), `src/utils/sqljs.js` (lazy sql.js loader),
+`src/utils/sqliteMerge.js` (database merge, verified in
+`tests/sqliteMerge.test.js`),
 `src/components/tools/DbBrowserWorkbench.jsx`.
 
 **Notes**: sql.js runs on an in-memory copy, so writes/DDL affect only that copy
