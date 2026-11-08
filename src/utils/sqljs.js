@@ -3,11 +3,20 @@
 // Loading is deferred so opening the tool doesn't pull ~650 KB until needed.
 
 let promise = null;
+let loader = null;   // a host page's own engine (the WarHog flasher hands in its hash-checked sql.js)
+
+/**
+ * Let an embedding page supply the sql.js module instead of the bundled package:
+ * fn() returns (a promise of) the initialised module. Used by the standalone
+ * studio build (src/dbstudio.jsx).
+ */
+export function setSqlJsLoader(fn) { loader = fn; promise = null; }
 
 /** Resolve (and cache) the sql.js module. Throws if it can't initialize. */
 export async function getSqlJs() {
   if (!promise) {
     promise = (async () => {
+      if (loader) return loader();
       const initSqlJs = (await import('sql.js')).default;
       return initSqlJs({ locateFile: (f) => `${import.meta.env.BASE_URL}sql/${f}` });
     })().catch((e) => { promise = null; throw e; });

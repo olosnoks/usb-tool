@@ -194,6 +194,12 @@ WebUSB  →  @openipc-rs/web WASM  →  readRxTransfer()  →  unpackRealtekUsbT
 `.github/workflows/deploy.yml` on every push to `main`. Because the app is static
 and self-contained, the deployed artifact is just HTML/JS/WASM assets.
 
+`npm run build:dbstudio` builds the Lite DB Browser's SQLite studio **on its own**
+(`vite.dbstudio.config.js` -> `dist-dbstudio/dbstudio.js` + `dbstudio.css`, exposed as
+`window.WarHogDbStudio` with React, CodeMirror, lucide and JSZip inside, sql.js left to the
+host page). It is what the WarHog web flasher's Drive database view embeds; see
+`src/dbstudio.jsx` for the mount API and `SqliteStudio`'s `onApi` / `onChange` / `onDrop` props.
+
 ---
 
 ## 🚀 Quick Start

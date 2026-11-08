@@ -23,3 +23,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# the embeddable SQLite studio build (npm run build:dbstudio)
+dist-dbstudio/

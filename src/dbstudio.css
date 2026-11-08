@@ -1,0 +1,15 @@
+/* Styles for the standalone studio build (src/dbstudio.jsx): Tailwind over the
+   dbbrowser components only (tailwind.dbstudio.config.js). Preflight is included,
+   so the host page is styled with that in mind. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.dbstudio {
+  font-family: theme('fontFamily.mono');
+  color-scheme: dark;
+}
+.dbstudio ::-webkit-scrollbar { width: 6px; height: 6px; }
+.dbstudio ::-webkit-scrollbar-track { background: rgb(var(--app-dark, 7 12 24)); }
+.dbstudio ::-webkit-scrollbar-thumb { background: rgb(var(--tw-slate-800, 30 41 59)); border-radius: 3px; }
+.dbstudio ::-webkit-scrollbar-thumb:hover { background: rgb(var(--tw-slate-700, 51 65 85)); }

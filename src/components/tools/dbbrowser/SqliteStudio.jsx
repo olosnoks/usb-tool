@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FilePlus, FolderOpen, Save, Undo2, SaveAll, FileInput, FileOutput, Combine, Wrench, ScrollText, Database,
   Table as TableIcon, Boxes, SlidersHorizontal, Terminal, ShieldCheck, Link2, Gauge, Minimize2, XCircle, FileSpreadsheet,
@@ -25,8 +25,14 @@ const TABS = [
  * SQLite studio modelled on DB Browser for SQLite: structure / browse / pragmas
  * / execute tabs over one in-memory database, with write-back, revert, import,
  * export, combine and an SQL log.
+ *
+ * Embedding (src/dbstudio.jsx builds it on its own for the WarHog flasher):
+ *   onApi(api)      called after every render with { session, db, open, create, browse,
+ *                   setTab, writeChanges, writeTo(sink), close } so the host can drive the studio
+ *   onChange(state) called when the database, its name or its dirty flag changes
+ *   onDrop(files, e) return true to take over a file drop (the host imports its own formats)
  */
-export default function SqliteStudio({ log }) {
+export default function SqliteStudio({ log, onApi, onChange, onDrop: onDropProp }) {
   const session = useDbSession(log);
   const { db, info, dirty } = session;
   const [tab, setTab] = useState('structure');
@@ -42,6 +48,8 @@ export default function SqliteStudio({ log }) {
   const [sqlTabsKey, setSqlTabsKey] = useState(0);
 
   const guard = async (fn) => { setError(''); try { await fn(); } catch (e) { setError(e.message || String(e)); log?.(`DB Browser: ${e.message}`); } };
+  // Like guard, for the host API: shows the error here and rethrows so the caller knows.
+  const run = async (fn) => { setError(''); try { return await fn(); } catch (e) { setError(e.message || String(e)); log?.(`DB Browser: ${e.message}`); throw e; } };
   const confirmDiscard = () => !dirty || window.confirm(`"${info?.name}" has changes that haven't been written. Discard them?`);
 
   const openBytes = (name, bytes, handle) => guard(async () => { await session.open(name, bytes, handle); setTab('structure'); setCombining(false); });
@@ -115,9 +123,21 @@ export default function SqliteStudio({ log }) {
 
   const browse = (name, schema) => { setBrowseTarget({ name, schema, n: Date.now() }); setTab('browse'); };
 
+  // ---- host API (embedding) ----
+  const api = {
+    session, get db() { return session.db; },
+    open: (name, bytes, opts) => run(async () => { await session.open(name, bytes, null, opts); setTab('structure'); setCombining(false); }),
+    create: (name, opts) => run(async () => { await session.open(name || 'untitled.sqlite', null, null, opts); setTab('structure'); setCombining(false); }),
+    browse, setTab, writeChanges: () => run(session.writeChanges), writeTo: (sink) => run(() => session.writeTo(sink)), close: () => session.close(),
+  };
+  useEffect(() => { onApi?.(api); });
+  useEffect(() => { onChange?.({ db: session.db, info, dirty, version: session.version, readOnly: session.readOnly }); }, [info, dirty, session.version]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const onDrop = async (e) => {
     e.preventDefault(); setDragging(false);
-    const f = e.dataTransfer.files?.[0];
+    const files = Array.from(e.dataTransfer.files || []);
+    if (onDropProp && onDropProp(files, e) === true) return;   // the host took the drop
+    const f = files[0];
     if (!f) return;
     if (/\.(csv|tsv)$/i.test(f.name)) { if (db) setDialog({ kind: 'csv' }); return; }
     if (/\.sqbpro$/i.test(f.name)) { loadProject(await f.text(), f.name); return; }
@@ -148,7 +168,7 @@ export default function SqliteStudio({ log }) {
           { label: 'Save Project (.sqbpro)…', icon: FolderCog, onClick: saveProject },
           ...(session.recent.length ? [{ sep: true }, ...session.recent.map((r) => ({ label: r.name, icon: History, onClick: () => openRecent(r) })), { label: 'Clear recent files', icon: Trash, onClick: session.forgetRecent }] : []),
         ]} />
-        <button className={btn + (dirty ? ' !border-amber-700 !text-amber-200' : '')} disabled={!db || session.readOnly} onClick={() => guard(session.writeChanges)} title={info?.handle ? `Save to ${info.name} (Ctrl+S)` : 'Save to a file (Ctrl+S)'}><Save size={13} /> Write Changes</button>
+        <button className={btn + (dirty ? ' !border-amber-700 !text-amber-200' : '')} disabled={!db || session.readOnly} onClick={() => guard(session.writeChanges)} title={info?.handle ? `Save to ${info.name} (Ctrl+S)` : info?.sink ? `Save to ${info.sink.label} (Ctrl+S)` : 'Save to a file (Ctrl+S)'}><Save size={13} /> Write Changes</button>
         <button className={btn} disabled={!db || !dirty} onClick={() => { if (window.confirm('Discard all changes since the last write?')) guard(session.revert); }}><Undo2 size={13} /> Revert Changes</button>
         <button className={btn} disabled={!db} onClick={() => guard(() => session.saveAs())}><SaveAll size={13} /> Save As…</button>
         <span className="mx-1 h-4 border-l border-slate-700" />
@@ -203,7 +223,7 @@ export default function SqliteStudio({ log }) {
             {session.attachments.length > 0 && <span className="text-sky-400">attached: {session.attachments.map((a) => a.alias).join(', ')}</span>}
             <span>{((info?.size || 0) / 1024).toFixed(0)} KB on disk</span>
             <span>{encoding}</span>
-            <span>{info?.handle ? 'Write Changes saves back to the original file' : hasFsAccess() ? 'In-browser copy — Write Changes asks where to save' : 'In-browser copy — Write Changes downloads a file'}</span>
+            <span>{info?.handle ? 'Write Changes saves back to the original file' : info?.sink ? `Write Changes saves to ${info.sink.label}` : hasFsAccess() ? 'In-browser copy — Write Changes asks where to save' : 'In-browser copy — Write Changes downloads a file'}</span>
             {dirty ? <span className="inline-flex items-center gap-1 text-amber-300"><Circle size={7} fill="currentColor" /> unsaved changes</span> : <span className="text-emerald-500/70">saved</span>}
             <span className="ml-auto">SQLite {sqliteVersion} (sql.js)</span>
           </div>

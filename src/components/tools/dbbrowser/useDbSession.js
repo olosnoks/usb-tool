@@ -82,7 +82,9 @@ export function useDbSession(onLog) {
   const undoRef = useRef([]);
   const redoRef = useRef([]);
   const readOnlyRef = useRef(false);
-  const [info, setInfo] = useState(null); // { name, handle, size, readOnly }
+  const [info, setInfo] = useState(null); // { name, handle, size, readOnly, sink }
+  // sink: { label, write(bytes) } — where Write Changes goes when there is no file handle
+  // (an embedding page's own store, e.g. the WarHog flasher's SD card).
   const [version, setVersion] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [sqlLog, setSqlLog] = useState([]);
@@ -179,7 +181,7 @@ export function useDbSession(onLog) {
   };
   useEffect(() => { idbAll().then(setRecent).catch(() => {}); }, []);
 
-  const load = useCallback(async (name, bytes, handle = null, { readOnly = false } = {}) => {
+  const load = useCallback(async (name, bytes, handle = null, { readOnly = false, sink = null } = {}) => {
     const SQL = await getSqlJs();
     const db = bytes ? new SQL.Database(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)) : new SQL.Database();
     try {
@@ -195,7 +197,7 @@ export function useDbSession(onLog) {
     const saved = bytes ? (bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)) : db.export();
     prepare(db);
     clearUndo();
-    setInfo({ name, handle, size: saved.byteLength, readOnly });
+    setInfo({ name, handle, size: saved.byteLength, readOnly, sink });
     setSqlLog([]);
     markClean(saved);
     onLog?.(`Opened ${name} (${(saved.byteLength / 1024).toFixed(0)} KB)${readOnly ? ' read-only' : ''}`);
@@ -259,10 +261,22 @@ export function useDbSession(onLog) {
     return true;
   }, [info, snapshot, onLog]);
 
-  /** Persist changes: to the file handle if we have one, else Save As. */
+  /** Write to a host sink { label, write(bytes) } and keep it: later Write Changes go there too. */
+  const writeTo = useCallback(async (sink) => {
+    if (!dbRef.current || readOnlyRef.current) return false;
+    const bytes = snapshot();
+    await sink.write(bytes);
+    setInfo((i) => ({ ...i, sink, size: bytes.byteLength }));
+    markClean(bytes);
+    logSql('-- changes written to ' + sink.label);
+    onLog?.(`Wrote changes to ${sink.label}`);
+    return true;
+  }, [snapshot, logSql, onLog]);
+
+  /** Persist changes: to the file handle if we have one, else to the host's sink, else Save As. */
   const writeChanges = useCallback(async () => {
     if (!dbRef.current || readOnlyRef.current) return false;
-    if (!info?.handle) return saveAs();
+    if (!info?.handle) return info?.sink ? writeTo(info.sink) : saveAs();
     const bytes = snapshot();
     await writeHandle(info.handle, bytes);
     setInfo((i) => ({ ...i, size: bytes.byteLength }));
@@ -270,7 +284,10 @@ export function useDbSession(onLog) {
     logSql('-- changes written to ' + info.name);
     onLog?.(`Wrote changes to ${info.name}`);
     return true;
-  }, [info, saveAs, snapshot, logSql, onLog]);
+  }, [info, saveAs, writeTo, snapshot, logSql, onLog]);
+
+  /** Attach (or drop) a host sink for Write Changes on the open database. */
+  const setSink = useCallback((sink) => setInfo((i) => (i ? { ...i, sink: sink || null } : i)), []);
 
   const revert = useCallback(async () => {
     if (!savedRef.current || !info) return;
@@ -377,7 +394,7 @@ export function useDbSession(onLog) {
     readOnly: !!info?.readOnly,
     canUndo: undoRef.current.length > 0, canRedo: redoRef.current.length > 0,
     undoLabel: undoRef.current[undoRef.current.length - 1]?.label, redoLabel: redoRef.current[redoRef.current.length - 1]?.label,
-    open, openWithPicker, openRecent, forgetRecent, create, close, revert, writeChanges, saveAs, currentBytes,
+    open, openWithPicker, openRecent, forgetRecent, create, close, revert, writeChanges, writeTo, saveAs, currentBytes, setSink,
     attach, detach, attachedBytes,
     mutate, exec, refresh, logSql, clearLog: () => setSqlLog([]),
     pushUndo, undo, redo,
