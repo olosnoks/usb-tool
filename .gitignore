@@ -24,5 +24,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Local deploy output (scripts/release-local.py)
+# Local deploy (scripts/release-local.py). .env holds the Cloudflare token; never commit it.
+.env
+.env.*
+!.env.example
 _site/

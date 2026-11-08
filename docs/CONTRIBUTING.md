@@ -2,7 +2,7 @@
 
 Thanks for your interest in contributing! This is a client-side hardware hacker
 workbench built with **Vite + React + Tailwind CSS**, hosted statically on
-GitHub Pages. Everything runs in the browser over Web Serial, WebUSB, and WASM —
+Cloudflare Pages. Everything runs in the browser over Web Serial, WebUSB, and WASM —
 there is no backend.
 
 By participating you agree to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
