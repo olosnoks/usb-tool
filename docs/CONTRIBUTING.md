@@ -60,7 +60,8 @@ label it clearly so users can tell synthetic data from real hardware I/O.
    JS/JSX with Tailwind classes — no separate linter config is enforced, so mirror
    nearby files for naming, formatting, and comment density).
 3. Add or update Vitest tests for parser/driver logic where practical.
-4. Ensure `npm run build` and `npm run test` both pass.
+4. Ensure `npm run build` and `npm run test` both pass locally. Hosted CI is
+   opt-in (repo variable `CI_BUILDS_ENABLED`), so it will not run them for you.
 5. If you add or change a tool, update its wiki article and the README tool list.
 6. Open a PR describing what changed and how you verified it (which browser,
    which hardware, or which simulated path).

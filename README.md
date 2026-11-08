@@ -190,9 +190,44 @@ WebUSB  →  @openipc-rs/web WASM  →  readRxTransfer()  →  unpackRealtekUsbT
 - **localStorage** holds per-viewer UI preferences. None of it leaves the device.
 
 ### Build & Deploy
-`npm run build` (Vite → `dist/`) is published to GitHub Pages by
-`.github/workflows/deploy.yml` on every push to `main`. Because the app is static
-and self-contained, the deployed artifact is just HTML/JS/WASM assets.
+`npm run build` (Vite → `dist/`) is a static bundle of HTML/JS/WASM assets that is
+published to **GitHub Pages** (https://usb.olosnoks.com). It is built and published
+from a developer PC, not by GitHub Actions — see *Releasing from your PC* below.
+
+### Releasing from your PC (no GitHub Actions build)
+Hosted CI is **opt-in**: `.github/workflows/ci.yml` and `deploy.yml` only run while the
+repo variable `CI_BUILDS_ENABLED` is `true`. Until then every push shows as *skipped*
+in the Actions tab. The normal path is `scripts/release-local.py` (Python 3, no
+dependencies):
+
+```bash
+python scripts/release-local.py                     # npm ci (if stale) + test + build -> dist/
+python scripts/release-local.py --assemble          # ... and build the site into _site/ to inspect it
+python scripts/release-local.py --deploy            # ... and publish it to GitHub Pages
+python scripts/release-local.py --deploy --skip-build --skip-tests   # republish the existing dist/
+```
+
+1. Runs the Vitest suite and `npm run build`, exactly what CI did. Any failure stops
+   before anything is published.
+2. `--deploy` assembles `_site/` (`dist/` + `.nojekyll`, with the `__VERSION__`
+   placeholder in both HTML entry points stamped `<branch>+<sha7>`), commits it to the
+   `gh-pages` branch with git plumbing (your checkout is untouched), pushes, and makes
+   sure Pages publishes from that branch (`build_type=legacy`). GitHub then copies the
+   files live with its own short *pages build and deployment* step: no `npm` runs on
+   GitHub any more. On a **private** repo GitHub still bills that copy step as Actions
+   time (a few minutes at most, only when you deploy); only a public repo makes it free.
+
+Needs Node, `gh` logged in as the repo owner, and push access over the normal git
+remote. No tokens or `.env`. Run it from a clean checkout of `main`; it warns and
+stamps `+dirty` otherwise. `_site/` is git-ignored. The deployed stamp is the
+`<meta name="build-version">` tag in the page source
+(`curl -s https://usb.olosnoks.com | grep build-version`).
+
+To use hosted CI again: `gh variable set CI_BUILDS_ENABLED --body true --repo
+olosnoks/usb-tool`; `deploy.yml` then publishes through `actions/deploy-pages` again,
+and the first such run should switch Pages back to its workflow source
+(`gh api -X PUT repos/olosnoks/usb-tool/pages -f build_type=workflow`). Turn it off
+with `gh variable delete CI_BUILDS_ENABLED --repo olosnoks/usb-tool`.
 
 ---
 

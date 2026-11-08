@@ -10,6 +10,11 @@ on:
 
 jobs:
   test:
+    # Hosted runs are opt-in: the site is normally tested, built and published from a
+    # developer PC with scripts/release-local.py (no build job on GitHub). Set the repo
+    # variable CI_BUILDS_ENABLED=true to run this workflow on GitHub again; every other
+    # job needs this one, so nothing runs while it is unset.
+    if: ${{ vars.CI_BUILDS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
