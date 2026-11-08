@@ -30,7 +30,7 @@ const qid = (n) => '"' + String(n).replace(/"/g, '""') + '"';
 // Internal tables created by common virtual-table modules (FTS3/4/5, R*Tree).
 // They're rebuilt automatically when the virtual table is created, so they're
 // never copied directly.
-const SHADOW_SUFFIXES = ['_content', '_segments', '_segdir', '_docsize', '_stat', '_data', '_idx', '_config', '_node', '_rowid', '_parent'];
+export const SHADOW_SUFFIXES = ['_content', '_segments', '_segdir', '_docsize', '_stat', '_data', '_idx', '_config', '_node', '_rowid', '_parent'];
 
 // An SQL identifier as it can appear in a CREATE statement, optionally
 // schema-qualified: "quoted", [bracketed], `backticked`, or bare.
