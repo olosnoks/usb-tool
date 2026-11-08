@@ -7,12 +7,14 @@ import { parseCsv, importRows, listObjects, dumpSql, toCsv, exportJson, queryAll
 
 const SEPS = [[',', 'Comma ,'], [';', 'Semicolon ;'], ['\t', 'Tab'], ['|', 'Pipe |'], ['other', 'Other…']];
 const QUOTES = [['"', 'Double "'], ["'", "Single '"], ['', 'None']];
+const ENCODINGS = ['utf-8', 'utf-16le', 'utf-16be', 'windows-1252', 'iso-8859-1', 'iso-8859-15', 'shift_jis', 'gbk', 'big5', 'koi8-r'];
 
 /** Import > Table from CSV file. */
 export function ImportCsvDialog({ session, onClose }) {
   const db = session.db;
   const [file, setFile] = useState(null);
-  const [text, setText] = useState('');
+  const [raw, setRaw] = useState(null);
+  const [encoding, setEncoding] = useState('utf-8');
   const [header, setHeader] = useState(true);
   const [sep, setSep] = useState(',');
   const [otherSep, setOtherSep] = useState('');
@@ -26,6 +28,10 @@ export function ImportCsvDialog({ session, onClose }) {
 
   const tables = useMemo(() => listObjects(db).filter((o) => o.type === 'table' && !o.shadow).map((o) => o.name), [db, session.version]);
   const separator = sep === 'other' ? otherSep : sep;
+  const text = useMemo(() => {
+    if (!raw) return '';
+    try { return new TextDecoder(encoding).decode(raw); } catch { return new TextDecoder().decode(raw); }
+  }, [raw, encoding]);
   const parsed = useMemo(() => {
     if (!text || !separator) return null;
     try { return parseCsv(text, { separator, quote, trim }); } catch (e) { return { err: e.message }; }
@@ -40,8 +46,11 @@ export function ImportCsvDialog({ session, onClose }) {
     e.target.value = '';
     if (!f) return;
     setFile(f); setDone(null); setError('');
-    const t = await f.text();
-    setText(t);
+    const buf = new Uint8Array(await f.arrayBuffer());
+    // BOM sniffing for the default encoding
+    const enc = buf[0] === 0xff && buf[1] === 0xfe ? 'utf-16le' : buf[0] === 0xfe && buf[1] === 0xff ? 'utf-16be' : 'utf-8';
+    setEncoding(enc); setRaw(buf);
+    const t = new TextDecoder(enc).decode(buf);
     const first = t.split(/\r?\n/, 1)[0] || '';
     if (/\.tsv$/i.test(f.name) || (first.split('\t').length > first.split(',').length)) setSep('\t');
     else if (first.split(';').length > first.split(',').length) setSep(';');
@@ -72,7 +81,8 @@ export function ImportCsvDialog({ session, onClose }) {
         <div><div className={label}>Field separator</div>
           <div className="flex gap-1"><select value={sep} onChange={(e) => setSep(e.target.value)} className={input}>{SEPS.map(([v, l]) => <option key={l} value={v}>{l}</option>)}</select>
             {sep === 'other' && <input value={otherSep} onChange={(e) => setOtherSep(e.target.value)} className={input + ' w-12'} maxLength={4} />}</div></div>
-        <div><div className={label}>Quote character</div><select value={quote} onChange={(e) => setQuote(e.target.value)} className={input}>{QUOTES.map(([v, l]) => <option key={l} value={v}>{l}</option>)}</select></div>
+        <div><div className={label}>Quote character</div><select value={quote} onChange={(e) => setQuote(e.target.value)} className={input}>{QUOTES.map(([v, l]) => <option key={l} value={v}>{l}</option>)}</select>
+          <div className={label + ' mt-1'}>Encoding</div><select value={encoding} onChange={(e) => setEncoding(e.target.value)} className={input}>{ENCODINGS.map((x) => <option key={x}>{x}</option>)}</select></div>
         <div className="flex flex-col gap-0.5">
           <label className="inline-flex items-center gap-1"><input type="checkbox" checked={header} onChange={(e) => setHeader(e.target.checked)} /> Column names in first line</label>
           <label className="inline-flex items-center gap-1"><input type="checkbox" checked={trim} onChange={(e) => setTrim(e.target.checked)} /> Trim fields</label>

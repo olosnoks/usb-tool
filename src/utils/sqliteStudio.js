@@ -330,9 +330,21 @@ export const isVirtualSql = (sql) => /^\s*CREATE\s+VIRTUAL\s+TABLE/i.test(sql ||
 // Table options (WITHOUT ROWID, STRICT) follow the closing parenthesis.
 export const isWithoutRowidSql = (sql) => /WITHOUT\s+ROWID/i.test((sql || '').slice((sql || '').lastIndexOf(')')));
 
+// A table reference is either a plain name (main schema) or { schema, name }
+// for tables in attached databases.
+const refName = (t) => (typeof t === 'string' ? t : t.name);
+const refSchema = (t) => (typeof t === 'string' ? 'main' : t.schema || 'main');
+/** Quoted, schema-qualified (when not main) table name. */
+export const qname = (t) => (refSchema(t) === 'main' ? qid(refName(t)) : `${qid(refSchema(t))}.${qid(refName(t))}`);
+
+/** Schemas of the connection (main + attached), excluding temp. */
+export function listSchemas(db) {
+  return queryObjects(db, 'PRAGMA database_list').map((d) => d.name).filter((n) => n !== 'temp');
+}
+
 /** All schema objects (tables, views, indexes, triggers), shadow tables flagged. */
-export function listObjects(db) {
-  const objs = queryObjects(db, "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name COLLATE NOCASE");
+export function listObjects(db, schema = 'main') {
+  const objs = queryObjects(db, `SELECT type, name, tbl_name, sql FROM ${qid(schema)}.sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name COLLATE NOCASE`);
   const virt = objs.filter((o) => o.type === 'table' && isVirtualSql(o.sql)).map((o) => o.name.toLowerCase());
   for (const o of objs) {
     o.virtual = o.type === 'table' && isVirtualSql(o.sql);
@@ -343,8 +355,8 @@ export function listObjects(db) {
 }
 
 /** Column info (PRAGMA table_xinfo) for a table or view. */
-export function columnsOf(db, name) {
-  return queryObjects(db, `PRAGMA table_xinfo(${qid(name)})`).map((c) => ({
+export function columnsOf(db, t) {
+  return queryObjects(db, `PRAGMA ${qid(refSchema(t))}.table_xinfo(${qid(refName(t))})`).map((c) => ({
     name: c.name, type: c.type || '', notnull: !!c.notnull, dflt: c.dflt_value, pk: c.pk || 0, hidden: c.hidden || 0,
   }));
 }
@@ -354,11 +366,11 @@ export function columnsOf(db, name) {
  * { editable, keyCols } — keyCols is ['_rowid_'] for rowid tables, the PK
  * columns for WITHOUT ROWID tables, [] for views (not editable).
  */
-export function rowKeyFor(db, name) {
-  const o = queryObjects(db, 'SELECT type, sql FROM sqlite_master WHERE name = ?', [name])[0];
+export function rowKeyFor(db, t) {
+  const o = queryObjects(db, `SELECT type, sql FROM ${qid(refSchema(t))}.sqlite_master WHERE name = ?`, [refName(t)])[0];
   if (!o || o.type !== 'table') return { editable: false, keyCols: [] };
   if (isWithoutRowidSql(o.sql)) {
-    const pk = columnsOf(db, name).filter((c) => c.pk > 0).sort((a, b) => a.pk - b.pk).map((c) => c.name);
+    const pk = columnsOf(db, t).filter((c) => c.pk > 0).sort((a, b) => a.pk - b.pk).map((c) => c.name);
     return { editable: pk.length > 0, keyCols: pk, withoutRowid: true };
   }
   return { editable: true, keyCols: ['_rowid_'] };
@@ -500,9 +512,9 @@ export function buildBrowseQuery({ table, columns = [], keyCols = [], filters = 
   const order = sort.length ? ` ORDER BY ${sort.map((s) => `${qid(s.column)} ${s.dir === 'desc' ? 'DESC' : 'ASC'}`).join(', ')}` : '';
   const rid = keyCols.length === 1 && keyCols[0] === '_rowid_' ? '_rowid_ AS "__rowid__", ' : '';
   return {
-    sql: `SELECT ${rid}* FROM ${qid(table)}${w}${order} LIMIT ${Math.max(0, limit | 0)} OFFSET ${Math.max(0, offset | 0)}`,
+    sql: `SELECT ${rid}* FROM ${qname(table)}${w}${order} LIMIT ${Math.max(0, limit | 0)} OFFSET ${Math.max(0, offset | 0)}`,
     params,
-    countSql: `SELECT COUNT(*) FROM ${qid(table)}${w}`,
+    countSql: `SELECT COUNT(*) FROM ${qname(table)}${w}`,
     countParams: params.slice(),
   };
 }
@@ -510,7 +522,7 @@ export function buildBrowseQuery({ table, columns = [], keyCols = [], filters = 
 const keyWhere = (keyCols) => keyCols.map((k) => (k === '_rowid_' ? '_rowid_' : qid(k)) + ' = ?').join(' AND ');
 
 export function updateCell(db, table, keyCols, keyVals, column, value) {
-  const sql = `UPDATE ${qid(table)} SET ${qid(column)} = ? WHERE ${keyWhere(keyCols)}`;
+  const sql = `UPDATE ${qname(table)} SET ${qid(column)} = ? WHERE ${keyWhere(keyCols)}`;
   db.run(sql, [value, ...keyVals]);
   return sql;
 }
@@ -521,21 +533,21 @@ export function updateCell(db, table, keyCols, keyVals, column, value) {
  * Returns { sql, rowid }.
  */
 export function insertRow(db, table) {
-  let sql = `INSERT INTO ${qid(table)} DEFAULT VALUES`;
+  let sql = `INSERT INTO ${qname(table)} DEFAULT VALUES`;
   try {
     db.run(sql);
   } catch (e) {
     const cols = columnsOf(db, table).filter((c) => !c.hidden && c.notnull && c.dflt === null && !(c.pk && /^INTEGER$/i.test(c.type)));
     if (!cols.length) throw e;
     const vals = cols.map((c) => (/INT|REAL|FLOA|DOUB|NUM|DEC|BOOL/i.test(c.type) ? 0 : ''));
-    sql = `INSERT INTO ${qid(table)} (${cols.map((c) => qid(c.name)).join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
+    sql = `INSERT INTO ${qname(table)} (${cols.map((c) => qid(c.name)).join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
     db.run(sql, vals);
   }
   return { sql, rowid: scalar(db, 'SELECT last_insert_rowid()') };
 }
 
 export function deleteRows(db, table, keyCols, keyValsList) {
-  const sql = `DELETE FROM ${qid(table)} WHERE ${keyWhere(keyCols)}`;
+  const sql = `DELETE FROM ${qname(table)} WHERE ${keyWhere(keyCols)}`;
   const st = db.prepare(sql);
   try { for (const kv of keyValsList) st.run(kv); } finally { st.free(); }
   return sql;
@@ -705,7 +717,7 @@ const b64 = (u8) => {
 
 /** Rows of a table (or any SELECT) as an array of objects; blobs become base64 strings. */
 export function exportJson(db, table, { pretty = true } = {}) {
-  const { columns, rows } = queryAll(db, /^\s*SELECT\b/i.test(table) ? table : `SELECT * FROM ${qid(table)}`);
+  const { columns, rows } = queryAll(db, /^\s*SELECT\b/i.test(table) ? table : `SELECT * FROM ${qname(table)}`);
   const objs = rows.map((r) => Object.fromEntries(columns.map((c, i) => [c, r[i] instanceof Uint8Array ? b64(r[i]) : r[i]])));
   return JSON.stringify(objs, null, pretty ? 2 : 0);
 }
@@ -791,6 +803,7 @@ export function executeScript(db, sql, { offset = 0, maxRows = 50000 } = {}) {
   const t0 = now();
   const it = db.iterateStatements(sql);
   let pos = 0;
+  let stepping = false; // error while running (vs. preparing) a statement
   try {
     for (;;) {
       const before = sql.length - it.getRemainingSQL().length;
@@ -805,7 +818,9 @@ export function executeScript(db, sql, { offset = 0, maxRows = 50000 } = {}) {
       const columns = st.getColumnNames();
       const rows = [];
       let truncated = false;
+      stepping = true;
       while (st.step()) { if (rows.length < maxRows) rows.push(st.get()); else { truncated = true; } }
+      stepping = false;
       const ms = now() - s0;
       const changes = columns.length ? 0 : scalar(db, 'SELECT total_changes()') - tc0;
       results.push({ sql: text.trim(), start: offset + pos, columns, rows, truncated, changes, ms });
@@ -814,7 +829,7 @@ export function executeScript(db, sql, { offset = 0, maxRows = 50000 } = {}) {
   } catch (e) {
     const rem = it.getRemainingSQL();
     let at = offset + pos;
-    if (rem != null) { const p = sql.length - rem.length; at = offset + p + (rem.length - rem.trimStart().length); }
+    if (rem != null && !stepping) { const p = sql.length - rem.length; at = offset + p + (rem.length - rem.trimStart().length); }
     return { results, error: e.message || String(e), errorAt: at, ms: now() - t0 };
   }
 }
@@ -873,4 +888,118 @@ export function registerFunctions(db) {
     if (!re) { re = new RegExp(pattern); if (cache.size > 100) cache.clear(); cache.set(pattern, re); }
     return re.test(String(value)) ? 1 : 0;
   });
+}
+
+// ------------------------------------------------------- browse extras
+
+/**
+ * Foreign keys of a table: [{ from, table, to }] where `to` is the referenced
+ * column (resolved to the parent's primary key when the FK omits it).
+ */
+export function foreignKeysOf(db, t) {
+  const schema = refSchema(t);
+  let fks;
+  try { fks = queryObjects(db, `PRAGMA ${qid(schema)}.foreign_key_list(${qid(refName(t))})`); } catch { return []; }
+  return fks.map((f) => {
+    let to = f.to;
+    if (!to) {
+      try { to = columnsOf(db, schema === 'main' ? f.table : { schema, name: f.table }).find((c) => c.pk === 1)?.name || '_rowid_'; } catch { to = '_rowid_'; }
+    }
+    return { from: f.from, table: f.table, to, id: f.id, seq: f.seq };
+  });
+}
+
+/**
+ * Capture complete rows (for undoing a delete): { columns, rows } with the
+ * rowid included for rowid tables. Generated columns are skipped.
+ */
+export function snapshotRows(db, t, keyCols, keyValsList) {
+  const cols = columnsOf(db, t).filter((c) => !c.hidden).map((c) => c.name);
+  const rowid = keyCols.length === 1 && keyCols[0] === '_rowid_';
+  const sel = (rowid ? ['_rowid_'] : []).concat(cols.map(qid)).join(', ');
+  const st = db.prepare(`SELECT ${sel} FROM ${qname(t)} WHERE ${keyWhere(keyCols)}`);
+  const rows = [];
+  try {
+    for (const kv of keyValsList) { st.bind(kv); while (st.step()) rows.push(st.get()); st.reset(); }
+  } finally { st.free(); }
+  return { columns: (rowid ? ['_rowid_'] : []).concat(cols), rows };
+}
+
+/** Re-insert rows captured by snapshotRows. */
+export function restoreRows(db, t, snap) {
+  if (!snap.rows.length) return null;
+  const sql = `INSERT INTO ${qname(t)} (${snap.columns.map((c) => (c === '_rowid_' ? c : qid(c))).join(', ')}) VALUES (${snap.columns.map(() => '?').join(', ')})`;
+  const st = db.prepare(sql);
+  try { for (const r of snap.rows) st.run(r); } finally { st.free(); }
+  return sql;
+}
+
+/** INSERT statements for some rows (for "Copy as SQL"). */
+export function rowsToInsertSql(table, columns, rows) {
+  const head = `INSERT INTO ${qid(table)} (${columns.map(qid).join(', ')}) VALUES `;
+  return rows.map((r) => head + '(' + r.map(sqlLiteral).join(', ') + ');').join('\n');
+}
+
+/** Display formats for Browse Data columns (display only — data is unchanged). */
+export const DISPLAY_FORMATS = [
+  { id: '', label: 'Default' },
+  { id: 'decimal', label: 'Decimal number (2 dp)' },
+  { id: 'exponent', label: 'Exponent notation' },
+  { id: 'hex', label: 'Hex number' },
+  { id: 'octal', label: 'Octal number' },
+  { id: 'hexblob', label: 'Hex blob / text' },
+  { id: 'unixepoch', label: 'Unix epoch to date (UTC)' },
+  { id: 'unixepoch_local', label: 'Unix epoch to local time' },
+  { id: 'unixepoch_ms', label: 'Java epoch (ms) to date' },
+  { id: 'julian', label: 'Julian day to date' },
+  { id: 'apple', label: 'Apple NSDate to date' },
+  { id: 'ticks', label: '.NET DateTime.Ticks to date' },
+  { id: 'lower', label: 'Lower case' },
+  { id: 'upper', label: 'Upper case' },
+];
+
+const isoUtc = (ms) => { const d = new Date(ms); return Number.isFinite(d.getTime()) ? d.toISOString().replace('T', ' ').replace(/\.000Z$|Z$/, '') : null; };
+
+/** Apply a display format; returns a string, or null to fall back to default. */
+export function formatValue(v, fmt) {
+  if (!fmt || v === null || v === undefined) return null;
+  const n = typeof v === 'number' ? v : (typeof v === 'string' && NUMERIC.test(v.trim()) ? Number(v) : NaN);
+  switch (fmt) {
+    case 'decimal': return Number.isFinite(n) ? n.toFixed(2) : null;
+    case 'exponent': return Number.isFinite(n) ? n.toExponential() : null;
+    case 'hex': return Number.isInteger(n) ? (n < 0 ? '-0x' + (-n).toString(16).toUpperCase() : '0x' + n.toString(16).toUpperCase()) : null;
+    case 'octal': return Number.isInteger(n) ? (n < 0 ? '-0' + (-n).toString(8) : '0' + n.toString(8)) : null;
+    case 'hexblob': return toHex(v instanceof Uint8Array ? v : new TextEncoder().encode(String(v))).toUpperCase();
+    case 'unixepoch': return Number.isFinite(n) ? isoUtc(n * 1000) : null;
+    case 'unixepoch_local': { if (!Number.isFinite(n)) return null; const d = new Date(n * 1000); return Number.isFinite(d.getTime()) ? d.toLocaleString() : null; }
+    case 'unixepoch_ms': return Number.isFinite(n) ? isoUtc(n) : null;
+    case 'julian': return Number.isFinite(n) ? isoUtc((n - 2440587.5) * 86400000) : null;
+    case 'apple': return Number.isFinite(n) ? isoUtc((n + 978307200) * 1000) : null;
+    case 'ticks': return Number.isFinite(n) ? isoUtc((n - 621355968000000000) / 10000) : null;
+    case 'lower': return typeof v === 'string' ? v.toLowerCase() : null;
+    case 'upper': return typeof v === 'string' ? v.toUpperCase() : null;
+    default: return null;
+  }
+}
+
+/**
+ * Parse SQL tabs out of a DB Browser for SQLite project (.sqbpro, XML).
+ * Needs a DOMParser (browser). Returns { dbPath, tabs: [{ title, text }] }.
+ */
+export function parseSqbpro(xml, DOMParserImpl = globalThis.DOMParser) {
+  const doc = new DOMParserImpl().parseFromString(xml, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('Not a valid project file');
+  const root = doc.documentElement;
+  if (!root || root.nodeName !== 'sqlb_project') throw new Error('Not a DB Browser for SQLite project (.sqbpro)');
+  const dbEl = root.getElementsByTagName('db')[0];
+  const tabs = Array.from(root.getElementsByTagName('sql')).map((el, i) => ({ title: el.getAttribute('name') || `SQL ${i + 1}`, text: el.textContent || '' }));
+  return { dbPath: dbEl?.getAttribute('path') || '', tabs };
+}
+
+const xmlEsc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** Write a minimal .sqbpro project (database path + SQL tabs) that DB4S can open. */
+export function buildSqbpro({ dbPath, tabs, currentTab = 0 }) {
+  return `<?xml version="1.0" encoding="UTF-8"?><sqlb_project><db path="${xmlEsc(dbPath || '')}" readonly="0" foreign_keys="1" case_sensitive_like="0" temp_store="0" wal_autocheckpoint="1000" synchronous="2"/><attached/><window><main_tabs open="structure browser pragmas query" current="3"/></window><tab_sql>${
+    tabs.map((t) => `<sql name="${xmlEsc(t.title)}">${xmlEsc(t.text)}</sql>`).join('')}<current_tab id="${currentTab}"/></tab_sql></sqlb_project>\n`;
 }

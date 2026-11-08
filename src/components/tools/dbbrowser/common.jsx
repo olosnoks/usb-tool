@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { X, ChevronDown } from 'lucide-react';
+import { X, ChevronDown, Download } from 'lucide-react';
 
 export const btn = 'px-2.5 py-1 bg-slate-800 border border-slate-700 text-gray-200 rounded text-xs hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none inline-flex items-center gap-1 whitespace-nowrap';
 export const btnPrimary = 'px-2.5 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-40 disabled:pointer-events-none inline-flex items-center gap-1 whitespace-nowrap';
@@ -126,6 +126,28 @@ export function Plot({ columns, rows }) {
   const [x, setX] = useState(-1); // -1 = row number
   const [ys, setYs] = useState(() => numericCols.slice(0, 1).map((n) => n.i));
   const [kind, setKind] = useState('line');
+  const svgRef = useRef(null);
+  const svgText = () => {
+    const clone = svgRef.current.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('width', '1520'); clone.setAttribute('height', '520');
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('width', '100%'); bg.setAttribute('height', '100%'); bg.setAttribute('fill', '#020617');
+    clone.insertBefore(bg, clone.firstChild);
+    return new XMLSerializer().serializeToString(clone);
+  };
+  const exportSvg = () => downloadText('plot.svg', svgText(), 'image/svg+xml');
+  const exportPng = () => {
+    const img = new Image();
+    const url = URL.createObjectURL(new Blob([svgText()], { type: 'image/svg+xml' }));
+    img.onload = () => {
+      const c = document.createElement('canvas'); c.width = 1520; c.height = 520;
+      c.getContext('2d').drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      c.toBlob((b) => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'plot.png'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); });
+    };
+    img.src = url;
+  };
   useEffect(() => { setYs((cur) => { const ok = cur.filter((i) => numericCols.some((n) => n.i === i)); return ok.length ? ok : numericCols.slice(0, 1).map((n) => n.i); }); }, [numericCols]);
 
   const W = 760; const H = 260; const P = { l: 52, r: 12, t: 10, b: 28 };
@@ -162,8 +184,10 @@ export function Plot({ columns, rows }) {
         <select value={kind} onChange={(e) => setKind(e.target.value)} className={input + ' ml-auto'}>
           <option value="line">Line</option><option value="points">Points</option><option value="bars">Bars</option>
         </select>
+        <button className={btn} onClick={exportPng} title="Save the plot as PNG"><Download size={12} /> PNG</button>
+        <button className={btn} onClick={exportSvg} title="Save the plot as SVG"><Download size={12} /> SVG</button>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" fontFamily="ui-monospace, monospace">
         {ticks(ymin, ymax).map((t, i) => (
           <g key={i}><line x1={P.l} x2={W - P.r} y1={sy(t)} y2={sy(t)} stroke="#1e293b" /><text x={P.l - 4} y={sy(t) + 3} fontSize="9" fill="#64748b" textAnchor="end">{fmt(t)}</text></g>
         ))}

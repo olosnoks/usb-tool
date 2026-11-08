@@ -6,9 +6,9 @@ import { Prec } from '@codemirror/state';
 import { Play, StepForward, FolderOpen, Save, Plus, X, Download, Eye, LineChart, CheckCircle2, XCircle } from 'lucide-react';
 import { btn, btnPrimary, ResultGrid, Plot, downloadText, pickFile, input } from './common.jsx';
 import { ViewEditor } from './SchemaEditors.jsx';
-import { executeScript, statementAt, listObjects, columnsOf, lineCol, toCsv } from '../../../utils/sqliteStudio.js';
+import { executeScript, statementAt, listObjects, listSchemas, columnsOf, lineCol, toCsv } from '../../../utils/sqliteStudio.js';
 
-const STORE_KEY = 'dbbrowser.sqlTabs.v1';
+export const STORE_KEY = 'dbbrowser.sqlTabs.v1';
 const loadTabs = () => {
   try {
     const t = JSON.parse(localStorage.getItem(STORE_KEY));
@@ -23,7 +23,7 @@ const editorTheme = EditorView.theme({
   '.cm-content': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
 });
 
-export default function ExecuteTab({ session }) {
+export default function ExecuteTab({ session, tabsRef }) {
   const { db, version } = session;
   const [tabs, setTabs] = useState(loadTabs);
   const [cur, setCur] = useState(() => tabs[0].id);
@@ -34,6 +34,7 @@ export default function ExecuteTab({ session }) {
   const [renaming, setRenaming] = useState(null);
   const viewRef = useRef(null);
   const tab = tabs.find((t) => t.id === cur) || tabs[0];
+  if (tabsRef) tabsRef.current = { tabs, cur: tab.id };
 
   useEffect(() => {
     const t = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(tabs)); } catch { /* quota */ } }, 400);
@@ -44,7 +45,15 @@ export default function ExecuteTab({ session }) {
   const schema = useMemo(() => {
     if (!db) return {};
     const s = {};
-    try { for (const o of listObjects(db)) if (o.type === 'table' || o.type === 'view') s[o.name] = columnsOf(db, o.name).map((c) => c.name); } catch { /* ignore */ }
+    try {
+      for (const schema of listSchemas(db)) {
+        for (const o of listObjects(db, schema)) {
+          if (o.type !== 'table' && o.type !== 'view') continue;
+          const cols = columnsOf(db, schema === 'main' ? o.name : { schema, name: o.name }).map((c) => c.name);
+          s[schema === 'main' ? o.name : `${schema}.${o.name}`] = cols;
+        }
+      }
+    } catch { /* ignore */ }
     return s;
   }, [db, version]);
 

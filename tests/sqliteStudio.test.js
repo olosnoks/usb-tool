@@ -5,6 +5,7 @@ import {
   filterToSql, buildBrowseQuery, updateCell, insertRow, deleteRows, rowKeyFor, listObjects,
   parseCsv, toCsv, inferType, importRows, dumpSql, exportJson, sqlLiteral, readPragmas, writePragmas,
   executeScript, registerFunctions, detectBlobType, looksLikeText, hexDump, lineCol, queryAll,
+  qname, listSchemas, foreignKeysOf, snapshotRows, restoreRows, rowsToInsertSql, formatValue, buildSqbpro, columnsOf,
 } from '../src/utils/sqliteStudio.js';
 
 let SQL;
@@ -299,6 +300,13 @@ describe('executeScript', () => {
     expect(r.errorAt).toBe(sql.indexOf('SELEC oops'));
     expect(lineCol(sql, r.errorAt)).toEqual({ line: 4, col: 3 });
   });
+  it('points runtime errors at the failing statement', () => {
+    const db = mk('CREATE TABLE t(a NOT NULL)');
+    const sql = 'SELECT 1;\nINSERT INTO t VALUES (NULL);\nSELECT 2;';
+    const r = executeScript(db, sql);
+    expect(r.error).toMatch(/NOT NULL/);
+    expect(r.errorAt).toBe(sql.indexOf('INSERT'));
+  });
   it('caps result rows', () => {
     const r = executeScript(mk(), 'WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c LIMIT 100) SELECT x FROM c', { maxRows: 10 });
     expect(r.results[0].rows).toHaveLength(10);
@@ -313,5 +321,59 @@ describe('blob helpers', () => {
     expect(looksLikeText(new TextEncoder().encode('héllo\n'))).toBe(true);
     expect(looksLikeText(new Uint8Array([0, 1, 2]))).toBe(false);
     expect(hexDump(new Uint8Array([0x41, 0x00]))).toBe('00000000  41 00' + ' '.repeat(42) + '  A.');
+  });
+});
+
+describe('attached schemas', () => {
+  it('lists, browses and edits tables in an attached database', () => {
+    const other = new SQL.Database(); other.run("CREATE TABLE x(id INTEGER PRIMARY KEY, v TEXT); INSERT INTO x VALUES (1,'a');");
+    const holder = new SQL.Database(other.export());
+    const db = mk('CREATE TABLE m(a)');
+    db.run(`ATTACH '/${holder.filename}' AS o`);
+    expect(listSchemas(db)).toEqual(['main', 'o']);
+    expect(listObjects(db, 'o').map((x) => x.name)).toEqual(['x']);
+    const t = { schema: 'o', name: 'x' };
+    expect(qname(t)).toBe('"o"."x"');
+    expect(qname('m')).toBe('"m"');
+    expect(columnsOf(db, t).map((c) => c.name)).toEqual(['id', 'v']);
+    const key = rowKeyFor(db, t);
+    const q = buildBrowseQuery({ table: t, keyCols: key.keyCols });
+    expect(rows(db, q.sql, q.params)).toEqual([[1, 1, 'a']]);
+    updateCell(db, t, key.keyCols, [1], 'v', 'b');
+    insertRow(db, t);
+    expect(rows(db, 'SELECT v FROM o.x ORDER BY id')).toEqual([['b'], [null]]);
+  });
+});
+
+describe('browse extras', () => {
+  it('foreignKeysOf resolves implicit parent keys', () => {
+    const db = mk('CREATE TABLE p(pid INTEGER PRIMARY KEY); CREATE TABLE c(id, a REFERENCES p, b REFERENCES p(pid));');
+    expect(foreignKeysOf(db, 'c').map((f) => [f.from, f.table, f.to]).sort()).toEqual([['a', 'p', 'pid'], ['b', 'p', 'pid']]);
+  });
+  it('snapshotRows/restoreRows undo a delete with the same rowids', () => {
+    const db = mk("CREATE TABLE t(a, b TEXT, g GENERATED ALWAYS AS (a*2)); INSERT INTO t VALUES (1,'x'),(2,'y'),(3,'z');");
+    const snap = snapshotRows(db, 't', ['_rowid_'], [[1], [3]]);
+    deleteRows(db, 't', ['_rowid_'], [[1], [3]]);
+    restoreRows(db, 't', snap);
+    expect(rows(db, 'SELECT rowid, a, b, g FROM t ORDER BY rowid')).toEqual([[1, 1, 'x', 2], [2, 2, 'y', 4], [3, 3, 'z', 6]]);
+  });
+  it('rowsToInsertSql', () => {
+    expect(rowsToInsertSql('t', ['a', 'b'], [[1, "o'k"], [null, new Uint8Array([255])]])).toBe(`INSERT INTO "t" ("a", "b") VALUES (1, 'o''k');\nINSERT INTO "t" ("a", "b") VALUES (NULL, X'ff');`);
+  });
+  it('formatValue', () => {
+    expect(formatValue(255, 'hex')).toBe('0xFF');
+    expect(formatValue(8, 'octal')).toBe('010');
+    expect(formatValue(0, 'unixepoch')).toBe('1970-01-01 00:00:00');
+    expect(formatValue(1700000000000, 'unixepoch_ms')).toBe('2023-11-14 22:13:20');
+    expect(formatValue(2440587.5, 'julian')).toBe('1970-01-01 00:00:00');
+    expect(formatValue('3.14159', 'decimal')).toBe('3.14');
+    expect(formatValue('abc', 'hex')).toBeNull();
+    expect(formatValue('Hi', 'upper')).toBe('HI');
+    expect(formatValue(null, 'hex')).toBeNull();
+  });
+  it('buildSqbpro escapes XML', () => {
+    const x = buildSqbpro({ dbPath: 'a&b.db', tabs: [{ title: 'Q <1>', text: "SELECT 1 < 2 AND 'x' = \"x\";" }] });
+    expect(x).toContain('<db path="a&amp;b.db"');
+    expect(x).toContain('<sql name="Q &lt;1&gt;">SELECT 1 &lt; 2 AND \'x\' = &quot;x&quot;;</sql>');
   });
 });

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Table as TableIcon, ChevronRight, ChevronDown, Plus, Pencil, Trash2, ListTree, Eye, Zap, Copy, KeyRound, Search } from 'lucide-react';
+import { Table as TableIcon, ChevronRight, ChevronDown, Plus, Pencil, Trash2, ListTree, Eye, Zap, Copy, KeyRound, Search, Database, Unplug, Download } from 'lucide-react';
 import { btn, btnDanger, Modal } from './common.jsx';
+import { downloadBytes } from './useDbSession.js';
 import { TableEditor, IndexEditor, ViewEditor } from './SchemaEditors.jsx';
 import { listObjects, columnsOf, parseCreateTable, scalar, qid } from '../../../utils/sqliteStudio.js';
 
@@ -13,7 +14,7 @@ const GROUPS = [
 
 /** Database Structure tab: schema tree + create/modify/delete. */
 export default function StructureTab({ session, onBrowse }) {
-  const { db, version } = session;
+  const { db, version, readOnly, attachments } = session;
   const [open, setOpen] = useState({ table: true, index: false, view: true, trigger: false });
   const [expanded, setExpanded] = useState({});
   const [sel, setSel] = useState(null); // { type, name }
@@ -27,7 +28,19 @@ export default function StructureTab({ session, onBrowse }) {
     for (const o of objects) if (o.type === 'table') { try { out[o.name] = scalar(db, `SELECT COUNT(*) FROM ${qid(o.name)}`); } catch { out[o.name] = null; } }
     return out;
   }, [db, objects]);
-  const selObj = sel && objects.find((o) => o.type === sel.type && o.name === sel.name);
+  const attachedObjects = useMemo(() => {
+    const out = {};
+    for (const a of attachments) {
+      try {
+        out[a.alias] = listObjects(db, a.alias).filter((o) => !o.shadow && (o.type === 'table' || o.type === 'view')).map((o) => {
+          let n = null; if (o.type === 'table') { try { n = scalar(db, `SELECT COUNT(*) FROM ${qid(a.alias)}.${qid(o.name)}`); } catch { /* ignore */ } }
+          return { ...o, count: n };
+        });
+      } catch { out[a.alias] = []; }
+    }
+    return out;
+  }, [db, version, attachments]);
+  const selObj = sel && !sel.schema && objects.find((o) => o.type === sel.type && o.name === sel.name);
   const tables = objects.filter((o) => o.type === 'table').map((o) => o.name);
   const q = search.trim().toLowerCase();
   const visible = (o) => !q || o.name.toLowerCase().includes(q) || (o.tbl_name || '').toLowerCase().includes(q);
@@ -53,19 +66,19 @@ export default function StructureTab({ session, onBrowse }) {
     } catch (e) { setError(e.message); }
   };
 
-  const copySql = () => { if (selObj?.sql) navigator.clipboard?.writeText(selObj.sql + ';'); };
+  const copySql = () => { const q = selObj?.sql || sel?.sql; if (q) navigator.clipboard?.writeText(q + ';'); };
   const modifiable = selObj?.type === 'table' && !selObj.virtual && !!parseCreateTable(selObj.sql);
 
   return (
     <div>
       <div className="flex items-center gap-1 mb-2 flex-wrap">
-        <button className={btn} onClick={() => setDialog('createTable')}><Plus size={12} /> Create Table</button>
-        <button className={btn} disabled={!tables.length} onClick={() => setDialog('createIndex')}><ListTree size={12} /> Create Index</button>
-        <button className={btn} onClick={() => setDialog('createView')}><Eye size={12} /> Create View</button>
-        <button className={btn} disabled={!modifiable} title={selObj?.type === 'table' && !modifiable ? 'This table definition cannot be edited (virtual / AS SELECT)' : ''} onClick={() => setDialog('modifyTable')}><Pencil size={12} /> Modify Table</button>
-        <button className={btnDanger} disabled={!selObj} onClick={() => setDialog('delete')}><Trash2 size={12} /> Delete {selObj ? selObj.type : ''}</button>
-        <button className={btn} disabled={!selObj || !['table', 'view'].includes(selObj.type)} onClick={() => onBrowse(selObj.name)}><TableIcon size={12} /> Browse</button>
-        <button className={btn} disabled={!selObj?.sql} onClick={copySql}><Copy size={12} /> Copy CREATE</button>
+        <button className={btn} disabled={readOnly} onClick={() => setDialog('createTable')}><Plus size={12} /> Create Table</button>
+        <button className={btn} disabled={readOnly || !tables.length} onClick={() => setDialog('createIndex')}><ListTree size={12} /> Create Index</button>
+        <button className={btn} disabled={readOnly} onClick={() => setDialog('createView')}><Eye size={12} /> Create View</button>
+        <button className={btn} disabled={readOnly || !modifiable} title={selObj?.type === 'table' && !modifiable ? 'This table definition cannot be edited (virtual / AS SELECT)' : ''} onClick={() => setDialog('modifyTable')}><Pencil size={12} /> Modify Table</button>
+        <button className={btnDanger} disabled={readOnly || !selObj} onClick={() => setDialog('delete')}><Trash2 size={12} /> Delete {selObj ? selObj.type : ''}</button>
+        <button className={btn} disabled={!(sel?.schema || (selObj && ['table', 'view'].includes(selObj.type)))} onClick={() => onBrowse(sel.name, sel.schema)}><TableIcon size={12} /> Browse</button>
+        <button className={btn} disabled={!selObj?.sql && !sel?.sql} onClick={copySql}><Copy size={12} /> Copy CREATE</button>
         <div className="ml-auto relative">
           <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="filter…" className="bg-slate-900 border border-slate-700 rounded pl-6 pr-2 py-1 text-xs w-40" />
@@ -122,10 +135,33 @@ export default function StructureTab({ session, onBrowse }) {
                 </React.Fragment>
               );
             })}
+            {attachments.map((a) => (
+              <React.Fragment key={a.alias}>
+                <tr className="bg-slate-900/60">
+                  <td colSpan={3} className="px-2 py-1 text-gray-200">
+                    <span className="inline-flex items-center gap-1 cursor-pointer" onClick={() => setOpen((s) => ({ ...s, ['@' + a.alias]: !s['@' + a.alias] }))}>
+                      {open['@' + a.alias] === false ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<Database size={12} className="text-sky-400" /> Attached: <span className="font-mono">{a.alias}</span> <span className="text-slate-500">({a.name})</span>
+                    </span>
+                    <button className="ml-3 text-[10px] text-slate-400 hover:text-cyan-300 inline-flex items-center gap-0.5" onClick={() => downloadBytes(a.name, session.attachedBytes(a.alias), 'application/x-sqlite3')}><Download size={10} /> save copy</button>
+                    <button className="ml-2 text-[10px] text-slate-400 hover:text-red-300 inline-flex items-center gap-0.5" onClick={() => { if (sel?.schema === a.alias) setSel(null); session.detach(a.alias); }}><Unplug size={10} /> detach</button>
+                  </td>
+                </tr>
+                {open['@' + a.alias] !== false && (attachedObjects[a.alias] || []).filter(visible).map((o) => {
+                  const isSel = sel?.schema === a.alias && sel?.name === o.name;
+                  return (
+                    <tr key={o.name} onClick={() => setSel({ schema: a.alias, type: o.type, name: o.name, sql: o.sql })} onDoubleClick={() => onBrowse(o.name, a.alias)} className={isSel ? 'bg-cyan-950/50' : 'hover:bg-slate-800/40'}>
+                      <td className="px-2 py-0.5 pl-10 font-mono text-gray-100 whitespace-nowrap">{o.name}{o.count != null && <span className="ml-2 text-slate-500">{o.count.toLocaleString()} rows</span>}</td>
+                      <td className="px-2 py-0.5 text-slate-400">{o.type}</td>
+                      <td className="px-2 py-0.5 font-mono text-slate-500 truncate max-w-[40rem]" title={o.sql}>{(o.sql || '').replace(/\s+/g, ' ')}</td>
+                    </tr>
+                  );
+                })}
+              </React.Fragment>
+            ))}
           </tbody>
         </table>
       </div>
-      {selObj?.sql && <pre className="mt-2 bg-slate-900 border border-slate-800 rounded p-2 text-[11px] text-emerald-200/80 whitespace-pre-wrap max-h-48 overflow-auto">{selObj.sql};</pre>}
+      {(selObj?.sql || sel?.sql) && <pre className="mt-2 bg-slate-900 border border-slate-800 rounded p-2 text-[11px] text-emerald-200/80 whitespace-pre-wrap max-h-48 overflow-auto">{selObj?.sql || sel?.sql};</pre>}
 
       {dialog === 'createTable' && <TableEditor session={session} table={null} onClose={(ok, name) => { setDialog(null); if (ok) setSel({ type: 'table', name }); }} />}
       {dialog === 'modifyTable' && selObj && <TableEditor session={session} table={selObj.name} onClose={(ok, name) => { setDialog(null); if (ok) setSel({ type: 'table', name }); }} />}
