@@ -227,10 +227,10 @@ function QueryBuilder({ tokens, raw, onTokens, onRaw }) {
   const add = (key) => onTokens([...tokens, key ? { type: 'filter', key, value: '', negate: false } : { type: 'term', value: '', negate: false }]);
   return (
     <div className="mb-2 p-2 border border-slate-800 rounded bg-slate-900/40">
-      <div className="flex items-center justify-between mb-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-1.5 mb-1.5">
         <span className={lbl}><ListFilter size={12} /> Query builder</span>
-        <div className="flex items-center gap-1.5">
-          <select defaultValue="" onChange={(e) => { if (e.target.value) { add(e.target.value === '__term' ? '' : e.target.value); e.target.value = ''; } }} className={sel} title="Add a filter row">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <select defaultValue="" onChange={(e) => { if (e.target.value) { add(e.target.value === '__term' ? '' : e.target.value); e.target.value = ''; } }} className={`${sel} max-w-[11rem]`} title="Add a filter row">
             <option value="">+ add filter…</option>
             <option value="__term">free text</option>
             {SHODAN_FILTER_GROUPS.map((g) => (
@@ -239,7 +239,7 @@ function QueryBuilder({ tokens, raw, onTokens, onRaw }) {
               </optgroup>
             ))}
           </select>
-          <select defaultValue="" onChange={(e) => { if (e.target.value) { onRaw(e.target.value); e.target.value = ''; } }} className={sel} title="Load an example query">
+          <select defaultValue="" onChange={(e) => { if (e.target.value) { onRaw(e.target.value); e.target.value = ''; } }} className={`${sel} max-w-[9rem]`} title="Load an example query">
             <option value="">presets…</option>
             {SHODAN_PRESETS.map((p) => <option key={p.label} value={p.query}>{p.label}</option>)}
           </select>

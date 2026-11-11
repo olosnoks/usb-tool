@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, Eye, EyeOff, Check, Trash2 } from 'lucide-react';
+import { KeyRound, Eye, EyeOff, Check, Trash2, Copy } from 'lucide-react';
 
 // Per-vendor API keys for the OSINT clients. Kept in localStorage and sent only
 // to that vendor (through the configured proxy, if any).
@@ -17,8 +17,12 @@ export function ApiKeyField({ service, label, required, hint }) {
   const [stored, setStored] = useState(getKey(service));
   const [show, setShow] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
   const save = () => { setKey(service, val.trim()); setStored(val.trim()); setSaved(true); setTimeout(() => setSaved(false), 1400); };
   const clear = () => { setKey(service, ''); setVal(''); setStored(''); };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(val.trim()); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch { /* clipboard blocked */ }
+  };
   const dirty = val.trim() !== stored;
   return (
     <div className="mb-3 p-2 border border-slate-800 rounded bg-slate-900/50">
@@ -44,6 +48,9 @@ export function ApiKeyField({ service, label, required, hint }) {
         />
         <button onClick={() => setShow((s) => !s)} title={show ? 'Hide' : 'Show'} className="px-2 py-1.5 bg-slate-800 rounded hover:bg-slate-700 text-gray-300">
           {show ? <EyeOff size={13} /> : <Eye size={13} />}
+        </button>
+        <button onClick={copy} disabled={!val.trim()} title="Copy key to clipboard" className="px-2 py-1.5 bg-slate-800 rounded hover:bg-slate-700 text-gray-300 disabled:opacity-40">
+          {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
         </button>
         <button onClick={save} disabled={!dirty} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-40">
           {saved ? 'Saved ✓' : 'Save'}
