@@ -8,7 +8,7 @@ import { getKey, ApiKeyField } from './apiKeys';
 import {
   SHODAN_FILTERS, SHODAN_FILTER_GROUPS, SHODAN_FACETS, SHODAN_PRESETS, SHODAN_ENDPOINTS,
   filterInfo, buildQuery, parseQuery, buildFacets, buildShodanUrl, redactKey,
-  parseShodanResponse, summarizeMatch, matchesToCsv, shodanWebUrl,
+  parseShodanResponse, summarizeMatch, matchesToCsv, shodanWebUrl, toRelayUrl, looksJson,
 } from '../../../utils/shodan';
 
 /**
@@ -24,6 +24,39 @@ import {
 const DRAFT_KEY = 'skon.osint.shodanQueryDraft';
 const loadDraft = () => { try { return localStorage.getItem(DRAFT_KEY) || ''; } catch { return ''; } };
 const saveDraft = (q) => { try { q ? localStorage.setItem(DRAFT_KEY, q) : localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } };
+
+// How requests reach Shodan. 'auto' (default): the site's own /api/shodan relay
+// (worker/index.js on the deployed site, Vite's proxy in dev), falling back to
+// the Proxy bar / direct fetch when the relay is not served on this host.
+// 'manual': always the Proxy bar (or direct when it is empty), like other tools.
+const TRANSPORT_KEY = 'skon.osint.shodanTransport';
+const getTransport = () => { try { return localStorage.getItem(TRANSPORT_KEY) === 'manual' ? 'manual' : 'auto'; } catch { return 'auto'; } };
+const setTransport = (v) => { try { v === 'manual' ? localStorage.setItem(TRANSPORT_KEY, 'manual') : localStorage.removeItem(TRANSPORT_KEY); } catch { /* ignore */ } };
+const ROUTE_LABEL = { relay: 'via site relay', proxy: 'via proxy', direct: 'direct' };
+
+/**
+ * Perform a Shodan request and return { resp, text, route, relayMissing }.
+ * In 'auto' mode the relay is tried first; a 404 with a non-JSON body (static
+ * host without the Worker, dev server without the proxy) or a network error
+ * means "no relay here", and the request falls through to proxiedFetch.
+ */
+async function shodanFetch(url) {
+  let relayMissing = false;
+  if (getTransport() === 'auto') {
+    const rel = toRelayUrl(url);
+    if (rel) {
+      try {
+        const resp = await fetch(rel, { headers: { accept: 'application/json' } });
+        const text = await resp.text();
+        if (!(resp.status === 404 && !looksJson(text))) return { resp, text, route: 'relay', relayMissing };
+      } catch { /* relay unreachable; fall back */ }
+      relayMissing = true;
+    }
+  }
+  const resp = await proxiedFetch(url);
+  const text = await resp.text();
+  return { resp, text, route: isProxyEnabled() ? 'proxy' : 'direct', relayMissing };
+}
 
 const PAGE_SIZE = 100;
 
@@ -86,6 +119,7 @@ function RequestInfo({ last }) {
     <div className="mb-2 text-[10px] text-slate-500 font-mono flex flex-wrap items-center gap-x-3 gap-y-1 break-all">
       <span className={ok ? 'text-emerald-400' : 'text-red-400'}>HTTP {last.status || 'ERR'}</span>
       <span className="inline-flex items-center gap-1"><Clock size={10} /> {last.ms} ms</span>
+      {last.route && <span className={last.route === 'relay' ? 'text-cyan-500' : 'text-slate-400'}>{ROUTE_LABEL[last.route]}</span>}
       <span>{SHODAN_ENDPOINTS[last.endpoint]?.method} {last.url}</span>
     </div>
   );
@@ -106,17 +140,22 @@ function useShodanRequest(log) {
     const safeUrl = redactKey(url);
     setBusy(true); setErr('');
     const t0 = performance.now();
-    log(`Shodan ${SHODAN_ENDPOINTS[endpointId].label}: ${safeUrl}${isProxyEnabled() ? ' (via proxy)' : ''}`);
+    log(`Shodan ${SHODAN_ENDPOINTS[endpointId].label}: ${safeUrl}`);
+    let relayMissing = false;
     try {
-      const resp = await proxiedFetch(url);
-      const text = await resp.text();
+      const got = await shodanFetch(url);
+      relayMissing = got.relayMissing;
+      const { resp, text, route } = got;
       const r = parseShodanResponse(resp.status, text);
-      setLast({ url: safeUrl, status: resp.status, ms: Math.round(performance.now() - t0), endpoint: endpointId });
+      setLast({ url: safeUrl, status: resp.status, ms: Math.round(performance.now() - t0), endpoint: endpointId, route });
+      log(`Shodan ${ROUTE_LABEL[route]}: HTTP ${resp.status}`);
       if (!r.ok) { setErr(r.error); log(`Shodan error: ${r.error}`); return null; }
       return r.data;
     } catch (e) {
-      setLast({ url: safeUrl, status: 0, ms: Math.round(performance.now() - t0), endpoint: endpointId });
-      setErr(describeNetworkError(e));
+      setLast({ url: safeUrl, status: 0, ms: Math.round(performance.now() - t0), endpoint: endpointId, route: isProxyEnabled() ? 'proxy' : 'direct' });
+      let msg = describeNetworkError(e);
+      if (relayMissing) msg = `The site's /api/shodan relay is not available on this host, and the fallback failed: ${msg}`;
+      setErr(msg);
       return null;
     } finally { setBusy(false); }
   };
@@ -671,6 +710,8 @@ const MODES = [
 
 export default function ShodanClient({ log }) {
   const [mode, setMode] = useState('search');
+  const [transport, setTransportState] = useState(getTransport);
+  const changeTransport = (v) => { setTransport(v); setTransportState(v); log(`Shodan route: ${v === 'auto' ? 'site relay (auto)' : 'Proxy bar / direct'}`); };
   const active = MODES.find((m) => m.id === mode);
   const Active = active.comp;
   return (
@@ -685,6 +726,13 @@ export default function ShodanClient({ log }) {
           ))}
         </div>
         <span className="text-[10px] text-slate-500">{active.desc}</span>
+        <label className={`${lbl} ml-auto`} title="Shodan blocks direct browser calls (no CORS). Auto uses this site's own /api/shodan relay, so nothing runs on your PC; it falls back to the Proxy bar when the relay is not served here.">
+          Route
+          <select value={transport} onChange={(e) => changeTransport(e.target.value)} className={`${sel} ml-1`}>
+            <option value="auto">auto — site relay, then Proxy bar</option>
+            <option value="manual">Proxy bar / direct only</option>
+          </select>
+        </label>
       </div>
       <Active log={log} />
     </div>

@@ -5,7 +5,12 @@ has no dataset of its own — these call each vendor's API with **your own API
 key** and render the reply.
 
 **Usage**:
-- **Shodan** — save your API key once, then pick a mode:
+- **Shodan** — save your API key once, then pick a mode. No proxy is needed on the
+  hosted site: Shodan blocks direct browser calls (no CORS), so the client's default
+  *Route: auto* sends requests to the site's own `/api/shodan` relay (a few lines of
+  Cloudflare Worker in `worker/index.js`; the Vite dev server proxies the same path).
+  If the relay is not served where you run the app, it falls back to the Proxy bar.
+  Your key goes straight through to Shodan; the relay stores nothing.
   - *Search*: a query builder with one row per filter (port, country, org,
     net, hostname, product, http.title, ssl.cert.*, vuln, tag, …), a `−` toggle
     to exclude, free-text rows, and the raw query string editable alongside

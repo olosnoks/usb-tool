@@ -8,6 +8,25 @@
 export const SHODAN_API = 'https://api.shodan.io';
 export const SHODAN_EXPLOITS_API = 'https://exploits.shodan.io/api';
 
+// Same-origin relay routes served by worker/index.js on the deployed site (and by
+// the Vite dev server's proxy). Must match RELAYS in worker/index.js — a test
+// checks that. Shodan sends no CORS headers, so the browser cannot call it
+// directly; the relay makes the call server-side with no local proxy needed.
+export const SHODAN_RELAYS = {
+  '/api/shodan': SHODAN_API,
+  '/api/shodan-exploits': SHODAN_EXPLOITS_API,
+};
+
+/** Absolute Shodan URL -> relative relay URL, or null when it is not a Shodan URL. */
+export function toRelayUrl(url) {
+  for (const [prefix, base] of Object.entries(SHODAN_RELAYS)) {
+    if (url === base || url.startsWith(base + '/') || url.startsWith(base + '?')) return prefix + url.slice(base.length);
+  }
+  return null;
+}
+
+export const looksJson = (text) => { try { JSON.parse(text); return true; } catch { return false; } };
+
 /* ------------------------------------------------------------------------ */
 /* Search filters                                                           */
 /* ------------------------------------------------------------------------ */

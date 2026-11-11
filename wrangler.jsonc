@@ -1,0 +1,21 @@
+// Cloudflare deployment of the built site, used by scripts/release-local.py --deploy
+// (`npx --yes wrangler deploy`). The static files in _site/ (assembled from dist/ by
+// the script) are served by Cloudflare's asset layer; worker/index.js runs only for
+// /api/* and relays the Shodan API for the OSINT client (see that file).
+//
+// The custom domain (usb-tool.olosnoks.com) is attached to this Worker in the
+// Cloudflare dashboard and is not managed here, so deploys never touch DNS.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "usb-tool",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-11-04",
+  "assets": {
+    "directory": "./_site",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": false }
+}

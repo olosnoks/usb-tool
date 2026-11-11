@@ -10,7 +10,14 @@ export default defineConfig({
   base: './', // Crucial for GitHub Pages static relative hosting
   server: {
     port: 3000,
-    open: true
+    open: true,
+    // Dev-time stand-in for worker/index.js: the deployed site relays /api/shodan*
+    // to Shodan from the Worker (no CORS); here Vite does the same. Keep the
+    // longer prefix first — Vite matches keys by prefix in order.
+    proxy: {
+      '/api/shodan-exploits': { target: 'https://exploits.shodan.io', changeOrigin: true, rewrite: (p) => p.replace(/^\/api\/shodan-exploits/, '/api') },
+      '/api/shodan': { target: 'https://api.shodan.io', changeOrigin: true, rewrite: (p) => p.replace(/^\/api\/shodan/, '') },
+    }
   },
   build: {
     target: 'esnext',
