@@ -1,119 +1,22 @@
 import React, { useState } from 'react';
-import { Radar, Search, RefreshCw, KeyRound, Globe, Eye, EyeOff, Check, Trash2 } from 'lucide-react';
-import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
+import { Radar, Search, RefreshCw, Globe } from 'lucide-react';
+import { proxiedFetch, describeNetworkError } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
+import { getKey, ApiKeyField } from './osint/apiKeys';
+import ShodanClient from './osint/ShodanClient';
 
 /**
- * OSINT API clients — thin in-app front-ends for Shodan, urlscan.io and
- * HackerTarget. They call each vendor's public API with YOUR OWN API key (kept
+ * OSINT API clients — in-app front-ends for Shodan (full client, see
+ * osint/ShodanClient.jsx), urlscan.io and HackerTarget. They call each
+ * vendor's public API with YOUR OWN API key (kept
  * in localStorage, never sent anywhere but the vendor) through the configurable
  * proxy. This app has no dataset of its own; it just renders the vendor's reply.
  *
  * Use only against hosts/domains you own or are authorized to assess.
  */
 
-const KEY_STORE = {
-  shodan: 'skon.osint.shodanKey',
-  urlscan: 'skon.osint.urlscanKey',
-  hackertarget: 'skon.osint.htKey',
-};
-const getKey = (s) => { try { return localStorage.getItem(KEY_STORE[s]) || ''; } catch { return ''; } };
-const setKey = (s, v) => { try { v ? localStorage.setItem(KEY_STORE[s], v) : localStorage.removeItem(KEY_STORE[s]); } catch { /* ignore */ } };
-
-function ApiKeyField({ service, label, required, hint }) {
-  const [val, setVal] = useState(getKey(service));
-  const [stored, setStored] = useState(getKey(service));
-  const [show, setShow] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const save = () => { setKey(service, val.trim()); setStored(val.trim()); setSaved(true); setTimeout(() => setSaved(false), 1400); };
-  const clear = () => { setKey(service, ''); setVal(''); setStored(''); };
-  const dirty = val.trim() !== stored;
-  return (
-    <div className="mb-3 p-2 border border-slate-800 rounded bg-slate-900/50">
-      <div className="flex items-center justify-between mb-1">
-        <label className="text-[11px] font-semibold text-amber-300 flex items-center gap-1.5">
-          <KeyRound size={13} /> {label} API key {required ? <span className="text-red-400">*</span> : <span className="text-slate-500 font-normal">(optional)</span>}
-        </label>
-        <span className="text-[10px]">
-          {stored
-            ? <span className="text-emerald-400 inline-flex items-center gap-1"><Check size={11} /> key saved in this browser</span>
-            : <span className="text-slate-500">no key saved</span>}
-        </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <input
-          type={show ? 'text' : 'password'}
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          placeholder={`paste your ${label} API key here`}
-          autoComplete="off"
-          spellCheck={false}
-          className="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs font-mono text-gray-200"
-        />
-        <button onClick={() => setShow((s) => !s)} title={show ? 'Hide' : 'Show'} className="px-2 py-1.5 bg-slate-800 rounded hover:bg-slate-700 text-gray-300">
-          {show ? <EyeOff size={13} /> : <Eye size={13} />}
-        </button>
-        <button onClick={save} disabled={!dirty} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-40">
-          {saved ? 'Saved ✓' : 'Save'}
-        </button>
-        {stored && (
-          <button onClick={clear} title="Remove saved key" className="px-2 py-1.5 bg-slate-800 rounded hover:bg-red-900/50 text-slate-400 hover:text-red-300">
-            <Trash2 size={13} />
-          </button>
-        )}
-      </div>
-      {hint && <p className="text-[10px] text-slate-500 mt-1">{hint}</p>}
-    </div>
-  );
-}
-
 function Pre({ children }) {
   return <pre className="border border-slate-800 rounded bg-slate-950 p-2 text-[11px] text-gray-300 overflow-auto max-h-[50vh] whitespace-pre-wrap break-all">{children}</pre>;
-}
-
-function ShodanTab({ log }) {
-  const [ip, setIp] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [out, setOut] = useState(null);
-  const [err, setErr] = useState('');
-
-  const run = async () => {
-    const key = getKey('shodan');
-    if (!key) { setErr('Enter and save your Shodan API key first.'); return; }
-    if (!ip.trim()) return;
-    setBusy(true); setErr(''); setOut(null);
-    log(`Shodan host lookup ${ip.trim()}${isProxyEnabled() ? ' (via proxy)' : ''}`);
-    try {
-      const resp = await proxiedFetch(`https://api.shodan.io/shodan/host/${encodeURIComponent(ip.trim())}?key=${encodeURIComponent(key)}`);
-      const data = await resp.json();
-      if (data.error) { setErr(data.error); setBusy(false); return; }
-      setOut(data);
-    } catch (e) { setErr(describeNetworkError(e)); }
-    setBusy(false);
-  };
-
-  return (
-    <div>
-      <ApiKeyField service="shodan" label="Shodan" required hint="Find your key at account.shodan.io → API. A free account includes a key." />
-      <div className="flex gap-2 mb-2">
-        <input value={ip} onChange={(e) => setIp(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} placeholder="IP address (e.g. 8.8.8.8)" className="flex-1 bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono" />
-        <button onClick={run} disabled={busy} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">{busy ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />} Lookup</button>
-      </div>
-      {err && <div className="mb-2 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{err}</div>}
-      {out && (
-        <>
-          <div className="mb-2 text-xs text-gray-300 flex flex-wrap gap-x-4 gap-y-1">
-            <span>Org: <span className="text-cyan-300">{out.org || '—'}</span></span>
-            <span>ISP: <span className="text-cyan-300">{out.isp || '—'}</span></span>
-            <span>Country: <span className="text-cyan-300">{out.country_name || '—'}</span></span>
-            <span>Ports: <span className="text-amber-300">{(out.ports || []).join(', ') || '—'}</span></span>
-            {out.hostnames?.length ? <span>Hostnames: <span className="text-cyan-300">{out.hostnames.join(', ')}</span></span> : null}
-          </div>
-          <Pre>{JSON.stringify(out, null, 2)}</Pre>
-        </>
-      )}
-    </div>
-  );
 }
 
 function UrlscanTab({ log }) {
@@ -207,7 +110,7 @@ function HackerTargetTab({ log }) {
 }
 
 const TABS = [
-  { id: 'shodan', label: 'Shodan', comp: ShodanTab },
+  { id: 'shodan', label: 'Shodan', comp: ShodanClient },
   { id: 'urlscan', label: 'urlscan.io', comp: UrlscanTab },
   { id: 'hackertarget', label: 'HackerTarget', comp: HackerTargetTab },
 ];
