@@ -1,6 +1,8 @@
 /**
- * Automotive CAN Bus & OBD-II Diagnostic Driver
- * Implements SLCAN protocol (CANable, Candlelight, USB-CAN) & ELM327 OBD-II AT commands.
+ * CAN bus driver helpers: the SLCAN (Lawicel) ASCII protocol spoken by CANable,
+ * Candlelight-in-SLCAN-mode and USB-CAN adapters (classic CAN and, where the
+ * adapter firmware supports the d/D/b/B extension, CAN FD), plus OBD-II
+ * (ISO 15765-4) requests carried over raw CAN frames. It does not speak ELM327.
  */
 
 export const CAN_BAUD_RATES = [
@@ -22,66 +24,255 @@ export const OBD_PIDS = [
 ];
 
 export const COMMON_DTCS = {
+  'P0016': 'Crankshaft / Camshaft Position Correlation (Bank 1 Sensor A)',
+  'P0087': 'Fuel Rail / System Pressure Too Low',
+  'P0100': 'Mass Air Flow (MAF) Circuit Malfunction',
+  'P0101': 'Mass Air Flow Circuit Range / Performance',
+  'P0102': 'Mass Air Flow Circuit Low Input',
+  'P0103': 'Mass Air Flow Circuit High Input',
+  'P0105': 'Manifold Absolute Pressure Circuit Malfunction',
+  'P0106': 'Manifold Absolute Pressure Range / Performance',
+  'P0110': 'Intake Air Temperature Circuit Malfunction',
+  'P0113': 'Intake Air Temperature Circuit High Input',
+  'P0115': 'Engine Coolant Temperature Circuit Malfunction',
+  'P0117': 'Engine Coolant Temperature Circuit Low Input',
+  'P0118': 'Engine Coolant Temperature Circuit High Input',
+  'P0120': 'Throttle / Pedal Position Sensor A Circuit Malfunction',
+  'P0121': 'Throttle / Pedal Position Sensor A Range / Performance',
+  'P0128': 'Coolant Thermostat (Coolant Temp Below Regulating Temp)',
+  'P0130': 'O2 Sensor Circuit Malfunction (Bank 1 Sensor 1)',
+  'P0131': 'O2 Sensor Circuit Low Voltage (Bank 1 Sensor 1)',
+  'P0133': 'O2 Sensor Circuit Slow Response (Bank 1 Sensor 1)',
+  'P0135': 'O2 Sensor Heater Circuit Malfunction (Bank 1 Sensor 1)',
+  'P0141': 'O2 Sensor Heater Circuit Malfunction (Bank 1 Sensor 2)',
+  'P0171': 'System Too Lean (Bank 1)',
+  'P0172': 'System Too Rich (Bank 1)',
+  'P0174': 'System Too Lean (Bank 2)',
+  'P0175': 'System Too Rich (Bank 2)',
+  'P0191': 'Fuel Rail Pressure Sensor Circuit Range / Performance',
+  'P0201': 'Injector Circuit Malfunction - Cylinder 1',
+  'P0202': 'Injector Circuit Malfunction - Cylinder 2',
+  'P0203': 'Injector Circuit Malfunction - Cylinder 3',
+  'P0204': 'Injector Circuit Malfunction - Cylinder 4',
+  'P0217': 'Engine Coolant Over Temperature Condition',
+  'P0220': 'Throttle / Pedal Position Sensor B Circuit Malfunction',
+  'P0230': 'Fuel Pump Primary Circuit Malfunction',
+  'P0234': 'Turbo / Supercharger Overboost Condition',
+  'P0299': 'Turbo / Supercharger Underboost',
   'P0300': 'Random / Multiple Cylinder Misfire Detected',
   'P0301': 'Cylinder 1 Misfire Detected',
-  'P0171': 'System Too Lean (Bank 1)',
+  'P0302': 'Cylinder 2 Misfire Detected',
+  'P0303': 'Cylinder 3 Misfire Detected',
+  'P0304': 'Cylinder 4 Misfire Detected',
+  'P0305': 'Cylinder 5 Misfire Detected',
+  'P0306': 'Cylinder 6 Misfire Detected',
+  'P0325': 'Knock Sensor 1 Circuit Malfunction (Bank 1)',
+  'P0335': 'Crankshaft Position Sensor A Circuit Malfunction',
+  'P0340': 'Camshaft Position Sensor Circuit Malfunction (Bank 1)',
+  'P0341': 'Camshaft Position Sensor Range / Performance (Bank 1)',
+  'P0351': 'Ignition Coil A Primary / Secondary Circuit Malfunction',
+  'P0352': 'Ignition Coil B Primary / Secondary Circuit Malfunction',
+  'P0401': 'Exhaust Gas Recirculation Flow Insufficient',
+  'P0402': 'Exhaust Gas Recirculation Flow Excessive',
   'P0420': 'Catalyst System Efficiency Below Threshold (Bank 1)',
-  'P0128': 'Coolant Thermostat (Coolant Temp Below Regulating Temp)',
+  'P0430': 'Catalyst System Efficiency Below Threshold (Bank 2)',
+  'P0440': 'Evaporative Emission Control System Malfunction',
+  'P0442': 'Evaporative Emission System Leak Detected (Small Leak)',
+  'P0446': 'Evaporative Emission Vent Control Circuit Malfunction',
   'P0455': 'Evaporative Emission System Leak Detected (Gross Leak)',
-  'P0500': 'Vehicle Speed Sensor (VSS) Malfunction'
+  'P0456': 'Evaporative Emission System Leak Detected (Very Small Leak)',
+  'P0480': 'Cooling Fan 1 Control Circuit Malfunction',
+  'P0500': 'Vehicle Speed Sensor (VSS) Malfunction',
+  'P0505': 'Idle Control System Malfunction',
+  'P0506': 'Idle Control System RPM Lower Than Expected',
+  'P0507': 'Idle Control System RPM Higher Than Expected',
+  'P0562': 'System Voltage Low',
+  'P0563': 'System Voltage High',
+  'P0600': 'Serial Communication Link Malfunction',
+  'P0601': 'Internal Control Module Memory Check Sum Error',
+  'P0606': 'Control Module Processor Fault',
+  'P0700': 'Transmission Control System Malfunction',
+  'P0715': 'Input / Turbine Speed Sensor Circuit Malfunction',
+  'P0720': 'Output Speed Sensor Circuit Malfunction',
+  'P0730': 'Incorrect Gear Ratio',
+  'P0741': 'Torque Converter Clutch Circuit Performance or Stuck Off',
+  'P2002': 'Diesel Particulate Filter Efficiency Below Threshold (Bank 1)',
+  'P2096': 'Post Catalyst Fuel Trim System Too Lean (Bank 1)',
+  'P2138': 'Throttle / Pedal Position Sensor D / E Voltage Correlation',
+  'P2195': 'O2 Sensor Signal Stuck Lean (Bank 1 Sensor 1)',
+  'P2196': 'O2 Sensor Signal Stuck Rich (Bank 1 Sensor 1)',
+  'C0035': 'Left Front Wheel Speed Sensor Circuit',
+  'C0040': 'Right Front Wheel Speed Sensor Circuit',
+  'C0045': 'Left Rear Wheel Speed Sensor Circuit',
+  'C0050': 'Right Rear Wheel Speed Sensor Circuit',
+  'U0001': 'High Speed CAN Communication Bus',
+  'U0073': 'Control Module Communication Bus Off',
+  'U0100': 'Lost Communication With ECM / PCM',
+  'U0101': 'Lost Communication With TCM',
+  'U0121': 'Lost Communication With Anti-Lock Brake System (ABS) Control Module',
+  'U0140': 'Lost Communication With Body Control Module',
+  'U0155': 'Lost Communication With Instrument Panel Cluster (IPC) Control Module'
+};
+
+// CAN FD data length for each 4-bit DLC code (codes 0-8 are the length itself).
+export const CAN_FD_LENGTHS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64];
+export const canFdLengthToDlc = (len) => CAN_FD_LENGTHS.indexOf(len);
+
+const HEX_ONLY = /^[0-9A-Fa-f]*$/;
+
+// SLCAN frame type letters: t/T classic data, r/R classic remote (RTR), and the
+// CAN FD extension used by CANable 2.0 / candleLight-FD firmware: d/D FD
+// without bit-rate switching, b/B FD with BRS. Lower case = 11-bit, upper = 29-bit.
+const SLCAN_TYPES = {
+  t: { ext: false, rtr: false, fd: false, brs: false },
+  T: { ext: true, rtr: false, fd: false, brs: false },
+  r: { ext: false, rtr: true, fd: false, brs: false },
+  R: { ext: true, rtr: true, fd: false, brs: false },
+  d: { ext: false, rtr: false, fd: true, brs: false },
+  D: { ext: true, rtr: false, fd: true, brs: false },
+  b: { ext: false, rtr: false, fd: true, brs: true },
+  B: { ext: true, rtr: false, fd: true, brs: true }
 };
 
 /**
- * Parses an SLCAN ASCII frame line:
- * t12381122334455667788 -> { id: 0x123, isExtended: false, dlc: 8, data: Uint8Array([0x11, 0x22...]) }
- * T18DAF11081122334455667788 -> { id: 0x18DAF110, isExtended: true, dlc: 8, data: ... }
+ * Parses one SLCAN ASCII frame line:
+ *   t12381122334455667788      -> { id: 0x123, isExtended: false, dlc: 8, data: [0x11, 0x22, ...] }
+ *   T18DAF11081122334455667788 -> { id: 0x18DAF110, isExtended: true, ... }
+ *   r1238 / R18DAF1108         -> remote frame: { rtr: true, dlc: 8, data: [] }
+ *   b1239...                   -> CAN FD with bit-rate switching (brs: true); the DLC is a hex
+ *                                 code (9 = 12 bytes ... F = 64 bytes)
+ * With the adapter's timestamp option (Z1) a line ends with 4 hex digits of
+ * milliseconds (wrapping at 60000); they come back as `timestamp`.
+ *
+ * Returns { id, isExtended, dlc (data length), data, raw, rtr, fd, brs, timestamp }
+ * or null when the line is not a valid frame (bad hex, DLC out of range, short
+ * or surplus characters). Data bytes are never filled in with guessed zeros.
  */
 export function parseSlcanFrame(line) {
   if (!line || typeof line !== 'string') return null;
   const trimmed = line.trim();
-  const type = trimmed[0];
-
-  if (type === 't') {
-    // Standard 11-bit ID (3 hex chars) + DLC (1 digit) + Data (2*DLC hex chars)
-    const id = parseInt(trimmed.substring(1, 4), 16);
-    const dlc = parseInt(trimmed[4], 10);
-    const dataStr = trimmed.substring(5, 5 + (dlc * 2));
-    const data = new Uint8Array(dlc);
-    for (let i = 0; i < dlc; i++) {
-      data[i] = parseInt(dataStr.substring(i * 2, (i * 2) + 2), 16) || 0;
-    }
-    return { id, isExtended: false, dlc, data, raw: trimmed };
-  } else if (type === 'T') {
-    // Extended 29-bit ID (8 hex chars) + DLC (1 digit) + Data
-    const id = parseInt(trimmed.substring(1, 9), 16);
-    const dlc = parseInt(trimmed[9], 10);
-    const dataStr = trimmed.substring(10, 10 + (dlc * 2));
-    const data = new Uint8Array(dlc);
-    for (let i = 0; i < dlc; i++) {
-      data[i] = parseInt(dataStr.substring(i * 2, (i * 2) + 2), 16) || 0;
-    }
-    return { id, isExtended: true, dlc, data, raw: trimmed };
+  const spec = SLCAN_TYPES[trimmed[0]];
+  if (!spec) return null;
+  const dlcPos = 1 + (spec.ext ? 8 : 3);
+  if (trimmed.length <= dlcPos) return null;
+  const idStr = trimmed.substring(1, dlcPos);
+  if (!HEX_ONLY.test(idStr)) return null;
+  const id = parseInt(idStr, 16);
+  if (id > (spec.ext ? 0x1fffffff : 0x7ff)) return null;
+  const dlcChar = trimmed[dlcPos];
+  if (!/^[0-9A-Fa-f]$/.test(dlcChar)) return null;
+  const code = parseInt(dlcChar, 16);
+  let len;
+  if (spec.fd) len = CAN_FD_LENGTHS[code];
+  else if (code <= 8) len = code;
+  else return null;
+  let pos = dlcPos + 1;
+  let data;
+  if (spec.rtr) {
+    data = new Uint8Array(0);
+  } else {
+    const dataStr = trimmed.substring(pos, pos + len * 2);
+    if (dataStr.length !== len * 2 || !HEX_ONLY.test(dataStr)) return null;
+    data = new Uint8Array(len);
+    for (let i = 0; i < len; i++) data[i] = parseInt(dataStr.substring(i * 2, i * 2 + 2), 16);
+    pos += len * 2;
   }
-
-  return null;
+  let timestamp = null;
+  const rest = trimmed.substring(pos);
+  if (rest.length) {
+    if (rest.length !== 4 || !HEX_ONLY.test(rest)) return null;
+    timestamp = parseInt(rest, 16);
+  }
+  return { id, isExtended: spec.ext, dlc: len, data, raw: trimmed, rtr: spec.rtr, fd: spec.fd, brs: spec.brs, timestamp };
 }
 
 /**
- * Encodes a CAN frame into an SLCAN string
+ * Encodes a CAN frame as an SLCAN string (with the trailing "\r").
+ *   buildSlcanFrame(0x123, [1, 2], false)                           -> "t12320102\r" (classic)
+ *   buildSlcanFrame(0x123, [], false, { rtr: true, dlc: 4 })        -> "r1234\r"
+ *   buildSlcanFrame(0x123, bytes12, false, { fd: true, brs: true }) -> "b1239...\r"
+ * Throws RangeError for a payload the frame type cannot carry.
  */
-export function buildSlcanFrame(id, dataBytes, isExtended = false) {
-  const dlc = dataBytes.length;
-  const hexData = Array.from(dataBytes)
-    .map(b => (b & 0xFF).toString(16).padStart(2, '0').toUpperCase())
-    .join('');
-
-  if (isExtended) {
-    const idStr = (id & 0x1FFFFFFF).toString(16).padStart(8, '0').toUpperCase();
-    return `T${idStr}${dlc}${hexData}\r`;
-  } else {
-    const idStr = (id & 0x7FF).toString(16).padStart(3, '0').toUpperCase();
-    return `t${idStr}${dlc}${hexData}\r`;
+export function buildSlcanFrame(id, dataBytes, isExtended = false, { rtr = false, fd = false, brs = false, dlc } = {}) {
+  const bytes = Array.from(dataBytes || []);
+  let len = bytes.length;
+  if (rtr) {
+    if (fd) throw new RangeError('CAN FD has no remote frames.');
+    len = dlc ?? bytes.length;
+    if (!Number.isInteger(len) || len < 0 || len > 8) throw new RangeError('A remote frame requests 0 to 8 bytes.');
+  } else if (fd) {
+    if (canFdLengthToDlc(len) < 0) throw new RangeError(`A CAN FD payload is 0-8, 12, 16, 20, 24, 32, 48 or 64 bytes, not ${len}.`);
+  } else if (len > 8) {
+    throw new RangeError('Classic CAN frames carry at most 8 bytes; use CAN FD for more.');
   }
+  const type = rtr ? (isExtended ? 'R' : 'r')
+    : fd ? (brs ? (isExtended ? 'B' : 'b') : (isExtended ? 'D' : 'd'))
+      : (isExtended ? 'T' : 't');
+  const idStr = isExtended
+    ? (id & 0x1FFFFFFF).toString(16).padStart(8, '0').toUpperCase()
+    : (id & 0x7FF).toString(16).padStart(3, '0').toUpperCase();
+  const dlcChar = fd ? canFdLengthToDlc(len).toString(16).toUpperCase() : String(len);
+  const hexData = rtr ? '' : bytes.map((b) => (b & 0xFF).toString(16).padStart(2, '0').toUpperCase()).join('');
+  return `${type}${idStr}${dlcChar}${hexData}\r`;
+}
+
+/** CAN FD data-phase bit rates (CANable 2.0 / candleLight-FD "Y" command). Confirm against your firmware. */
+export const CAN_FD_DATA_RATES = [
+  { code: 'Y1', baud: 1000000, label: '1 Mbps data phase' },
+  { code: 'Y2', baud: 2000000, label: '2 Mbps data phase' },
+  { code: 'Y4', baud: 4000000, label: '4 Mbps data phase' },
+  { code: 'Y5', baud: 5000000, label: '5 Mbps data phase' }
+];
+
+/**
+ * Commands (without the "\r") that open an SLCAN channel:
+ * C (close), S<n> (nominal bit rate), Y<n> (FD data rate), Z1 (timestamps),
+ * then O (normal), L (listen-only: never transmits or ACKs) or l (loopback).
+ */
+export function buildSlcanOpenSequence({ baudCode = 'S6', fdRateCode = null, mode = 'normal', timestamps = false } = {}) {
+  const open = { normal: 'O', listen: 'L', loopback: 'l' }[mode];
+  if (!open) throw new RangeError(`Unknown SLCAN open mode "${mode}".`);
+  const seq = ['C', baudCode];
+  if (fdRateCode) seq.push(fdRateCode);
+  if (timestamps) seq.push('Z1');
+  seq.push(open);
+  return seq;
+}
+
+/** The adapter answers a rejected command with a BELL (0x07). */
+export const isSlcanError = (line) => typeof line === 'string' && line.includes('\x07');
+
+/**
+ * Turn the 16-bit millisecond timestamps (0-59999, then wrapping) into a
+ * continuously increasing millisecond count. Call the returned function with
+ * each frame's `timestamp` in arrival order.
+ */
+export function createSlcanClock() {
+  let last = null;
+  let base = 0;
+  return (ts) => {
+    if (ts === null || ts === undefined) return null;
+    if (last !== null && ts < last - 30000) base += 60000;
+    last = ts;
+    return base + ts;
+  };
+}
+
+/**
+ * Find the bus bit rate by listening. `probe(code)` must open the channel
+ * listen-only at that SLCAN rate code, listen for a moment, and resolve
+ * { frames, errors } (valid frames parsed, error replies / bad lines). The
+ * first rate with traffic and no errors wins; null means nothing was heard
+ * (silent bus, wiring, or a rate not in the list).
+ */
+export async function autoDetectBitrate(probe, { codes = ['S6', 'S5', 'S8', 'S4', 'S3'], minFrames = 1 } = {}) {
+  const results = [];
+  for (const code of codes) {
+    const r = await probe(code);
+    results.push({ code, frames: r.frames, errors: r.errors });
+    if (r.frames >= minFrames && r.errors === 0) return { code, results };
+  }
+  return { code: null, results };
 }
 
 /**

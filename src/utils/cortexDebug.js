@@ -392,14 +392,18 @@ export function parseElf(bytes) {
   }
 
   const symbols = new Map();
+  const symbolList = [];
   for (const s of sections.filter((x) => x.type === 2)) { // SHT_SYMTAB
     const names = sections[s.link];
     for (let o = s.offset; o + 16 <= s.offset + s.size; o += 16) {
       const name = cstr(names.offset + u32(o));
-      if (name) symbols.set(name, { value: u32(o + 4), size: u32(o + 8), shndx: u16(o + 14) });
+      if (!name) continue;
+      const sym = { value: u32(o + 4), size: u32(o + 8), shndx: u16(o + 14), type: b[o + 12] & 0xf, bind: b[o + 12] >> 4 };
+      symbols.set(name, sym);
+      symbolList.push({ name, ...sym });
     }
   }
-  return { entry: u32(0x18), sections, segments, symbols, bytes: b };
+  return { entry: u32(0x18), sections, segments, symbols, symbolList, bytes: b };
 }
 
 // ---------------------------------------------------------------------------
@@ -475,9 +479,11 @@ export async function readPack(bytes) {
   const pdscName = Object.keys(zip.files).find((n) => /\.pdsc$/i.test(n));
   const devices = pdscName ? parsePdsc(await zip.file(pdscName).async('string')) : [];
   const flms = Object.keys(zip.files).filter((n) => /\.flm$/i.test(n));
+  const svds = Object.keys(zip.files).filter((n) => /\.svd$/i.test(n));
   return {
     devices,
     algorithms: flms,
+    svds,
     async load(path) {
       const norm = (p) => p.replace(/\\/g, '/').toLowerCase();
       const name = Object.keys(zip.files).find((n) => norm(n) === norm(path) || norm(n).endsWith(`/${norm(path)}`));
@@ -687,4 +693,108 @@ export async function programFlash(target, flm, segments, { ramBase, ramSize, ch
     log(`Verified ${total} bytes.`);
   }
   return { sectors: sectors.length, pages: order.length };
+}
+
+// ---------------------------------------------------------------------------
+// ELF symbols: "main+0x12" for addresses
+// ---------------------------------------------------------------------------
+
+const STT_OBJECT = 1;
+const STT_FUNC = 2;
+const SHN_ABS = 0xfff1;
+
+/**
+ * Sorted table of the functions and data objects in an ELF's symbol table.
+ * Thumb function symbols carry bit 0 set; it is cleared here.
+ */
+export function buildSymbolTable(elf) {
+  const list = elf.symbolList || [...elf.symbols].map(([name, s]) => ({ name, ...s }));
+  return list
+    .filter((s) => (s.type === STT_FUNC || s.type === STT_OBJECT) && s.shndx !== 0 && s.shndx !== SHN_ABS && !(s.name.startsWith('$')))
+    .map((s) => ({ name: s.name, addr: (s.value & ~1) >>> 0, size: s.size, func: s.type === STT_FUNC }))
+    .sort((a, b) => a.addr - b.addr || b.size - a.size);
+}
+
+// Symbols without a size (hand-written assembly) cover the bytes up to the next symbol, at most this far.
+const UNSIZED_REACH = 0x400;
+
+/** { name, offset } for the symbol that contains `addr`, or null. */
+export function symbolize(table, addr) {
+  if (!table?.length) return null;
+  const a = addr >>> 0;
+  let lo = 0;
+  let hi = table.length - 1;
+  let idx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (table[mid].addr <= a) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  // Several symbols can start at one address (aliases) or nest: walk back a few for one that covers `a`.
+  for (let i = idx; i >= 0 && i > idx - 8; i--) {
+    const s = table[i];
+    const off = a - s.addr;
+    const next = table[i + 1];
+    const reach = s.size || Math.min(UNSIZED_REACH, next && next.addr > s.addr ? next.addr - s.addr : UNSIZED_REACH);
+    if (off < reach) return { name: s.name, offset: off };
+  }
+  return null;
+}
+
+/** "main+0x12", "main" at offset 0, or '' when the address has no symbol. */
+export function formatSymbol(table, addr) {
+  const s = symbolize(table, addr);
+  if (!s) return '';
+  return s.offset ? `${s.name}+0x${s.offset.toString(16)}` : s.name;
+}
+
+/** Address of the symbol called `name` (function addresses without the Thumb bit), or null. */
+export function symbolAddress(table, name) {
+  const s = table?.find((x) => x.name === name);
+  return s ? s.addr : null;
+}
+
+// ---------------------------------------------------------------------------
+// Mass erase and unlock
+// ---------------------------------------------------------------------------
+
+/** Erase the whole chip with the flash algorithm's EraseChip() and nothing else. */
+export async function eraseChipWithAlgorithm(target, flm, { ramBase, ramSize, onProgress = () => {}, log = () => {} } = {}) {
+  if (flm.functions.EraseChip === undefined) throw new FlashAlgoError(`${flm.name} has no EraseChip(): this flash algorithm can only erase sectors.`);
+  const runner = new FlashAlgoRunner(target, flm, { ramBase, ramSize, log });
+  await runner.load();
+  await runner.init(1);
+  try {
+    onProgress('erase', 0);
+    const r = await runner.call('EraseChip', [], Math.max(60000, flm.eraseTimeout * 50));
+    if (r) throw new FlashAlgoError(`EraseChip() failed with ${r}.`);
+    onProgress('erase', 1);
+  } finally {
+    try { await runner.uninit(1); } catch (e) { /* the erase result matters more */ }
+  }
+  log('Erased the whole chip.');
+}
+
+// Nordic nRF52 CTRL-AP: access port 1, registers RESET 0x00, ERASEALL 0x04, ERASEALLSTATUS 0x08, IDR 0xFC.
+export const NRF52_CTRL_AP = { APSEL: 1, RESET: 0x00, ERASEALL: 0x04, ERASEALLSTATUS: 0x08, IDR_VALUE: 0x02880000 };
+
+/**
+ * Unlock a read-protected nRF52 by erasing it through the CTRL-AP (flash,
+ * UICR and RAM are wiped; there is no other way in). Resets the chip afterwards.
+ */
+export async function nrf52EraseAll(target, { timeoutMs = 30000, sleepMs = 20 } = {}) {
+  const C = NRF52_CTRL_AP;
+  const idr = await target.readApRegister(C.APSEL, 0xfc);
+  if ((idr >>> 0) !== C.IDR_VALUE) {
+    throw new Error(`Access port ${C.APSEL} is not an nRF52 CTRL-AP (IDR 0x${(idr >>> 0).toString(16).toUpperCase()}, expected 0x${C.IDR_VALUE.toString(16).toUpperCase()}). This is not an nRF52 target.`);
+  }
+  await target.writeApRegister(C.APSEL, C.ERASEALL, 1);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if ((await target.readApRegister(C.APSEL, C.ERASEALLSTATUS)) === 0) break;
+    if (Date.now() > deadline) throw new Error('The nRF52 did not finish ERASEALL in time.');
+    await sleep(sleepMs);
+  }
+  await target.writeApRegister(C.APSEL, C.RESET, 1);
+  await target.writeApRegister(C.APSEL, C.RESET, 0);
+  await target.writeApRegister(C.APSEL, C.ERASEALL, 0);
 }

@@ -15,7 +15,7 @@ import {
   FolderOpen,
   Monitor
 } from 'lucide-react';
-import { getFlipperDriver } from '../../../utils/flipperDriver';
+import { formatHexDump, getFlipperDriver, isPrintableText } from '../../../utils/flipperDriver';
 import { useSerial } from '../../../context/SerialContext';
 import { identifyUsbChip } from '../../../utils/usbDatabase';
 import flipperSvg from '../../../assets/flipper/flipper.svg';
@@ -116,6 +116,8 @@ export default function FlipperWorkbench() {
   const [dirItems, setDirItems] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileContent, setFileContent] = useState('');
+  const [fileBytes, setFileBytes] = useState(null); // raw bytes of the selected file (Export saves these)
+  const [fileNotice, setFileNotice] = useState(null);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const fileUploadInputRef = useRef(null);
 
@@ -252,8 +254,18 @@ export default function FlipperWorkbench() {
       loadDirectory(item.path);
     } else {
       setSelectedFile(item);
-      const content = await driver.readRealFile(item.path);
-      setFileContent(content);
+      setFileBytes(null);
+      setFileContent('');
+      setFileNotice(null);
+      try {
+        const bytes = await driver.readRealFileBytes(item.path);
+        setFileBytes(bytes);
+        setFileContent(isPrintableText(bytes)
+          ? new TextDecoder('utf-8').decode(bytes)
+          : `[binary, ${bytes.length} bytes]\n\n${formatHexDump(bytes)}`);
+      } catch (err) {
+        setFileContent(`[Error reading file: ${err.message}]`);
+      }
     }
   };
 
@@ -282,7 +294,7 @@ export default function FlipperWorkbench() {
       await driver.createRealDirectory(fullPath);
       await loadDirectory(currentDir);
     } catch (e) {
-      alert(`Failed to create folder: ${e.message}`);
+      setFileNotice({ type: 'error', text: `Failed to create folder: ${e.message}` });
     }
   };
 
@@ -295,10 +307,11 @@ export default function FlipperWorkbench() {
       if (selectedFile?.path === item.path) {
         setSelectedFile(null);
         setFileContent('');
+        setFileBytes(null);
       }
       await loadDirectory(currentDir);
     } catch (err) {
-      alert(`Failed to delete: ${err.message}`);
+      setFileNotice({ type: 'error', text: `Failed to delete: ${err.message}` });
     }
   };
 
@@ -306,19 +319,20 @@ export default function FlipperWorkbench() {
   const handleUploadFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      const content = evt.target.result;
-      const targetPath = `${currentDir}/${file.name}`.replace(/\/+/g, '/');
-      try {
-        await driver.writeRealFile(targetPath, content);
-        await loadDirectory(currentDir);
-      } catch (err) {
-        alert(`Failed to upload: ${err.message}`);
-      }
-    };
-    reader.readAsText(file);
     e.target.value = '';
+    const targetPath = `${currentDir}/${file.name}`.replace(/\/+/g, '/');
+    if (file.size > 1024 * 1024 &&
+        !confirmAction(`"${file.name}" is ${(file.size / 1048576).toFixed(1)} MB. Large uploads over serial are slow. Continue?`)) {
+      return;
+    }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      await driver.writeRealFile(targetPath, bytes);
+      setFileNotice({ type: 'ok', text: `Uploaded ${file.name} (${bytes.length} bytes)` });
+      await loadDirectory(currentDir);
+    } catch (err) {
+      setFileNotice({ type: 'error', text: `Failed to upload: ${err.message}` });
+    }
   };
 
   // Connect directly to a detected port
@@ -765,6 +779,8 @@ export default function FlipperWorkbench() {
               currentDir={currentDir}
               dirItems={dirItems}
               fileContent={fileContent}
+              fileBytes={fileBytes}
+              fileNotice={fileNotice}
               fileUploadInputRef={fileUploadInputRef}
               handleCreateFolder={handleCreateFolder}
               handleDeleteItem={handleDeleteItem}

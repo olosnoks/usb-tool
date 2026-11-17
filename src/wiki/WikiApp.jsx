@@ -34,6 +34,7 @@ import {
   Github
 } from 'lucide-react';
 import { WIKI_ARTICLES, WIKI_CATEGORIES } from './wikiArticles';
+import skonLogo from '../assets/skon-logo.svg';
 import { searchTools } from '../utils/toolSearch';
 
 const WIKI_SEARCH_FIELDS = { name: ['title'], id: ['id'], keywords: ['tags'], desc: ['summary'], body: ['content'] };
@@ -120,6 +121,23 @@ export const TOOL_TO_ARTICLE_MAP = {
   'mass-storage': 'mass-storage',
   ptp: 'ptp',
   fido2: 'fido2',
+
+  // Sidebar tools that share another tool's article
+  'http-workbench': 'web-request-toolkit',
+  'web-analyzer': 'web-security-scanner',
+  'url-inspector': 'web-security-scanner',
+  'owasp-zap': 'web-security-scanner',
+  'crtsh-finder': 'crtsh-finder',
+  'ip-calculator': 'ip-calculator',
+  'osint-clients': 'osint-clients',
+  android: 'adb',
+  'usb-inspector': 'usb-descriptors',
+
+  // Crypto & data tools
+  'hash-calculator': 'hash-calculator',
+  'jwt-inspector': 'jwt-inspector',
+  'regex-tester': 'regex-tester',
+  'db-browser': 'db-browser',
 
   // Reference & Setup
   setup: 'setup',
@@ -522,7 +540,7 @@ export default function WikiApp() {
             </a>
             
             <div className="flex items-center gap-2">
-              <span className="text-lg">📖</span>
+              <img src={skonLogo} alt="Skon" className="h-6 w-auto select-none" draggable="false" />
               <h1 className="text-sm sm:text-base font-bold text-slate-100 font-mono tracking-tight flex items-center gap-1.5">
                 <span>SKON'S USB TOOL</span>
                 <span className="text-amber-400 text-xs px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 font-bold">KNOWLEDGE BASE</span>

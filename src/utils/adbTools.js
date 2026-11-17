@@ -1,3 +1,5 @@
+import { blobChunks } from './adbDriver';
+
 /**
  * adbTools.js — device-level helpers on top of an AdbConnection: device info
  * from getprop and dumpsys, logcat polling, package management, input events
@@ -120,10 +122,15 @@ export function parsePackages(text) {
 
 const quote = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
 
-/** Push an APK to /data/local/tmp and install it with pm. Resolves with pm's output. */
-export async function installApk(conn, bytes, { replace = true, downgrade = false, onProgress } = {}) {
+/**
+ * Push an APK (bytes or a File/Blob, streamed) to /data/local/tmp and install it
+ * with pm. Resolves with pm's output. `onProgress` gets a 0..1 fraction.
+ */
+export async function installApk(conn, apk, { replace = true, downgrade = false, onProgress } = {}) {
   const remote = `/data/local/tmp/skons-${Date.now()}.apk`;
-  await conn.push(remote, bytes, { onProgress });
+  const progress = onProgress ? (f) => onProgress(f) : undefined;
+  if (apk instanceof Uint8Array) await conn.push(remote, apk, { onProgress: progress });
+  else await conn.pushFrom(apk, remote, { onProgress: progress });
   try {
     const out = (await conn.shell(`pm install ${replace ? '-r ' : ''}${downgrade ? '-d ' : ''}${quote(remote)}`)).trim();
     if (!/Success/.test(out)) throw new Error(out || 'pm install gave no answer.');
@@ -131,6 +138,135 @@ export async function installApk(conn, bytes, { replace = true, downgrade = fals
   } finally {
     await conn.shell(`rm -f ${quote(remote)}`);
   }
+}
+
+const apkSize = (a) => (a.blob ? a.blob.size : a.bytes.length);
+const apkBlob = (a) => a.blob || new Blob([a.bytes]);
+
+/**
+ * Install several APKs as one package (a base APK plus its splits) with a pm
+ * install session: install-create, then install-write per file streamed over
+ * `exec:` stdin, then install-commit. `apks` is [{ name, blob | bytes }].
+ * `onProgress(fraction, bytesDone, totalBytes)`. A failed or cancelled session
+ * is cleaned up with install-abandon.
+ */
+export async function installMultiple(conn, apks, { replace = true, downgrade = false, onProgress, signal } = {}) {
+  if (!apks?.length) throw new Error('No APK files to install.');
+  const total = apks.reduce((n, a) => n + apkSize(a), 0);
+  const created = (await conn.shell(`pm install-create ${replace ? '-r ' : ''}${downgrade ? '-d ' : ''}-S ${total}`)).trim();
+  const sid = created.match(/\[(\d+)\]/)?.[1];
+  if (!/Success/.test(created) || !sid) throw new Error(created || 'pm install-create gave no session.');
+  try {
+    let done = 0;
+    for (let i = 0; i < apks.length; i++) {
+      const a = apks[i];
+      const size = apkSize(a);
+      const remoteName = `${i}_${String(a.name).replace(/[^\w.-]/g, '_')}`;
+      const stream = await conn.open(`exec:pm install-write -S ${size} ${sid} ${remoteName} -`);
+      for await (const chunk of blobChunks(apkBlob(a), 256 * 1024)) {
+        if (signal?.aborted) { await stream.close(); throw new Error('Cancelled.'); }
+        await stream.write(chunk);
+        done += chunk.length;
+        onProgress?.(total ? done / total : 1, done, total);
+      }
+      const reply = new TextDecoder().decode(await conn._collect(stream));
+      if (!/Success/.test(reply)) throw new Error(`install-write ${a.name}: ${reply.trim() || 'no answer'}`);
+    }
+    const out = (await conn.shell(`pm install-commit ${sid}`)).trim();
+    if (!/Success/.test(out)) throw new Error(out || 'pm install-commit gave no answer.');
+    return out;
+  } catch (e) {
+    try { await conn.shell(`pm install-abandon ${sid}`); } catch (e2) { /* ignore */ }
+    throw e;
+  }
+}
+
+// Device-dependent split selection for bundletool `.apks` archives.
+const ABI_NAMES = ['arm64_v8a', 'armeabi_v7a', 'armeabi', 'x86_64', 'x86', 'mips64', 'mips'];
+const DENSITY_DPI = { ldpi: 120, mdpi: 160, tvdpi: 213, hdpi: 240, xhdpi: 320, xxhdpi: 480, xxxhdpi: 640 };
+
+/** The device's ABI list (`_`-spelled, as in split names) and screen density. */
+export async function deviceInstallProfile(conn) {
+  const abilist = (await conn.shell('getprop ro.product.cpu.abilist')).trim();
+  const density = Number((await conn.shell('wm density')).match(/(\d+)\s*$/m)?.[1]) || null;
+  return { abis: abilist.split(',').map((a) => a.trim().replace(/-/g, '_')).filter(Boolean), density };
+}
+
+/**
+ * Choose which entries of a bundletool `.apks` archive to install together:
+ * universal.apk alone if present, otherwise each module's master split plus the
+ * ABI split the device runs, the closest screen-density split and the listed
+ * languages. Returns { names, skipped }. Throws if the archive only holds
+ * standalone APKs for CPUs the device does not run.
+ */
+export function selectApksSet(entryNames, { abis = [], density = null, languages = ['en'] } = {}) {
+  const apks = entryNames.filter((n) => /\.apk$/i.test(n));
+  if (apks.includes('universal.apk')) return { names: ['universal.apk'], skipped: apks.filter((n) => n !== 'universal.apk') };
+  const splits = apks.filter((n) => n.startsWith('splits/'));
+  if (!splits.length) {
+    const standalone = apks.filter((n) => n.startsWith('standalones/'));
+    for (const abi of abis) {
+      const hit = standalone.find((n) => n.replace(/-/g, '_').includes(abi));
+      if (hit) return { names: [hit], skipped: standalone.filter((n) => n !== hit) };
+    }
+    if (standalone.length === 1) return { names: standalone, skipped: [] };
+    throw new Error("This .apks archive has no splits/ folder and no standalone APK for this device's CPU.");
+  }
+  const names = []; const skipped = [];
+  const bestDensity = new Map();
+  for (const n of splits) {
+    const base = n.split('/').pop().replace(/\.apk$/i, '');
+    const dash = base.lastIndexOf('-');
+    const module = dash < 0 ? base : base.slice(0, dash);
+    const config = dash < 0 ? 'master' : base.slice(dash + 1);
+    if (config.startsWith('master')) names.push(n);
+    else if (ABI_NAMES.includes(config)) (abis.includes(config) ? names : skipped).push(n);
+    else if (DENSITY_DPI[config]) {
+      const dist = Math.abs(DENSITY_DPI[config] - (density || 480));
+      const prev = bestDensity.get(module);
+      if (!prev || dist < prev.dist) { if (prev) skipped.push(prev.n); bestDensity.set(module, { n, dist }); } else skipped.push(n);
+    } else if (/^[a-z]{2,3}(_[A-Za-z0-9]+)?$/.test(config) && languages.includes(config.split('_')[0])) names.push(n);
+    else skipped.push(n);
+  }
+  for (const { n } of bestDensity.values()) names.push(n);
+  return { names, skipped };
+}
+
+/**
+ * Open an install bundle and return what to pass to installMultiple():
+ * { apks: [{ name, bytes }], notes: [string] }. Handles .xapk / .apkm (a zip of
+ * split APKs, optionally with manifest.json) and bundletool .apks. The archive
+ * is read into memory (the APKs are small next to media). `profile` is
+ * deviceInstallProfile()'s result; it only matters for .apks.
+ */
+export async function apkSetFromArchive(file, profile = {}) {
+  const JSZip = (await import('jszip')).default;
+  const data = file instanceof Uint8Array ? file : await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(data);
+  const names = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
+  const notes = [];
+  let chosen;
+  const isBundle = names.includes('toc.pb') || names.includes('universal.apk') || names.some((n) => n.startsWith('splits/') || n.startsWith('standalones/'));
+  if (isBundle) {
+    const sel = selectApksSet(names, profile);
+    chosen = sel.names;
+    if (sel.skipped.length) notes.push(`${sel.skipped.length} split(s) for other CPUs, screen densities or languages were skipped.`);
+  } else {
+    let listed = null;
+    if (names.includes('manifest.json')) {
+      try {
+        const m = JSON.parse(await zip.file('manifest.json').async('string'));
+        if (Array.isArray(m.split_apks)) listed = m.split_apks.map((x) => x.file).filter((f) => names.includes(f));
+      } catch (e) { /* fall back to every root .apk */ }
+    }
+    chosen = listed?.length ? listed : names.filter((n) => /\.apk$/i.test(n) && !n.includes('/'));
+  }
+  if (!chosen.length) throw new Error('No .apk files found in this archive.');
+  const obb = names.filter((n) => /^Android\/(obb|data)\//i.test(n) || /\.obb$/i.test(n));
+  if (obb.length) notes.push(`${obb.length} expansion (OBB/data) file(s) in the archive are not installed; copy them to /sdcard/Android/obb/<package>/ separately.`);
+  const apks = [];
+  for (const n of chosen) apks.push({ name: n.split('/').pop(), bytes: await zip.file(n).async('uint8array') });
+  return { apks, notes };
 }
 
 export async function uninstallPackage(conn, name, { keepData = false } = {}) {
@@ -238,3 +374,200 @@ function concat(parts) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Folder pull and bugreport
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively list the files under `remoteDir`: { files: [{ path, rel, size }],
+ * skipped: [string] }. Symlinks are skipped (they can loop); unreadable folders
+ * are reported in `skipped` instead of stopping the walk.
+ */
+export async function walkRemote(conn, remoteDir, { signal } = {}) {
+  const root = remoteDir.replace(/\/?$/, '/');
+  const files = []; const skipped = [];
+  const stack = [''];
+  while (stack.length) {
+    if (signal?.aborted) throw new Error('Cancelled.');
+    const rel = stack.pop();
+    let entries;
+    try { entries = await conn.list(root + rel); } catch (e) { skipped.push(`${root}${rel} (${e.message})`); continue; }
+    for (const e of entries) {
+      if (e.name.includes('/') || e.name === '.' || e.name === '..') continue;
+      if (e.isLink) { skipped.push(`${root}${rel}${e.name} (symlink)`); continue; }
+      if (e.isDir) stack.push(`${rel}${e.name}/`);
+      else files.push({ path: `${root}${rel}${e.name}`, rel: `${rel}${e.name}`, size: e.size });
+    }
+  }
+  return { files, skipped };
+}
+
+/**
+ * Pull a remote folder into a sink: anything with `openFile(rel) -> writable`
+ * (see directoryHandleSink / createZipSink). Files are streamed one at a time;
+ * a file that fails is recorded and the pull carries on.
+ * `onProgress({ fraction, bytes, total, file })`.
+ */
+export async function pullDirectory(conn, remoteDir, sink, { onProgress, signal } = {}) {
+  const { files, skipped } = await walkRemote(conn, remoteDir, { signal });
+  const total = files.reduce((n, f) => n + f.size, 0);
+  let bytes = 0; let pulled = 0;
+  const failed = [];
+  for (const f of files) {
+    if (signal?.aborted) throw new Error('Cancelled.');
+    let writable = null;
+    const before = bytes;
+    try {
+      writable = await sink.openFile(f.rel);
+      await conn.pullTo(f.path, writable, {
+        total: f.size,
+        signal,
+        onProgress: (_frac, b) => { bytes = before + b; onProgress?.({ fraction: total ? bytes / total : 1, bytes, total, file: f.rel }); }
+      });
+      await writable.close?.();
+      pulled++;
+    } catch (e) {
+      try { await writable?.abort?.(); } catch (e2) { /* ignore */ }
+      bytes = before;
+      if (/^Cancelled/.test(e.message)) throw e;
+      failed.push({ path: f.path, error: e.message });
+    }
+  }
+  return { files: pulled, bytes, total, skipped, failed };
+}
+
+/** A sink that writes into a folder the user picked (File System Access directory handle). */
+export function directoryHandleSink(rootHandle) {
+  return {
+    async openFile(rel) {
+      const parts = rel.split('/');
+      const name = parts.pop();
+      let dir = rootHandle;
+      for (const part of parts) dir = await dir.getDirectoryHandle(part, { create: true });
+      const handle = await dir.getFileHandle(name, { create: true });
+      return handle.createWritable();
+    }
+  };
+}
+
+/** A sink that collects files into a zip (JSZip). `generate()` returns the zip Blob. */
+export async function createZipSink() {
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+  return {
+    openFile(rel) {
+      const parts = [];
+      return { write: (c) => { parts.push(c); }, close: () => { zip.file(rel, new Blob(parts)); } };
+    },
+    generate: () => zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
+  };
+}
+
+/** Parse one line of `bugreportz -p` output. */
+export function parseBugreportLine(line) {
+  const t = String(line).trim();
+  let m = t.match(/^PROGRESS:(\d+)\/(\d+)$/);
+  if (m) return { type: 'progress', done: Number(m[1]), total: Number(m[2]) };
+  m = t.match(/^OK:(.+)$/);
+  if (m) return { type: 'ok', path: m[1] };
+  m = t.match(/^FAIL:(.*)$/);
+  if (m) return { type: 'fail', message: m[1] };
+  return null;
+}
+
+/**
+ * Run `bugreportz -p` (Android 7+) and resolve with the path of the zip it wrote
+ * on the device; fetch it with conn.pullTo(). `onProgress(fraction)`.
+ */
+export async function runBugreport(conn, { onProgress, signal } = {}) {
+  const stream = await conn.open('shell:bugreportz -p');
+  let buf = ''; let path = null; let failure = null;
+  const dec = new TextDecoder();
+  try {
+    for (;;) {
+      if (signal?.aborted) throw new Error('Cancelled.');
+      const chunk = await stream.read();
+      if (chunk === null) break;
+      buf += dec.decode(chunk, { stream: true });
+      const lines = buf.split(/\r?\n/);
+      buf = lines.pop();
+      for (const line of lines) {
+        const ev = parseBugreportLine(line);
+        if (ev?.type === 'progress') onProgress?.(ev.total ? ev.done / ev.total : 0);
+        else if (ev?.type === 'ok') path = ev.path;
+        else if (ev?.type === 'fail') failure = ev.message;
+      }
+    }
+  } finally { await stream.close(); }
+  const tail = parseBugreportLine(buf);
+  if (tail?.type === 'ok') path = tail.path;
+  if (failure !== null) throw new Error(`bugreportz failed: ${failure || 'no reason given'}`);
+  if (!path) throw new Error('bugreportz did not report a file (it needs Android 7 or newer).');
+  return path;
+}
+
+// ---------------------------------------------------------------------------
+// Interactive shell: a tiny terminal model (no full-screen apps)
+// ---------------------------------------------------------------------------
+
+/**
+ * Turns a pty byte stream into plain lines: ANSI sequences are dropped (except
+ * erase-to-end-of-line and cursor left/right, which shells use to redraw their
+ * input), \r returns to column 0, \b/DEL step left, \n starts a line. Not an
+ * emulator: full-screen programs (vi, top) will not render.
+ */
+export class TerminalText {
+  constructor({ maxLines = 3000 } = {}) {
+    this.maxLines = maxLines;
+    this.lines = [];
+    this.cur = '';
+    this.pos = 0;
+    this.pending = '';
+  }
+
+  get text() { return [...this.lines, this.cur].join('\n'); }
+
+  clear() { this.lines = []; this.cur = ''; this.pos = 0; this.pending = ''; }
+
+  _put(ch) {
+    this.cur = this.pos < this.cur.length ? this.cur.slice(0, this.pos) + ch + this.cur.slice(this.pos + 1) : this.cur + ch;
+    this.pos++;
+  }
+
+  _csi(params, final) {
+    const n = Number(params.split(';')[0]) || 0;
+    if (final === 'K') {
+      if (n === 0) this.cur = this.cur.slice(0, this.pos);
+      else if (n === 2) { this.cur = ''; this.pos = 0; }
+    } else if (final === 'D') this.pos = Math.max(0, this.pos - (n || 1));
+    else if (final === 'C') this.pos = Math.min(this.cur.length, this.pos + (n || 1));
+  }
+
+  append(chunk) {
+    const s = this.pending + chunk;
+    this.pending = '';
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (ch === '\x1b') {
+        const rest = s.slice(i);
+        const csi = rest.match(/^\x1b\[([0-?]*)[ -/]*([@-~])/);
+        if (csi) { this._csi(csi[1], csi[2]); i += csi[0].length - 1; continue; }
+        const osc = rest.match(/^\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/);
+        if (osc) { i += osc[0].length - 1; continue; }
+        const two = rest.match(/^\x1b(?:[()#][A-Za-z0-9]|[=>78MDEHc])/);
+        if (two) { i += two[0].length - 1; continue; }
+        if (rest.length < 64 && (rest === '\x1b' || /^\x1b\[[0-?]*[ -/]*$/.test(rest) || /^\x1b\][^\x07\x1b]*\x1b?$/.test(rest) || /^\x1b[()#]$/.test(rest))) { this.pending = rest; break; }
+        continue; // stray ESC
+      }
+      if (ch === '\n') {
+        this.lines.push(this.cur); this.cur = ''; this.pos = 0;
+        if (this.lines.length > this.maxLines) this.lines.splice(0, this.lines.length - this.maxLines);
+      } else if (ch === '\r') this.pos = 0;
+      else if (ch === '\b' || ch === '\x7f') this.pos = Math.max(0, this.pos - 1);
+      else if (ch === '\t') { const n = 8 - (this.pos % 8); for (let k = 0; k < n; k++) this._put(' '); }
+      else if (ch < ' ') continue;
+      else this._put(ch);
+    }
+    return this.text;
+  }
+}

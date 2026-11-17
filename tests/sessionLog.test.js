@@ -85,3 +85,49 @@ describe('session log', () => {
     expect(exportMarkdown([])).toContain('No entries.');
   });
 });
+
+import { redact, redactEntries, describeEnvironment } from '../src/utils/sessionLog';
+
+describe('session log redaction (DAT-9)', () => {
+  it('masks common secret shapes', () => {
+    expect(redact('Authorization: Bearer abcdef1234567890XYZ')).toBe('Authorization: Bearer [REDACTED]');
+    expect(redact('GET /x?api_key=SECRET123&b=2')).toBe('GET /x?api_key=[REDACTED]&b=2');
+    expect(redact('password=hunter2 user=bob')).toBe('password=[REDACTED] user=bob');
+    expect(redact('token: "abc def"')).toBe('token: [REDACTED]');
+    expect(redact('hash 5f4dcc3b5aa765d61d8327deb882cf99 found')).toBe('hash [REDACTED] found');
+    expect(redact('jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcDEF123_-x end')).toBe('jwt [REDACTED] end');
+    expect(redact('k=QWxhZGRpbjpvcGVuIHNlc2FtZVF1aWNrQnJvd25Gb3hKdW1wcw1234')).toContain('[REDACTED]');
+    expect(redact('-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----')).toBe('[REDACTED]');
+  });
+  it('leaves benign text untouched', () => {
+    for (const s of ['Selected USB Google Pixel (18d1:4ee0)', 'Connected at 115200 baud', 'Flashed firmware.bin 1048576 bytes', 'Erase the whole chip?', 'reading /dev/ttyUSB0 token count 5']) {
+      expect(redact(s)).toBe(s);
+    }
+  });
+  it('masks MACs and SSIDs only when asked', () => {
+    expect(redact('AP aa:bb:cc:dd:ee:ff SSID=HomeNet')).toBe('AP aa:bb:cc:dd:ee:ff SSID=HomeNet');
+    expect(redact('AP aa:bb:cc:dd:ee:ff SSID=HomeNet', { network: true })).toBe('AP XX:XX:XX:XX:XX:XX SSID=[REDACTED]');
+  });
+  it('exports are redacted by default and raw only on explicit opt-out', () => {
+    record('Hashcat', 'info', 'note password=hunter2');
+    const md = exportMarkdown(getEntries());
+    expect(md).not.toContain('hunter2');
+    expect(md).toContain('Redaction:** on');
+    expect(JSON.parse(exportJson(getEntries())).entries[0].text).toBe('note password=[REDACTED]');
+    expect(exportMarkdown(getEntries(), { redact: false })).toContain('hunter2');
+    expect(exportJson(getEntries(), {}, false)).toContain('hunter2');
+  });
+  it('redacts strings inside entry data without mutating the live log', () => {
+    record('x', 'device', 'd', { serial: 'abcdef0123456789abcdef0123456789abcd' });
+    expect(redactEntries(getEntries())[0].data.serial).toBe('[REDACTED]');
+    expect(getEntries()[0].data.serial).toMatch(/^abcdef/);
+  });
+  it('adds an environment header', () => {
+    const env = describeEnvironment({ userAgent: 'UA/1', serial: {}, usb: {} }, '1.2.3');
+    expect(env).toEqual({ appVersion: '1.2.3', userAgent: 'UA/1', webSerial: true, webUsb: true, webHid: false });
+    record('x', 'info', 'hi');
+    const md = exportMarkdown(getEntries(), { environment: env });
+    expect(md).toContain('**App version:** 1.2.3');
+    expect(md).toContain('Web Serial / WebUSB / WebHID:** yes / yes / no');
+  });
+});

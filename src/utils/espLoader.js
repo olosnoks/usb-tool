@@ -6,13 +6,16 @@
  * write is an error instead of a "success" log line. Steps:
  *   reset into the bootloader (classic DTR/RTS or USB-Serial/JTAG sequence)
  *   -> SYNC until the ROM answers -> read the chip-detect register
- *   -> SPI_ATTACH + SPI_SET_PARAMS (ESP32 family) -> per image:
- *   FLASH_BEGIN (erase, timeout scaled by size) -> FLASH_DATA blocks
+ *   -> optional CHANGE_BAUDRATE (port reopened, re-sync; falls back to 115200)
+ *   -> SPI_ATTACH, JEDEC flash-size detection, SPI_SET_PARAMS (ESP32 family)
+ *   -> per image: FLASH_BEGIN (erase, timeout scaled by size) -> FLASH_DATA
+ *   blocks, or FLASH_DEFL_BEGIN/DATA/END with a zlib stream (ESP32 family)
  *   -> SPI_FLASH_MD5 verify (not on ESP8266: its ROM has no MD5 command)
  *   -> hard reset into the app.
  * Protocol reference: esptool.py / esptool-js (Espressif, Apache-2.0).
  */
 import CryptoJS from 'crypto-js';
+import { deflate } from 'pako';
 
 export const ESP_CMD = {
   FLASH_BEGIN: 0x02,
@@ -114,6 +117,28 @@ const CHIP_MAGIC = {
 };
 export const CHIP_DETECT_MAGIC_REG = 0x40001000;
 
+// SPI0/1 host registers used to read the JEDEC id (esptool run_spiflash_command).
+// ESP8266 is intentionally absent: its ROM stays at 115200 with no detection.
+const SPI_LAYOUT_NEW = { usr: 0x18, usr2: 0x20, mosiDlen: 0x24, misoDlen: 0x28, w0: 0x58 };
+export const SPI_REGS = {
+  'ESP32': { base: 0x3ff42000, usr: 0x1c, usr2: 0x24, mosiDlen: 0x28, misoDlen: 0x2c, w0: 0x80 },
+  'ESP32-S2': { base: 0x3f402000, ...SPI_LAYOUT_NEW },
+  'ESP32-S3': { base: 0x60002000, ...SPI_LAYOUT_NEW },
+  'ESP32-C3': { base: 0x60002000, ...SPI_LAYOUT_NEW },
+  'ESP32-C2': { base: 0x60002000, ...SPI_LAYOUT_NEW },
+  'ESP32-C6': { base: 0x60003000, ...SPI_LAYOUT_NEW },
+  'ESP32-H2': { base: 0x60003000, ...SPI_LAYOUT_NEW }
+};
+const SPI_CMD_USR = 1 << 18;
+const SPI_USR_COMMAND = 1 << 31;
+const SPI_USR_MISO = 1 << 28;
+
+/** JEDEC capacity byte -> flash size in bytes (0x12 = 256 KB ... 0x1c = 256 MB), else null. */
+export function flashSizeFromJedec(jedecId) {
+  const cap = (jedecId >>> 16) & 0xff;
+  return cap >= 0x12 && cap <= 0x1c ? 2 ** cap : null;
+}
+
 const ROM_ERRORS = {
   0x05: 'invalid message', 0x06: 'failed to act on message', 0x07: 'invalid CRC',
   0x08: 'flash write error', 0x09: 'flash read error', 0x0a: 'flash read length error', 0x0b: 'deflate error'
@@ -145,8 +170,18 @@ export class FlashAbortedError extends Error {
 }
 
 export class EspBootloaderClient {
-  constructor(port, logger) {
+  /**
+   * @param {object} port  Web Serial port
+   * @param {function} logger
+   * @param {object} [opts]
+   * @param {boolean} [opts.compress=false] use FLASH_DEFL_* (zlib) writes on the ESP32 family
+   */
+  constructor(port, logger, opts = {}) {
     this.port = port;
+    this.compress = !!opts.compress;
+    this.baud = 115200;           // current host-side rate
+    this.flashSize = null;        // bytes, from the JEDEC id; null = unknown
+    this._resetTimings = [100, 50];
     this.logger = logger || console.log;
     this.reader = null;
     this.writer = null;
@@ -299,15 +334,96 @@ export class EspBootloaderClient {
     return this.chip;
   }
 
+  async writeReg(address, value, mask = 0xffffffff, delayUs = 0) {
+    await this.command(ESP_CMD.WRITE_REG, u32(address, value, mask, delayUs));
+  }
+
+  /** Read the 24-bit JEDEC id (0x9F) through the SPI host registers; null if this chip isn't mapped or reads nothing. */
+  async readFlashJedec() {
+    const r = SPI_REGS[this.chip];
+    if (!r) return null;
+    const oldUsr = await this.readReg(r.base + r.usr);
+    const oldUsr2 = await this.readReg(r.base + r.usr2);
+    await this.writeReg(r.base + r.misoDlen, 24 - 1);
+    await this.writeReg(r.base + r.usr, (SPI_USR_COMMAND | SPI_USR_MISO) >>> 0);
+    await this.writeReg(r.base + r.usr2, ((7 << 28) | 0x9f) >>> 0);
+    await this.writeReg(r.base + r.w0, 0);
+    await this.writeReg(r.base, SPI_CMD_USR);
+    for (let i = 0; i < 10; i++) {
+      if (((await this.readReg(r.base)) & SPI_CMD_USR) === 0) break;
+      if (i === 9) throw new Error('SPI flash id read did not finish');
+    }
+    const id = (await this.readReg(r.base + r.w0)) & 0xffffff;
+    await this.writeReg(r.base + r.usr, oldUsr);
+    await this.writeReg(r.base + r.usr2, oldUsr2);
+    return id === 0 || id === 0xffffff ? null : id;
+  }
+
   async _prepareFlash() {
     if (this.isEsp8266) return;
     await this.command(ESP_CMD.SPI_ATTACH, u32(0, 0));
-    // id, total size (16 MB: let the ROM accept any offset), block 64 KB, sector 4 KB, page 256, status mask
-    await this.command(ESP_CMD.SPI_SET_PARAMS, u32(0, 16 * 1024 * 1024, 0x10000, FLASH_SECTOR, 0x100, 0xffff));
+    this.flashSize = null;
+    try {
+      const jedec = await this.readFlashJedec();
+      this.flashSize = jedec == null ? null : flashSizeFromJedec(jedec);
+      if (this.flashSize) this.log(`Flash: JEDEC 0x${jedec.toString(16).padStart(6, '0')}, ${this.flashSize / 1048576} MB.`);
+      else this.log('Flash size could not be detected; images are not range-checked against the flash.');
+    } catch (e) {
+      this.log(`Flash size detection failed (${e.message}); images are not range-checked against the flash.`);
+    }
+    // id, total size (detected, else 16 MB so the ROM accepts any offset), block 64 KB, sector 4 KB, page 256, status mask
+    await this.command(ESP_CMD.SPI_SET_PARAMS, u32(0, this.flashSize || 16 * 1024 * 1024, 0x10000, FLASH_SECTOR, 0x100, 0xffff));
+  }
+
+  // ---- baud rate ----
+  /** Close and reopen the port at `baudRate` (streams are released first). */
+  async _reopen(baudRate) {
+    await this.release();
+    try { await this.port.close(); } catch (e) { /* already closed */ }
+    await this.port.open({ baudRate, bufferSize: 16384 });
+    this.rx = []; this.frames = [];
+    this.baud = baudRate;
+  }
+
+  /**
+   * CHANGE_BAUDRATE, reopen the port at the new rate and re-sync. Throws if the
+   * chip stops answering (the caller falls back with negotiateBaud()).
+   */
+  async changeBaud(baudRate) {
+    await this.command(ESP_CMD.CHANGE_BAUDRATE, u32(baudRate, 0));
+    await sleep(50);
+    await this._reopen(baudRate);
+    await this.sync(5);
+  }
+
+  /**
+   * Try to run at `baudRate`. ESP8266 and USB-Serial/JTAG ports stay at 115200.
+   * On any failure the port goes back to 115200, the chip is reset into the ROM
+   * again and the session continues there. Returns the rate in use.
+   */
+  async negotiateBaud(baudRate) {
+    if (!baudRate || baudRate <= 115200 || this.isEsp8266 || this._isUsbJtag) return this.baud;
+    try {
+      this.log(`Switching to ${baudRate} baud...`);
+      await this.changeBaud(baudRate);
+      this.log(`Running at ${baudRate} baud.`);
+    } catch (e) {
+      this.log(`${baudRate} baud failed (${e.message}); falling back to 115200.`);
+      await this._reopen(115200);
+      await this.connect(this._resetTimings[0], this._resetTimings[1]);
+    }
+    return this.baud;
+  }
+
+  /** Put the port back at the rate the Terminal expects (call after flashing, before release()). */
+  async restoreBaud(baudRate) {
+    if (!baudRate || this.baud === baudRate) return;
+    await this._reopen(baudRate);
   }
 
   /** Reset into the ROM, sync, identify the chip and attach SPI flash. */
   async connect(resetDurationMs, bootHoldDurationMs, syncRetries = 8) {
+    if (resetDurationMs != null) this._resetTimings = [resetDurationMs, bootHoldDurationMs];
     await this.hardwareResetToBootloader(resetDurationMs, bootHoldDurationMs);
     await this.sync(syncRetries);
     await this.detectChip();
@@ -320,6 +436,13 @@ export class EspBootloaderClient {
     if (!this.chip) await this.detectChip();
     await this._prepareFlash();
     this._prepared = true;
+  }
+
+  /** Reject an image that would end past the detected flash. Runs before any erase. */
+  _checkFits(offset, length) {
+    if (this.flashSize && offset + length > this.flashSize) {
+      throw new Error(`Image at 0x${offset.toString(16)} (${length} bytes) ends at 0x${(offset + length).toString(16)}, past the detected ${this.flashSize / 1048576} MB flash. Nothing was erased.`);
+    }
   }
 
   /**
@@ -338,26 +461,64 @@ export class EspBootloaderClient {
     const pad4 = (4 - (binaryData.length % 4)) % 4;
     const image = new Uint8Array(binaryData.length + pad4);
     image.set(binaryData); image.fill(0xff, binaryData.length);
-    const blocks = Math.ceil(image.length / bs);
-    const eraseSize = this.isEsp8266 ? esp8266EraseSize(flashOffset, image.length) : image.length;
+    this._checkFits(flashOffset, image.length);
     const mb = image.length / (1024 * 1024);
+    const wantDeflate = this.compress && !this.isEsp8266;
+    const compressed = wantDeflate ? deflate(image, { level: 9 }) : null;
+    // Incompressible data would only add overhead: use the plain path.
+    const useDeflate = !!compressed && compressed.length < image.length;
+    if (wantDeflate && !useDeflate) this.log('Image does not compress; writing it uncompressed.');
+    this.lastWrite = { compressed: useDeflate, bytesSent: 0 };
 
-    this.log(`Erasing ${image.length} bytes at 0x${flashOffset.toString(16)}...`);
-    const begin = this.isEsp8266 || this.chip === 'ESP32'
-      ? u32(eraseSize, blocks, bs, flashOffset)
-      : u32(eraseSize, blocks, bs, flashOffset, 0);   // newer ROMs take an "encrypted" word
-    await this.command(ESP_CMD.FLASH_BEGIN, begin, 0, Math.max(3000, ERASE_MS_PER_MB * Math.max(mb, 0.1)));
+    if (useDeflate) {
+      const blocks = Math.ceil(compressed.length / bs);
+      this.log(`Erasing ${image.length} bytes at 0x${flashOffset.toString(16)} (compressed ${image.length} -> ${compressed.length} bytes)...`);
+      const eraseBlocks = Math.ceil(image.length / bs);
+      const writeSize = eraseBlocks * bs;
+      const begin = this.chip === 'ESP32'
+        ? u32(writeSize, blocks, bs, flashOffset)
+        : u32(writeSize, blocks, bs, flashOffset, 0);
+      await this.command(ESP_CMD.FLASH_DEFL_BEGIN, begin, 0, Math.max(3000, ERASE_MS_PER_MB * Math.max(writeSize / (1024 * 1024), 0.1)));
+      for (let seq = 0; seq < blocks; seq++) {
+        if (signal?.aborted) throw new FlashAbortedError(`Flash aborted by user after ${seq} of ${blocks} blocks.`);
+        const block = compressed.subarray(seq * bs, Math.min((seq + 1) * bs, compressed.length));   // last block is not padded
+        const payload = new Uint8Array(16 + block.length);
+        payload.set(u32(block.length, seq, 0, 0));
+        payload.set(block, 16);
+        await this.command(ESP_CMD.FLASH_DEFL_DATA, payload, espChecksum(block), 5000);
+        this.lastWrite.bytesSent += block.length;
+        // Progress is reported in uncompressed bytes so the bar matches the image size.
+        const frac = (seq + 1) / blocks;
+        const written = Math.min(Math.round(frac * binaryData.length), binaryData.length);
+        if (onProgress) onProgress(Math.min(100, Number((frac * 100).toFixed(1))), written, binaryData.length, seq + 1, blocks);
+      }
+      try {
+        await this.command(ESP_CMD.FLASH_DEFL_END, u32(1), 0, 5000);   // 1 = stay in the loader
+      } catch (e) {
+        this.log(`FLASH_DEFL_END not acknowledged (${e.message}); relying on the MD5 check.`);
+      }
+    } else {
+      const blocks = Math.ceil(image.length / bs);
+      const eraseSize = this.isEsp8266 ? esp8266EraseSize(flashOffset, image.length) : image.length;
 
-    for (let seq = 0; seq < blocks; seq++) {
-      if (signal?.aborted) throw new FlashAbortedError(`Flash aborted by user after ${seq} of ${blocks} blocks.`);
-      const block = new Uint8Array(bs).fill(0xff);
-      block.set(image.subarray(seq * bs, Math.min((seq + 1) * bs, image.length)));
-      const payload = new Uint8Array(16 + bs);
-      payload.set(u32(bs, seq, 0, 0));
-      payload.set(block, 16);
-      await this.command(ESP_CMD.FLASH_DATA, payload, espChecksum(block), 5000);
-      const written = Math.min((seq + 1) * bs, binaryData.length);
-      if (onProgress) onProgress(Math.min(100, Number((((seq + 1) / blocks) * 100).toFixed(1))), written, binaryData.length, seq + 1, blocks);
+      this.log(`Erasing ${image.length} bytes at 0x${flashOffset.toString(16)}...`);
+      const begin = this.isEsp8266 || this.chip === 'ESP32'
+        ? u32(eraseSize, blocks, bs, flashOffset)
+        : u32(eraseSize, blocks, bs, flashOffset, 0);   // newer ROMs take an "encrypted" word
+      await this.command(ESP_CMD.FLASH_BEGIN, begin, 0, Math.max(3000, ERASE_MS_PER_MB * Math.max(mb, 0.1)));
+
+      for (let seq = 0; seq < blocks; seq++) {
+        if (signal?.aborted) throw new FlashAbortedError(`Flash aborted by user after ${seq} of ${blocks} blocks.`);
+        const block = new Uint8Array(bs).fill(0xff);
+        block.set(image.subarray(seq * bs, Math.min((seq + 1) * bs, image.length)));
+        const payload = new Uint8Array(16 + bs);
+        payload.set(u32(bs, seq, 0, 0));
+        payload.set(block, 16);
+        await this.command(ESP_CMD.FLASH_DATA, payload, espChecksum(block), 5000);
+        this.lastWrite.bytesSent += bs;
+        const written = Math.min((seq + 1) * bs, binaryData.length);
+        if (onProgress) onProgress(Math.min(100, Number((((seq + 1) / blocks) * 100).toFixed(1))), written, binaryData.length, seq + 1, blocks);
+      }
     }
 
     if (signal?.aborted) throw new FlashAbortedError();
@@ -378,6 +539,8 @@ export class EspBootloaderClient {
 
   async flashMultiplePartitions(partitions, blockSize = ROM_BLOCK_SIZE, onProgress, signal) {
     if (!partitions || partitions.length === 0) throw new Error('No partitions specified for flashing.');
+    await this._ensurePrepared();
+    for (const p of partitions) this._checkFits(p.offset, p.data.length + ((4 - (p.data.length % 4)) % 4));
     const totalAllBytes = partitions.reduce((sum, p) => sum + p.data.length, 0);
     let bytesWrittenPrior = 0;
     for (let i = 0; i < partitions.length; i++) {

@@ -70,9 +70,14 @@ project in each tool's article.
 - **WarHog web flasher** — the Warhog & Piglet suite's board carousel, flashing, device
   screens, pig sprites and Piglet toolkit/monitor are ports of the web flasher in
   [olosnoks/warhog](https://github.com/olosnoks/warhog) (same author as this project).
-- **aircrack-js** (georg95), a browser port of aircrack-ng, provides the optional SIMD
-  `public/wasm/aircrack.wasm` accelerator; the aircrack-ng project is GPL-2.0.
-  See each upstream repository for its license text.
+- **usb-rea** (Emir Mrkaljević, MIT) — ported to `src/utils/usbrea/`; its license text is in
+  `src/utils/usbrea/LICENSE`.
+
+The build writes the license text of every bundled npm package to
+`dist/THIRD_PARTY_NOTICES.txt` (`scripts/build-notices.mjs`).
+
+The `aircrack-js` checkout (georg95) is not shipped: it has no license, so its
+`pbkdf2_eapol.wasm` was removed from `public/wasm/`. The WPA PMKID cracker uses Web Crypto only.
 
 ### Modeled on
 
@@ -126,6 +131,8 @@ Wireshark dissector conventions; ChibiOS/RT (PortaPack shell); DuckyScript
 - **Google Public DNS** DNS-over-HTTPS endpoint (DNS Toolkit).
 - **crt.sh** (Sectigo) Certificate Transparency search (crt.sh Subdomain Finder, Certificate Inspector).
 - **Shodan**, **urlscan.io** and **HackerTarget** APIs (OSINT API Clients; bring your own key).
+- **Passkey authenticator AAGUID list** (FIDO2 tool's authenticator names) — github.com/passkeydeveloper/passkey-authenticator-aaguids. The repository publishes no license, so the list is not bundled; the browser fetches `aaguid.json` from GitHub on demand when you open the FIDO2 tool.
+- **usb.ids** (USB vendor/product/class names; Chip Intelligence, Descriptor Explorer) — Stephen J. Gowdy & contributors, linux-usb.org — dual-licensed BSD-3-Clause / GPL-2.0-or-later, used here under BSD-3-Clause; upstream header kept in `src/data/usb-ids.json`, regenerate with `scripts/build-usb-ids.mjs`.
 - **OpenDeviceDB** (optional online lookup in USB Protocol RE).
 
 ---

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { UDEV_SETUP_COMMAND, UDEV_RULES_PATH, DIALOUT_COMMAND } from '../../data/udevRules.js';
 import { 
   HelpCircle, 
   Terminal, 
@@ -100,6 +101,7 @@ export default function HelpTroubleshootingTab() {
         <div 
           onClick={() => toggleSection('linux')}
           role="button"
+          aria-expanded={openSections.linux}
           tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSection('linux'); }}
           className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-900/50"
@@ -135,7 +137,7 @@ export default function HelpTroubleshootingTab() {
         {openSections.linux && (
           <div className="p-4 border-t border-slate-900 bg-[#020510] space-y-3">
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              On Linux (Ubuntu, Debian, Arch, Fedora), non-root users are restricted from accessing <code className="text-purple-300 bg-slate-900 px-1 py-0.5 rounded">/dev/ttyUSB*</code> and <code className="text-purple-300 bg-slate-900 px-1 py-0.5 rounded">/dev/ttyACM*</code> nodes by default. Run either of these commands in your terminal:
+              On Linux (Ubuntu, Debian, Arch, Fedora), non-root users are restricted from accessing <code className="text-purple-300 bg-slate-900 px-1 py-0.5 rounded">/dev/ttyUSB*</code> and <code className="text-purple-300 bg-slate-900 px-1 py-0.5 rounded">/dev/ttyACM*</code> nodes by default. Do either of these (the udev rule below is per-vendor and never makes ports world-writable):
             </p>
 
             <div className="grid grid-cols-1 @md:grid-cols-2 gap-4 pt-1">
@@ -147,14 +149,14 @@ export default function HelpTroubleshootingTab() {
                     <span className="text-[10px] text-emerald-400 font-bold">Standard</span>
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">
-                    Adds your current user account to the system dialout group. Requires a one-time log out or reboot.
+                    Adds your user to the dialout group (Debian, Ubuntu, Fedora; use the uucp group on Arch). Requires a one-time log out and back in.
                   </p>
                 </div>
 
                 <div className="relative bg-slate-900 rounded-lg p-2.5 text-xs text-amber-300 font-mono select-all border border-slate-800 flex items-center justify-between">
-                  <code>sudo usermod -a -G dialout $USER</code>
+                  <code>{DIALOUT_COMMAND}</code>
                   <button
-                    onClick={() => copyToClipboard('sudo usermod -a -G dialout $USER', 'cmd-dialout')}
+                    onClick={() => copyToClipboard(DIALOUT_COMMAND, 'cmd-dialout')}
                     className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-cyan-300 shrink-0 ml-2"
                     title="Copy command"
                   >
@@ -163,32 +165,39 @@ export default function HelpTroubleshootingTab() {
                 </div>
               </div>
 
-              {/* Method B: udev rule */}
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between gap-2.5">
+              {/* Method B: udev rule. The displayed text and the copied text are the same string. */}
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between gap-2.5 @md:col-span-2">
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-200">Option 2: Universal udev Rule (0666)</span>
-                    <span className="text-[10px] text-cyan-400 font-bold">Immediate</span>
+                    <span className="text-xs font-bold text-slate-200">Option 2: Per-vendor udev rule (uaccess, 0660)</span>
+                    <span className="text-[10px] text-cyan-400 font-bold">No logout needed for the seated user</span>
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">
-                    Grants read/write permissions to any connected USB-UART bridge without requiring user logout.
+                    Writes <code>{UDEV_RULES_PATH}</code> with one rule per USB vendor, grants access with <code>TAG+="uaccess"</code> (and group <code>dialout</code>, mode 0660 for ssh sessions) and tells ModemManager to leave these ports alone. Replug the device afterwards.
                   </p>
                 </div>
 
-                <div className="relative bg-slate-900 rounded-lg p-2 text-[11px] text-cyan-300 font-mono select-all border border-slate-800 flex items-center justify-between">
-                  <code className="truncate mr-2">
-                    echo 'SUBSYSTEM=="tty", ATTRS&#123;idVendor&#125;=="*", MODE="0666"' | sudo tee /etc/udev/rules.d/99-serial.rules &amp;&amp; sudo udevadm control --reload-rules
-                  </code>
+                <div className="relative bg-slate-900 rounded-lg p-2.5 text-[11px] text-cyan-300 font-mono border border-slate-800">
                   <button
-                    onClick={() => copyToClipboard('echo \'SUBSYSTEM=="tty", ATTRS{idVendor}=="*", MODE="0666"\' | sudo tee /etc/udev/rules.d/99-serial.rules\nsudo udevadm control --reload-rules', 'cmd-udev')}
-                    className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-cyan-300 shrink-0"
+                    onClick={() => copyToClipboard(UDEV_SETUP_COMMAND, 'cmd-udev')}
+                    className="absolute top-1.5 right-1.5 p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-cyan-300"
                     title="Copy udev commands"
+                    aria-label="Copy udev commands"
                   >
                     {copiedKey === 'cmd-udev' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
+                  <pre data-testid="udev-command" className="whitespace-pre overflow-x-auto pr-8 select-all">{UDEV_SETUP_COMMAND}</pre>
                 </div>
               </div>
             </div>
+
+            <ul className="text-[10px] text-slate-400 leading-relaxed list-disc pl-4 space-y-1">
+              <li>Arch Linux: the serial group is <code>uucp</code>. Change <code>GROUP="dialout"</code> to <code>GROUP="uucp"</code> and run <code>sudo usermod -a -G uucp $USER</code>.</li>
+              <li>If a CH340 port vanishes right after plug-in on Ubuntu or Debian, <code>brltty</code> may be claiming it: <code>sudo apt remove brltty</code>.</li>
+              <li>ModemManager can grab a port and send AT commands to it. The rule above sets <code>ID_MM_DEVICE_IGNORE</code> for the listed vendors.</li>
+              <li>macOS has no udev: ports appear as <code>/dev/cu.usbserial-*</code> and <code>/dev/cu.usbmodem*</code>. Use the <code>cu.*</code> node, for example <code>cu -l /dev/cu.usbserial-0001 -s 115200</code>.</li>
+              <li>Web Serial works in Chromium-based browsers (Chrome, Edge, Opera) on https or localhost only. Firefox and Safari do not support it.</li>
+            </ul>
           </div>
         )}
       </div>
@@ -200,6 +209,7 @@ export default function HelpTroubleshootingTab() {
         <div 
           onClick={() => toggleSection('drivers')}
           role="button"
+          aria-expanded={openSections.drivers}
           tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSection('drivers'); }}
           className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-900/50"
@@ -279,6 +289,7 @@ export default function HelpTroubleshootingTab() {
         <div 
           onClick={() => toggleSection('troubleshooting')}
           role="button"
+          aria-expanded={openSections.troubleshooting}
           tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSection('troubleshooting'); }}
           className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-900/50"

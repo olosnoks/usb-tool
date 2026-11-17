@@ -3,7 +3,11 @@ import { Globe, Mail, Search, RefreshCw, ShieldCheck, ShieldAlert, Server, FileD
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
 import WordlistPicker from './common/WordlistPicker';
-import { parseSpf, parseDmarc, classifyTxt, DNSBL_ZONES, dnsblName, interpretDnsbl } from '../../utils/mailDns.js';
+import {
+  parseSpf, parseDmarc, classifyTxt, DNSBL_ZONES, dnsblName, interpretDnsbl, expandSpf,
+  parseMtaStsTxt, parseMtaStsPolicy, parseTlsRpt, parseBimi, COMMON_DKIM_SELECTORS, compareResolvers, dnssecVerdict,
+} from '../../utils/mailDns.js';
+import { doh, dohProblem, unquote, RESOLVERS } from '../../utils/dnsDoh.js';
 
 /**
  * DNS Toolkit — one domain lookup resolves every record type AND the email-auth
@@ -13,15 +17,22 @@ import { parseSpf, parseDmarc, classifyTxt, DNSBL_ZONES, dnsblName, interpretDns
  * a proxy can be set for networks that block it.
  */
 
-const RRTYPE = { 1: 'A', 2: 'NS', 5: 'CNAME', 6: 'SOA', 15: 'MX', 16: 'TXT', 28: 'AAAA', 257: 'CAA' };
 const LOOKUP_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'SOA', 'CAA', 'TXT'];
+const TYPE_CODE = { A: 1, NS: 2, CNAME: 5, SOA: 6, MX: 15, TXT: 16, AAAA: 28, CAA: 257 };
 
-async function doh(name, type) {
-  const resp = await proxiedFetch(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${type}`, { headers: { accept: 'application/dns-json' } });
-  const data = await resp.json();
-  return (data.Answer || []).map((a) => ({ ...a, typeName: RRTYPE[a.type] || a.type }));
+// All queries go through the proxy-aware fetch; a resolver can be named per call.
+const dq = (name, type, resolver = 'google') => doh(name, type, { resolver, fetchImpl: proxiedFetch });
+
+/** TXT strings for a name; throws on a resolver error (SERVFAIL/REFUSED), [] on NXDOMAIN/no data. */
+async function txtQuery(name, resolver) {
+  const r = await dq(name, 'TXT', resolver);
+  const problem = dohProblem(r);
+  if (problem) throw new Error(problem);
+  return r.answers.filter((a) => a.type === 16).map((a) => unquote(a.data));
 }
-const unquote = (s) => String(s).replace(/^"|"$/g, '').replace(/"\s+"/g, '');
+/** Like txtQuery but never throws: { strings, error }. */
+const txtSafe = (name) => txtQuery(name).then((strings) => ({ strings, error: null }), (e) => ({ strings: [], error: describeNetworkError(e) }));
+const first = (strings, re) => strings.find((t) => re.test(t));
 
 function Section({ icon: Icon, title, children, accent = 'text-cyan-400', id }) {
   return (
@@ -39,6 +50,7 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
   const scrolledRef = useRef(false);
   const [domain, setDomain] = useState('');
   const [dkimSelector, setDkimSelector] = useState('default');
+  const [probeDkim, setProbeDkim] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState(null);
@@ -62,39 +74,108 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
     setBusy(true); setError(''); setInfo(null);
     log(`DNS lookup for ${name}${isProxyEnabled() ? ' (via proxy)' : ''}…`);
     try {
-      const [a, aaaa, cname, mx, ns, soa, caa, txt] = await Promise.all(LOOKUP_TYPES.map((t) => doh(name, t)));
+      // One failing record type shows an error chip; the others still render.
+      const settled = await Promise.allSettled(LOOKUP_TYPES.map((t) => dq(name, t)));
+      const recs = {}; const recErrors = {}; let ad = false;
+      LOOKUP_TYPES.forEach((t, idx) => {
+        const s = settled[idx];
+        if (s.status === 'rejected') { recErrors[t] = describeNetworkError(s.reason); recs[t] = []; return; }
+        const problem = dohProblem(s.value);
+        if (problem) recErrors[t] = problem;
+        if (s.value.ad && (t === 'A' || t === 'SOA')) ad = true;
+        recs[t] = s.value.answers.filter((a) => a.type === TYPE_CODE[t]);
+      });
+      if (Object.keys(recErrors).length === LOOKUP_TYPES.length) {
+        setError(`Every record lookup failed: ${Object.values(recErrors)[0]}`);
+        setBusy(false);
+        return;
+      }
+      const { A: a, AAAA: aaaa, CNAME: cname, MX: mx, NS: ns, SOA: soa, CAA: caa, TXT: txt } = recs;
       const txtStrings = txt.map((r) => unquote(r.data));
-      const spfTxt = txtStrings.find((t) => /^v=spf1/i.test(t));
-      const dmarcAns = await doh(`_dmarc.${name}`, 'TXT');
-      const dmarcTxt = dmarcAns.map((r) => unquote(r.data)).find((t) => /^v=DMARC1/i.test(t));
-      const dkimAns = dkimSelector.trim() ? await doh(`${dkimSelector.trim()}._domainkey.${name}`, 'TXT') : [];
-      const dkimTxt = dkimAns.map((r) => unquote(r.data)).join('');
+
+      // SPF with the include:/redirect= chain expanded for a real lookup count.
+      const spfTxt = first(txtStrings, /^v=spf1/i);
+      const spfExp = recErrors.TXT ? null : await expandSpf(name, (d) => (d === name ? Promise.resolve(txtStrings) : txtQuery(d)));
+      const spf = parseSpf(spfTxt);
+      if (spf && spfExp) { spf.lookups = spfExp.lookups; spf.expansion = spfExp; }
+
+      const selectors = [...new Set([dkimSelector.trim(), ...(probeDkim ? COMMON_DKIM_SELECTORS : [])].filter(Boolean))];
+      const [dmarcR, mtaR, tlsR, bimiR, dsR, dnskeyR, ...dkimR] = await Promise.all([
+        txtSafe(`_dmarc.${name}`), txtSafe(`_mta-sts.${name}`), txtSafe(`_smtp._tls.${name}`), txtSafe(`default._bimi.${name}`),
+        dq(name, 'DS').catch((e) => ({ error: describeNetworkError(e) })), dq(name, 'DNSKEY').catch((e) => ({ error: describeNetworkError(e) })),
+        ...selectors.map((s) => txtSafe(`${s}._domainkey.${name}`).then((r) => ({ selector: s, ...r }))),
+      ]);
+      const dmarc = parseDmarc(first(dmarcR.strings, /^v=DMARC1/i));
+      const dkim = dkimR.filter((r) => r.strings.length).map((r) => ({ selector: r.selector, raw: r.strings.join('') }));
+      const dkimErrors = dkimR.filter((r) => r.error).map((r) => ({ selector: r.selector, error: r.error }));
+
+      const mtaTxt = parseMtaStsTxt(first(mtaR.strings, /^v=STSv1/i));
+      let mtaPolicy = null; let mtaPolicyNote = null;
+      if (mtaTxt) {
+        if (!isProxyEnabled()) mtaPolicyNote = 'needs proxy: the policy file at mta-sts.<domain> sends no CORS headers';
+        else {
+          try {
+            const pr = await proxiedFetch(`https://mta-sts.${name}/.well-known/mta-sts.txt`);
+            if (!pr.ok) throw new Error(`HTTP ${pr.status}`);
+            mtaPolicy = parseMtaStsPolicy(await pr.text());
+            if (!mtaPolicy) mtaPolicyNote = 'policy file is not valid MTA-STS';
+          } catch (e) { mtaPolicyNote = `policy file not fetched: ${describeNetworkError(e)}`; }
+        }
+      }
+
+      const dsRes = dsR.error ? null : dsR; const dkRes = dnskeyR.error ? null : dnskeyR;
+      const dnssec = dsRes || dkRes
+        ? { ...dnssecVerdict({ ad: ad || !!dsRes?.ad, hasDs: !!dsRes?.answers.some((x) => x.type === 43), hasDnskey: !!dkRes?.answers.some((x) => x.type === 48) }), ad: ad || !!dsRes?.ad }
+        : { state: 'error', text: `DNSSEC lookup failed: ${dsR.error || dnskeyR.error}`, ad: false };
+
+      // Same question to every resolver: disagreement can mean split-horizon, geo-DNS, or tampering.
+      const rnames = Object.keys(RESOLVERS);
+      const resolverChecks = {};
+      for (const t of ['A', 'NS']) {
+        const rs = await Promise.allSettled(rnames.map((r) => dq(name, t, r)));
+        resolverChecks[t] = compareResolvers(rs.map((s, idx) => {
+          const label = RESOLVERS[rnames[idx]].label;
+          if (s.status === 'rejected') return { resolver: label, ok: false, error: describeNetworkError(s.reason) };
+          const problem = dohProblem(s.value);
+          if (problem) return { resolver: label, ok: false, error: problem };
+          return { resolver: label, ok: true, values: s.value.answers.filter((x) => x.type === TYPE_CODE[t]).map((x) => x.data) };
+        }));
+      }
 
       const mxHosts = mx.map((r) => r.data.split(/\s+/)[1]?.replace(/\.$/, '')).filter(Boolean);
       const mxIps = [];
-      for (const host of mxHosts.slice(0, 5)) {
-        const ips = await doh(host, 'A');
-        ips.filter((i) => i.type === 1).forEach((i) => mxIps.push({ host, ip: i.data }));
-      }
-      const dnsbl = [];
-      for (const { host, ip } of mxIps) {
-        for (const zone of DNSBL_ZONES) {
-          const q = dnsblName(ip, zone);
-          if (!q) continue;
-          try {
-            const ans = await doh(q, 'A');
-            const hit = ans.find((x) => x.type === 1 && interpretDnsbl(x.data));
-            if (hit) dnsbl.push({ host, ip, zone, code: hit.data });
-          } catch { /* NXDOMAIN = not listed */ }
-        }
-      }
-      setInfo({
-        name, a, aaaa, cname, mx, ns, soa, caa, txtStrings,
-        spf: parseSpf(spfTxt), dmarc: parseDmarc(dmarcTxt),
-        dkim: dkimTxt ? { selector: dkimSelector.trim(), raw: dkimTxt } : null,
-        mxIps, dnsbl,
+      const mxRes = await Promise.allSettled(mxHosts.slice(0, 5).map((h) => dq(h, 'A')));
+      mxRes.forEach((s, idx) => {
+        if (s.status === 'fulfilled') s.value.answers.filter((i) => i.type === 1).forEach((i) => mxIps.push({ host: mxHosts[idx], ip: i.data }));
       });
-      log(`Lookup done: ${a.length} A, ${mx.length} MX, SPF ${spfTxt ? 'yes' : 'no'}, DMARC ${dmarcTxt ? 'yes' : 'no'}, DNSBL hits ${dnsbl.length}`);
+      const dnsbl = []; const dnsblInconclusive = []; let dnsblChecked = 0;
+      const jobs = [];
+      for (const { host, ip } of mxIps) for (const zone of DNSBL_ZONES) { const q = dnsblName(ip, zone); if (q) jobs.push({ host, ip, zone, q }); }
+      const dres = await Promise.allSettled(jobs.map((j) => dq(j.q, 'A')));
+      dres.forEach((s, idx) => {
+        const j = jobs[idx];
+        if (s.status === 'rejected') { dnsblInconclusive.push({ ...j, reason: describeNetworkError(s.reason) }); return; }
+        const problem = dohProblem(s.value);
+        if (problem) { dnsblInconclusive.push({ ...j, reason: problem }); return; }
+        dnsblChecked += 1;
+        for (const ans of s.value.answers.filter((x) => x.type === 1)) {
+          const v = interpretDnsbl(ans.data);
+          if (!v) continue;
+          if (v.inconclusive) dnsblInconclusive.push({ ...j, code: v.code, reason: v.reason });
+          else dnsbl.push({ ...j, code: v.code });
+        }
+      });
+
+      setInfo({
+        name, a, aaaa, cname, mx, ns, soa, caa, txtStrings, recErrors,
+        spf, dmarc, dmarcError: dmarcR.error, txtError: recErrors.TXT || null,
+        dkim, dkimErrors, dkimSelectors: selectors,
+        mtaSts: mtaTxt ? { ...mtaTxt, policy: mtaPolicy, policyNote: mtaPolicyNote } : null, mtaStsError: mtaR.error,
+        tlsRpt: parseTlsRpt(first(tlsR.strings, /^v=TLSRPTv1/i)), bimi: parseBimi(first(bimiR.strings, /^v=BIMI1/i)),
+        dnssec, resolverChecks,
+        mxIps, dnsbl, dnsblInconclusive, dnsblChecked,
+      });
+      log(`Lookup done: ${a.length} A, ${mx.length} MX, SPF ${spfTxt ? `yes (${spf?.lookups ?? '?'} lookups)` : 'no'}, DMARC ${dmarc ? 'yes' : 'no'}, DNSSEC ${dnssec.state}, DNSBL hits ${dnsbl.length}${dnsblInconclusive.length ? `, ${dnsblInconclusive.length} inconclusive` : ''}`);
     } catch (e) { setError(describeNetworkError(e)); }
     setBusy(false);
   };
@@ -123,8 +204,11 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
         const fqdn = `${sub}.${name}`;
         let line;
         try {
-          const ans = await doh(fqdn, 'A');
-          if (ans.length) {
+          const res = await dq(fqdn, 'A');
+          const ans = res.answers;
+          if (dohProblem(res)) {
+            line = `[!] ${fqdn} (${res.statusName})`;
+          } else if (ans.length) {
             const ips = ans.filter((a) => a.type === 1).map((a) => a.data);
             const data = (ips.length ? ips : ans.map((a) => a.data)).join(', ');
             hits.push({ fqdn, data });
@@ -160,13 +244,31 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
       i.txtStrings.forEach((t) => rows.push(`| TXT | ${i.name} | ${t.replace(/\|/g, '\\|')} | |`));
       L.push(rows.join('\n') || '| | | (none) | |', '');
 
+      const errTypes = Object.entries(i.recErrors || {});
+      if (errTypes.length) { L.push('**Record lookup errors:** ' + errTypes.map(([t, m]) => `${t} (${m})`).join(', '), ''); }
+
       L.push('## Email authentication', '');
-      L.push(`- **SPF:** ${i.spf ? `present — all = ${i.spf.all ? i.spf.all.qualifier + 'all (' + i.spf.all.meaning + ')' : 'none'}, ${i.spf.lookups} lookup(s)` : 'MISSING'}`);
+      L.push(`- **SPF:** ${i.spf ? `present — all = ${i.spf.all ? i.spf.all.qualifier + 'all (' + i.spf.all.meaning + ')' : 'none'}, ${i.spf.lookups} DNS lookup(s) after expanding include/redirect${i.spf.expansion?.overLimit ? ' — OVER the 10-lookup limit' : ''}` : (i.txtError ? `unknown (TXT lookup failed: ${i.txtError})` : 'MISSING')}`);
       if (i.spf) L.push(`  - \`${i.spf.raw}\``);
-      L.push(`- **DMARC:** ${i.dmarc ? `p=${i.dmarc.policy} (${i.dmarc.strength})${i.dmarc.pct !== 100 ? `, pct=${i.dmarc.pct}` : ''}` : 'MISSING'}`);
-      if (i.dmarc) L.push(`  - \`${i.dmarc.raw}\`${i.dmarc.rua ? `\n  - reports → ${i.dmarc.rua}` : ''}`);
-      L.push(`- **DKIM (${i.dkim?.selector || dkimSelector || '—'}):** ${i.dkim ? 'found' : 'not found for this selector'}`);
-      if (i.dkim) L.push(`  - \`${i.dkim.raw}\``);
+      (i.spf?.expansion?.errors || []).forEach((e) => L.push(`  - ERROR: ${e}`));
+      (i.spf?.expansion?.warnings || []).forEach((e) => L.push(`  - warning: ${e}`));
+      if (i.spf?.expansion?.voidLookups) L.push(`  - void lookups: ${i.spf.expansion.voidLookups}`);
+      L.push(`- **DMARC:** ${i.dmarc ? `p=${i.dmarc.policy} (${i.dmarc.strength})${i.dmarc.sp ? `, sp=${i.dmarc.sp}` : ''}, adkim=${i.dmarc.adkim}, aspf=${i.dmarc.aspf}${i.dmarc.pct !== 100 ? `, pct=${i.dmarc.pct}` : ''}` : (i.dmarcError ? `unknown (${i.dmarcError})` : 'MISSING')}`);
+      if (i.dmarc) { L.push(`  - \`${i.dmarc.raw}\``); if (i.dmarc.rua) L.push(`  - aggregate reports (rua) → ${i.dmarc.rua}`); if (i.dmarc.ruf) L.push(`  - forensic reports (ruf) → ${i.dmarc.ruf}`); }
+      L.push(`- **DKIM (${i.dkimSelectors.join(', ') || '—'}):** ${i.dkim.length ? i.dkim.map((d) => d.selector).join(', ') + ' found' : 'not found for the selector(s) tried'}`);
+      i.dkim.forEach((d) => L.push(`  - ${d.selector}: \`${d.raw}\``));
+      L.push(`- **MTA-STS:** ${i.mtaSts ? `TXT present (id=${i.mtaSts.id || '?'})${i.mtaSts.policy ? `, mode=${i.mtaSts.policy.mode}, max_age=${i.mtaSts.policy.maxAge}, mx=${i.mtaSts.policy.mx.join(' ')}` : `; ${i.mtaSts.policyNote}`}` : (i.mtaStsError ? `unknown (${i.mtaStsError})` : 'not published')}`);
+      L.push(`- **TLS-RPT:** ${i.tlsRpt ? `present — ${i.tlsRpt.rua || 'no rua'}` : 'not published'}`);
+      L.push(`- **BIMI:** ${i.bimi ? `present — logo ${i.bimi.logo || 'none'}${i.bimi.authority ? `, VMC ${i.bimi.authority}` : ''}` : 'not published'}`);
+      L.push('');
+
+      L.push('## DNSSEC and resolver agreement', '');
+      L.push(`- **DNSSEC:** ${i.dnssec.state} — ${i.dnssec.text}`);
+      for (const [t, c] of Object.entries(i.resolverChecks)) {
+        L.push(`- **${t} across resolvers:** ${c.comparable ? (c.agree ? 'all agree' : 'DISAGREE (may be geo-DNS/load-balancing, or tampering)') : 'not enough resolvers answered to compare'}`);
+        c.groups.forEach((g) => L.push(`  - ${g.resolvers.join(', ')}: ${g.values.join(', ') || '(empty)'}`));
+        c.failed.forEach((f) => L.push(`  - ${f.resolver}: error — ${f.error}`));
+      }
       L.push('');
 
       L.push('## Mail servers', '');
@@ -176,8 +278,11 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
 
       L.push('## DNSBL reputation', '');
       if (i.mxIps.length === 0) L.push('- No mail-server IPs resolved.');
-      else if (i.dnsbl.length === 0) L.push(`- Not listed on any checked DNSBL (${DNSBL_ZONES.join(', ')}).`);
-      else i.dnsbl.forEach((d) => L.push(`- ⚠ ${d.ip} (${d.host}) listed on ${d.zone} → ${d.code}`));
+      else {
+        if (i.dnsbl.length === 0) L.push(`- No listings found (${i.dnsblChecked} check(s) answered; zones: ${DNSBL_ZONES.join(', ')}).`);
+        i.dnsbl.forEach((d) => L.push(`- ⚠ ${d.ip} (${d.host}) listed on ${d.zone} → ${d.code}`));
+        i.dnsblInconclusive.forEach((d) => L.push(`- inconclusive (${d.reason}): ${d.ip} (${d.host}) on ${d.zone}${d.code ? ` → ${d.code}` : ''}`));
+      }
       L.push('');
     } else {
       L.push('_No lookup has been run._', '');
@@ -198,6 +303,30 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
     log('Exported DNS report (.md)');
   };
 
+  const exportJson = () => {
+    const name = info?.name || cleanDomain() || 'dns';
+    const strip = (rs) => (rs || []).map((r) => ({ name: r.name, type: r.typeName, ttl: r.TTL, data: r.data }));
+    const doc = {
+      generatedAt: new Date().toISOString(), tool: "Skon's USB Tool — DNS Toolkit", domain: name,
+      records: info ? {
+        A: strip(info.a), AAAA: strip(info.aaaa), CNAME: strip(info.cname), MX: strip(info.mx), NS: strip(info.ns), SOA: strip(info.soa), CAA: strip(info.caa), TXT: info.txtStrings, errors: info.recErrors,
+      } : null,
+      email: info ? {
+        spf: info.spf ? { raw: info.spf.raw, all: info.spf.all, lookups: info.spf.lookups, voidLookups: info.spf.expansion?.voidLookups ?? null, overLimit: !!info.spf.expansion?.overLimit, errors: info.spf.expansion?.errors || [], warnings: info.spf.expansion?.warnings || [] } : null,
+        dmarc: info.dmarc, dkim: info.dkim, dkimSelectorsTried: info.dkimSelectors,
+        mtaSts: info.mtaSts, tlsRpt: info.tlsRpt, bimi: info.bimi,
+      } : null,
+      dnssec: info?.dnssec || null,
+      resolverAgreement: info?.resolverChecks || null,
+      mailServers: info ? { hosts: info.mxIps, dnsbl: { listed: info.dnsbl, inconclusive: info.dnsblInconclusive, answeredChecks: info.dnsblChecked } } : null,
+      subdomains: { tried: progress.total, found },
+    };
+    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `dns-${name}-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+    log('Exported DNS report (.json)');
+  };
+
   const i = info;
   const spf = i?.spf; const dmarc = i?.dmarc;
   const canExport = !!info || found.length > 0;
@@ -216,11 +345,15 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
         <label className="flex items-center gap-1 text-xs text-slate-500">DKIM selector
           <input value={dkimSelector} onChange={(e) => setDkimSelector(e.target.value)} className="w-24 bg-slate-900 border border-slate-800 rounded px-2 py-1 font-mono ml-1" />
         </label>
+        <label className="flex items-center gap-1 text-xs text-slate-500"><input type="checkbox" checked={probeDkim} onChange={(e) => setProbeDkim(e.target.checked)} /> also try common selectors</label>
         <button onClick={lookup} disabled={busy} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
           {busy ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />} {busy ? 'Looking up…' : 'Look up'}
         </button>
         <button onClick={exportMd} disabled={!canExport} title={canExport ? 'Export everything for this domain to Markdown' : 'Run a lookup first'} className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-gray-200 rounded text-sm hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
           <FileDown size={14} /> Export (.md)
+        </button>
+        <button onClick={exportJson} disabled={!canExport} title={canExport ? 'Export everything for this domain to JSON' : 'Run a lookup first'} className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-gray-200 rounded text-sm hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
+          <FileDown size={14} /> Export (.json)
         </button>
       </div>
 
@@ -228,37 +361,75 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
 
       {i && (
         <>
+          {Object.keys(i.recErrors).length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-1.5 items-center text-[11px]">
+              <span className="text-slate-500">Lookup errors:</span>
+              {Object.entries(i.recErrors).map(([t, m]) => <span key={t} className="px-1.5 py-0.5 rounded bg-red-950/40 border border-red-900 text-red-300" title={m}>{t}: {m}</span>)}
+            </div>
+          )}
           <Section id="dns-email" icon={Mail} title="Email authentication" accent="text-emerald-400">
             <div className="mb-2">
-              <span className={spf ? 'text-emerald-300' : 'text-red-300'}>SPF: {spf ? 'present' : 'MISSING'}</span>
+              <span className={spf ? 'text-emerald-300' : 'text-red-300'}>SPF: {spf ? 'present' : (i.txtError ? 'unknown (TXT lookup failed)' : 'MISSING')}</span>
               {spf && (
                 <div className="pl-3 text-slate-400">
                   <div>all: <span className="text-gray-200">{spf.all ? `${spf.all.qualifier}all → ${spf.all.meaning}` : 'none'}</span>{spf.all?.qualifier === '+' && <span className="text-amber-400"> ⚠ +all permits any sender</span>}</div>
-                  <div>DNS lookups: <span className={spf.lookups > 10 ? 'text-amber-400' : 'text-gray-200'}>{spf.lookups}{spf.lookups > 10 ? ' ⚠ exceeds the 10-lookup limit' : ''}</span></div>
+                  <div>DNS lookups (includes expanded): <span className={spf.lookups > 10 ? 'text-red-400' : 'text-gray-200'}>{spf.lookups}/10</span>{spf.expansion?.voidLookups > 0 && <span className="text-amber-400"> · {spf.expansion.voidLookups} void</span>}</div>
+                  {(spf.expansion?.errors || []).map((e, idx) => <div key={`se${idx}`} className="text-red-400 break-all">✗ {e}</div>)}
+                  {(spf.expansion?.warnings || []).map((e, idx) => <div key={`sw${idx}`} className="text-amber-400 break-all">⚠ {e}</div>)}
                   <div className="break-all text-slate-500">{spf.raw}</div>
                 </div>
               )}
             </div>
             <div className="mb-2">
-              <span className={dmarc ? (dmarc.strength === 'weak' ? 'text-amber-300' : 'text-emerald-300') : 'text-red-300'}>DMARC: {dmarc ? `p=${dmarc.policy} (${dmarc.strength})` : 'MISSING'}</span>
+              <span className={dmarc ? (dmarc.strength === 'weak' ? 'text-amber-300' : 'text-emerald-300') : 'text-red-300'}>DMARC: {dmarc ? `p=${dmarc.policy} (${dmarc.strength})` : (i.dmarcError ? `unknown (${i.dmarcError})` : 'MISSING')}</span>
               {dmarc && (
                 <div className="pl-3 text-slate-400">
+                  <div>sp: <span className="text-gray-200">{dmarc.sp || '(inherits p)'}</span> · adkim: <span className="text-gray-200">{dmarc.adkim}</span> · aspf: <span className="text-gray-200">{dmarc.aspf}</span></div>
                   {dmarc.pct !== 100 && <div>pct: {dmarc.pct}%</div>}
-                  {dmarc.rua && <div>aggregate reports → <span className="text-gray-200 break-all">{dmarc.rua}</span></div>}
+                  {dmarc.rua && <div>aggregate reports (rua) → <span className="text-gray-200 break-all">{dmarc.rua}</span></div>}
+                  {dmarc.ruf && <div>forensic reports (ruf) → <span className="text-gray-200 break-all">{dmarc.ruf}</span></div>}
                   <div className="break-all text-slate-500">{dmarc.raw}</div>
                 </div>
               )}
             </div>
-            <div>
-              <span className={i.dkim ? 'text-emerald-300' : 'text-slate-400'}>DKIM ({dkimSelector || '—'}): {i.dkim ? 'found' : 'not found for this selector'}</span>
-              {i.dkim && <div className="pl-3 break-all text-slate-500">{i.dkim.raw}</div>}
+            <div className="mb-2">
+              <span className={i.dkim.length ? 'text-emerald-300' : 'text-slate-400'}>DKIM ({i.dkimSelectors.join(', ') || '—'}): {i.dkim.length ? `found for ${i.dkim.map((d) => d.selector).join(', ')}` : 'not found for the selector(s) tried'}</span>
+              {i.dkim.map((d) => <div key={d.selector} className="pl-3 break-all text-slate-500">{d.selector}: {d.raw}</div>)}
             </div>
+            <div className="mb-2">
+              <span className={i.mtaSts ? 'text-emerald-300' : 'text-slate-400'}>MTA-STS: {i.mtaSts ? `published (id ${i.mtaSts.id || '?'})` : (i.mtaStsError ? `unknown (${i.mtaStsError})` : 'not published')}</span>
+              {i.mtaSts?.policy && <div className="pl-3 text-slate-400">mode <span className={i.mtaSts.policy.mode === 'enforce' ? 'text-emerald-300' : 'text-amber-300'}>{i.mtaSts.policy.mode}</span> · max_age {i.mtaSts.policy.maxAge} · mx {i.mtaSts.policy.mx.join(', ')}</div>}
+              {i.mtaSts && !i.mtaSts.policy && <div className="pl-3 text-slate-500">{i.mtaSts.policyNote}</div>}
+            </div>
+            <div className="mb-2">
+              <span className={i.tlsRpt ? 'text-emerald-300' : 'text-slate-400'}>TLS-RPT: {i.tlsRpt ? 'published' : 'not published'}</span>
+              {i.tlsRpt?.rua && <div className="pl-3 text-slate-400 break-all">reports → {i.tlsRpt.rua}</div>}
+            </div>
+            <div>
+              <span className={i.bimi ? 'text-emerald-300' : 'text-slate-400'}>BIMI: {i.bimi ? 'published' : 'not published'}</span>
+              {i.bimi && <div className="pl-3 text-slate-400 break-all">logo {i.bimi.logo || 'none'}{i.bimi.authority ? ` · VMC ${i.bimi.authority}` : ''}</div>}
+            </div>
+          </Section>
+
+          <Section icon={ShieldCheck} title="DNSSEC and resolver agreement" accent="text-sky-400">
+            <div className="mb-1">
+              <span className={{ validated: 'text-emerald-300', unverified: 'text-amber-300', incomplete: 'text-amber-300', unsigned: 'text-slate-400', error: 'text-red-300' }[i.dnssec.state]}>DNSSEC: {i.dnssec.state}</span>
+              <span className="text-slate-500"> — {i.dnssec.text}</span>
+            </div>
+            {Object.entries(i.resolverChecks).map(([t, c]) => (
+              <div key={t} className="mb-1">
+                <span className={!c.comparable ? 'text-slate-400' : c.agree ? 'text-emerald-300' : 'text-amber-300'}>{t} across resolvers: {!c.comparable ? 'not enough answers to compare' : c.agree ? 'all agree' : 'differ (geo-DNS or load balancing is common; tampering is possible)'}</span>
+                {c.groups.map((g, idx) => <div key={idx} className="pl-3 text-slate-400 break-all">{g.resolvers.join(', ')}: {g.values.join(', ') || '(empty)'}</div>)}
+                {c.failed.map((f) => <div key={f.resolver} className="pl-3 text-red-400">{f.resolver}: {f.error}</div>)}
+              </div>
+            ))}
           </Section>
 
           <Section icon={ShieldCheck} title={`DNSBL reputation (${i.mxIps.length} mail IP${i.mxIps.length === 1 ? '' : 's'})`} accent={i.dnsbl.length ? 'text-red-400' : 'text-emerald-400'}>
             {i.mxIps.length === 0 && <div className="text-slate-500">No mail-server IPs resolved.</div>}
-            {i.mxIps.length > 0 && i.dnsbl.length === 0 && <div className="text-emerald-300 flex items-center gap-1"><ShieldCheck size={13} /> Not listed on any checked DNSBL ({DNSBL_ZONES.join(', ')}).</div>}
+            {i.mxIps.length > 0 && i.dnsbl.length === 0 && i.dnsblChecked > 0 && <div className="text-emerald-300 flex items-center gap-1"><ShieldCheck size={13} /> No listings among {i.dnsblChecked} answered check(s) ({DNSBL_ZONES.join(', ')}).</div>}
             {i.dnsbl.map((d, idx) => (<div key={idx} className="text-red-300 flex items-center gap-1"><ShieldAlert size={13} /> {d.ip} ({d.host}) listed on {d.zone} → {d.code}</div>))}
+            {i.dnsblInconclusive.map((d, idx) => (<div key={`inc${idx}`} className="text-amber-300 flex items-center gap-1"><ShieldAlert size={13} /> inconclusive ({d.reason}): {d.ip} ({d.host}) on {d.zone}{d.code ? ` → ${d.code}` : ''}</div>))}
           </Section>
 
           <div id="dns-records" className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(16rem,1fr))]">

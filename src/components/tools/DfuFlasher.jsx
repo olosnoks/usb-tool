@@ -11,7 +11,8 @@ import {
   Power,
   Info,
   Loader2,
-  Trash2
+  Trash2,
+  Upload
 } from 'lucide-react';
 import {
   DfuDevice,
@@ -19,6 +20,7 @@ import {
   parseDfuSuffix,
   parseDfuSeImage
 } from '../../utils/dfuDriver';
+import { parseIntelHex } from '../../utils/firmwareParser';
 import StatusBadge from '../common/StatusBadge';
 
 import { confirmAction, record } from '../../utils/sessionLog';
@@ -35,6 +37,13 @@ export default function DfuFlasher() {
   const [firmware, setFirmware] = useState(null); // { name, payload, suffix, dfuse }
   const [targetAddress, setTargetAddress] = useState('0x08000000');
   const [erasePageSize, setErasePageSize] = useState('2048');
+  const [altIndex, setAltIndex] = useState(0); // index into ifaceInfo.alternates
+  const [massErase, setMassErase] = useState(false);
+  const [verifyAfter, setVerifyAfter] = useState(true);
+  const [leaveAfter, setLeaveAfter] = useState(true);
+  const [readLength, setReadLength] = useState('65536');
+  const [readAddress, setReadAddress] = useState('0x08000000'); // separate from the flash target address
+  const [isReading, setIsReading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isFlashing, setIsFlashing] = useState(false);
   const [log, setLog] = useState([]);
@@ -80,6 +89,10 @@ export default function DfuFlasher() {
       }
 
       await dev.claimInterface(info.interfaceNumber);
+      const alts = (info.alternates || []).filter((a) => a.interfaceNumber === info.interfaceNumber);
+      const firstAlt = Math.max(0, alts.findIndex((a) => a.alternate === info.alternate));
+      info.alternates = alts;
+      setAltIndex(firstAlt);
       if (info.alternate) {
         try {
           await dev.selectAlternateInterface(info.interfaceNumber, info.alternate);
@@ -90,15 +103,30 @@ export default function DfuFlasher() {
 
       const driver = new DfuDevice(dev, info.interfaceNumber, {
         transferSize: info.transferSize,
+        dfuse: Boolean(alts[firstAlt]?.region),
         log: (m) => addLog(m, 'info')
       });
+      if (alts[firstAlt]?.region) {
+        setTargetAddress('0x' + alts[firstAlt].region.start.toString(16));
+        setReadAddress('0x' + alts[firstAlt].region.start.toString(16));
+        setReadLength(String(alts[firstAlt].region.end - alts[firstAlt].region.start));
+      }
 
       setDevice(dev);
       setDfu(driver);
       setIfaceInfo(info);
-      setStatus('online');
       const vid = dev.vendorId?.toString(16).padStart(4, '0');
       const pid = dev.productId?.toString(16).padStart(4, '0');
+      if (info.runtimeOnly) {
+        setStatus('warning');
+        setStatusMsg(
+          `This device (${vid}:${pid}) is in runtime mode (DFU protocol 1) and cannot be flashed. ` +
+            'Use "Detach to DFU mode" below, or reboot it into its bootloader (boot button / BOOT0), then select it again.'
+        );
+        addLog('Device exposes only a DFU runtime interface (protocol 1); download is not possible.', 'err');
+        return;
+      }
+      setStatus('online');
       setStatusMsg(
         `DFU device ${vid}:${pid} • iface ${info.interfaceNumber} • transferSize ${info.transferSize}B`
       );
@@ -125,15 +153,107 @@ export default function DfuFlasher() {
     setDevice(null);
     setDfu(null);
     setIfaceInfo(null);
+    setAltIndex(0);
     setStatus('offline');
     setStatusMsg('No DFU device connected');
     setProgress(0);
+  };
+
+  const selectedAlt = ifaceInfo?.alternates?.[altIndex] || null;
+  const region = selectedAlt?.region || null;
+
+  const handleAltChange = async (e) => {
+    const idx = Number(e.target.value);
+    const alt = ifaceInfo?.alternates?.[idx];
+    if (!alt || !device) return;
+    try {
+      await device.selectAlternateInterface(alt.interfaceNumber, alt.alternate);
+      setAltIndex(idx);
+      if (dfu) dfu.dfuse = Boolean(alt.region);
+      if (alt.region) {
+        setTargetAddress('0x' + alt.region.start.toString(16));
+        setReadAddress('0x' + alt.region.start.toString(16));
+        setReadLength(String(alt.region.end - alt.region.start));
+      }
+      addLog(`Selected alt ${alt.alternate}: ${alt.name || '(unnamed)'}`, 'info');
+      if (alt.layoutError) addLog(`Layout not parsed: ${alt.layoutError}`, 'err');
+    } catch (err) {
+      addLog(`Could not select alt ${alt.alternate}: ${err.message}`, 'err');
+    }
+  };
+
+  const handleDetach = async () => {
+    if (!dfu) return;
+    try {
+      await dfu.detach(1000);
+      addLog('DFU_DETACH sent. The device should re-enumerate in DFU mode; select it again.', 'ok');
+    } catch (err) {
+      addLog(`Detach failed: ${err.message}`, 'err');
+    }
+    await handleDisconnect();
+    setStatus('warning');
+    setStatusMsg('Detach sent. Wait for the device to re-enumerate, then click Select DFU Device again.');
+  };
+
+  // --- Read device (DFU_UPLOAD) --------------------------------------------
+  const handleRead = async () => {
+    if (!dfu) return;
+    const length = parseInt(readLength, 10);
+    if (!(length > 0)) {
+      addLog('Enter a read length in bytes.', 'err');
+      return;
+    }
+    const addr = parseInt(readAddress, 16);
+    setIsReading(true);
+    setProgress(0);
+    try {
+      addLog(`Reading ${length} bytes${dfu.dfuse ? ` from 0x${addr.toString(16)}` : ''}…`, 'info');
+      const data = await dfu.upload(
+        length,
+        ({ read, total }) => setProgress(Math.round((read / total) * 100)),
+        { address: addr }
+      );
+      const url = URL.createObjectURL(new Blob([data], { type: 'application/octet-stream' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dfu-read-${dfu.dfuse ? addr.toString(16) + '-' : ''}${data.length}.bin`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setStatus('online');
+      setStatusMsg(`Read ${data.length} bytes${data.length < length ? ` (device ended early, asked for ${length})` : ''}.`);
+      addLog(`✓ Read ${data.length} bytes.`, 'ok');
+    } catch (err) {
+      setStatus('warning');
+      setStatusMsg(`Read failed: ${err.message}`);
+      addLog(`✗ Read failed: ${err.message}`, 'err');
+    } finally {
+      setIsReading(false);
+    }
   };
 
   // --- Firmware file ------------------------------------------------------
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (/\.hex$/i.test(file.name)) {
+      try {
+        const parsed = parseIntelHex(await file.text());
+        if (!parsed.size) throw new Error('no data records found');
+        setFirmware({
+          name: file.name,
+          size: parsed.size,
+          payload: parsed.data,
+          suffix: { present: false, valid: false },
+          dfuse: { isDfuSe: false, targets: [] },
+          hexAddress: parsed.startAddress
+        });
+        setTargetAddress('0x' + parsed.startAddress.toString(16));
+        addLog(`Loaded ${file.name}: Intel HEX, ${parsed.size} bytes at 0x${parsed.startAddress.toString(16)}`, 'ok');
+      } catch (err) {
+        addLog(`Could not parse ${file.name}: ${err.message}`, 'err');
+      }
+      return;
+    }
     const buf = new Uint8Array(await file.arrayBuffer());
 
     const suffix = parseDfuSuffix(buf);
@@ -185,30 +305,79 @@ export default function DfuFlasher() {
       setProgress(total ? Math.round((written / total) * 100) : 0);
 
     try {
-      if (firmware.dfuse.isDfuSe) {
-        addLog('Starting DfuSe download…', 'info');
+      const useDfuse = firmware.dfuse.isDfuSe || dfu.dfuse || Boolean(region) || isDfuSeManifestSelected();
+      if (useDfuse) {
+        dfu.dfuse = true;
+        const erased = new Set();
+        const elements = [];
+        if (firmware.dfuse.isDfuSe) {
+          for (const target of firmware.dfuse.targets) {
+            const alt = ifaceInfo?.alternates?.find((x) => x.alternate === target.alternate) || selectedAlt;
+            if (alt && alt.alternate !== selectedAlt?.alternate) {
+              await device.selectAlternateInterface(alt.interfaceNumber, alt.alternate);
+              addLog(`Switched to alt ${alt.alternate} for DfuSe target`, 'info');
+            }
+            for (const el of target.elements) elements.push({ ...el, alt });
+          }
+        } else {
+          const addr = parseInt(targetAddress, 16);
+          if (!Number.isFinite(addr)) throw new Error('Enter a valid target address (hex).');
+          elements.push({ address: addr, data: firmware.payload, alt: selectedAlt });
+        }
+
         const pageSize = parseInt(erasePageSize, 10) || 0;
-        for (const target of firmware.dfuse.targets) {
-          for (const el of target.elements) {
-            addLog(
-              `DfuSe element @ 0x${el.address.toString(16)} (${el.data.length} bytes)`,
-              'info'
-            );
-            await dfu.dfuseDownloadElement(
-              el.address,
-              el.data,
-              { erasePageSize: pageSize },
-              onProgress
-            );
+        // only ask when a mass erase will actually happen (no sector layout reported for any element)
+        if (massErase && elements.some((el) => !el.alt?.region)) {
+          const ok = confirmAction(
+            'MASS ERASE wipes the ENTIRE flash of the device, including any stored settings.\n\nContinue?',
+            'DFU'
+          );
+          if (!ok) {
+            addLog('Flash aborted by user (mass erase declined).', 'err');
+            return;
           }
         }
-      } else if (dfu.dfuse || ifaceInfo?.attributes?.bcdDFU === 0x011a || isDfuSeManifestSelected()) {
-        // Raw .bin to an ST DfuSe bootloader at an explicit address.
-        const addr = parseInt(targetAddress, 16);
-        const pageSize = parseInt(erasePageSize, 10) || 0;
-        dfu.dfuse = true;
-        addLog(`DfuSe raw download to 0x${addr.toString(16)} (erase page ${pageSize}B)`, 'info');
-        await dfu.dfuseDownloadElement(addr, firmware.payload, { erasePageSize: pageSize }, onProgress);
+        addLog('Starting DfuSe download…', 'info');
+        let first = true;
+        for (const el of elements) {
+          const layout = el.alt?.region?.sectors;
+          addLog(
+            `DfuSe element @ 0x${el.address.toString(16)} (${el.data.length} bytes), erase: ${
+              massErase && first && !layout ? 'mass' : layout ? 'per sector (layout)' : pageSize ? `${pageSize} B pages` : 'none possible'
+            }`,
+            'info'
+          );
+          await dfu.dfuseDownloadElement(
+            el.address,
+            el.data,
+            {
+              layout,
+              erasePageSize: layout ? 0 : pageSize,
+              massErase: massErase && first && !layout,
+              erased,
+              leave: false
+            },
+            onProgress
+          );
+          first = false;
+        }
+        if (verifyAfter) {
+          for (const el of elements) {
+            addLog(`Verifying @ 0x${el.address.toString(16)}…`, 'info');
+            const v = await dfu.verify(el.data, { address: el.address });
+            if (!v.ok) {
+              throw new Error(
+                `Verify failed at 0x${(el.address + v.mismatchOffset).toString(16)} (offset ${v.mismatchOffset})`
+              );
+            }
+          }
+          addLog('✓ Verify OK (read back matches).', 'ok');
+        }
+        if (leaveAfter) {
+          await dfu.dfuseLeave(elements[0].address);
+        } else {
+          addLog('Staying in DFU mode (leave not requested).', 'info');
+        }
       } else {
         addLog('Starting plain DFU 1.1 download…', 'info');
         await dfu.download(firmware.payload, onProgress);
@@ -216,7 +385,7 @@ export default function DfuFlasher() {
 
       setProgress(100);
       setStatus('online');
-      setStatusMsg('Flash complete — device entering new firmware.');
+      setStatusMsg(leaveAfter || !dfu.dfuse ? 'Flash complete — device entering new firmware.' : 'Flash complete — device left in DFU mode.');
       addLog('✓ Download + manifest complete.', 'ok');
     } catch (err) {
       setStatus('warning');
@@ -233,7 +402,7 @@ export default function DfuFlasher() {
     ifaceInfo?.bcdDFU === 0x011a && !firmware?.dfuse?.isDfuSe;
 
   const stLikely = ifaceInfo?.bcdDFU === 0x011a;
-  const needsAddress = firmware && !firmware.dfuse.isDfuSe && stLikely;
+  const needsAddress = firmware && !firmware.dfuse.isDfuSe && (stLikely || Boolean(region));
 
   return (
     <div className="w-full max-w-5xl mx-auto p-4 space-y-4 text-slate-200">
@@ -275,7 +444,7 @@ export default function DfuFlasher() {
         </div>
         <p className="text-xs text-slate-400">{statusMsg}</p>
         <div className="flex gap-2">
-          {status !== 'online' ? (
+          {!device ? (
             <button
               onClick={handleConnect}
               disabled={!webUsbAvailable || status === 'connecting'}
@@ -299,6 +468,42 @@ export default function DfuFlasher() {
           )}
         </div>
 
+        {ifaceInfo?.runtimeOnly && (
+          <button
+            onClick={handleDetach}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-700/70 hover:bg-amber-600 text-white text-sm font-semibold transition"
+          >
+            <Power className="w-4 h-4" />
+            Detach to DFU mode
+          </button>
+        )}
+
+        {ifaceInfo && !ifaceInfo.runtimeOnly && ifaceInfo.alternates?.length > 0 && (
+          <label className="block text-xs text-slate-400 space-y-1">
+            <span>Memory / alt-setting</span>
+            <select
+              value={altIndex}
+              onChange={handleAltChange}
+              disabled={isFlashing}
+              className="w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-xs"
+            >
+              {ifaceInfo.alternates.map((a, i) => (
+                <option key={i} value={i}>
+                  alt {a.alternate}: {a.name || '(unnamed)'}
+                </option>
+              ))}
+            </select>
+            {selectedAlt?.layoutError && (
+              <span className="text-rose-400">Layout not understood: {selectedAlt.layoutError}</span>
+            )}
+            {region && (
+              <span className="text-slate-500">
+                {region.sectors.length} sector(s), 0x{region.start.toString(16)}–0x{(region.end - 1).toString(16)}
+              </span>
+            )}
+          </label>
+        )}
+
         {ifaceInfo && (
           <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2 text-xs pt-2">
             <InfoCell label="Interface" value={`#${ifaceInfo.interfaceNumber}`} />
@@ -307,7 +512,7 @@ export default function DfuFlasher() {
               label="DFU ver"
               value={ifaceInfo.bcdDFU ? `0x${ifaceInfo.bcdDFU.toString(16)}` : '1.1'}
             />
-            <InfoCell label="Mode" value={stLikely ? 'DfuSe (ST)' : 'DFU 1.1'} />
+            <InfoCell label="Mode" value={stLikely || region ? 'DfuSe (ST)' : 'DFU 1.1'} />
           </div>
         )}
       </div>
@@ -322,7 +527,7 @@ export default function DfuFlasher() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".bin,.dfu,.dfuse"
+          accept=".bin,.dfu,.dfuse,.hex"
           onChange={handleFile}
           className="hidden"
         />
@@ -332,7 +537,7 @@ export default function DfuFlasher() {
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/50 text-slate-200 text-sm font-semibold transition"
           >
             <FileCode className="w-4 h-4" />
-            Load .bin / .dfu
+            Load .bin / .dfu / .hex
           </button>
           {firmware && (
             <button
@@ -385,19 +590,22 @@ export default function DfuFlasher() {
                 placeholder="0x08000000"
               />
             </label>
-            <label className="text-xs text-slate-400 space-y-1">
-              <span>Erase page size (bytes, 0 = mass erase)</span>
-              <input
-                value={erasePageSize}
-                onChange={(e) => setErasePageSize(e.target.value)}
-                className="w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-sm"
-                placeholder="2048"
-              />
-            </label>
+            {!region && (
+              <label className="text-xs text-slate-400 space-y-1">
+                <span>Erase page size (bytes; only used when the device reports no layout)</span>
+                <input
+                  value={erasePageSize}
+                  onChange={(e) => setErasePageSize(e.target.value)}
+                  className="w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-sm"
+                  placeholder="2048"
+                />
+              </label>
+            )}
             <div className="@sm:col-span-2 flex items-start gap-2 text-[11px] text-slate-500">
               <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              Raw .bin has no address — defaulting to the STM32 flash base. Set the page size for
-              your part (STM32F1 = 1024/2048; F4 uses variable sectors — prefer a .dfu there).
+              {region
+                ? 'Erase uses the device-reported sector layout: only sectors overlapping the image are erased.'
+                : 'No sector layout reported by this device. Set the page size for your part, or tick mass erase below.'}
             </div>
           </div>
         )}
@@ -405,9 +613,54 @@ export default function DfuFlasher() {
 
       {/* Flash action + progress */}
       <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-3">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={verifyAfter} onChange={(e) => setVerifyAfter(e.target.checked)} className="accent-cyan-500" />
+            Verify after write (read back)
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={leaveAfter} onChange={(e) => setLeaveAfter(e.target.checked)} className="accent-cyan-500" />
+            Jump to application after flash
+          </label>
+          {/* with a reported sector layout the flasher erases exactly the sectors the image covers,
+              so mass erase does not apply (the driver only mass-erases when no layout is known) */}
+          <label className={`flex items-center gap-1.5 ${region ? 'text-slate-500' : 'text-rose-300'}`}
+            title={region ? 'Not used: this device reports its sector layout, so only the sectors the image covers are erased.' : undefined}>
+            <input type="checkbox" checked={massErase && !region} disabled={!!region} onChange={(e) => setMassErase(e.target.checked)} className="accent-rose-500" />
+            {region ? 'Mass erase (not needed: per-sector erase from the device layout)' : 'Mass erase (wipes the whole flash; asks to confirm)'}
+          </label>
+        </div>
+        <div className="flex flex-wrap items-end gap-2 text-xs text-slate-400">
+          <label className="space-y-1">
+            <span>Read length (bytes)</span>
+            <input
+              value={readLength}
+              onChange={(e) => setReadLength(e.target.value)}
+              className="w-32 block px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-sm"
+            />
+          </label>
+          {(region || dfu?.dfuse) && (
+            <label className="space-y-1">
+              <span>From address</span>
+              <input
+                value={readAddress}
+                onChange={(e) => setReadAddress(e.target.value)}
+                className="w-32 block px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-sm"
+              />
+            </label>
+          )}
+          <button
+            onClick={handleRead}
+            disabled={!dfu || ifaceInfo?.runtimeOnly || isFlashing || isReading}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/50 text-slate-200 text-sm font-semibold transition disabled:opacity-40"
+          >
+            {isReading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            Read device to .bin
+          </button>
+        </div>
         <button
           onClick={handleFlash}
-          disabled={!dfu || !firmware || isFlashing}
+          disabled={!dfu || !firmware || isFlashing || isReading || ifaceInfo?.runtimeOnly}
           className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-amber-600/90 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold transition"
         >
           {isFlashing ? (

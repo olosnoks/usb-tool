@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Terminal as TerminalIcon, 
   Binary, 
@@ -18,7 +18,8 @@ import { useSerial } from '../../context/SerialContext';
 import StreamConsole from '../StreamConsole';
 import HexViewer from '../common/HexViewer';
 import FrameInjector from '../FrameInjector';
-import { CANDIDATE_BAUD_RATES, evaluateSample } from '../../utils/baudScanner';
+import TerminalEmulator from '../TerminalEmulator';
+import { CANDIDATE_BAUD_RATES, runBaudHunt } from '../../utils/baudScanner';
 
 export default function TerminalTab() {
   const {
@@ -32,7 +33,10 @@ export default function TerminalTab() {
     clearHexStream,
     baudRate,
     setBaudRate,
-    runBaudScan
+    runBaudScan,
+    reconfigureActivePort,
+    subscribeRx,
+    activeBoardId
   } = useSerial();
 
   // Sub-panel selection
@@ -42,41 +46,63 @@ export default function TerminalTab() {
   const [currentBaudTesting, setCurrentBaudTesting] = useState(null);
   const [probeMode, setProbeMode] = useState('active');
 
+  // 'log' = chunk/line log view (StreamConsole); 'interactive' = keystroke passthrough terminal.
+  // The emulator is mounted the first time it is opened and then kept (hidden)
+  // so switching modes never drops received data.
+  const [termMode, setTermMode] = useState('log');
+  const [emulatorOpened, setEmulatorOpened] = useState(false);
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  const openMode = (mode) => {
+    setTermMode(mode);
+    if (mode === 'interactive') setEmulatorOpened(true);
+  };
+  const getBacklog = () => entriesRef.current.filter(e => e.type === 'rx' && e.rawBytes).map(e => e.rawBytes);
+
+  const [hunterMsg, setHunterMsg] = useState('');
+  const huntAbortRef = useRef(null);
+
+  const stopBaudHunt = () => {
+    if (huntAbortRef.current) huntAbortRef.current.aborted = true;
+  };
+
+  // Leaving the tab mid-scan aborts it; runBaudHunt then restores the original
+  // baud rate and the console read loop.
+  useEffect(() => () => { if (huntAbortRef.current) huntAbortRef.current.aborted = true; }, []);
+
   const startBaudHunt = async () => {
     if (!isConnected) {
-      alert('Please connect to a serial port first to run the Baud Rate Hunter.');
+      setHunterMsg('Connect to a serial port first to run the Baud Rate Hunter.');
       return;
     }
 
+    const originalBaud = baudRate;
+    const ctl = { aborted: false };
+    huntAbortRef.current = ctl;
+    setHunterMsg('');
     setIsScanning(true);
     setHunterResults([]);
     addLog(`[BAUD HUNTER] Starting automated scan across ${CANDIDATE_BAUD_RATES.length} candidate baud rates...`, 'sys');
 
-    const results = [];
-    for (const baud of CANDIDATE_BAUD_RATES) {
-      setCurrentBaudTesting(baud);
-      try {
-        const sampleBytes = await runBaudScan(baud, probeMode === 'active');
-        const evalResult = evaluateSample(sampleBytes);
-        const entry = {
-          baud,
-          byteCount: sampleBytes ? sampleBytes.length : 0,
-          printableRatio: evalResult.printableRatio,
-          entropy: evalResult.entropy,
-          confidence: evalResult.confidence,
-          verdict: evalResult.verdict,
-          previewText: evalResult.previewText
-        };
-        results.push(entry);
-        setHunterResults([...results]);
-      } catch (err) {
-        console.error(`Baud scan error at ${baud}:`, err);
-      }
-    }
+    const { aborted, restoreError } = await runBaudHunt({
+      candidates: CANDIDATE_BAUD_RATES,
+      signal: ctl,
+      scan: (baud) => runBaudScan(baud, probeMode === 'active'),
+      restore: () => reconfigureActivePort({ baudRate: originalBaud }),
+      onProgress: (baud) => setCurrentBaudTesting(baud),
+      onResult: (_entry, all) => setHunterResults(all),
+      onError: (baud, err) => console.error(`Baud scan error at ${baud}:`, err)
+    });
 
+    huntAbortRef.current = null;
     setIsScanning(false);
     setCurrentBaudTesting(null);
-    addLog('[BAUD HUNTER] Scan cycle complete.', 'sys');
+    if (restoreError) {
+      setHunterMsg(`Scan ended but the original ${originalBaud} bps could not be restored: ${restoreError.message}. Reconnect the port.`);
+    } else {
+      setHunterMsg(aborted ? `Scan stopped. Restored ${originalBaud} bps.` : `Scan complete. Restored ${originalBaud} bps.`);
+    }
+    addLog(aborted ? '[BAUD HUNTER] Scan aborted.' : '[BAUD HUNTER] Scan cycle complete.', 'sys');
   };
 
   return (
@@ -90,6 +116,21 @@ export default function TerminalTab() {
           <span className="text-slate-400 text-[11px] hidden @sm:inline">
             Active: <strong className="text-amber-400">{baudRate} bps</strong>
           </span>
+        </div>
+
+        {/* Log view / Interactive mode */}
+        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-[11px]">
+          {[['log', 'Log view'], ['interactive', 'Interactive']].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => openMode(id)}
+              className={`px-2.5 py-1 rounded-md font-bold transition-all ${
+                termMode === id ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {/* Panel Switcher Buttons */}
@@ -138,12 +179,28 @@ export default function TerminalTab() {
       }`}>
         {/* Serial Log Terminal */}
         <div className={activeSidePanel !== 'none' ? '@lg:col-span-7 @xl:col-span-8' : 'w-full'}>
-          <StreamConsole
-            entries={entries}
-            onSend={(text, lineEnding) => sendString(text, lineEnding)}
-            onClear={clearLogs}
-            isConnected={isConnected}
-          />
+          <div className={termMode === 'log' ? '' : 'hidden'}>
+            <StreamConsole
+              entries={entries}
+              onSend={(text, lineEnding) => sendString(text, lineEnding)}
+              onClear={clearLogs}
+              isConnected={isConnected}
+              boardId={activeBoardId}
+              subscribeRx={subscribeRx}
+              onSendRaw={sendRawBytes}
+              onSys={addLog}
+            />
+          </div>
+          {emulatorOpened && (
+            <TerminalEmulator
+              visible={termMode === 'interactive'}
+              subscribeRx={subscribeRx}
+              boardId={activeBoardId}
+              sendRawBytes={sendRawBytes}
+              isConnected={isConnected}
+              getBacklog={getBacklog}
+            />
+          )}
         </div>
 
         {/* Secondary Side Panel */}
@@ -184,6 +241,14 @@ export default function TerminalTab() {
                 </p>
 
                 <div className="flex items-center gap-2">
+                  {isScanning && (
+                    <button
+                      onClick={stopBaudHunt}
+                      className="px-3 py-2 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold text-xs"
+                    >
+                      STOP
+                    </button>
+                  )}
                   <button
                     onClick={startBaudHunt}
                     disabled={isScanning || !isConnected}
@@ -193,6 +258,8 @@ export default function TerminalTab() {
                     <span>{isScanning ? `SCANNING ${currentBaudTesting || ''}...` : 'RUN BAUD SCAN'}</span>
                   </button>
                 </div>
+
+                {hunterMsg && <p className="text-[11px] text-amber-300">{hunterMsg}</p>}
 
                 {/* Results Table */}
                 {hunterResults.length > 0 && (

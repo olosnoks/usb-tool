@@ -1,6 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { isClearShortcut } from '../utils/consoleShortcuts';
-import { useConsolePause } from '../context/SerialContext';
+import { useConsolePause, useOptionalSerial } from '../context/SerialContext';
+import {
+  computeDeltas, formatDelta, assembleLines, buildMatcher, textMatches, splitByMatches,
+  matchHighlightRule, createDiskLogger, sendPaced, CTRL_KEYS
+} from '../utils/consoleTools';
+import { loadMacros, saveMacros, exportMacros, importMacros, expandEscapes, normalizeMacro } from '../utils/consoleMacros';
 import { 
   Terminal as TerminalIcon, 
   Send, 
@@ -18,7 +23,10 @@ import {
   Disc,
   StopCircle,
   FileSpreadsheet,
-  Activity
+  Activity,
+  ChevronUp,
+  Upload,
+  X
 } from 'lucide-react';
 
 /**
@@ -93,8 +101,15 @@ export default function StreamConsole({
   entries = [],
   onClear,
   onSend,
-  isConnected
+  isConnected,
+  boardId,            // enables disk logging (bytes come from subscribeRx for this board)
+  subscribeRx: subscribeRxProp,
+  onSendRaw,          // (Uint8Array) => Promise, enables Ctrl keys and send-file
+  onSys,              // (text) => void, optional system-log hook
+  initialViewMode = 'stream'
 }) {
+  const serialCtx = useOptionalSerial();
+  const subscribeRx = subscribeRxProp || serialCtx?.subscribeRx;
   const [inputText, setInputText] = useState('');
   const [lineEnding, setLineEnding] = useState('\r\n');
   const [autoScroll, setAutoScroll] = useState(true);
@@ -107,17 +122,36 @@ export default function StreamConsole({
   const shownEntries = isPaused ? frozenRef.current : entries;
   const [showTimestamps, setShowTimestamps] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [regexMode, setRegexMode] = useState(false);
+  const [filterToMatches, setFilterToMatches] = useState(true);
+  const [matchIdx, setMatchIdx] = useState(0);
+  const [echoTx, setEchoTx] = useState(true);       // show sent data in the view
+  const [rxEnding, setRxEnding] = useState('auto'); // line view: auto | lf | cr | crlf
+  const [showTools, setShowTools] = useState(false);
+  const [macros, setMacros] = useState(() => loadMacros());
+  const [macroDraft, setMacroDraft] = useState({ name: '', text: '' });
+  const [highlightRules, setHighlightRules] = useState(() => {
+    try { return JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem('skons.console.highlights')) || '[]'); } catch (e) { return []; }
+  });
+  const [ruleDraft, setRuleDraft] = useState('');
+  const [toolMsg, setToolMsg] = useState('');
+  const [fileDelay, setFileDelay] = useState(10);
+  const [fileUnit, setFileUnit] = useState('char');
+  const [fileProgress, setFileProgress] = useState(null); // { sent, total } | null
+  const fileAbortRef = useRef(null);
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
 
-  // View Mode: 'stream' | 'delta' (Wireshark-style timing)
-  const [viewMode, setViewMode] = useState('stream');
+  // View Mode: 'stream' (one row per chunk) | 'lines' (assembled lines) | 'delta' (Wireshark-style timing)
+  const [viewMode, setViewMode] = useState(initialViewMode);
   const [directionFilter, setDirectionFilter] = useState('all'); // 'all', 'rx', 'tx'
 
   // Direct File System Access API disk streaming
   const [isDiskStreaming, setIsDiskStreaming] = useState(false);
   const [diskFileName, setDiskFileName] = useState('');
-  const fileWriterRef = useRef(null);
+  const [diskMode, setDiskMode] = useState('raw'); // raw | text | hex
+  const diskLoggerRef = useRef(null);
+  const diskUnsubRef = useRef(null);
 
   const consoleEndRef = useRef(null);
   const consoleContainerRef = useRef(null);
@@ -129,54 +163,67 @@ export default function StreamConsole({
     }
   }, [entries, autoScroll, isPaused]);
 
-  // Direct-to-Disk Streamer: pipe new entries to disk if active
-  useEffect(() => {
-    if (!isDiskStreaming || !fileWriterRef.current || entries.length === 0) return;
-    const lastEntry = entries[entries.length - 1];
-    if (lastEntry) {
-      const line = `[${lastEntry.timestamp}] ${lastEntry.type === 'rx' ? '<- ' : '-> '}${lastEntry.text}\n`;
-      fileWriterRef.current.write(line).catch(err => {
-        console.error('Disk stream write error:', err);
-      });
+  // Direct-to-Disk logger: driven by the raw RX byte stream (subscribeRx), not by
+  // the batched `entries` list, so every byte is written once, in order, even
+  // when 200 chunks arrive in one render tick.
+  const stopDiskLogging = async () => {
+    if (diskUnsubRef.current) { diskUnsubRef.current(); diskUnsubRef.current = null; }
+    const logger = diskLoggerRef.current;
+    diskLoggerRef.current = null;
+    setIsDiskStreaming(false);
+    setDiskFileName('');
+    if (logger) {
+      await logger.close();
+      if (logger.error) setToolMsg(`Disk log error: ${logger.error.message}`);
     }
-  }, [entries, isDiskStreaming]);
+  };
 
   const handleStartDiskStream = async () => {
     if (!window.showSaveFilePicker) {
-      alert('File System Access API is not supported in this browser. Please use Chrome, Edge, or Opera.');
+      setToolMsg('File System Access API is not supported in this browser. Use Chrome, Edge, or Opera.');
+      return;
+    }
+    if (!subscribeRx || !boardId) {
+      setToolMsg('Disk logging is not available for this console.');
       return;
     }
 
     try {
       const handle = await window.showSaveFilePicker({
-        suggestedName: `serial-log-${new Date().toISOString().slice(0, 10)}.log`,
+        suggestedName: `serial-log-${new Date().toISOString().slice(0, 10)}.${diskMode === 'raw' ? 'bin' : 'log'}`,
         types: [{
           description: 'Serial Log Files',
-          accept: { 'text/plain': ['.log', '.txt'] }
+          accept: { 'text/plain': ['.log', '.txt', '.bin'] }
         }]
       });
 
       const writable = await handle.createWritable();
-      fileWriterRef.current = writable;
+      const logger = createDiskLogger(writable, { mode: diskMode });
+      diskLoggerRef.current = logger;
+      diskUnsubRef.current = subscribeRx((bytes, id) => {
+        if (id === boardId) logger.write(bytes);
+      });
       setDiskFileName(handle.name);
       setIsDiskStreaming(true);
     } catch (err) {
       if (err.name !== 'AbortError') {
         console.error('File stream open error:', err);
+        setToolMsg(`Could not open log file: ${err.message}`);
       }
     }
   };
 
-  const handleStopDiskStream = async () => {
-    if (fileWriterRef.current) {
-      try {
-        await fileWriterRef.current.close();
-      } catch (e) {}
-      fileWriterRef.current = null;
-    }
-    setIsDiskStreaming(false);
-    setDiskFileName('');
-  };
+  const handleStopDiskStream = () => { stopDiskLogging(); };
+
+  // Close the file when the port disconnects or the console unmounts.
+  useEffect(() => {
+    if (!isConnected && diskLoggerRef.current) stopDiskLogging();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected]);
+  useEffect(() => () => {
+    if (diskUnsubRef.current) diskUnsubRef.current();
+    if (diskLoggerRef.current) diskLoggerRef.current.close();
+  }, []);
 
   const handleScroll = () => {
     if (!consoleContainerRef.current) return;
@@ -219,7 +266,7 @@ export default function StreamConsole({
   };
 
   const handleExportLog = () => {
-    const rawLines = entries.map(e => {
+    const rawLines = baseRows.map(e => {
       const ts = showTimestamps ? `[${e.timestamp}] ` : '';
       const prefix = e.type === 'rx' ? '<- ' : e.type === 'tx' ? '-> ' : '[SYS] ';
       return `${ts}${prefix}${e.text}`;
@@ -234,32 +281,34 @@ export default function StreamConsole({
     URL.revokeObjectURL(url);
   };
 
-  // Calculate high-resolution delta timing between entries (Wireshark style)
-  const entriesWithDeltas = shownEntries.map((entry, idx, arr) => {
-    let deltaMs = 0;
-    if (idx > 0) {
-      const prev = arr[idx - 1];
-      const prevTime = prev.rawTime || 0;
-      const currTime = entry.rawTime || 0;
-      if (currTime > prevTime && prevTime > 0) {
-        deltaMs = +(currTime - prevTime).toFixed(2);
-      } else {
-        deltaMs = +((idx * 7) % 23 * 0.42 + 0.15).toFixed(2);
-      }
-    }
-    return { ...entry, deltaMs };
-  });
+  // Rows for the active view. Deltas are real arrival differences (rawTime is
+  // taken at ingest); unknown values show as a dash, never as invented numbers.
+  const baseRows = viewMode === 'lines' ? assembleLines(shownEntries, rxEnding) : shownEntries;
+  const entriesWithDeltas = computeDeltas(baseRows);
+  const { re: searchRe, error: searchError } = buildMatcher(searchQuery, { regex: regexMode });
 
-  const filteredEntries = entriesWithDeltas
-    .filter(e => {
+  const visibleRows = entriesWithDeltas.filter(e => {
+    if (!echoTx && e.type === 'tx') return false;
+    if (viewMode === 'delta') {
       if (directionFilter === 'rx') return e.type === 'rx';
       if (directionFilter === 'tx') return e.type === 'tx';
-      return true;
-    })
-    .filter(e => {
-      if (!searchQuery.trim()) return true;
-      return e.text.toLowerCase().includes(searchQuery.toLowerCase());
-    });
+    }
+    return true;
+  });
+  const matchingIds = searchRe ? visibleRows.filter(e => textMatches(searchRe, e.text)).map(e => e.id) : [];
+  const filteredEntries = searchRe && filterToMatches
+    ? visibleRows.filter(e => matchingIds.includes(e.id))
+    : visibleRows;
+  const currentMatchId = matchingIds.length ? matchingIds[((matchIdx % matchingIds.length) + matchingIds.length) % matchingIds.length] : null;
+
+  const gotoMatch = (dir) => {
+    if (!matchingIds.length) return;
+    const next = (matchIdx + dir + matchingIds.length) % matchingIds.length;
+    setMatchIdx(next);
+    setAutoScroll(false);
+    const el = typeof document !== 'undefined' ? document.getElementById(`sc-row-${matchingIds[next]}`) : null;
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+  };
 
   const handleExportCsvTimeline = () => {
     const csvHeader = 'Timestamp,Delta_ms,Direction,Length,ASCII,Hex\n';
@@ -267,7 +316,7 @@ export default function StreamConsole({
       const hex = Array.from(new TextEncoder().encode(e.text))
         .map(b => b.toString(16).padStart(2, '0').toUpperCase())
         .join(' ');
-      return `"${e.timestamp}","+${e.deltaMs}ms","${e.type.toUpperCase()}","${e.text.length}","${e.text.replace(/"/g, '""')}","${hex}"`;
+      return `"${e.timestamp}","${e.deltaMs == null ? '' : '+' + e.deltaMs + 'ms'}","${e.type.toUpperCase()}","${e.text.length}","${e.text.replace(/"/g, '""')}","${hex}"`;
     }).join('\n');
 
     const blob = new Blob([csvHeader + csvRows], { type: 'text/csv;charset=utf-8' });
@@ -279,23 +328,89 @@ export default function StreamConsole({
     URL.revokeObjectURL(url);
   };
 
-  const totalMatchesCount = searchQuery.trim() ? filteredEntries.length : 0;
+  const totalMatchesCount = searchRe ? matchingIds.length : 0;
 
-  const renderHighlight = (text, query) => {
-    if (!query || !query.trim() || !text) return text;
-    const q = query.trim();
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(${escaped})`, 'gi');
-    const parts = text.split(regex);
-    if (parts.length <= 1) return text;
-    return parts.map((part, i) => 
-      part.toLowerCase() === q.toLowerCase() ? (
-        <mark key={i} className="bg-amber-400 text-slate-950 font-bold px-0.5 rounded shadow-amber-glow">
-          {part}
-        </mark>
-      ) : part
-    );
+  const renderHighlight = (text) => {
+    if (!searchRe || !text) return text;
+    const parts = splitByMatches(text, searchRe);
+    if (parts.length <= 1 && !parts[0].match) return text;
+    return parts.map((part, i) => part.match ? (
+      <mark key={i} className="bg-amber-400 text-slate-950 font-bold px-0.5 rounded shadow-amber-glow">
+        {part.text}
+      </mark>
+    ) : part.text);
   };
+
+  // --- tools: macros, highlight rules, Ctrl keys, send-file -----------------
+  const persistMacros = (next) => { setMacros(next); saveMacros(next); };
+  const runMacro = (m) => {
+    if (!isConnected || !onSend) return;
+    onSend(m.ending === 'hex' ? m.text : expandEscapes(m.text), m.ending);
+  };
+  const addMacro = () => {
+    const m = normalizeMacro({ name: macroDraft.name, text: macroDraft.text, ending: lineEnding });
+    if (!m) { setToolMsg('A macro needs a name and text.'); return; }
+    persistMacros([...macros, m]);
+    setMacroDraft({ name: '', text: '' });
+    setToolMsg('');
+  };
+  const handleExportMacros = () => {
+    const blob = new Blob([exportMacros(macros)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'skons-console-macros.json';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const handleImportMacros = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const imported = importMacros(await file.text());
+      persistMacros([...macros, ...imported]);
+      setToolMsg(`Imported ${imported.length} macro(s).`);
+    } catch (err) {
+      setToolMsg(`Import failed: ${err.message}`);
+    }
+  };
+  const saveRules = (next) => {
+    setHighlightRules(next);
+    try { localStorage.setItem('skons.console.highlights', JSON.stringify(next)); } catch (err) {}
+  };
+  const addRule = () => {
+    const { re, error } = buildMatcher(ruleDraft, { regex: true });
+    if (!re) { setToolMsg(error ? `Invalid regex: ${error}` : 'Enter a pattern.'); return; }
+    const colors = ['bg-rose-500/20 text-rose-300', 'bg-amber-500/20 text-amber-300', 'bg-emerald-500/20 text-emerald-300', 'bg-cyan-500/20 text-cyan-300'];
+    saveRules([...highlightRules, { id: `r-${Date.now()}`, pattern: ruleDraft, color: colors[highlightRules.length % colors.length] }]);
+    setRuleDraft('');
+    setToolMsg('');
+  };
+  const sendCtrl = (k) => { if (isConnected && onSendRaw) onSendRaw(Uint8Array.from(k.bytes)); };
+  const handleSendFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !onSendRaw || !isConnected) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const ctl = { aborted: false };
+    fileAbortRef.current = ctl;
+    setFileProgress({ sent: 0, total: bytes.length });
+    if (onSys) onSys(`[SEND FILE] ${file.name}: ${bytes.length} bytes, ${fileUnit === 'line' ? 'per-line' : 'per-char'} delay ${fileDelay} ms`);
+    try {
+      const res = await sendPaced(bytes, {
+        unit: fileUnit, delayMs: Number(fileDelay) || 0, sendRaw: onSendRaw, signal: ctl,
+        onProgress: (sent, total) => setFileProgress({ sent, total })
+      });
+      if (onSys) onSys(res.cancelled ? `[SEND FILE] cancelled after ${res.sent}/${res.total} bytes` : `[SEND FILE] done, ${res.sent} bytes sent`);
+    } catch (err) {
+      setToolMsg(`Send file failed: ${err.message}`);
+    } finally {
+      fileAbortRef.current = null;
+      setFileProgress(null);
+    }
+  };
+  const cancelSendFile = () => { if (fileAbortRef.current) fileAbortRef.current.aborted = true; };
 
   return (
     <div
@@ -314,7 +429,7 @@ export default function StreamConsole({
           <TerminalIcon className="w-4 h-4 text-cyber-cyan" />
           <span className="font-bold text-slate-200 tracking-wider">ANSI STREAM CONSOLE</span>
           <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">
-            {entries.length} Lines
+            {entries.length} Chunks
           </span>
 
           {/* Disk Stream Indicator */}
@@ -337,6 +452,14 @@ export default function StreamConsole({
               }`}
             >
               STREAM
+            </button>
+            <button
+              onClick={() => setViewMode('lines')}
+              className={`px-2 py-0.5 rounded font-bold transition-all ${
+                viewMode === 'lines' ? 'bg-cyan-600 text-white shadow-cyan-glow' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              LINES
             </button>
             <button
               onClick={() => setViewMode('delta')}
@@ -366,19 +489,41 @@ export default function StreamConsole({
           )}
 
           {/* Search Query */}
-          <div className="relative flex items-center">
+          <div className="relative flex items-center gap-1">
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 pointer-events-none" />
             <input
               type="text"
-              placeholder="Search stream..."
+              placeholder={regexMode ? 'Regex...' : 'Search stream...'}
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg pl-7 pr-2 py-0.5 text-[11px] text-slate-200 focus:border-cyber-cyan outline-none w-24 @sm:w-32 transition-all"
+              onChange={(e) => { setSearchQuery(e.target.value); setMatchIdx(0); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); gotoMatch(e.shiftKey ? -1 : 1); } }}
+              title={searchError || undefined}
+              className={`bg-slate-950 border rounded-lg pl-7 pr-2 py-0.5 text-[11px] text-slate-200 outline-none w-24 @sm:w-32 transition-all ${
+                searchError ? 'border-rose-500' : 'border-slate-800 focus:border-cyber-cyan'
+              }`}
             />
+            <button
+              onClick={() => setRegexMode(!regexMode)}
+              title="Regular expression search"
+              className={`p-1 rounded border text-[10px] font-bold ${regexMode ? 'bg-cyan-500/20 text-cyber-cyan border-cyan-500/40' : 'bg-slate-900 text-slate-500 border-slate-800'}`}
+            >
+              .*
+            </button>
             {searchQuery.trim() && (
-              <span className="ml-1.5 px-1.5 py-0.2 rounded bg-amber-500/20 text-cyber-amber border border-amber-500/40 text-[10px] font-bold">
-                {totalMatchesCount}
-              </span>
+              <>
+                <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-cyber-amber border border-amber-500/40 text-[10px] font-bold">
+                  {searchError ? 'ERR' : matchingIds.length ? `${(((matchIdx % matchingIds.length) + matchingIds.length) % matchingIds.length) + 1}/${totalMatchesCount}` : '0'}
+                </span>
+                <button onClick={() => gotoMatch(-1)} title="Previous match" className="p-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400"><ChevronUp className="w-3 h-3" /></button>
+                <button onClick={() => gotoMatch(1)} title="Next match" className="p-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400"><ChevronDown className="w-3 h-3" /></button>
+                <button
+                  onClick={() => setFilterToMatches(!filterToMatches)}
+                  title="Show only matching rows"
+                  className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${filterToMatches ? 'bg-amber-500/10 text-cyber-amber border-amber-500/30' : 'bg-slate-900 text-slate-500 border-slate-800'}`}
+                >
+                  FILTER
+                </button>
+              </>
             )}
           </div>
 
@@ -394,7 +539,19 @@ export default function StreamConsole({
           </button>
 
           {/* Stream Direct to Disk Toggle (Zero-drop overnight logger) */}
-          {!isDiskStreaming ? (
+          {boardId && !isDiskStreaming && (
+            <select
+              value={diskMode}
+              onChange={(e) => setDiskMode(e.target.value)}
+              title="Disk log format: raw bytes, timestamped text, or timestamped hex"
+              className="bg-slate-950 border border-slate-800 text-[10px] text-slate-400 rounded px-1 py-1 outline-none"
+            >
+              <option value="raw">RAW</option>
+              <option value="text">TEXT+TS</option>
+              <option value="hex">HEX+TS</option>
+            </select>
+          )}
+          {boardId && (!isDiskStreaming ? (
             <button
               onClick={handleStartDiskStream}
               title="Stream direct to local disk file (Overnight zero-drop logging)"
@@ -410,7 +567,16 @@ export default function StreamConsole({
             >
               <StopCircle className="w-3.5 h-3.5 text-cyber-emerald" />
             </button>
-          )}
+          ))}
+
+          {/* Tools drawer */}
+          <button
+            onClick={() => setShowTools(!showTools)}
+            title="Macros, highlight rules, Ctrl keys, send file"
+            className={`px-2 py-1 rounded-lg border text-[10px] font-bold ${showTools ? 'bg-cyan-500/20 text-cyber-cyan border-cyan-500/40' : 'bg-slate-900 text-slate-400 border-slate-800'}`}
+          >
+            TOOLS
+          </button>
 
           {/* Pause */}
           <button
@@ -501,9 +667,9 @@ export default function StreamConsole({
                     .join(' ');
 
                   return (
-                    <tr key={entry.id} className="hover:bg-slate-900/40 transition-colors">
+                    <tr key={entry.id} id={`sc-row-${entry.id}`} className={`hover:bg-slate-900/40 transition-colors ${entry.id === currentMatchId ? 'bg-amber-500/10' : ''}`}>
                       <td className="p-2 text-slate-500 text-[10px]">{entry.timestamp}</td>
-                      <td className="p-2 font-bold text-emerald-400">+{entry.deltaMs} ms</td>
+                      <td className="p-2 font-bold text-emerald-400">{formatDelta(entry.deltaMs)}</td>
                       <td className="p-2">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                           isRx ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' :
@@ -515,7 +681,7 @@ export default function StreamConsole({
                       </td>
                       <td className="p-2 text-slate-400">{entry.text.length} B</td>
                       <td className="p-2 text-slate-200 font-mono break-all">
-                        {renderHighlight(entry.text, searchQuery)}
+                        {renderHighlight(entry.text)}
                       </td>
                       <td className="p-2 text-slate-500 text-[10px] font-mono hidden @md:table-cell truncate max-w-xs">
                         {hexStr}{entry.text.length > 16 ? '...' : ''}
@@ -551,9 +717,10 @@ export default function StreamConsole({
               return (
                 <div 
                   key={entry.id} 
+                  id={`sc-row-${entry.id}`}
                   className={`flex items-start gap-2 leading-relaxed transition-colors hover:bg-slate-900/40 rounded px-1 -mx-1 ${
                     isSys ? 'text-slate-400 italic' : ''
-                  }`}
+                  } ${matchHighlightRule(highlightRules, entry.text)?.color || ''} ${entry.id === currentMatchId ? 'ring-1 ring-amber-400/60' : ''}`}
                 >
                   {showTimestamps && (
                     <span className="text-[10px] text-slate-600 select-none flex-shrink-0 pt-0.5">
@@ -573,11 +740,11 @@ export default function StreamConsole({
                     {ansiParts ? (
                       ansiParts.map((part, idx) => (
                         <span key={idx} className={part.className}>
-                          {renderHighlight(part.text, searchQuery)}
+                          {renderHighlight(part.text)}
                         </span>
                       ))
                     ) : (
-                      renderHighlight(entry.text, searchQuery)
+                      renderHighlight(entry.text)
                     )}
                   </span>
                 </div>
@@ -585,6 +752,102 @@ export default function StreamConsole({
             })
           )}
           <div ref={consoleEndRef} />
+        </div>
+      )}
+
+      {/* Tools drawer: Ctrl keys, macros, highlight rules, send file, line ending map */}
+      {showTools && (
+        <div className="px-3 py-2 bg-[#090e1a] border-t border-cyber-border text-[11px] font-mono flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-500 text-[10px]">CTRL:</span>
+            {CTRL_KEYS.map(k => (
+              <button
+                key={k.label}
+                onClick={() => sendCtrl(k)}
+                disabled={!isConnected || !onSendRaw}
+                className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-cyber-cyan disabled:opacity-40"
+              >
+                {k.label}
+              </button>
+            ))}
+            <label className="flex items-center gap-1 text-slate-400 cursor-pointer ml-2" title="Show what you send in the console">
+              <input type="checkbox" checked={echoTx} onChange={(e) => setEchoTx(e.target.checked)} />
+              Local echo (show TX)
+            </label>
+            <label className="flex items-center gap-1 text-slate-400">
+              RX line end
+              <select value={rxEnding} onChange={(e) => setRxEnding(e.target.value)} className="bg-[#030712] border border-slate-800 rounded px-1 py-0.5 text-slate-300">
+                <option value="auto">Auto (CR/LF/CRLF)</option>
+                <option value="lf">LF</option>
+                <option value="cr">CR</option>
+                <option value="crlf">CRLF</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-500 text-[10px]">SEND FILE:</span>
+            <select value={fileUnit} onChange={(e) => setFileUnit(e.target.value)} className="bg-[#030712] border border-slate-800 rounded px-1 py-0.5 text-slate-300">
+              <option value="char">per char</option>
+              <option value="line">per line</option>
+            </select>
+            <input
+              type="number" min="0" value={fileDelay}
+              onChange={(e) => setFileDelay(e.target.value)}
+              className="w-16 bg-[#030712] border border-slate-800 rounded px-1 py-0.5 text-slate-300"
+            />
+            <span className="text-slate-500">ms</span>
+            {fileProgress ? (
+              <>
+                <span className="text-cyber-amber">{fileProgress.sent}/{fileProgress.total} B</span>
+                <button onClick={cancelSendFile} className="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300">Cancel</button>
+              </>
+            ) : (
+              <label className={`flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 ${isConnected && onSendRaw ? 'cursor-pointer hover:text-cyber-cyan' : 'opacity-40'}`}>
+                <Upload className="w-3 h-3" /> Choose file
+                <input type="file" className="hidden" onChange={handleSendFile} disabled={!isConnected || !onSendRaw} />
+              </label>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-500 text-[10px]">MACROS:</span>
+            {macros.length === 0 && <span className="text-slate-600">none saved</span>}
+            {macros.map(m => (
+              <span key={m.id} className="flex items-center rounded bg-slate-900 border border-slate-700 overflow-hidden">
+                <button onClick={() => runMacro(m)} disabled={!isConnected} title={m.text} className="px-2 py-0.5 text-slate-300 hover:text-cyber-cyan disabled:opacity-40">{m.name}</button>
+                <button onClick={() => persistMacros(macros.filter(x => x.id !== m.id))} title="Delete macro" className="px-1 text-slate-600 hover:text-rose-400"><X className="w-3 h-3" /></button>
+              </span>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={macroDraft.name} onChange={(e) => setMacroDraft({ ...macroDraft, name: e.target.value })} placeholder="Name" className="w-24 bg-[#030712] border border-slate-800 rounded px-1.5 py-0.5 text-slate-300" />
+            <input value={macroDraft.text} onChange={(e) => setMacroDraft({ ...macroDraft, text: e.target.value })} placeholder="Text (\r \n \xNN escapes ok)" className="flex-1 min-w-[8rem] bg-[#030712] border border-slate-800 rounded px-1.5 py-0.5 text-slate-300" />
+            <button onClick={addMacro} className="px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-500/40 text-cyber-cyan">Save macro</button>
+            <button onClick={handleExportMacros} disabled={macros.length === 0} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-400 disabled:opacity-40">Export</button>
+            <label className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-400 cursor-pointer">
+              Import
+              <input type="file" accept="application/json,.json" className="hidden" onChange={handleImportMacros} />
+            </label>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-500 text-[10px]">HIGHLIGHT:</span>
+            {highlightRules.map(r => (
+              <span key={r.id} className={`flex items-center gap-1 rounded px-1.5 py-0.5 border border-slate-700 ${r.color}`}>
+                {r.pattern}
+                <button onClick={() => saveRules(highlightRules.filter(x => x.id !== r.id))} title="Remove rule"><X className="w-3 h-3" /></button>
+              </span>
+            ))}
+            <input value={ruleDraft} onChange={(e) => setRuleDraft(e.target.value)} placeholder="regex (e.g. error|panic)" className="w-40 bg-[#030712] border border-slate-800 rounded px-1.5 py-0.5 text-slate-300" />
+            <button onClick={addRule} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-400">Add rule</button>
+          </div>
+        </div>
+      )}
+      {toolMsg && (
+        <div className="px-3 py-1 bg-[#090e1a] border-t border-cyber-border text-[10px] text-amber-300 font-mono flex items-center justify-between">
+          <span>{toolMsg}</span>
+          <button onClick={() => setToolMsg('')} className="text-slate-500 hover:text-slate-300"><X className="w-3 h-3" /></button>
         </div>
       )}
 
@@ -610,9 +873,9 @@ export default function StreamConsole({
           onChange={(e) => setLineEnding(e.target.value)}
           className="bg-[#030712] border border-slate-800 text-[11px] font-mono text-slate-300 rounded-lg px-2 py-1.5 outline-none cursor-pointer"
         >
-          <option value="\r\n">CRLF (\r\n)</option>
-          <option value="\n">LF (\n)</option>
-          <option value="\r">CR (\r)</option>
+          <option value={'\r\n'}>CRLF (\r\n)</option>
+          <option value={'\n'}>LF (\n)</option>
+          <option value={'\r'}>CR (\r)</option>
           <option value="">None (Raw)</option>
           <option value="hex">Hex Bytes</option>
         </select>

@@ -8,7 +8,8 @@ export interface FirmwareArtifact {
   name: string;
   blob?: Uint8Array | ArrayBuffer;
   url?: string;
-  expectedSha256: string;
+  /** Real SHA-256 (hex) of the release file, or null when none is published yet (entry is disabled). */
+  expectedSha256: string | null;
   byteSize: number;
   targetAddress?: number;
 }

@@ -2,11 +2,14 @@
 // Extracted as-is; all state and handlers come in as props.
 import { ArrowUp, Download, FileCode, Folder, FolderOpen, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
 import React from 'react';
+import { isPrintableText, mimeForFileName } from '../../../../utils/flipperDriver';
 
 export default function FilesView({
   currentDir,
   dirItems,
   fileContent,
+  fileBytes = null,
+  fileNotice = null,
   fileUploadInputRef,
   handleCreateFolder,
   handleDeleteItem,
@@ -27,6 +30,12 @@ export default function FilesView({
         onChange={handleUploadFile} 
         className="hidden" 
       />
+
+      {fileNotice && (
+        <div role="status" className={`text-xs font-mono px-3 py-2 rounded-xl border ${fileNotice.type === 'error' ? 'bg-rose-600/20 text-rose-300 border-rose-500/30' : 'bg-emerald-600/20 text-emerald-300 border-emerald-500/30'}`}>
+          {fileNotice.text}
+        </div>
+      )}
 
       {/* Path, Breadcrumbs and Action Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#232733]">
@@ -195,6 +204,7 @@ export default function FilesView({
                 {selectedFile && (
                   <span className="text-[10px] text-slate-400">
                     {selectedFile.size ? `${selectedFile.size}` : ''}
+                    {fileBytes && !isPrintableText(fileBytes) ? ` binary, ${fileBytes.length} bytes (hex view is display only)` : ''}
                   </span>
                 )}
               </div>
@@ -202,8 +212,11 @@ export default function FilesView({
               {selectedFile && (
                 <div className="flex items-center gap-2 shrink-0">
                   <button
+                    disabled={!fileBytes}
                     onClick={() => {
-                      const blob = new Blob([fileContent || ''], { type: 'text/plain' });
+                      // Save the real bytes read from the device, not the displayed text/hex dump.
+                      const isText = isPrintableText(fileBytes);
+                      const blob = new Blob([fileBytes], { type: mimeForFileName(selectedFile.name, isText) });
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement('a');
                       a.href = url;
@@ -211,7 +224,7 @@ export default function FilesView({
                       a.click();
                       URL.revokeObjectURL(url);
                     }}
-                    className="px-3 py-1 bg-[#fe8a2c] hover:bg-[#ff9722] text-slate-950 font-bold rounded-lg text-xs font-mono transition flex items-center gap-1.5 shadow"
+                    className="px-3 py-1 bg-[#fe8a2c] hover:bg-[#ff9722] text-slate-950 font-bold rounded-lg text-xs font-mono transition flex items-center gap-1.5 shadow disabled:opacity-40"
                   >
                     <Download className="w-3.5 h-3.5" /> Export
                   </button>

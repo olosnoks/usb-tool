@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   readBytes, writeBytes, findRttControlBlock, RttClient, ItmParser, itmText, configureSwoTarget, TRACE,
-  Breakpoints, Watchpoints, FPB, DWT, parseElf, parseFlm, flmSectors, parsePdsc, loadFirmwareImage, programFlash, FlashAlgoRunner
+  Breakpoints, Watchpoints, FPB, DWT, parseElf, parseFlm, flmSectors, parsePdsc, loadFirmwareImage, programFlash, FlashAlgoRunner,
+  buildSymbolTable, formatSymbol, symbolAddress, eraseChipWithAlgorithm, nrf52EraseAll
 } from '../src/utils/cortexDebug';
 import { CmsisDapClient } from '../src/utils/cmsisDapDriver';
 import { DapProbe } from '../src/utils/dapLink';
@@ -394,5 +395,86 @@ describe('CMSIS-DAP SWO commands', () => {
     const over = probeWith(0x07, [], 0x40);
     await over.probe.open();
     await expect(over.probe.swoRead()).rejects.toThrow(/overrun/);
+  });
+});
+
+describe('ELF symbols', () => {
+  const elf = () => buildElf({
+    sections: [{ name: '.text', addr: 0x08000000, data: new Array(0x200).fill(0) }],
+    symbols: [
+      { name: 'Reset_Handler', value: 0x08000101, size: 0x20, shndx: 1, func: true },
+      { name: 'main', value: 0x08000121, size: 0x40, shndx: 1, func: true },
+      { name: 'asm_stub', value: 0x08000180, size: 0, shndx: 1, func: true },
+      { name: 'counter', value: 0x20000010, size: 4, shndx: 1 },
+      { name: '$t', value: 0x08000100, size: 0, shndx: 1, func: true }
+    ]
+  });
+
+  it('shows name+offset, strips the Thumb bit, and ignores mapping symbols', () => {
+    const table = buildSymbolTable(parseElf(elf()));
+    expect(table.map((s) => s.name)).not.toContain('$t');
+    expect(formatSymbol(table, 0x08000100)).toBe('Reset_Handler');
+    expect(formatSymbol(table, 0x08000120 + 0x12)).toBe('main+0x12');
+    expect(formatSymbol(table, 0x20000012)).toBe('counter+0x2');
+    expect(formatSymbol(table, 0x08000170)).toBe(''); // between symbols
+    expect(formatSymbol(table, 0x08000184)).toBe('asm_stub+0x4');
+    expect(symbolAddress(table, 'main')).toBe(0x08000120);
+    expect(symbolAddress(table, 'nope')).toBeNull();
+  });
+
+  it('client shows nothing without an ELF and sets a breakpoint by symbol', async () => {
+    const client = new CmsisDapClient(() => {});
+    expect(client.symbolFor(0x08000121)).toBe('');
+    expect(client.loadSymbols(elf(), 'fw.elf')).toBe(4);
+    expect(client.symbolFor(0x08000130)).toBe('main+0x10');
+    client.setBreakpoint = async (a) => { client.bp = a; };
+    expect(await client.breakAtSymbol('main')).toBe(0x08000120);
+    expect(client.bp).toBe(0x08000120);
+    await expect(client.breakAtSymbol('missing')).rejects.toThrow(/No symbol/);
+  });
+});
+
+describe('mass erase and unlock', () => {
+  it('mass erase runs only Init, EraseChip, UnInit', async () => {
+    const core = new FakeCore();
+    const flm = parseFlm(testFlm());
+    const runner = new FlashAlgoRunner(core, flm, { ramBase: 0x20000000, ramSize: 0x4000 });
+    wireAlgorithm(core, runner, flm);
+    core.mem.set(0x08000010, 0x1234);
+    await eraseChipWithAlgorithm(core, flm, { ramBase: 0x20000000, ramSize: 0x4000 });
+    expect(core.calls).toEqual(['Init', 'EraseChip', 'UnInit']);
+    expect(core.mem.has(0x08000010)).toBe(false);
+  });
+
+  it('refuses an algorithm without EraseChip', async () => {
+    const flm = { ...parseFlm(testFlm()), functions: { Init: 0, UnInit: 4 } };
+    await expect(eraseChipWithAlgorithm(new FakeCore(), flm, { ramBase: 0x20000000, ramSize: 0x4000 })).rejects.toThrow(/no EraseChip/);
+  });
+
+  function fakeCtrlAp({ idr = 0x02880000, busyReads = 2 } = {}) {
+    const log = [];
+    let busy = busyReads;
+    return {
+      log,
+      async readApRegister(ap, addr) {
+        log.push(`r${ap}:${addr.toString(16)}`);
+        if (addr === 0xfc) return idr;
+        if (addr === 0x08) return busy-- > 0 ? 1 : 0;
+        return 0;
+      },
+      async writeApRegister(ap, addr, v) { log.push(`w${ap}:${addr.toString(16)}=${v}`); }
+    };
+  }
+
+  it('nRF52 ERASEALL: check IDR, erase, poll status, pulse RESET, clear ERASEALL', async () => {
+    const t = fakeCtrlAp();
+    await nrf52EraseAll(t, { sleepMs: 0 });
+    expect(t.log).toEqual(['r1:fc', 'w1:4=1', 'r1:8', 'r1:8', 'r1:8', 'w1:0=1', 'w1:0=0', 'w1:4=0']);
+  });
+
+  it('refuses a target that has no nRF52 CTRL-AP', async () => {
+    const t = fakeCtrlAp({ idr: 0 });
+    await expect(nrf52EraseAll(t)).rejects.toThrow(/not an nRF52 CTRL-AP/);
+    expect(t.log).toEqual(['r1:fc']);
   });
 });

@@ -1,17 +1,16 @@
 // USB Protocol RE — in-browser port of usb-rea (MIT, (c) 2026 Emir Mrkaljević,
 // https://github.com/emirmrkaljevic/usb-rea). Load a usbmon/USBPcap capture plus action markers and get a
 // protocol report, a Python driver scaffold and a Wireshark Lua dissector. Everything runs locally.
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { analyze, sha256 } from '../../utils/usbrea/pipeline';
-import { render as renderReport } from '../../utils/usbrea/report';
-import { generate as generateScaffold } from '../../utils/usbrea/scaffold';
-import { generate as generateDissector } from '../../utils/usbrea/dissector';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { run_job } from '../../utils/usbrea/worker';
 import { read_transfers, find_ids } from '../../utils/usbrea/pcap';
+import PacketBrowser from './usbrea/PacketBrowser';
 import * as lookupDb from '../../utils/usbrea/lookup';
 import { make_capture } from '../../utils/usbrea/synth';
 
 const TABS = [
   ['analyze', 'Analyze capture'],
+  ['packets', 'Packets'],
   ['marker', 'Action marker'],
   ['lookup', 'VID:PID lookup'],
   ['guide', 'How to capture'],
@@ -41,6 +40,31 @@ function readFile(file) {
   });
 }
 
+const MARKERS_KEY = 'usbrea.markers';
+const MARKS_KEY = 'usbrea.marks';
+const store = {
+  get(k, d) { try { const v = window.sessionStorage.getItem(k); return v == null ? d : v; } catch { return d; } },
+  set(k, v) { try { window.sessionStorage.setItem(k, v); } catch { /* storage full or blocked */ } },
+};
+
+// Run the analysis in a module Web Worker (progress + cancel). Without Worker support (tests, very old
+// browsers) it falls back to running the same job on the calling thread.
+function startJob(msg, onMessage) {
+  if (typeof Worker === 'undefined') {
+    let cancelled = false;
+    run_job(msg, (m) => { if (!cancelled) onMessage(m); });
+    return () => { cancelled = true; };
+  }
+  const worker = new Worker(new URL('../../utils/usbrea/worker.js', import.meta.url), { type: 'module' });
+  worker.onmessage = (e) => {
+    onMessage(e.data);
+    if (e.data.type === 'result' || e.data.type === 'error') worker.terminate();
+  };
+  worker.onerror = (e) => { onMessage({ type: 'error', id: msg.id, message: e.message || 'analysis worker failed' }); worker.terminate(); };
+  worker.postMessage(msg);
+  return () => worker.terminate();
+}
+
 function OutputPane({ outputs, baseName }) {
   const [view, setView] = useState('report');
   const files = {
@@ -65,16 +89,24 @@ function OutputPane({ outputs, baseName }) {
   );
 }
 
-function AnalyzeTab({ log, pendingMarkers }) {
+function AnalyzeTab({ log, pendingMarkers, onPackets }) {
   const [capture, setCapture] = useState(null); // { name, bytes }
   const [devices, setDevices] = useState([]);
   const [device, setDevice] = useState('');
-  const [markersText, setMarkersText] = useState('');
+  const [markersText, setMarkersText] = useState(() => store.get(MARKERS_KEY, ''));
+  const [offsetText, setOffsetText] = useState('0');
+  const [progress, setProgress] = useState(null); // { stage, fraction }
+  const [truncated, setTruncated] = useState(null);
+  const cancelRef = useRef(null);
+  const jobId = useRef(0);
   const [labelsText, setLabelsText] = useState('');
   const [mode, setMode] = useState('markers');
   const [outputs, setOutputs] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => { store.set(MARKERS_KEY, markersText); }, [markersText]);
+  useEffect(() => () => { cancelRef.current?.(); }, []);
 
   useEffect(() => {
     if (pendingMarkers) { setMarkersText(pendingMarkers); setMode('markers'); }
@@ -88,7 +120,17 @@ function AnalyzeTab({ log, pendingMarkers }) {
     setOutputs(null);
     try {
       const bytes = await readFile(f);
-      const ts = read_transfers(bytes);
+      if (!bytes.length) throw new Error('the file is empty');
+      const info = {};
+      let ts;
+      try {
+        ts = read_transfers(bytes, info);
+      } catch (err) {
+        if (/not a pcap/i.test(err.message)) throw new Error('this is not a pcap/pcapng capture. Save the Wireshark capture as pcapng (or pcap), or use a .gz of one');
+        throw err;
+      }
+      setTruncated(info.truncated_at ?? null);
+      onPackets?.({ transfers: ts, ids: find_ids(ts), name: f.name, truncated_at: info.truncated_at ?? null });
       const ids = find_ids(ts);
       const counts = new Map();
       for (const t of ts) counts.set(t.device, (counts.get(t.device) || 0) + 1);
@@ -99,7 +141,7 @@ function AnalyzeTab({ log, pendingMarkers }) {
       }));
       setDevice('');
       setCapture({ name: f.name, bytes });
-      log?.(`usb-rea: loaded ${f.name} — ${ts.length} transfers`);
+      log?.(`usb-rea: loaded ${f.name} - ${ts.length} transfers${info.truncated_at ? ` (truncated at frame ${info.truncated_at})` : ''}`);
     } catch (err) {
       setError(`Could not read capture: ${err.message}`);
     }
@@ -113,29 +155,42 @@ function AnalyzeTab({ log, pendingMarkers }) {
     setMode('markers');
   };
 
-  const run = useCallback(async (cap, markers, labels, dev) => {
+  const cancel = () => {
+    cancelRef.current?.();
+    cancelRef.current = null;
+    jobId.current += 1;
+    setBusy(false);
+    setProgress(null);
+    setError('Analysis cancelled.');
+  };
+
+  const run = useCallback((cap, markers, labels, dev) => {
+    cancelRef.current?.();
     setBusy(true);
     setError(null);
-    try {
-      const proto = analyze(cap.bytes, markers, dev, labels);
-      const digest = await sha256(cap.bytes);
-      const base = cap.name.replace(/\.(gz)$/i, '').replace(/\.(pcapng|pcap)$/i, '').replace(/[^\w.-]+/g, '_') || 'device';
-      setOutputs({
-        base,
-        report: renderReport(proto, cap.name, digest),
-        scaffold: generateScaffold(proto),
-        dissector: generateDissector(proto, base),
-        json: JSON.stringify(proto.to_dict ? proto.to_dict() : proto, (k, v) => (v instanceof Uint8Array ? Array.from(v, (x) => x.toString(16).padStart(2, '0')).join('') : v === Infinity ? null : v), 1),
-      });
-      log?.(`usb-rea: ${proto.commands.length} command(s) inferred from ${cap.name}`);
-    } catch (err) {
-      console.error(err);
-      setError(err.message || String(err));
-      setOutputs(null);
-    } finally {
-      setBusy(false);
-    }
-  }, [log]);
+    setProgress({ stage: 'Starting', fraction: 0 });
+    const id = ++jobId.current;
+    const offset = Number(offsetText);
+    cancelRef.current = startJob(
+      { type: 'analyze', id, bytes: cap.bytes, name: cap.name, markers, labels, device: dev, markerOffset: Number.isFinite(offset) ? offset : 0 },
+      (m) => {
+        if (m.id !== jobId.current) return;
+        if (m.type === 'progress') {
+          setProgress({ stage: m.stage, fraction: m.fraction });
+        } else if (m.type === 'result') {
+          setOutputs(m.outputs);
+          setBusy(false);
+          setProgress(null);
+          log?.(`usb-rea: ${m.outputs.commands} command(s) inferred from ${cap.name}`);
+        } else if (m.type === 'error') {
+          setError(m.message);
+          setOutputs(null);
+          setBusy(false);
+          setProgress(null);
+        }
+      },
+    );
+  }, [log, offsetText]);
 
   const onAnalyze = () => {
     if (!capture) return;
@@ -155,6 +210,11 @@ function AnalyzeTab({ log, pendingMarkers }) {
       const { capture: bytes, markers } = make_capture();
       const cap = { name: 'demo-lamp.pcap', bytes };
       setCapture(cap);
+      setTruncated(null);
+      try {
+        const ts = read_transfers(bytes);
+        onPackets?.({ transfers: ts, ids: find_ids(ts), name: cap.name, truncated_at: null });
+      } catch { /* browser stays empty */ }
       setDevices([]);
       setDevice('');
       const text = JSON.stringify(markers, null, 1);
@@ -174,6 +234,7 @@ function AnalyzeTab({ log, pendingMarkers }) {
           <input type="file" accept=".pcap,.pcapng,.gz,.cap" onChange={onCapture} className="text-xs text-gray-300" />
           <p className="text-[11px] text-gray-500">pcap or pcapng, gzipped OK. Linux usbmon (DLT 189/220) or Windows USBPcap (DLT 249).</p>
           {capture && <div className="text-xs text-gray-300">Loaded <span className="font-mono text-amber-300">{capture.name}</span></div>}
+          {truncated != null && <div className="text-xs text-amber-400">Capture truncated at frame {truncated}: everything before it was loaded, the rest of the file is cut off or corrupt.</div>}
           {devices.length > 0 && (
             <label className="block text-xs text-gray-300">Target device
               <select value={device} onChange={(e) => setDevice(e.target.value)} className={`${field} mt-1`}>
@@ -193,6 +254,10 @@ function AnalyzeTab({ log, pendingMarkers }) {
           {mode === 'markers' ? (
             <>
               <input type="file" accept=".json" onChange={onMarkers} className="text-xs text-gray-300" />
+              <label className="flex items-center gap-2 text-xs text-gray-300">Timestamp offset (s)
+                <input type="number" step="0.1" value={offsetText} onChange={(e) => setOffsetText(e.target.value)} className={`${field} w-28`} aria-label="Marker timestamp offset in seconds" />
+                <span className="text-gray-500">added to every marker time (clock skew)</span>
+              </label>
               <textarea value={markersText} onChange={(e) => setMarkersText(e.target.value)} rows={6} className={field}
                 placeholder='[{"label": "brightness 0%", "start": 1763337600.12, "end": null}, ...]' />
             </>
@@ -204,6 +269,13 @@ function AnalyzeTab({ log, pendingMarkers }) {
       </div>
       <div className="flex items-center gap-3">
         <button type="button" className={btnPrimary} disabled={!capture || busy} onClick={onAnalyze}>{busy ? 'Analyzing…' : '3. Infer protocol'}</button>
+        {busy && <button type="button" className={btnGhost} onClick={cancel}>Cancel</button>}
+        {busy && progress && (
+          <span className="text-xs text-gray-400 flex items-center gap-2">
+            <progress value={Math.round(progress.fraction * 100)} max={100} className="w-32" />
+            {progress.stage}
+          </span>
+        )}
         {error && <span className="text-xs text-red-400">{error}</span>}
       </div>
       {outputs && <OutputPane outputs={outputs} baseName={outputs.base} />}
@@ -212,7 +284,8 @@ function AnalyzeTab({ log, pendingMarkers }) {
 }
 
 function MarkerTab({ onUse }) {
-  const [marks, setMarks] = useState([]);
+  const [marks, setMarks] = useState(() => { try { return JSON.parse(store.get(MARKS_KEY, '[]')); } catch { return []; } });
+  useEffect(() => { store.set(MARKS_KEY, JSON.stringify(marks)); }, [marks]);
   const [label, setLabel] = useState('');
   const now = () => Date.now() / 1000;
   const add = (lb) => {
@@ -332,6 +405,7 @@ function GuideTab() {
 export default function UsbReaWorkbench({ onLogMessage }) {
   const [tab, setTab] = useState('analyze');
   const [pendingMarkers, setPendingMarkers] = useState(null);
+  const [packets, setPackets] = useState(null);
   const log = useMemo(() => (m) => onLogMessage?.(m), [onLogMessage]);
   return (
     <div className="p-4 space-y-4">
@@ -340,7 +414,13 @@ export default function UsbReaWorkbench({ onLogMessage }) {
           <button key={id} type="button" onClick={() => setTab(id)} className={tab === id ? btnPrimary : btnGhost}>{name}</button>
         ))}
       </div>
-      <div className={tab === 'analyze' ? '' : 'hidden'}><AnalyzeTab log={log} pendingMarkers={pendingMarkers} /></div>
+      <div className={tab === 'analyze' ? '' : 'hidden'}><AnalyzeTab log={log} pendingMarkers={pendingMarkers} onPackets={setPackets} /></div>
+      {tab === 'packets' && (packets ? (
+        <div className="space-y-2">
+          <div className="text-xs text-gray-400">{packets.name}{packets.truncated_at ? ` (truncated at frame ${packets.truncated_at})` : ''}</div>
+          <PacketBrowser transfers={packets.transfers} ids={packets.ids} />
+        </div>
+      ) : <div className="text-xs text-gray-500">Load a capture (or the demo) in the Analyze tab first.</div>)}
       <div className={tab === 'marker' ? '' : 'hidden'}><MarkerTab onUse={(json) => { setPendingMarkers(json); setTab('analyze'); }} /></div>
       {tab === 'lookup' && <LookupTab />}
       {tab === 'guide' && <GuideTab />}

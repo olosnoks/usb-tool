@@ -199,8 +199,8 @@ The Flipper Zero mounts standard FAT32 / exFAT microSD cards under the root moun
 | **Color Theme** | Dropdown | Selects color palettes: Classic Orange (\`#FF8200\`), Monochrome Green (\`#00FF66\`), OLED White (\`#FFFFFF\`), or Inverted Dark. |
 | **Virtual D-Pad** | Buttons | On-screen navigation buttons triggering \`gui_send_input_event_request\` for Up, Down, Left, Right, OK, Back. |
 | **Storage Tab** | Tab | Switches view to the remote file manager for browsing \`/ext\` microSD card folders. |
-| **Upload File** | Button / Dropzone | Uploads arbitrary local files directly to the selected directory on the Flipper's microSD card. |
-| **Download File** | Button | Streams the selected file in 512-byte blocks and saves it to your local browser downloads. |
+| **Upload File** | Button / Dropzone | Uploads local files to the selected directory on the Flipper's microSD card. The file is read as raw bytes, so binary files arrive unchanged. A confirmation appears for files over 1 MB. |
+| **Export** | Button | Saves the selected file to your browser downloads from the raw bytes read over RPC, so binary files are not altered. Non-text files are previewed as a hex dump instead of being decoded as text. |
 | **Delete File** | Button | Permanently deletes the selected file or folder on the microSD card. |
 | **Take Screenshot** | Button | Captures the current LCD canvas and exports a pixel-perfect PNG file. |
 | **Battery & Health Pill** | Status Badge | Displays live battery charge percentage, voltage in mV, and FreeRTOS heap memory metrics. |
@@ -590,7 +590,7 @@ These tabs are **not shown** at the moment. The old Transmit Lab only ran a time
 
 ### 7. FREQMAN Frequency Manager Table
 
-Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The workbench provides built-in presets:
+Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The FREQMAN tab can **import** a \`FREQMAN.TXT\` (lines of \`f=,a=,d=,bw=\`), **export** the list, or **reset to presets**. Import reports how many entries were accepted, how many lines were rejected and how many duplicates were skipped; if no line is valid, the current list is left unchanged, otherwise the imported entries replace the list. The list is kept in the browser's local storage, so edits survive a reload (if storage is blocked or full, it just does not persist). The workbench provides built-in presets:
 | Preset ID | Frequency | Modulation | Category | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **\`ism-433\`** | 433.920 MHz | NFM (12.5 kHz) | ISM | Keyfobs, wireless doorbells & weather sensors |
@@ -623,7 +623,8 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 | **LISTEN, demod, SQL, volume** | Row | Audio on/off, WFM / NFM / AM / USB / LSB, squelch on the channel power, output level. |
 | **Tactical Map tab** | Tab | Leaflet map tracking ADS-B aircraft decoded from the 1090 MHz IQ. |
 | **MAX + REC, capture strip** | Row | Records raw IQ (up to 512 MB) and saves it as .c8 or Mayhem .C16 + .TXT. |
-| **FREQMAN tab** | Panel | Edits channel presets and exports FREQMAN.TXT for the microSD card; TUNE opens the receiver on that channel. |
+| **FREQMAN tab** | Panel | Edits channel presets, imports and exports FREQMAN.TXT for the microSD card, and resets to the built-in presets; TUNE opens the receiver on that channel. |
+| **Export peaks CSV** | Button | Saves the sweep peak list as \`sweep-peaks-<timestamp>.csv\` (disabled until a sweep has produced peaks). |
 
 ---
 
@@ -642,6 +643,7 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The wor
 2. Pick a preset band, or type a custom start and end in MHz (for example 400 and 500).
 3. The HackRF hops across the band; the stitched trace fills in, each pass adds a waterfall row, and peaks above the **THRESHOLD** are listed.
 4. Wheel-zoom into a busy stretch, then click a peak (or **Tune & Listen**) to tune there and listen in LIVE.
+5. To keep the result, click **Export peaks CSV**. Columns: \`start_hz,end_hz,peak_hz,dbfs,timestamp\` (swept band, peak frequency, level, and when the pass finished), one row per listed peak.
 
 ---
 
@@ -773,7 +775,17 @@ for (let i = 2; i < buffer.length - 2; i++) {
 | **OpenStreetMap View** | Map Canvas | Real-time Leaflet map tracking current fix, GPS accuracy circle, and vehicle path. |
 | **Satellites In View Table**| Table | Displays active satellite IDs (PRN), constellation origin, elevation, azimuth, and SNR bars. |
 | **NMEA Raw Stream** | Drawer | Collapsible raw ASCII terminal displaying incoming sentences with checksum verification. |
-| **Export WiGLE CSV** | Button | Converts live geolocated survey points into official WiGLE CSV format for global submission. |
+| **Export WiGLE CSV** | Button | Writes the captured networks as a WigleWifi-1.6 CSV (rules below). Networks without a GPS fix are skipped and the status line reports how many. |
+
+#### WiGLE CSV export rules
+
+One shared writer produces every WiGLE CSV in the app. It writes a \`WigleWifi-1.6\` pre-header, the 14-column header and one row per network:
+
+- **FirstSeen** is a UTC time (\`YYYY-MM-DD HH:MM:SS\`) taken from the network's first observation, not the export time.
+- **No GPS fix, no row.** Networks without a valid position are skipped and counted; the export never writes 0,0 positions. If every network lacks a fix, nothing is exported.
+- **Unknown values stay empty.** RSSI, channel, frequency, altitude and accuracy are left blank when unknown rather than filled with made-up numbers.
+- SSIDs are CSV-escaped, and a leading \`=\`, \`+\`, \`-\` or \`@\` is prefixed with an apostrophe so spreadsheets do not run it as a formula.
+- The file is saved as \`<device-tag>-<timestamp>.wigle.csv\`.
 
 ---
 
@@ -897,6 +909,14 @@ AA:BB:CC:DD:EE:FF,CoffeeShop,[WPA2-PSK-CCMP],2024-03-23 12:45:10,6,-68,48.123456
 4. Select your \`piglet_wardrive_YYYYMMDD.csv\` file.
 5. Your discovered access points will be added to the global wireless map and your user rank will increase!
 
+#### Viewing, merging and exporting logs in the app
+
+The Warhog/Piglet SD file browser opens \`.csv\` logs in a viewer (the device caps CSV logs at 9 MiB; unreadable lines are skipped and counted):
+
+- **Map and histograms:** logged networks are plotted on a Leaflet map (strongest-signal fix per MAC, capped at 5000 points), with histograms for Wi-Fi channel, Wi-Fi security and Wi-Fi vs BLE.
+- **Export KML / GeoJSON:** one point per MAC at its strongest-signal fix. Rows without a valid fix (including 0,0) are never plotted or exported; the buttons are disabled when the log has none.
+- **Merge selected logs:** select two or more WiGLE CSVs to merge them into one row per MAC, keeping the best-RSSI sighting (a row with a fix wins over a stronger one without) and the earliest FirstSeen. The result opens in the viewer and can be downloaded as \`merged.csv\`.
+
 ---
 
 ### 6. Upstream Project & Engineering Attribution
@@ -1017,7 +1037,7 @@ ESP32 Marauder is **external firmware** controlled over its serial CLI — there
     content: `
 # Demo Wardrive Generator — Synthetic APs for Map Art, Routes & Pipeline Testing
 
-The **Demo Wardrive Generator** builds **synthetic** Wi-Fi access point (AP) datasets laid out along a path you choose: a word, a real road route, or an SVG drawing. Every AP gets an ISP-style SSID, a vendor-OUI MAC, a channel, an RSSI and a GPS fix with a timestamp, then exports as a **WigleWifi-1.6** CSV or a lightweight **Kepler.gl** CSV. The concept of drawing on wardrive maps with AP trails comes from **OSINTI4L**.
+The **Demo Wardrive Generator** builds **synthetic** Wi-Fi access point (AP) datasets laid out along a path you choose: a word, a real road route, or an SVG drawing. Every AP gets an ISP-style SSID, a vendor-OUI MAC, a channel, an RSSI and a GPS fix with a timestamp, then exports as a **WigleWifi-1.6**-layout CSV or a lightweight **Kepler.gl** CSV. Every export is marked **SYNTHETIC** in its header, rows and file name so it cannot pass for a real survey log. The concept of drawing on wardrive maps with AP trails comes from **OSINTI4L**.
 
 Open it from the sidebar (**Demo Wardrive Generator**) or from the **GPS & Wardrive Suite** → **Demo Vector Generator** tab.
 
@@ -1103,7 +1123,7 @@ The sliders button opens **Base Font Geometry & PRNG**:
 
 - **Base Width / Base Height / Letter Gap (°)**: base letter geometry in degrees before the size multiplier (defaults 0.04 / 0.06 / 0.02). SVG art also uses width and height as its base span.
 - **Random Seed** with **Fixed Seed** (on by default): the same settings and seed give the same dataset every time. Turn it off for a fresh random seed per run.
-- **WiGLE Header**: include or drop the \`WigleWifi-1.6\` pre-header line in WiGLE exports.
+- **WiGLE Header (SYNTHETIC)**: always on. The WiGLE pre-header carries the SYNTHETIC marker, so it is never dropped.
 
 ---
 
@@ -1119,14 +1139,14 @@ The sliders button opens **Base Font Geometry & PRNG**:
 
 | Button | Columns | File name |
 | :--- | :--- | :--- |
-| **WiGLE CSV** | Optional \`WigleWifi-1.6\` pre-header, then \`MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type\` (\`Type\` = \`WIFI\`). | \`<text>_wigle.csv\` |
-| **Kepler CSV** | \`mac,ssid,auth,first_seen,channel,rssi,lat,lon\` | \`<text>_kepler.csv\` |
+| **WiGLE CSV** | \`WigleWifi-1.6\`-layout pre-header whose fields (appRelease, model, device, brand and so on) all say SYNTHETIC, then \`MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type\` (\`Type\` = \`WIFI\`). | \`SYNTHETIC_<text>_wigle.csv\` |
+| **Kepler CSV** | \`mac,ssid,auth,first_seen,channel,rssi,lat,lon,synthetic\` (the last column is \`SYNTHETIC\` on every row) | \`SYNTHETIC_<text>_kepler.csv\` |
 
-The file name comes from your phrase, lower-cased with non-alphanumerics replaced by \`_\` (\`demo\` if empty).
+The file name is \`SYNTHETIC_\` followed by your phrase, lower-cased with non-alphanumerics replaced by \`_\` (\`demo\` if empty).
 
 #### Split limit
 - **Split** sets a per-file size cap: No Limit, 1, 2, 5, 10, 25, 50 or 100 MB.
-- When the data needs more than one file, each part carries the full header (and pre-header for WiGLE), so every part opens on its own. Parts are named \`<text>_wigle_part01_of_04.csv\` and downloaded together as \`<text>_wigle_<N>_parts.zip\` (Kepler likewise). The export button shows an estimated part count.
+- When the data needs more than one file, each part carries the full header (and pre-header for WiGLE), so every part opens on its own. Parts are named \`SYNTHETIC_<text>_wigle_part01_of_04.csv\` and downloaded together as \`SYNTHETIC_<text>_wigle_<N>_parts.zip\` (Kepler likewise). The export button shows an estimated part count.
 
 ---
 
@@ -1144,16 +1164,16 @@ The **Kepler Guide** tab in the tool has the same steps.
 
 ### 9. Standalone Python Exporter
 
-The **Python Script** tab generates a dependency-free Python 3 script pre-filled with your current settings: mode, phrase or SVG strokes, road route coordinates (already snapped, so the script needs no network access), position, geometry, density, speed, start time, SSID profile and pre-header choice.
+The **Python Script** tab generates a dependency-free Python 3 script pre-filled with your current settings: mode, phrase or SVG strokes, road route coordinates (already snapped, so the script needs no network access), position, geometry, density, speed, start time, SSID profile.
 
-- **Copy Python Code** or **Download .py** (saved as \`<text>_generator.py\`).
+- **Copy Python Code** or **Download .py** (saved as \`SYNTHETIC_<text>_generator.py\`).
 - Run it anywhere:
 
 \`\`\`bash
 python3 kepler_generator.py
 \`\`\`
 
-- It writes \`<text>_wigle.csv\` and \`<text>_test.csv\` (Kepler columns) to the current folder. It does not split files.
+- It writes \`<text>_wigle.csv\` and \`<text>_test.csv\` (Kepler columns) to the current folder. It does not split files. The pre-header and rows carry the same SYNTHETIC marker, and the script prints a notice not to upload the output.
 - The script always uses Python's \`random\` with seed 42, so its output matches its own previous runs but not the browser's rows exactly. Path, density and timing are the same.
 
 ---
@@ -1242,10 +1262,20 @@ The workbench includes a built-in firmware flasher for Nordic Semiconductor nRF5
 
 ---
 
-### 4. Implementation & Architecture
+### 4. Exports, Advertisements & Cleanup
+
+- **GATT export:** **Export JSON** and **Export Markdown** save the discovered service tree: UUIDs, names, properties, and the last value read for each characteristic and descriptor (hex, decoded text, byte length, timestamp, or the read error). Live handles are stripped, so the file is plain data.
+- **Notification history CSV:** notifications are kept in a history (capped at 2000 entries) and can be downloaded as \`ble_notifications_<timestamp>.csv\` with columns \`time,characteristic,hex,decoded\`, sorted by time. Device-supplied text that starts with \`=\`, \`+\`, \`-\` or \`@\` is apostrophe-prefixed so spreadsheets do not run it.
+- **Advertisement watching:** where the browser supports \`watchAdvertisements()\` (Chromium, sometimes behind a flag), you can watch advertisements of the device you already selected. It is limited to that device; Web Bluetooth cannot scan for other advertisers.
+- **Cleanup:** disconnecting, or closing the tool, stops notifications and advertisement watching, removes the event listeners and releases the GATT connection. If the device drops the link, the last values stay on screen and the status says so; some devices need pairing before values can be read.
+
+---
+
+### 5. Implementation & Architecture
 
 - **Driver:** [\`src/utils/bleDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/bleDriver.js) — Web Bluetooth connection handling, service enumeration, characteristic caching, and notification streaming.
 - **DFU Engine:** [\`src/utils/nordicDfu.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/nordicDfu.js) — Nordic Secure DFU protocol implementation and packet assembler.
+- **Exporters:** [\`src/utils/bleExport.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/bleExport.js) — GATT JSON/Markdown and notification CSV (pure functions).
 - **Workbench:** [\`src/components/tools/BleExplorer.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/BleExplorer.jsx) — interactive GATT tree browser, live chart visualizer, and hexadecimal console.
 - **Tests:** [\`tests/bleDriver.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/bleDriver.test.js) and [\`tests/nordicDfu.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/nordicDfu.test.js).
 `

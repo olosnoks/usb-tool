@@ -20,9 +20,13 @@ import {
 import { useSerial } from '../../context/SerialContext';
 import {
   CAN_BAUD_RATES,
+  CAN_FD_DATA_RATES,
   COMMON_DTCS,
   parseSlcanFrame,
   buildSlcanFrame,
+  buildSlcanOpenSequence,
+  createSlcanClock,
+  autoDetectBitrate,
   SlcanLineReader,
   ObdOverSlcan
 } from '../../utils/canBusDriver';
@@ -37,8 +41,11 @@ import {
   IsoTpChannel,
   UdsClient,
   UDS_DIDS,
+  UdsDeclinedError,
   formatDidValue,
-  OBD_PID_TABLE
+  OBD_PID_TABLE,
+  decodeJ1939Frame,
+  buildJ1939Request
 } from '../../utils/canTools';
 
 import { confirmAction } from '../../utils/sessionLog';
@@ -60,6 +67,7 @@ const MODES = [
   ['sniffer', 'CAN Bus Sniffer'],
   ['obd2', 'OBD-II Scanner & Gauges'],
   ['uds', 'UDS Diagnostics'],
+  ['j1939', 'J1939'],
   ['log', 'Record & Replay']
 ];
 
@@ -85,6 +93,25 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const [txExtended, setTxExtended] = useState(false);
   const [txIntervalMs, setTxIntervalMs] = useState(100);
   const [txPeriodic, setTxPeriodic] = useState(false);
+  const [txRtr, setTxRtr] = useState(false);
+  const [txRtrDlc, setTxRtrDlc] = useState(0);
+  const [txFd, setTxFd] = useState(false);
+  const [txBrs, setTxBrs] = useState(true);
+
+  // Channel options: listen-only never transmits or ACKs; FD and timestamps need adapter firmware support.
+  const [listenOnly, setListenOnly] = useState(false);
+  const [fdRate, setFdRate] = useState('');           // '' = classic CAN only
+  const [hwTimestamps, setHwTimestamps] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const detectRef = useRef(null);                     // { frames, errors } while auto-detecting
+  const clockRef = useRef(createSlcanClock());
+  const listenOnlyRef = useRef(false);
+  listenOnlyRef.current = listenOnly;
+
+  // J1939
+  const [j1939Pgn, setJ1939Pgn] = useState('65262');
+  const [j1939Da, setJ1939Da] = useState('FF');
+  const [j1939Sa, setJ1939Sa] = useState('F9');
 
   // OBD-II. null = not read yet, 'n/a' = the car doesn't support that PID.
   const EMPTY_OBD = { rpm: null, speed: null, temp: null, load: null, throttle: null, voltage: null };
@@ -119,6 +146,18 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const [udsLog, setUdsLog] = useState([]);
   const [udsBusy, setUdsBusy] = useState('');
   const [testerPresent, setTesterPresent] = useState(false);
+  const [udsRoutineId, setUdsRoutineId] = useState('FF00');
+  const [udsRoutineType, setUdsRoutineType] = useState(1);
+  const [udsRoutineOpt, setUdsRoutineOpt] = useState('');
+  const [udsWriteDid, setUdsWriteDid] = useState('F190');
+  const [udsWriteData, setUdsWriteData] = useState('');
+  const [udsSecLevel, setUdsSecLevel] = useState('01');
+  const [udsSeed, setUdsSeed] = useState('');
+  const [udsKey, setUdsKey] = useState('');
+  const [udsMemAddr, setUdsMemAddr] = useState('');
+  const [udsMemSize, setUdsMemSize] = useState('16');
+  const [udsCommType, setUdsCommType] = useState('00');
+  const [udsDtcSetting, setUdsDtcSetting] = useState('02');
   const udsRef = useRef(null); // { tp, uds, key }
 
   const sendRef = useRef(sendString);
@@ -132,7 +171,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const ingest = (frames, { tx = false } = {}) => {
     const now = performance.now();
     for (const f of frames) {
-      if (recordingRef.current && logRef.current.length < MAX_LOG) logRef.current.push({ ...f, t: f.t ?? Date.now(), tx });
+      if (recordingRef.current && logRef.current.length < MAX_LOG) logRef.current.push({ ...f, t: f.hwMs ?? f.t ?? Date.now(), tx });
       if (tx) continue;
       obdRef.current.onFrame(f);
       udsRef.current?.tp.onFrame(f);
@@ -142,8 +181,10 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
 
   // One CAN frame onto the bus.
   const sendFrame = (f) => {
-    const frame = { ...f, dlc: f.data.length, t: Date.now() };
-    sendRef.current(buildSlcanFrame(frame.id, frame.data, frame.isExtended), '');
+    if (listenOnlyRef.current) throw new Error('The channel is open listen-only, so nothing can be sent. Turn listen-only off and restart the sniffer.');
+    const frame = { ...f, dlc: f.rtr ? (f.dlc ?? 0) : f.data.length, t: Date.now() };
+    const line = buildSlcanFrame(frame.id, frame.data, frame.isExtended, { rtr: !!f.rtr, fd: !!f.fd, brs: !!f.brs, dlc: frame.dlc });
+    sendRef.current(line, '');
     ingest([frame], { tx: true });
   };
 
@@ -159,9 +200,10 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
         const key = (f.isExtended ? 'x' : '') + f.id;
         const old = next[key];
         const diffs = new Set();
-        if (old) for (let i = 0; i < f.dlc; i++) if (old.data[i] !== f.data[i]) diffs.add(i);
+        if (old) for (let i = 0; i < f.data.length; i++) if (old.data[i] !== f.data[i]) diffs.add(i);
         next[key] = {
           id: f.id, isExtended: f.isExtended, dlc: f.dlc, data: f.data, lastTime: now,
+          rtr: !!f.rtr, fd: !!f.fd, brs: !!f.brs, hwMs: f.hwMs ?? null,
           deltaMs: old ? now - old.lastTime : 0, count: (old?.count || 0) + 1, diffs,
           lastChange: diffs.size || !old ? now : old.lastChange
         };
@@ -189,7 +231,11 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       const frames = [];
       for (const line of reader.push(dec.decode(bytes, { stream: true }))) {
         const f = parseSlcanFrame(line);
-        if (f) frames.push({ ...f, t: Date.now() });
+        if (detectRef.current) {                      // bit-rate probe: only count what the bus gives us
+          if (f) detectRef.current.frames++; else if (line.trim()) detectRef.current.errors++;
+          continue;
+        }
+        if (f) frames.push({ ...f, t: Date.now(), hwMs: clockRef.current(f.timestamp) });
       }
       if (frames.length) ingest(frames);
     });
@@ -229,7 +275,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
     if (!txPeriodic) return undefined;
     const t = setInterval(() => { try { transmit(); } catch (e) { setTxPeriodic(false); setNotice(e.message); } }, Math.max(5, Number(txIntervalMs) || 100));
     return () => clearInterval(t);
-  }, [txPeriodic, txIntervalMs, txId, txData, txExtended]);
+  }, [txPeriodic, txIntervalMs, txId, txData, txExtended, txRtr, txRtrDlc, txFd, txBrs]);
 
   // UDS TesterPresent keep-alive (every 2 s) so non-default sessions don't time out.
   useEffect(() => {
@@ -245,16 +291,17 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
 
   // SLCAN: close, set bitrate, open (listen + transmit).
   const openChannel = async () => {
-    await sendString('C', '\r');
-    await sendString(canBaud, '\r');
-    await sendString('O', '\r');
+    clockRef.current = createSlcanClock();
+    const seq = buildSlcanOpenSequence({ baudCode: canBaud, fdRateCode: fdRate || null, mode: listenOnly ? 'listen' : 'normal', timestamps: hwTimestamps });
+    for (const cmd of seq) await sendString(cmd, '\r');
+    return seq;
   };
 
   const startSniffing = async () => {
     if (!isConnected) { alert('Connect the SLCAN adapter (CANable / Candlelight) over serial first.'); return false; }
-    await openChannel();
+    const seq = await openChannel();
     const rate = (CAN_BAUD_RATES.find((r) => r.code === canBaud) || {}).label || canBaud;
-    addLog(`[CAN BUS] SLCAN channel opened at ${rate} (${canBaud}, O).`, 'sys');
+    addLog(`[CAN BUS] SLCAN channel opened at ${rate} (${seq.join(' ')}).`, 'sys');
     setIsSniffing(true);
     sniffingRef.current = true;
     return true;
@@ -263,6 +310,41 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const ensureBus = async () => {
     if (sniffingRef.current) return true;
     return startSniffing();
+  };
+
+  // Listen-only sweep over the common bit rates; nothing is transmitted.
+  const handleAutoDetect = async () => {
+    if (!isConnected) { setNotice('Connect the SLCAN adapter first.'); return; }
+    setDetecting(true);
+    setNotice('Listening at each bit rate (listen-only, nothing is sent)...');
+    try {
+      if (sniffingRef.current) { setIsSniffing(false); sniffingRef.current = false; }
+      const probe = async (code) => {
+        detectRef.current = { frames: 0, errors: 0 };
+        await sendString('C', '\r');
+        await sendString(code, '\r');
+        await sendString('L', '\r');
+        await new Promise((r) => setTimeout(r, 700));
+        const res = detectRef.current;
+        detectRef.current = null;
+        await sendString('C', '\r');
+        return res;
+      };
+      const r = await autoDetectBitrate(probe);
+      if (r.code) {
+        setCanBaud(r.code);
+        const label = (CAN_BAUD_RATES.find((b) => b.code === r.code) || {}).label || r.code;
+        setNotice(`Heard clean frames at ${label}. Bit rate set; press START SNIFFER.`);
+        addLog(`[CAN BUS] Auto-detect: ${label} (${r.code}).`, 'sys');
+      } else {
+        setNotice('No frames heard at 500/250/1000/125/100 kbps. Check the wiring, termination and that something is transmitting on the bus.');
+      }
+    } catch (e) {
+      setNotice(`Auto-detect failed: ${e.message}`);
+    } finally {
+      detectRef.current = null;
+      setDetecting(false);
+    }
   };
 
   const stopSniffing = async () => {
@@ -276,18 +358,20 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const transmit = () => {
     const id = parseInt(String(txId).replace(/^0x/i, ''), 16);
     if (Number.isNaN(id) || id < 0 || id > 0x1fffffff) throw new Error('Invalid hex CAN ID.');
-    const bytes = parseBytes(txData);
-    if (bytes.length > 8) throw new Error('Classic CAN frames carry at most 8 bytes.');
+    const bytes = txRtr ? [] : parseBytes(txData);
     if (!isConnected) throw new Error('Connect the SLCAN adapter first.');
     const ext = txExtended || id > 0x7ff;
-    sendFrame({ id, isExtended: ext, data: Uint8Array.from(bytes) });
-    return { id, ext, bytes };
+    const frame = { id, isExtended: ext, data: Uint8Array.from(bytes), rtr: txRtr, fd: txFd && !txRtr, brs: txFd && !txRtr && txBrs };
+    if (txRtr) frame.dlc = Math.max(0, Math.min(8, Number(txRtrDlc) || 0));
+    if (frame.fd && !fdRate) throw new Error('Pick a CAN FD data rate in the toolbar and restart the sniffer to send FD frames.');
+    sendFrame(frame); // throws for payloads the frame type cannot carry
+    return { id, ext, bytes, frame };
   };
 
   const handleTransmitFrame = () => {
     try {
-      const { id, ext, bytes } = transmit();
-      addLog(`[CAN TX] ${buildSlcanFrame(id, Uint8Array.from(bytes), ext).trim()}`, 'tx');
+      const { frame } = transmit();
+      addLog(`[CAN TX] ${buildSlcanFrame(frame.id, frame.data, frame.isExtended, { rtr: frame.rtr, fd: frame.fd, brs: frame.brs, dlc: frame.dlc }).trim()}`, 'tx');
       setNotice('');
     } catch (e) {
       setNotice(e.message);
@@ -368,7 +452,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
     const key = `${udsTx}/${udsRx}/${udsExtended}`;
     if (udsRef.current?.key !== key) {
       const tp = new IsoTpChannel((f) => sendFrame(f), { txId: parseInt(udsTx, 16), rxId: parseInt(udsRx, 16), extended: udsExtended, timeoutMs: 1500 });
-      udsRef.current = { key, tp, uds: new UdsClient(tp) };
+      udsRef.current = { key, tp, uds: new UdsClient(tp, { confirm: (m) => confirmAction(m, 'CAN Bus') }) };
     }
     return udsRef.current;
   };
@@ -383,7 +467,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       if (!(await ensureBus())) return;
       await fn(udsChannel().uds);
     } catch (e) {
-      logUds('!', e.message, 'error');
+      logUds('!', e.message, e instanceof UdsDeclinedError ? 'info' : 'error');
     } finally {
       setUdsBusy('');
     }
@@ -432,6 +516,81 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
     logUds('<', `${hexBytes(r)}${r.length > 3 ? `  "${formatDidValue(r.slice(3))}"` : ''}`, 'ok');
   });
 
+  // --- UDS: services that change the ECU (each asks for confirmation inside UdsClient) ---
+
+  const needHex = (text, what) => {
+    const b = parseBytes(text);
+    if (!b.length) throw new Error(`Enter ${what} as hex bytes.`);
+    return b;
+  };
+
+  const udsRoutine = () => runUds('routine', async (uds) => {
+    const id = parseInt(udsRoutineId, 16);
+    if (Number.isNaN(id) || id > 0xffff) throw new Error('A routine ID is 4 hex digits, e.g. FF00.');
+    const type = Number(udsRoutineType);
+    const r = await uds.routineControl(type, id, parseBytes(udsRoutineOpt));
+    logUds('<', `Routine 0x${id.toString(16).toUpperCase().padStart(4, '0')} ${['', 'started', 'stopped', 'results'][type]}${r.status.length ? `: ${hexBytes(r.status)}` : ''}`, 'ok');
+  });
+
+  const udsWrite = () => runUds('write', async (uds) => {
+    const did = parseInt(udsWriteDid, 16);
+    if (Number.isNaN(did) || did > 0xffff) throw new Error('A DID is 4 hex digits, e.g. F190.');
+    const data = needHex(udsWriteData, 'the data to write');
+    await uds.writeDid(did, data);
+    logUds('<', `DID 0x${did.toString(16).toUpperCase()} written (${data.length} bytes).`, 'ok');
+  });
+
+  const udsSeedRequest = () => runUds('seed', async (uds) => {
+    const level = parseInt(udsSecLevel, 16);
+    const r = await uds.requestSeed(level);
+    setUdsSeed(hexBytes(r.seed));
+    logUds('<', r.unlocked ? `Level 0x${level.toString(16)} is already unlocked (seed is all zero).` : `Seed for level 0x${level.toString(16).toUpperCase()}: ${hexBytes(r.seed)}`, 'ok');
+  });
+
+  const udsSendKey = () => runUds('key', async (uds) => {
+    const level = parseInt(udsSecLevel, 16);
+    const r = await uds.sendKey(level, needHex(udsKey, 'the key you computed for this seed'));
+    logUds('<', r.accepted ? `Security level 0x${level.toString(16).toUpperCase()} unlocked.` : 'The ECU did not accept the key.', r.accepted ? 'ok' : 'error');
+  });
+
+  const udsMemRead = () => runUds('mem', async (uds) => {
+    const addr = parseInt(udsMemAddr, 16);
+    const size = parseInt(udsMemSize, 10);
+    if (Number.isNaN(addr)) throw new Error('Enter the start address in hex.');
+    const bytes = await uds.readMemory(addr, size, { addressBytes: addr > 0xffffffff ? 5 : 4 });
+    logUds('<', `0x${addr.toString(16).toUpperCase()} (${bytes.length} bytes): ${hexBytes(bytes)}`, 'ok');
+  });
+
+  const udsCommControl = (control) => runUds('comm', async (uds) => {
+    await uds.communicationControl(control, parseInt(udsCommType, 16) || 0x01);
+    logUds('<', `CommunicationControl ${control.toString(16).padStart(2, '0')} accepted.`, 'ok');
+  });
+
+  const udsDtcControl = () => runUds('dtcset', async (uds) => {
+    const setting = parseInt(udsDtcSetting, 16);
+    await uds.controlDtcSetting(setting);
+    logUds('<', `DTC setting ${setting === 1 ? 'on' : setting === 2 ? 'off' : `0x${setting.toString(16)}`} accepted.`, 'ok');
+  });
+
+  // --- J1939 ----------------------------------------------------------------
+
+  const handleJ1939Request = async () => {
+    try {
+      const t = String(j1939Pgn).trim();
+      const pgn = /^0x/i.test(t) ? parseInt(t, 16) : parseInt(t, 10);
+      const da = parseInt(j1939Da, 16);
+      const sa = parseInt(j1939Sa, 16);
+      if (Number.isNaN(pgn)) throw new Error('Enter the PGN as a number (65262) or hex (0xFEEE).');
+      if (Number.isNaN(da) || da > 0xff || Number.isNaN(sa) || sa > 0xff) throw new Error('Addresses are hex bytes, e.g. FF (all) and F9 (diagnostic tool).');
+      if (!isConnected) throw new Error('Connect the SLCAN adapter first.');
+      if (!(await ensureBus())) return;
+      sendFrame(buildJ1939Request(pgn, { da, sa }));
+      setNotice(`Requested PGN ${pgn} from ${da === 0xff ? 'all nodes' : `address ${da.toString(16).toUpperCase()}`}. Replies show in the table (multi-packet replies are not reassembled).`);
+    } catch (e) {
+      setNotice(e.message);
+    }
+  };
+
   // --- Logs -------------------------------------------------------------------
 
   const startRecording = () => {
@@ -479,7 +638,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
     ensureBus().then((ok) => {
       if (!ok) return;
       setReplay({ done: 0, total: frames.length });
-      replayStopRef.current = replayFrames(frames, (f) => sendFrame({ id: f.id, isExtended: f.isExtended, data: f.data }), {
+      replayStopRef.current = replayFrames(frames, (f) => sendFrame({ id: f.id, isExtended: f.isExtended, data: f.data, rtr: f.rtr, fd: f.fd, brs: f.brs, dlc: f.dlc }), {
         speed: Number(replaySpeed) || 1,
         loop: replayLoop,
         onProgress: (done, total) => { if (done % 20 === 0 || done === total) setReplay({ done, total }); },
@@ -514,6 +673,13 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
     .sort((a, b) => a.id - b.id);
 
 
+  const j1939Rows = mode === 'j1939'
+    ? Object.values(messages)
+      .filter((m) => m && m.isExtended && !m.rtr)
+      .map((m) => ({ m, d: decodeJ1939Frame(m) }))
+      .sort((a, b) => a.d.pgn - b.d.pgn || a.d.sa - b.d.sa)
+    : [];
+
   const btn = 'flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 text-xs font-bold disabled:opacity-40';
   const inp = 'bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs outline-none';
 
@@ -524,7 +690,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
             <p className="text-[11px] text-slate-400">
-              Sniff CAN through an SLCAN adapter (CANable / Candlelight) with byte-change highlighting and DBC signal decoding, transmit and replay frames, read OBD-II data and talk UDS over ISO-TP.
+              Sniff CAN through an SLCAN adapter (CANable / Candlelight) with byte-change highlighting and DBC signal decoding, transmit and replay frames, read OBD-II data, talk UDS over ISO-TP and decode J1939. Classic CAN, remote frames and CAN FD (where the adapter firmware supports it) are handled.
             </p>
           </div>
 
@@ -547,6 +713,15 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                 {CAN_BAUD_RATES.map((b) => <option key={b.code} value={b.code}>{b.label}</option>)}
               </select>
             </div>
+            <button onClick={handleAutoDetect} disabled={detecting || !isConnected || isSniffing} className={btn} title="Listen-only sweep over 500/250/1000/125/100 kbps to find the bus bit rate (stop the sniffer first)">
+              {detecting ? 'LISTENING...' : 'AUTO-DETECT'}
+            </button>
+            <label className="flex items-center gap-1 text-slate-400" title="Open with L: the adapter never transmits or ACKs, so it cannot disturb the bus"><input type="checkbox" checked={listenOnly} disabled={isSniffing} onChange={(e) => setListenOnly(e.target.checked)} className="accent-emerald-500" /> listen-only</label>
+            <select value={fdRate} disabled={isSniffing} onChange={(e) => setFdRate(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-300 outline-none" title="CAN FD data-phase rate (Y command). Needs CANable 2.0 / candleLight-FD style firmware.">
+              <option value="">Classic CAN</option>
+              {CAN_FD_DATA_RATES.map((r) => <option key={r.code} value={r.code}>FD: {r.label}</option>)}
+            </select>
+            <label className="flex items-center gap-1 text-slate-400" title="Z1: the adapter appends a millisecond timestamp (16 bit, wraps at 60 s) to each received frame"><input type="checkbox" checked={hwTimestamps} disabled={isSniffing} onChange={(e) => setHwTimestamps(e.target.checked)} className="accent-emerald-500" /> HW timestamps</label>
             {!isSniffing ? (
               <button onClick={startSniffing} className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/50 text-xs font-bold transition-all">
                 <Play className="w-3.5 h-3.5 fill-current" /><span>START SNIFFER</span>
@@ -596,13 +771,14 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                     <th className="py-2 px-3">DLC</th>
                     <th className="py-2 px-3">Data Bytes (Live Diff Highlight)</th>
                     <th className="py-2 px-3">Delta</th>
+                    <th className="py-2 px-3">HW time</th>
                     <th className="py-2 px-3 text-right">Count</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-850">
                   {filteredMessageList.length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="py-12 text-center text-slate-500 italic">
+                      <td colSpan="7" className="py-12 text-center text-slate-500 italic">
                         {isSniffing ? 'Listening on CAN bus... Waiting for frames.' : 'Click "START SNIFFER" to capture packets.'}
                       </td>
                     </tr>
@@ -615,10 +791,11 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                             0x{hexId(m)}
                             {decoded && <div className="text-[10px] text-emerald-300 font-normal">{decoded.name}</div>}
                           </td>
-                          <td className="py-2 px-3 text-[10px] text-slate-400">{m.isExtended ? 'EXT (29b)' : 'STD (11b)'}</td>
+                          <td className="py-2 px-3 text-[10px] text-slate-400">{m.isExtended ? 'EXT (29b)' : 'STD (11b)'}{m.fd ? ` FD${m.brs ? '/BRS' : ''}` : ''}{m.rtr ? ' RTR' : ''}</td>
                           <td className="py-2 px-3 text-slate-300 font-bold">{m.dlc}</td>
                           <td className="py-2 px-3">
-                            <div className="flex items-center gap-1.5 font-bold">
+                            <div className="flex flex-wrap items-center gap-1.5 font-bold">
+                              {m.rtr && <span className="text-slate-500 italic font-normal">remote request for {m.dlc} byte{m.dlc === 1 ? '' : 's'}</span>}
                               {Array.from(m.data || []).map((b, idx) => (
                                 <span key={idx} className={`px-1.5 py-0.5 rounded transition-colors ${m.diffs?.has?.(idx) ? 'bg-amber-400 text-slate-950 font-extrabold shadow-[0_0_8px_rgba(251,191,36,0.6)]' : 'bg-slate-950 text-cyan-300 border border-slate-850'}`}>
                                   {(b ?? 0).toString(16).padStart(2, '0').toUpperCase()}
@@ -634,6 +811,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                             )}
                           </td>
                           <td className="py-2 px-3 text-slate-400 text-[10px]">{m.deltaMs} ms</td>
+                          <td className="py-2 px-3 text-slate-500 text-[10px]">{m.hwMs != null ? `${(m.hwMs / 1000).toFixed(3)} s` : '-'}</td>
                           <td className="py-2 px-3 text-right text-emerald-400 font-bold">{m.count}</td>
                         </tr>
                       );
@@ -651,7 +829,11 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
             <div className="flex flex-wrap items-center gap-2 flex-1 justify-end">
               <input type="text" value={txId} onChange={(e) => setTxId(e.target.value)} placeholder="0x123" className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-amber-300 font-bold outline-none w-24 uppercase" />
               <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={txExtended} onChange={(e) => setTxExtended(e.target.checked)} className="accent-cyan-500" /> 29-bit</label>
-              <input type="text" value={txData} onChange={(e) => setTxData(e.target.value)} placeholder="11 22 33 44 55 66 77 88" className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-cyan-300 font-bold outline-none w-64 uppercase" />
+              <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={txRtr} onChange={(e) => setTxRtr(e.target.checked)} className="accent-cyan-500" /> RTR</label>
+              {txRtr && <input type="number" min="0" max="8" value={txRtrDlc} onChange={(e) => setTxRtrDlc(e.target.value)} title="Bytes requested" className={`${inp} w-14 text-slate-200`} />}
+              <label className="flex items-center gap-1 text-slate-400" title="Needs an FD data rate selected in the toolbar"><input type="checkbox" checked={txFd} disabled={txRtr} onChange={(e) => setTxFd(e.target.checked)} className="accent-cyan-500" /> FD</label>
+              {txFd && !txRtr && <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={txBrs} onChange={(e) => setTxBrs(e.target.checked)} className="accent-cyan-500" /> BRS</label>}
+              <input type="text" value={txData} disabled={txRtr} onChange={(e) => setTxData(e.target.value)} placeholder="11 22 33 44 55 66 77 88" className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-cyan-300 font-bold outline-none w-64 uppercase disabled:opacity-40" />
               <button onClick={handleTransmitFrame} className="px-3 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/50 font-bold text-xs">SEND FRAME</button>
               <span className="text-slate-500">every</span>
               <input type="number" min="5" value={txIntervalMs} onChange={(e) => setTxIntervalMs(e.target.value)} className={`${inp} w-16 text-slate-200`} />
@@ -789,6 +971,49 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
             <button onClick={udsSendRaw} disabled={!!udsBusy} className={btn}><Send className="w-3.5 h-3.5" /> SEND</button>
             {udsBusy && <span className="text-slate-500">waiting for the ECU...</span>}
           </div>
+          <div className="border border-amber-500/30 rounded-lg p-2.5 flex flex-col gap-2 bg-amber-500/5">
+            <span className="font-bold text-amber-300">SERVICES THAT ACT ON THE ECU (each asks for confirmation before it is sent)</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-slate-500 font-bold">ROUTINE (31)</span>
+              <select value={udsRoutineType} onChange={(e) => setUdsRoutineType(e.target.value)} className={`${inp} text-slate-200`}>
+                <option value={1}>start</option><option value={2}>stop</option><option value={3}>request results</option>
+              </select>
+              <input value={udsRoutineId} onChange={(e) => setUdsRoutineId(e.target.value)} title="Routine ID (hex)" className={`${inp} w-20 text-cyan-300`} />
+              <input value={udsRoutineOpt} onChange={(e) => setUdsRoutineOpt(e.target.value)} placeholder="option bytes (hex)" className={`${inp} w-40 text-cyan-300`} />
+              <button onClick={udsRoutine} disabled={!!udsBusy} className={`${btn} text-amber-300`}>SEND</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-slate-500 font-bold">WRITE DID (2E)</span>
+              <input value={udsWriteDid} onChange={(e) => setUdsWriteDid(e.target.value)} className={`${inp} w-20 text-cyan-300`} />
+              <input value={udsWriteData} onChange={(e) => setUdsWriteData(e.target.value)} placeholder="data bytes (hex)" className={`${inp} w-64 text-cyan-300`} />
+              <button onClick={udsWrite} disabled={!!udsBusy} className={`${btn} text-rose-300`}>WRITE</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-slate-500 font-bold">SECURITY ACCESS (27)</span>
+              <span className="text-slate-500">level</span>
+              <input value={udsSecLevel} onChange={(e) => setUdsSecLevel(e.target.value)} title="Odd request-seed level: 01, 03, ..." className={`${inp} w-14 text-cyan-300`} />
+              <button onClick={udsSeedRequest} disabled={!!udsBusy} className={btn}>REQUEST SEED</button>
+              <span className="text-slate-300">{udsSeed ? <>seed <span className="text-amber-300 font-bold">{udsSeed}</span></> : ''}</span>
+              <input value={udsKey} onChange={(e) => setUdsKey(e.target.value)} placeholder="key (hex) you computed" className={`${inp} w-48 text-cyan-300`} />
+              <button onClick={udsSendKey} disabled={!!udsBusy} className={`${btn} text-amber-300`}>SEND KEY</button>
+            </div>
+            <p className="text-slate-500">The seed and key exchange is the standard UDS one. This tool never computes, guesses or brute-forces keys; enter the key your own algorithm or the vendor's documentation gives. Wrong keys count against the ECU's attempt limit.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-slate-500 font-bold">READ MEMORY (23)</span>
+              <input value={udsMemAddr} onChange={(e) => setUdsMemAddr(e.target.value)} placeholder="address (hex)" className={`${inp} w-32 text-cyan-300`} />
+              <input value={udsMemSize} onChange={(e) => setUdsMemSize(e.target.value)} title="Bytes (decimal)" className={`${inp} w-16 text-cyan-300`} />
+              <button onClick={udsMemRead} disabled={!!udsBusy} className={btn}>READ</button>
+              <span className="text-slate-500 font-bold ml-3">COMM CONTROL (28)</span>
+              <input value={udsCommType} onChange={(e) => setUdsCommType(e.target.value)} title="Communication type (hex, 01 = normal messages)" className={`${inp} w-12 text-cyan-300`} />
+              <button onClick={() => udsCommControl(0x00)} disabled={!!udsBusy} className={`${btn} text-amber-300`}>ENABLE (00)</button>
+              <button onClick={() => udsCommControl(0x03)} disabled={!!udsBusy} className={`${btn} text-rose-300`}>DISABLE (03)</button>
+              <span className="text-slate-500 font-bold ml-3">DTC SETTING (85)</span>
+              <select value={udsDtcSetting} onChange={(e) => setUdsDtcSetting(e.target.value)} className={`${inp} text-slate-200`}>
+                <option value="01">on (01)</option><option value="02">off (02)</option>
+              </select>
+              <button onClick={udsDtcControl} disabled={!!udsBusy} className={`${btn} text-amber-300`}>SEND</button>
+            </div>
+          </div>
           <div className="bg-black border border-slate-800 rounded p-2 h-64 overflow-y-auto">
             {udsLog.length === 0 && <div className="text-slate-600">Responses appear here.</div>}
             {udsLog.map((l, i) => (
@@ -796,6 +1021,54 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                 <span className="text-slate-600">{l.time} {l.dir}</span> {l.text}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {mode === 'j1939' && (
+        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl flex flex-col gap-3 text-xs">
+          <div className="font-bold text-slate-200">J1939 (29-bit IDs: priority, PGN, source address)</div>
+          <p className="text-slate-400">Start the sniffer at the network's bit rate (250 kbps on most trucks, tractors and NMEA 2000 boats; 500 kbps on newer ones). Decoded signals come from a built-in table of common PGNs; values the sender marks not available are shown as such. Multi-packet messages (BAM / RTS-CTS) are not reassembled.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-500 font-bold">REQUEST PGN</span>
+            <input value={j1939Pgn} onChange={(e) => setJ1939Pgn(e.target.value)} title="Decimal (65262) or hex (0xFEEE)" className={`${inp} w-24 text-cyan-300`} />
+            <span className="text-slate-500">to</span>
+            <input value={j1939Da} onChange={(e) => setJ1939Da(e.target.value)} title="Destination address (hex); FF = global" className={`${inp} w-14 text-amber-300`} />
+            <span className="text-slate-500">from SA</span>
+            <input value={j1939Sa} onChange={(e) => setJ1939Sa(e.target.value)} title="Your source address (hex); F9 is the off-board diagnostic tool address" className={`${inp} w-14 text-amber-300`} />
+            <button onClick={handleJ1939Request} className={btn}><Send className="w-3.5 h-3.5" /> REQUEST</button>
+          </div>
+          <div className="overflow-x-auto border border-slate-800 rounded">
+            <table className="w-full text-left">
+              <thead className="bg-slate-950 text-slate-400 text-[10px] uppercase font-bold border-b border-slate-800">
+                <tr><th className="py-1.5 px-3">PGN</th><th className="py-1.5 px-3">Name</th><th className="py-1.5 px-3">SA</th><th className="py-1.5 px-3">DA</th><th className="py-1.5 px-3">Pri</th><th className="py-1.5 px-3">Data / signals</th><th className="py-1.5 px-3 text-right">Count</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-900">
+                {j1939Rows.length === 0 && (
+                  <tr><td colSpan="7" className="py-8 text-center text-slate-500 italic">{isSniffing ? 'Waiting for 29-bit frames...' : 'Start the sniffer to collect J1939 traffic.'}</td></tr>
+                )}
+                {j1939Rows.map(({ m, d }) => (
+                  <tr key={m.id} className="align-top hover:bg-slate-900/40">
+                    <td className="py-1.5 px-3 text-amber-300 font-bold">{d.pgn}<span className="text-slate-500 font-normal"> 0x{d.pgn.toString(16).toUpperCase()}</span></td>
+                    <td className="py-1.5 px-3 text-emerald-300">{d.acronym ? `${d.acronym} ` : ''}<span className="text-slate-400">{d.name || 'unknown PGN'}</span></td>
+                    <td className="py-1.5 px-3 text-slate-300">{d.sa.toString(16).toUpperCase().padStart(2, '0')}</td>
+                    <td className="py-1.5 px-3 text-slate-300">{d.pdu1 ? d.da.toString(16).toUpperCase().padStart(2, '0') : 'all'}</td>
+                    <td className="py-1.5 px-3 text-slate-300">{d.priority}</td>
+                    <td className="py-1.5 px-3">
+                      <div className="text-cyan-300 font-bold">{hexBytes(m.data)}</div>
+                      {d.signals.length > 0 && (
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[10px]">
+                          {d.signals.map((sg, i) => (
+                            <span key={i} className="text-slate-400">{sg.name}: <span className={sg.value === null && !sg.text ? 'text-slate-500' : 'text-emerald-300 font-bold'}>{sg.value !== null ? sg.value : sg.text}</span>{sg.value !== null && sg.unit ? ` ${sg.unit}` : ''}{sg.value !== null && sg.text ? ` (${sg.text})` : ''}</span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-1.5 px-3 text-right text-emerald-400 font-bold">{m.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

@@ -19,6 +19,8 @@ import {
   X
 } from 'lucide-react';
 import { fmtSize, baseName, extOf, parentOf, joinPath, parseWigle } from '../../../utils/pigletToolkit';
+import { mergeWigleLogs, rowsToWigleCsv } from '../../../utils/pigletGeo';
+import PigletGeoPanel from './PigletGeoPanel';
 
 // Same behaviour as the Piglet Toolkit in olosnoks/warhog web-flasher/toolkit.js:
 // folder navigation, sortable columns, click / Ctrl / Shift selection, toolbar
@@ -319,6 +321,7 @@ function PreviewModal({ preview, onClose }) {
           {table ? (
             <>
               <CsvCards data={preview.csv} />
+              <PigletGeoPanel rows={preview.csv.rows} name={preview.name} />
               <CsvTable data={preview.csv} />
             </>
           ) : (
@@ -525,6 +528,31 @@ export default function PigletFileBrowser({ client, connected, busy, setBusy, se
     finally { setBusy(false); }
   };
 
+  // Merge the selected WiGLE CSV logs into one row per MAC (best-RSSI position,
+  // earliest FirstSeen) and open the result in the viewer; Download saves it.
+  const mergeSelected = async () => {
+    const files = view.filter((e) => selected.has(e.path) && !e.dir && extOf(e.name) === 'csv');
+    if (files.length < 2 || busyRef.current) return;
+    setBusy(true);
+    try {
+      const logs = []; let preHeader = '', skipped = 0;
+      for (const it of files) {
+        const text = new TextDecoder().decode(await fetchFile(it));
+        const parsed = parseWigle(text);
+        if (!parsed) { skipped++; continue; }
+        if (!preHeader && text.startsWith('WigleWifi')) preHeader = text.split(/\r?\n/)[0];
+        logs.push(parsed);
+      }
+      if (logs.length < 2) throw new Error('fewer than two of the selected files are readable WiGLE logs');
+      const rows = mergeWigleLogs(logs);
+      const text = rowsToWigleCsv(rows, { preHeader });
+      const bytes = new TextEncoder().encode(text);
+      setPreview({ path: 'merged ' + logs.length + ' logs', name: 'merged.csv', bytes, text, csv: { rows, bad: logs.reduce((t, l) => t + l.bad, 0), dev: '' } });
+      setStatus('merged ' + logs.length + ' logs into ' + rows.length + ' networks' + (skipped ? ' (' + skipped + ' unreadable file(s) skipped)' : ''));
+    } catch (e) { log('Merge failed: ' + e.message); setStatus('merge failed: ' + e.message); }
+    finally { setBusy(false); busyRef.current = false; }
+  };
+
   const openItem = (it) => {
     if (busyRef.current) return;
     if (it.dir) { navigate(it.path); return; }
@@ -679,6 +707,10 @@ export default function PigletFileBrowser({ client, connected, busy, setBusy, se
           title={selItems.some((e) => e.dir) ? 'Download into a folder you choose' : 'Download selected'}
           disabled={busy || !selItems.length} onClick={downloadSelection}>
           <Download className="w-3.5 h-3.5" /><span>Download</span>
+        </button>
+        <button type="button" className={`${tb} bg-slate-800 hover:bg-slate-700 text-slate-200`} title="Merge the selected WiGLE CSV logs into one"
+          disabled={busy || selFiles.filter((e) => extOf(e.name) === 'csv').length < 2} onClick={mergeSelected}>
+          <span>Merge selected logs</span>
         </button>
         <button type="button" className={`${tb} bg-rose-600/80 hover:bg-rose-600 text-white`} title="Delete selected (Del)"
           disabled={busy || !selItems.length} onClick={deleteSelected}>

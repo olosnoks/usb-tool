@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollText, Download, FileJson, Copy, Trash2, Upload, StickyNote, X } from 'lucide-react';
 import {
-  useSessionEntries, record, clearLog, confirmAction, exportMarkdown, exportJson, parseJsonLog, LEVELS
+  useSessionEntries, record, clearLog, confirmAction, exportMarkdown, exportJson, parseJsonLog, describeEnvironment, LEVELS
 } from '../../utils/sessionLog';
 
 const LEVEL_STYLE = {
@@ -28,6 +28,8 @@ export default function SessionLogPanel() {
   const [note, setNote] = useState('');
   const [copied, setCopied] = useState(false);
   const [problem, setProblem] = useState('');
+  const [unredacted, setUnredacted] = useState(false); // off by default: exports are redacted
+  const [preview, setPreview] = useState(false);
   const fileRef = useRef(null);
   const listRef = useRef(null);
 
@@ -44,7 +46,12 @@ export default function SessionLogPanel() {
   }, [shown.length]);
 
   const filtered = shown.length !== source.length;
-  const meta = { userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined };
+  const environment = useMemo(() => describeEnvironment(), []);
+  const meta = { userAgent: environment.userAgent, environment, redact: unredacted ? false : {} };
+  // JSON export keeps its environment block but never carries the raw userAgent twice.
+  const jsonMeta = { environment };
+  const redactArg = unredacted ? false : {};
+  const reportText = () => exportMarkdown(shown, meta);
 
   const addNote = () => {
     if (!note.trim()) return;
@@ -54,7 +61,7 @@ export default function SessionLogPanel() {
 
   const copyReport = async () => {
     try {
-      await navigator.clipboard.writeText(exportMarkdown(shown, meta));
+      await navigator.clipboard.writeText(reportText());
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch (err) {
@@ -103,10 +110,10 @@ export default function SessionLogPanel() {
         {problem && <div className="p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 font-bold">{problem}</div>}
 
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={() => download(`session-${stamp()}.md`, exportMarkdown(shown, meta), 'text/markdown')} disabled={!shown.length} className={`${btn} border-emerald-500/40 text-emerald-300`}>
+          <button onClick={() => download(`session-${stamp()}.md`, reportText(), 'text/markdown')} disabled={!shown.length} className={`${btn} border-emerald-500/40 text-emerald-300`}>
             <Download className="w-3.5 h-3.5" /> REPORT (.MD)
           </button>
-          <button onClick={() => download(`session-${stamp()}.json`, exportJson(shown, meta), 'application/json')} disabled={!shown.length} className={`${btn} border-slate-700 text-slate-200`}>
+          <button onClick={() => download(`session-${stamp()}.json`, exportJson(shown, jsonMeta, redactArg), 'application/json')} disabled={!shown.length} className={`${btn} border-slate-700 text-slate-200`}>
             <FileJson className="w-3.5 h-3.5" /> JSON
           </button>
           <button onClick={copyReport} disabled={!shown.length} className={`${btn} border-slate-700 text-slate-200`}>
@@ -122,6 +129,17 @@ export default function SessionLogPanel() {
             </button>
           )}
         </div>
+        <div className="flex flex-wrap items-center gap-3 text-slate-400">
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" checked={unredacted} onChange={(e) => setUnredacted(e.target.checked)} />
+            Include unredacted text in exports
+          </label>
+          <button onClick={() => setPreview((p) => !p)} className="underline text-slate-300 hover:text-cyan-300">{preview ? 'Hide export preview' : 'Preview export'}</button>
+          <span className="text-slate-500">{unredacted ? 'Exports are RAW: tokens, keys and passwords are kept.' : 'Exports mask Bearer tokens, api_key= / password= values, JWTs, private keys and long hex/base64 strings.'}</span>
+        </div>
+        {preview && (
+          <pre data-testid="export-preview" className="max-h-64 overflow-auto bg-slate-950 border border-slate-800 rounded p-2 text-[11px] text-slate-300 whitespace-pre-wrap">{reportText()}</pre>
+        )}
         {filtered && <p className="text-slate-500">Exports contain the {shown.length} entries matching the filters below.</p>}
 
         <div className="flex flex-wrap items-center gap-2">

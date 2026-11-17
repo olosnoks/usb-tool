@@ -7,7 +7,8 @@
 
 import { DapProbe, SwdTarget, requestDapTransport, describeCpuid, CORTEX, CORE_REG_SELECT } from './dapLink';
 import {
-  RttClient, findRttControlBlock, configureSwoTarget, ItmParser, Breakpoints, Watchpoints, dumpMemory, programFlash
+  RttClient, findRttControlBlock, configureSwoTarget, ItmParser, Breakpoints, Watchpoints, dumpMemory, programFlash, eraseChipWithAlgorithm, nrf52EraseAll,
+  buildSymbolTable, formatSymbol, symbolAddress, parseElf
 } from './cortexDebug';
 
 export const DAP_CMD = {
@@ -59,6 +60,9 @@ export class CmsisDapClient {
     this.logger = logger;
     this.connected = false;
     this.targetState = 'disconnected'; // 'running' | 'halted' | 'disconnected'
+    this.symbols = null; // sorted symbol table from a loaded ELF
+    this.symbolsName = '';
+    this.clockHz = 1_000_000;
   }
 
   log(msg, type = 'sys') {
@@ -70,16 +74,17 @@ export class CmsisDapClient {
    * kind: 'usb' (CMSIS-DAP v2, faster) or 'hid' (v1, older DAPLink firmware).
    * `probe` (an opened DapProbe) is for tests.
    */
-  async connectHardware({ kind = 'usb', probe = null, clockHz = 1_000_000 } = {}) {
+  async connectHardware({ kind = 'usb', probe = null, clockHz = 1_000_000, underReset = false } = {}) {
     const p = probe || await new DapProbe(await requestDapTransport(kind)).open();
     try {
       if (p.capabilities && !p.capabilities.swd) throw new Error(`${p.product} does not support SWD.`);
       const target = new SwdTarget(p);
-      const { dpidr } = await target.connect({ clockHz });
+      const { dpidr } = await target.connect({ clockHz, underReset });
       const cpuid = await target.readWord(CORTEX.CPUID);
       const status = await target.coreStatus();
       this.probe = p;
       this.target = target;
+      this.clockHz = clockHz;
       this.rtt = null;
       this.breakpoints = null;
       this.watchpoints = null;
@@ -92,9 +97,10 @@ export class CmsisDapClient {
         transport: p.transport.kind === 'hid' ? 'WebHID (CMSIS-DAP v1)' : 'WebUSB (CMSIS-DAP v2)',
         dpidr,
         cpuid,
-        core: describeCpuid(cpuid)
+        core: describeCpuid(cpuid),
+        underReset
       };
-      this.log(`Attached through ${p.product}: DPIDR 0x${dpidr.toString(16).toUpperCase()}, ${this.info.core}.`);
+      this.log(`Attached${underReset ? ' under reset' : ''} through ${p.product}: DPIDR 0x${dpidr.toString(16).toUpperCase()}, ${this.info.core}.`);
       return this.info;
     } catch (e) {
       try { await p.close(); } catch (x) { /* ignore */ }
@@ -316,5 +322,55 @@ export class CmsisDapClient {
       this.targetState = 'running';
     }
     return result;
+  }
+
+  // --- Mass erase / unlock ---------------------------------------------------
+
+  /** Erase the whole chip with the loaded flash algorithm's EraseChip(). */
+  async massErase(flm, { ramBase, ramSize, onProgress } = {}) {
+    this._hw('Mass erase');
+    await this.stopSwo();
+    this.rtt = null;
+    if (this.breakpoints) await this.breakpoints.clearAll();
+    await this.target.reset({ halt: true });
+    this.targetState = 'halted';
+    await eraseChipWithAlgorithm(this.target, flm, { ramBase, ramSize, onProgress, log: (m) => this.log(m) });
+  }
+
+  /** Unlock a read-protected nRF52 through its CTRL-AP (wipes flash, UICR and RAM). */
+  async nrf52Unlock() {
+    this._hw('nRF52 unlock');
+    await this.stopSwo();
+    this.rtt = null;
+    await nrf52EraseAll(this.target);
+    this.log('nRF52 ERASEALL finished through the CTRL-AP; the chip was reset.');
+    // The chip reset dropped the DP state: reattach.
+    await this.target.connect({ clockHz: this.clockHz });
+    const status = await this.target.coreStatus();
+    this.targetState = status.halted ? 'halted' : 'running';
+  }
+
+  // --- Symbols (from an ELF) -----------------------------------------------------
+
+  /** Load function and object symbols from an ELF image; returns how many were found. */
+  loadSymbols(elfBytes, name = '') {
+    const table = buildSymbolTable(parseElf(elfBytes));
+    this.symbols = table;
+    this.symbolsName = name;
+    this.log(`Loaded ${table.length} symbols${name ? ` from ${name}` : ''}.`);
+    return table.length;
+  }
+
+  clearSymbols() { this.symbols = null; this.symbolsName = ''; }
+
+  /** "main+0x12" for an address, or '' when no ELF is loaded or the address has no symbol. */
+  symbolFor(addr) { return this.symbols ? formatSymbol(this.symbols, addr) : ''; }
+
+  /** Set a hardware breakpoint on a function or object by name. */
+  async breakAtSymbol(name) {
+    const addr = this.symbols ? symbolAddress(this.symbols, name) : null;
+    if (addr === null) throw new Error(`No symbol "${name}"${this.symbols ? '' : ': load an ELF first'}.`);
+    await this.setBreakpoint(addr);
+    return addr;
   }
 }

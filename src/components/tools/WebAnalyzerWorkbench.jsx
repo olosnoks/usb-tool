@@ -1,11 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Search, RefreshCw, FileDown, ShieldCheck, ShieldAlert, Link2, FileCode, Image, Code2, Fingerprint, Cookie, Globe } from 'lucide-react';
-import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
+import { proxiedFetch, describeNetworkError, isProxyEnabled, getSetCookie, getRedirectChain } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
-import { extractTitle, extractLinks, extractResources, extractMeta, extractForms, assessSecurityHeaders } from '../../utils/urlinspect.js';
+import { extractTitle, assessSecurityHeaders, extractLinks, extractResources, extractMeta, extractForms, gradeSecurityHeaders } from '../../utils/urlinspect.js';
 import { detectTech } from '../../utils/fingerprint.js';
 import { analyzeSetCookies, cookieNames } from '../../utils/cookies.js';
-import { runPassiveScan } from '../../utils/webScan.js';
+import { scanHeaders } from '../../utils/webScan.js';
 import NiktoScannerWorkbench from './NiktoScannerWorkbench';
 import CrawlerTab from './webanalyzer/CrawlerTab';
 
@@ -44,6 +44,14 @@ function List({ items, linkify = true }) {
   );
 }
 
+const ICON = { good: '✅', warn: '⚠️', bad: '❌', absent: '➖' };
+const STATUS_CLASS = {
+  good: 'border-emerald-800 bg-emerald-950/20 text-emerald-300',
+  warn: 'border-amber-800 bg-amber-950/20 text-amber-300',
+  bad: 'border-red-900 bg-red-950/20 text-red-300',
+  absent: 'border-slate-700 bg-slate-900 text-slate-400',
+};
+const GRADE_CLASS = { A: 'text-emerald-300 border-emerald-700', B: 'text-lime-300 border-lime-700', C: 'text-amber-300 border-amber-700', D: 'text-orange-300 border-orange-700', F: 'text-red-300 border-red-800' };
 const SEV_COLOR = { High: 'text-red-400', Medium: 'text-orange-400', Low: 'text-yellow-400', Info: 'text-gray-400' };
 
 // initialTab -> which section to open/scroll to (paths | crawler open an on-demand
@@ -75,22 +83,28 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
       const headersLower = {};
       [...resp.headers.entries()].forEach(([k, v]) => { headersLower[k.toLowerCase()] = v; });
       const resources = extractResources(html, target);
-      const names = headersLower['set-cookie'] ? cookieNames(headersLower['set-cookie']) : [];
+      // Set-Cookie is hidden from fetch(); only the bundled proxy forwards it (x-proxy-set-cookie).
+      const cookieList = getSetCookie(resp);
+      const redirects = getRedirectChain(resp);
+      const names = cookieList ? cookieNames(cookieList) : [];
+      const grade = gradeSecurityHeaders(resp.headers, html, { baseUrl: resp.url || target });
       const page = {
         finalUrl: resp.url || target,
         status: resp.status, statusText: resp.statusText,
-        timeMs: Math.round(performance.now() - start), size: html.length,
+        timeMs: Math.round(performance.now() - start), size: new TextEncoder().encode(html).length,
         headers: Object.fromEntries([...resp.headers.entries()]),
         security: assessSecurityHeaders(headersLower),
+        grade, redirects,
         title: extractTitle(html), meta: extractMeta(html),
         links: extractLinks(html, target), resources, forms: extractForms(html, target),
       };
       const tech = detectTech({ headers: headersLower, html, cookieNames: names, scripts: resources.scripts });
-      const cookies = headersLower['set-cookie'] ? analyzeSetCookies(headersLower['set-cookie']) : [];
-      const cookieNote = headersLower['set-cookie'] ? '' : 'No Set-Cookie header was visible to the browser (browsers hide it from fetch() unless a proxy forwards it).';
-      // passive scan does its own fetch; tolerate failure independently
-      let passive = null;
-      try { const r = await runPassiveScan(target); passive = r.ok ? { alerts: r.alerts, note: r.note } : { alerts: [], note: r.error }; } catch (e) { passive = { alerts: [], note: describeNetworkError(e) }; }
+      const cookies = cookieList ? analyzeSetCookies(cookieList) : [];
+      const cookieNote = cookieList
+        ? (cookies.length ? '' : 'The proxy reported no Set-Cookie headers.')
+        : 'Set-Cookie is hidden by browsers; run the bundled proxy to see cookie flags.';
+      // passive scan reuses the headers from this single fetch
+      const passive = scanHeaders(target, resp.headers, { status: resp.status, setCookies: cookieList });
       setData({ target, page, tech, cookies, cookieNote, passive });
       log(`Analyze done — ${page.status}, ${tech.length} tech, ${cookies.length} cookie(s), ${passive.alerts.length} passive finding(s)`);
     } catch (e) { setError(describeNetworkError(e)); }
@@ -113,8 +127,9 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
       const { page, tech, cookies, cookieNote, passive } = data;
       L.push('## Summary', '', `- **Status:** ${page.status} ${page.statusText} · ${(page.size / 1024).toFixed(1)} KB · ${page.timeMs} ms`, `- **Final URL:** ${page.finalUrl}`);
       if (page.title) L.push(`- **Title:** ${page.title}`);
-      L.push('', '### Security headers');
-      page.security.forEach((h) => L.push(`- ${h.present ? '✅' : '❌'} ${h.header}${h.value ? `: \`${h.value}\`` : ''}`));
+      if (page.redirects?.length) { L.push('- **Redirect chain:** ' + page.redirects.map((r) => `${r.status} ${r.url}`).join(' → ')); }
+      L.push('', `### Security headers — grade ${page.grade.grade} (${page.grade.score}/100)`, '');
+      page.grade.headers.forEach((h) => L.push(`- ${ICON[h.status]} **${h.header}** (${h.status})${h.value ? `: \`${h.value}\`` : ''} — ${h.reason}`));
       L.push('');
       L.push('## Technology', '');
       if (tech.length) tech.forEach((t) => L.push(`- **${t.name}** (${t.category}) — \`${t.evidence}\``)); else L.push('_No technologies matched._');
@@ -142,6 +157,16 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
     log('Exported Web Analyzer report (.md)');
   };
 
+  const exportJson = () => {
+    const host = (() => { try { return new URL(data?.target || normalized()).hostname; } catch { return 'report'; } })();
+    const { page, tech, cookies, cookieNote, passive, target } = data;
+    const out = { target, generatedAt: new Date().toISOString(), status: page.status, finalUrl: page.finalUrl, sizeBytes: page.size, redirects: page.redirects, grade: page.grade, tech, cookies, cookieNote, passive, forms: page.forms, resources: page.resources };
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `web-analysis-${host}-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(a.href);
+    log('Exported Web Analyzer report (.json)');
+  };
+
   const d = data;
 
   return (
@@ -154,6 +179,9 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
         </button>
         <button onClick={exportMd} disabled={!d} title={d ? 'Export everything to Markdown' : 'Analyze first'} className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-gray-200 rounded text-sm hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
           <FileDown size={14} /> Export (.md)
+        </button>
+        <button onClick={exportJson} disabled={!d} title={d ? 'Export to JSON' : 'Analyze first'} className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-gray-200 rounded text-sm hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
+          <FileDown size={14} /> Export (.json)
         </button>
       </div>
 
@@ -168,12 +196,25 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
           </div>
           {d.page.title && <div className="text-sm text-gray-200 mb-2">{d.page.title}</div>}
 
+          {d.page.redirects?.length > 0 && (
+            <Section icon={Link2} title="Redirect chain" count={d.page.redirects.length} accent="text-sky-400">
+              <List items={d.page.redirects.map((r) => `${r.status} ${r.url}`)} linkify={false} />
+            </Section>
+          )}
+
           <Section icon={ShieldCheck} title="Security headers">
-            <div className="flex flex-wrap gap-1.5">
-              {d.page.security.map((h) => (
-                <span key={h.header} title={h.value || 'absent'} className={`px-2 py-0.5 rounded text-[10px] border inline-flex items-center gap-1 ${h.present ? 'border-emerald-800 bg-emerald-950/20 text-emerald-300' : 'border-red-900 bg-red-950/20 text-red-300'}`}>
-                  {h.present ? <ShieldCheck size={10} /> : <ShieldAlert size={10} />} {h.header}
-                </span>
+            <div className="flex items-center gap-2 mb-2">
+              <span title={`${d.page.grade.score}/100`} className={`px-2.5 py-0.5 rounded border text-lg font-bold ${GRADE_CLASS[d.page.grade.grade]}`}>{d.page.grade.grade}</span>
+              <span className="text-slate-500 text-[11px]">{d.page.grade.score}/100, based on header values, not just presence</span>
+            </div>
+            <div className="space-y-1">
+              {d.page.grade.headers.map((h) => (
+                <div key={h.header} className="flex items-start gap-2">
+                  <span title={h.value || 'absent'} className={`shrink-0 px-2 py-0.5 rounded text-[10px] border inline-flex items-center gap-1 ${STATUS_CLASS[h.status]}`}>
+                    {h.status === 'good' ? <ShieldCheck size={10} /> : <ShieldAlert size={10} />} {h.header}
+                  </span>
+                  <span className="text-[11px] text-gray-400 break-words min-w-0">{h.reason}</span>
+                </div>
               ))}
             </div>
           </Section>

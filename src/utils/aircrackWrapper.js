@@ -5,11 +5,8 @@
 //
 // Both primitives are provided by SubtleCrypto, so this runs for real in any
 // browser with no backend and no WASM. The PBKDF2 path was verified against the
-// IEEE 802.11i WPA PSK test vectors. It is correct but not fast; the optional
-// SIMD WASM engine in /wasm/aircrack.wasm (and the aircrack-js submodule) can be
-// wired in later as an accelerator via loadAircrackWasm().
+// IEEE 802.11i WPA PSK test vectors. It is correct but not fast.
 
-import { loadWasm } from './wasmLoader';
 
 const subtle = globalThis.crypto?.subtle;
 
@@ -83,6 +80,3 @@ export async function crackPmkid({ ssid, apMac, clientMac, pmkid, candidates }, 
  * engine's pbkdf2_pmkid dual-lane path is a future optimization documented in
  * docs/WASM_ENGINES.md.
  */
-export async function loadAircrackWasm() {
-  return loadWasm('/wasm/aircrack.wasm', {});
-}

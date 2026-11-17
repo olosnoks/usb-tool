@@ -24,6 +24,15 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { identifyUsbChip } from '../utils/usbDatabase';
+import {
+  endpointKey,
+  describeEndpointOption,
+  dfuDetach,
+  sendHexToEndpoint,
+  readFromEndpoint,
+  releaseDevice,
+  formatUsbVersion
+} from '../utils/usbRecon';
 
 export default function UsbReconDeck({
   isConnected = false,
@@ -50,6 +59,8 @@ export default function UsbReconDeck({
   const [inTransferLog, setInTransferLog] = useState([]);
   const [isListening, setIsListening] = useState(false);
   const listenLoopRef = useRef(false);
+  const deviceRef = useRef(null);
+  const claimedRef = useRef(new Set());
 
   // Active Tab: 'interrogate' | 'forcer' | 'guide'
   const [activeTab, setActiveTab] = useState('interrogate');
@@ -73,10 +84,27 @@ export default function UsbReconDeck({
   const [forcerStatus, setForcerStatus] = useState('');
   const [isExecutingForcer, setIsExecutingForcer] = useState(false);
 
+  // Stop the listener and release every claimed interface (used on unmount and before a new device).
+  const releaseAll = async () => {
+    listenLoopRef.current = false;
+    const dev = deviceRef.current;
+    const claimed = [...claimedRef.current];
+    claimedRef.current = new Set();
+    deviceRef.current = null;
+    if (!dev) return;
+    await releaseDevice(dev, claimed);
+  };
+
+  useEffect(() => () => { releaseAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const currentInterface = interfaces.find(i => i.interfaceNumber === selectedInterface);
+  const currentEndpoint = currentInterface?.endpoints.find(ep => endpointKey(ep) === selectedEndpoint) || null;
+
   // Request & Interrogate ANY USB Device (Zero filters)
   const handleInterrogateAnyUsb = async () => {
     if (!navigator.usb) {
-      alert('WebUSB API is not supported in this browser. Please use Google Chrome, Microsoft Edge, or Opera.');
+      setForcerStatus('WebUSB is not supported in this browser. Use Chrome, Edge, or Opera.');
+      onLogMessage?.('[USB ERROR] WebUSB is not supported in this browser.', 'err');
       return;
     }
 
@@ -84,7 +112,12 @@ export default function UsbReconDeck({
       setForcerStatus('Requesting USB device access from user...');
       // Empty filters array allows selecting ANY connected USB device
       const device = await navigator.usb.requestDevice({ filters: [] });
+      await releaseAll();
+      setClaimedInterfaces({});
+      setInTransferLog([]);
+      setIsListening(false);
       await device.open();
+      deviceRef.current = device;
       
       // Try to select configuration 1
       if (device.configuration === null) {
@@ -124,7 +157,9 @@ export default function UsbReconDeck({
       if (parsedInterfaces.length > 0) {
         setSelectedInterface(parsedInterfaces[0].interfaceNumber);
         if (parsedInterfaces[0].endpoints.length > 0) {
-          setSelectedEndpoint(parsedInterfaces[0].endpoints[0].endpointNumber);
+          setSelectedEndpoint(endpointKey(parsedInterfaces[0].endpoints[0]));
+        } else {
+          setSelectedEndpoint(null);
         }
       }
 
@@ -136,7 +171,7 @@ export default function UsbReconDeck({
         productName: device.productName || 'Unnamed USB Device',
         manufacturerName: device.manufacturerName || 'Unknown Manufacturer',
         serialNumber: device.serialNumber || 'No Serial Reported',
-        usbVersion: `${device.usbVersionMajor}.${device.usbVersionMinor}`,
+        usbVersion: formatUsbVersion(device.usbVersionMajor, device.usbVersionMinor, device.usbVersionSubminor),
         deviceClass: device.deviceClass,
         deviceSubclass: device.deviceSubclass,
         deviceProtocol: device.deviceProtocol,
@@ -159,32 +194,26 @@ export default function UsbReconDeck({
     if (!usbDevice) return;
     try {
       await usbDevice.claimInterface(ifaceNum);
+      claimedRef.current.add(ifaceNum);
       setClaimedInterfaces(prev => ({ ...prev, [ifaceNum]: true }));
       onLogMessage?.(`[USB] Claimed interface #${ifaceNum}`, 'sys');
       setForcerStatus(`Interface #${ifaceNum} claimed successfully`);
     } catch (err) {
       onLogMessage?.(`[USB CLAIM ERROR] ${err.message}`, 'err');
-      alert(`Could not claim interface #${ifaceNum}: ${err.message}\nNote: The OS driver or another program might be locking this interface.`);
+      setForcerStatus(`Could not claim interface #${ifaceNum}: ${err.message}. The OS driver or another program might be locking this interface.`);
     }
   };
 
   // Transfer OUT (Send raw bytes to endpoint)
   const handleTransferOut = async () => {
-    if (!usbDevice || selectedEndpoint === null) return;
+    if (!usbDevice || !currentEndpoint) return;
     try {
-      // Parse hex payload string: "41 54 0D 0A" -> Uint8Array
-      const hexBytes = outPayload.replace(/[^0-9a-fA-F]/g, '');
-      const byteArray = [];
-      for (let i = 0; i < hexBytes.length; i += 2) {
-        byteArray.push(parseInt(hexBytes.substr(i, 2), 16));
-      }
-      const data = new Uint8Array(byteArray);
-
-      await usbDevice.transferOut(selectedEndpoint, data);
-      onLogMessage?.(`[USB OUT Ep:${selectedEndpoint}] Sent ${data.length} bytes: ${outPayload}`, 'tx');
-      setForcerStatus(`Sent ${data.length} bytes to Endpoint ${selectedEndpoint}`);
+      const data = await sendHexToEndpoint(usbDevice, currentEndpoint, selectedInterface, claimedRef.current, outPayload);
+      onLogMessage?.(`[USB OUT Ep:${currentEndpoint.endpointNumber}] Sent ${data.length} bytes: ${outPayload}`, 'tx');
+      setForcerStatus(`Sent ${data.length} bytes to Endpoint ${currentEndpoint.endpointNumber} (OUT)`);
     } catch (err) {
       onLogMessage?.(`[USB TRANSFER ERROR] ${err.message}`, 'err');
+      setForcerStatus(err.message);
     }
   };
 
@@ -196,18 +225,20 @@ export default function UsbReconDeck({
       return;
     }
 
-    if (!usbDevice || selectedEndpoint === null) return;
+    if (!usbDevice || !currentEndpoint) return;
+    const ep = currentEndpoint;
+    const ifaceNum = selectedInterface;
+    const device = usbDevice;
     listenLoopRef.current = true;
     setIsListening(true);
-    setForcerStatus(`Listening on Endpoint ${selectedEndpoint}...`);
+    setForcerStatus(`Listening on Endpoint ${ep.endpointNumber} (IN)...`);
 
-    while (listenLoopRef.current) {
+    while (listenLoopRef.current && deviceRef.current === device) {
       try {
-        const result = await usbDevice.transferIn(selectedEndpoint, 64);
-        if (result.data && result.data.byteLength > 0) {
-          const bytes = new Uint8Array(result.data.buffer);
+        const bytes = await readFromEndpoint(device, ep, ifaceNum, claimedRef.current);
+        if (bytes.length > 0) {
           const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-          const ascii = new TextDecoder().decode(bytes);
+          const ascii = Array.from(bytes).map(b => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '.')).join('');
           const time = new Date().toLocaleTimeString();
 
           setInTransferLog(prev => [
@@ -216,10 +247,16 @@ export default function UsbReconDeck({
           ]);
         }
       } catch (err) {
-        if (listenLoopRef.current) {
-          console.warn('TransferIn loop paused:', err);
-          await new Promise(r => setTimeout(r, 200));
+        if (!listenLoopRef.current) break;
+        if (/^(Claim interface|Endpoint )/.test(err.message)) {
+          // A usage error, not a transient USB error: stop instead of retrying forever.
+          listenLoopRef.current = false;
+          setIsListening(false);
+          setForcerStatus(err.message);
+          break;
         }
+        console.warn('TransferIn loop paused:', err);
+        await new Promise(r => setTimeout(r, 200));
       }
     }
   };
@@ -244,7 +281,7 @@ export default function UsbReconDeck({
       // Step 3: Deassert DTR & restore baud
       onToggleSignal?.('dtr');
       await new Promise(r => setTimeout(r, 200));
-      onBaudRateChange?.(115200);
+      onBaudRateChange?.(currentBaudRate);
 
       setForcerStatus('1200-Baud knock completed! RP2040 / SAMD / Arduino board should now be in Bootloader / UF2 mode.');
       onLogMessage?.('[BOOT FORCER] 1200-baud pulse finished. Device rebooting into bootloader.', 'sys');
@@ -282,30 +319,21 @@ export default function UsbReconDeck({
     }
   };
 
-  // 3. USB DFU Detach Knock (WebUSB Control Transfer)
+  // 3. USB DFU Detach Knock (WebUSB Control Transfer, sent to the DFU interface only)
   const handleDfuDetachKnock = async () => {
     if (!usbDevice) {
-      alert('Please interrogate a WebUSB device first using the "INTERROGATE ANY USB DEVICE" button.');
+      setForcerStatus('Interrogate a WebUSB device first using the "INTERROGATE ANY USB DEVICE" button.');
       return;
     }
 
     setIsExecutingForcer(true);
     setForcerStatus('Sending USB DFU_DETACH control transfer...');
-    onLogMessage?.('[BOOT FORCER] Sending DFU_DETACH request...', 'sys');
-
     try {
-      // DFU_DETACH: bmRequestType: 0x21 (Class, Interface, Host-to-Device), bRequest: 0x00, wValue: 1000ms
-      await usbDevice.controlTransferOut({
-        requestType: 'class',
-        recipient: 'interface',
-        request: 0x00, // DFU_DETACH
-        value: 1000,   // Timeout before returning
-        index: selectedInterface || 0
-      });
-      setForcerStatus('DFU_DETACH request acknowledged! Device should reboot into DFU bootloader.');
-      onLogMessage?.('[BOOT FORCER] DFU_DETACH acknowledged by target.', 'sys');
+      const dfu = await dfuDetach(usbDevice);
+      setForcerStatus(`DFU_DETACH acknowledged by interface #${dfu.interfaceNumber}. Device should reboot into DFU bootloader.`);
+      onLogMessage?.(`[BOOT FORCER] DFU_DETACH acknowledged by interface #${dfu.interfaceNumber}.`, 'sys');
     } catch (err) {
-      setForcerStatus(`DFU Detach error: ${err.message}`);
+      setForcerStatus(`DFU Detach: ${err.message}`);
       onLogMessage?.(`[BOOT FORCER] DFU error: ${err.message}`, 'err');
     } finally {
       setIsExecutingForcer(false);
@@ -406,7 +434,7 @@ export default function UsbReconDeck({
                 CONNECT & PROBE ANY PLUGGED-IN USB HARDWARE
               </span>
               <p className="text-[11px] text-slate-400">
-                Pypasses COM port restrictions. Works on mystery gadgets, smart vapes, DFU devices, and raw USB controllers.
+                Bypasses COM port restrictions. Works on mystery gadgets, smart vapes, DFU devices, and raw USB controllers.
               </p>
             </div>
 
@@ -419,6 +447,13 @@ export default function UsbReconDeck({
             </button>
           </div>
 
+          {forcerStatus && (
+            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-cyan-300 font-mono text-[11px] flex items-center gap-2">
+              <Activity className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>{forcerStatus}</span>
+            </div>
+          )}
+
           {deviceInfo ? (
             <div className="grid grid-cols-1 @lg:grid-cols-3 gap-4">
               {/* Left Column: Silicon Fingerprint & Descriptors */}
@@ -428,9 +463,15 @@ export default function UsbReconDeck({
                     <Cpu className="w-4 h-4 text-amber-400" />
                     SILICON FINGERPRINT
                   </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">
-                    IDENTIFIED
-                  </span>
+                  {deviceInfo.intel?.known === false ? (
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-700 font-bold">
+                      UNKNOWN
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">
+                      IDENTIFIED
+                    </span>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -490,7 +531,12 @@ export default function UsbReconDeck({
                       return (
                         <div
                           key={iface.interfaceNumber}
-                          onClick={() => setSelectedInterface(iface.interfaceNumber)}
+                          onClick={() => {
+                            listenLoopRef.current = false;
+                            setIsListening(false);
+                            setSelectedInterface(iface.interfaceNumber);
+                            setSelectedEndpoint(iface.endpoints[0] ? endpointKey(iface.endpoints[0]) : null);
+                          }}
                           className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
                             isSelected 
                               ? 'bg-slate-900 border-cyan-500/80 shadow-cyan-glow/20' 
@@ -538,16 +584,18 @@ export default function UsbReconDeck({
                       <span>ENDPOINT:</span>
                       <select
                         value={selectedEndpoint || ''}
-                        onChange={e => setSelectedEndpoint(Number(e.target.value))}
+                        onChange={e => {
+                          listenLoopRef.current = false;
+                          setIsListening(false);
+                          setSelectedEndpoint(e.target.value);
+                        }}
                         className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-cyber-cyan font-bold"
                       >
-                        {interfaces
-                          .find(i => i.interfaceNumber === selectedInterface)
-                          ?.endpoints.map(ep => (
-                            <option key={ep.endpointNumber} value={ep.endpointNumber}>
-                              Ep {ep.endpointNumber} ({ep.direction.toUpperCase()} - {ep.type})
-                            </option>
-                          ))}
+                        {currentInterface?.endpoints.map(ep => (
+                          <option key={endpointKey(ep)} value={endpointKey(ep)}>
+                            {describeEndpointOption(ep)}
+                          </option>
+                        ))}
                       </select>
                       <button
                         onClick={toggleListening}

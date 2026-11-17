@@ -62,6 +62,64 @@ export function normalizeHash(h) {
   return String(h).trim().toLowerCase().replace(/^\*/, '');
 }
 
+// ---------- Target parsing (hash / hash:salt) and log hygiene ----------
+
+/** Expected hex digest length for each mode. */
+export const HASH_HEX_LENGTH = {
+  md5: 32, sha1: 40, sha256: 64, sha384: 96, sha512: 128, ntlm: 32, md5md5: 32, mysql41: 40,
+  md5ps: 32, md5sp: 32, sha1ps: 40, sha1sp: 40, sha256ps: 64,
+};
+
+/**
+ * Parse one target line for a hash mode. Salted modes accept `hash:salt`
+ * (split on the first colon, so the salt may itself contain colons); a line
+ * with no salt part falls back to `sharedSalt`. Unsalted modes use the text
+ * before any colon. Crypt-style strings (`$2a$..`, `$1$..`, `$6$..`, bcrypt,
+ * argon2 ...) are reported as unsupported instead of being treated as hex.
+ * Returns { ok, hash, salt, error }.
+ */
+export function parseTargetLine(line, modeId, sharedSalt = '') {
+  const raw = String(line ?? '').trim();
+  if (!raw) return { ok: false, error: 'empty line' };
+  const spec = HASH_MODES.find((m) => m.id === modeId);
+  if (!spec) return { ok: false, error: `unknown mode ${modeId}` };
+  if (/^\$[A-Za-z0-9./-]+\$/.test(raw) || raw.startsWith('{')) {
+    return { ok: false, error: 'Unsupported hash format (bcrypt / $id$ crypt / scheme-prefixed strings cannot be cracked here)' };
+  }
+  const i = raw.indexOf(':');
+  const hash = normalizeHash(i === -1 ? raw : raw.slice(0, i));
+  let salt = '';
+  if (spec.salt) salt = i === -1 || i === raw.length - 1 ? sharedSalt : raw.slice(i + 1);
+  if (!/^[0-9a-f]+$/.test(hash)) return { ok: false, error: 'not a hex digest' };
+  const want = HASH_HEX_LENGTH[modeId];
+  if (want && hash.length !== want) return { ok: false, error: `${hash.length} hex chars, ${spec.label} needs ${want}` };
+  if (spec.salt && !salt) return { ok: false, error: 'no salt (use hash:salt or fill the Salt box)' };
+  return { ok: true, hash, salt };
+}
+
+/** Parse a block of target lines. Returns { targets: [{hash, salt}], errors: [{line, error}] } (de-duplicated). */
+export function parseTargets(text, modeId, sharedSalt = '') {
+  const targets = [];
+  const errors = [];
+  const seen = new Set();
+  String(text ?? '').split(/\r?\n/).forEach((l, idx) => {
+    if (!l.trim()) return;
+    const r = parseTargetLine(l, modeId, sharedSalt);
+    if (!r.ok) { errors.push({ line: idx + 1, error: r.error }); return; }
+    const key = `${r.salt}\u0000${r.hash}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push({ hash: r.hash, salt: r.salt });
+  });
+  return { targets, errors };
+}
+
+/** Masked form of a recovered password for logs: length only, no characters. */
+export function maskPassword(pw) {
+  const n = String(pw ?? '').length;
+  return `${'*'.repeat(Math.min(n, 12))}${n > 12 ? '…' : ''} (${n} char${n === 1 ? '' : 's'})`;
+}
+
 // ---------- Rule-based expansion (a compact best64-style set) ----------
 
 const LEET = { a: '4', e: '3', i: '1', o: '0', s: '5', t: '7' };

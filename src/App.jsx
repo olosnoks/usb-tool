@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SerialProvider, useSerial } from './context/SerialContext';
 import Header from './components/layout/Header';
-import Sidebar from './components/layout/Sidebar';
 import Desktop from './components/layout/Desktop';
 import { setCurrentTool, record } from './utils/sessionLog';
 import TerminalDrawer from './components/layout/TerminalDrawer';
@@ -10,7 +9,7 @@ import { renderTool, toolMeta } from './components/ToolRegistry';
 import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize,
   moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, saveState, zoomStep, toggleFit,
-  duplicateWindow, baseIdOf, applySnap, setZoom
+  duplicateWindow, applySnap, setZoom
 } from './utils/windowManager';
 
 // Modals
@@ -32,7 +31,7 @@ function toolFromUrl() {
 
 /** A first guess at the desktop size before it has been measured. */
 function guessViewport() {
-  try { return { width: Math.max(600, window.innerWidth - 280), height: Math.max(400, window.innerHeight - 120) }; }
+  try { return { width: Math.max(600, window.innerWidth - 24), height: Math.max(400, window.innerHeight - 120) }; }
   catch (e) { return { width: 1200, height: 760 }; }
 }
 
@@ -81,6 +80,11 @@ function AppContent() {
   }, [wm]);
 
   const open = useCallback((toolId, opts) => setWm((s) => openWindow(s, toolId, toolMeta(toolId), viewportRef.current, opts)), []);
+  // Start-menu launcher (the old sidebar handler): the full terminal makes the drawer redundant.
+  const launchTool = useCallback((toolId, opts) => {
+    open(toolId, opts);
+    if (toolId === 'terminal') setIsDrawerOpen(false);
+  }, [open]);
   const onDuplicate = useCallback((id) => setWm((s) => duplicateWindow(s, id, viewportRef.current)), []);
   const onSnap = useCallback((id, zone) => setWm((s) => applySnap(s, id, zone, viewportRef.current)), []);
   const onFocus = useCallback((id) => setWm((s) => focusWindow(s, id)), []);
@@ -120,18 +124,8 @@ function AppContent() {
   const focusedIdRef = useRef(null);
   focusedIdRef.current = focused?.id || null;
   const activeTool = focused?.toolId || null;           // the tool whose window has focus
-  const openTools = useMemo(() => wm.windows.map((w) => w.baseId || baseIdOf(w.id)), [wm.windows]);
   const metaFor = useCallback((toolId) => toolMeta(toolId), []);
   const renderToolInWindow = useCallback((toolId) => renderTool(toolId, serial), [serial]);
-
-  // Sidebar collapse state (persisted)
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    try { return localStorage.getItem('skon_sidebar_collapsed') === 'true'; } catch (e) { return false; }
-  });
-  const handleToggleSidebar = (collapsed) => {
-    setIsSidebarCollapsed(collapsed);
-    try { localStorage.setItem('skon_sidebar_collapsed', String(collapsed)); } catch (e) { /* ignore */ }
-  };
 
   // Live Terminal Drawer state (closed by default)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -224,24 +218,16 @@ function AppContent() {
         onOpenPinouts={() => setIsPinoutModalOpen(true)}
       />
 
-      {/* 2. Main Workspace Layout: Sidebar + windowed desktop */}
+      {/* 2. Main Workspace Layout: windowed desktop (tools launch from the taskbar's Start menu) */}
       <div className="flex-1 flex overflow-hidden relative">
-        <Sidebar
-          activeTool={activeTool}
-          openTools={openTools}
-          onSelectTool={(toolId, opts) => {
-            open(toolId, opts);
-            // The full terminal makes the drawer redundant
-            if (toolId === 'terminal') setIsDrawerOpen(false);
-          }}
-          isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={handleToggleSidebar}
-          onOpenPinouts={() => setIsPinoutModalOpen(true)}
-          onOpenHardwareIntel={() => setIsHardwareIntelOpen(true)}
-        />
-
-        {/* Desktop with the tool windows, and the bottom terminal drawer */}
+        {/* The terminal drawer drops down from the header, above the desktop with the tool windows */}
         <div className="flex-1 flex flex-col overflow-hidden bg-cyber-darkest min-w-0">
+          <TerminalDrawer
+            isOpen={isDrawerOpen}
+            onToggleOpen={() => setIsDrawerOpen(!isDrawerOpen)}
+            onNavigateToFullTerminal={() => { open('terminal'); setIsDrawerOpen(false); }}
+          />
+
           <Desktop
             state={wm} viewport={viewport} onViewport={onViewport}
             renderTool={renderToolInWindow} metaFor={metaFor}
@@ -249,13 +235,10 @@ function AppContent() {
             onToggleMaximize={onToggleMaximize} onClose={onClose}
             onTile={onTile} onCascade={onCascade} onCloseAll={onCloseAll}
             onZoomStep={onZoomStep} onToggleFit={onToggleFit} onResetZoom={onResetZoom} onDuplicate={onDuplicate} onSnap={onSnap}
+            activeTool={activeTool} onLaunch={launchTool}
+            onOpenPinouts={() => setIsPinoutModalOpen(true)} onOpenHardwareIntel={() => setIsHardwareIntelOpen(true)}
           />
 
-          <TerminalDrawer
-            isOpen={isDrawerOpen}
-            onToggleOpen={() => setIsDrawerOpen(!isDrawerOpen)}
-            onNavigateToFullTerminal={() => { open('terminal'); setIsDrawerOpen(false); }}
-          />
         </div>
       </div>
 

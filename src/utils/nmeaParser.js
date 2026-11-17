@@ -3,6 +3,15 @@
  * Parses GPS strings ($GPGGA, $GPRMC, $GNGGA) and WiFi beacon logs into structured data.
  */
 
+import {
+  channelToFrequency,
+  isValidFix,
+  splitCsvLine,
+  splitCsvRecords,
+  toEpochMs,
+  unneutralizeCsvText
+} from './wardrivingExporter';
+
 /**
  * Converts NMEA latitude/longitude coordinate (ddmm.mmmm) to decimal degrees
  * @param {string} rawCoord e.g. "4045.1234"
@@ -114,14 +123,87 @@ export function parseNmeaSentence(line) {
   return null;
 }
 
+const MAC_RE = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+
+const toNum = (v) => {
+  if (v === null || v === undefined) return null;
+  const t = String(v).trim();
+  if (t === '') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+};
+const intOrNull = (v) => {
+  const n = toNum(v);
+  return n === null ? null : Math.round(n);
+};
+// 0 is how many firmwares write "unknown" for RSSI / channel
+const positiveOrNull = (v) => { const n = intOrNull(v); return n && n > 0 ? n : null; };
+const rssiOrNull = (v) => { const n = intOrNull(v); return n === null || n === 0 ? null : n; };
+
+/** Position for a row, or nulls: rejects non-finite, out-of-range and 0,0. */
+function fixOrNull(rawLat, rawLon) {
+  const lat = toNum(rawLat);
+  const lon = toNum(rawLon);
+  return isValidFix(lat, lon) ? { lat, lon } : { lat: null, lon: null };
+}
+
+/** Standard WiGLE columns (name -> default index) for v1.6 (14 cols) and v1.4 (11 cols). */
+const WIGLE_V16_INDEX = { mac: 0, ssid: 1, auth: 2, seen: 3, channel: 4, frequency: 5, rssi: 6, lat: 7, lon: 8, alt: 9, acc: 10, type: 13 };
+const WIGLE_V14_INDEX = { mac: 0, ssid: 1, auth: 2, seen: 3, channel: 4, rssi: 5, lat: 6, lon: 7, alt: 8, acc: 9, type: 10 };
+
+/** Build a name->index map from a "MAC,SSID,AuthMode,..." header line. */
+export function wigleColumnIndex(headerFields) {
+  const names = {
+    mac: 'mac', ssid: 'ssid', authmode: 'auth', firstseen: 'seen', channel: 'channel', frequency: 'frequency',
+    rssi: 'rssi', currentlatitude: 'lat', currentlongitude: 'lon', altitudemeters: 'alt', accuracymeters: 'acc', type: 'type'
+  };
+  const idx = {};
+  headerFields.forEach((h, i) => {
+    const k = names[String(h).trim().toLowerCase()];
+    if (k && idx[k] === undefined) idx[k] = i;
+  });
+  return idx.mac === 0 && idx.seen !== undefined ? idx : null;
+}
+
+function parseWigleFields(parts, idx) {
+  const get = (k) => (idx[k] === undefined ? '' : (parts[idx[k]] ?? '').trim());
+  const seenRaw = get('seen');
+  const firstSeenTimestamp = toEpochMs(seenRaw);
+  const { lat, lon } = fixOrNull(get('lat'), get('lon'));
+  const rawAlt = toNum(get('alt'));
+  const accuracy = toNum(get('acc'));
+  const devType = (get('type') || 'WIFI').toUpperCase();
+  const channel = positiveOrNull(get('channel'));
+  const frequency = positiveOrNull(get('frequency')) ?? (channel ? channelToFrequency(channel) : null);
+  const timePart = /^\d{4}-\d{2}-\d{2}[ T](\d{2}:\d{2}:\d{2})/.exec(seenRaw);
+  return {
+    bssid: get('mac').toUpperCase().replace(/-/g, ':'),
+    ssid: unneutralizeCsvText(parts[idx.ssid] ?? '') || '<Hidden SSID>',
+    auth: get('auth') || null,
+    channel,
+    frequency,
+    rssi: rssiOrNull(get('rssi')),
+    lat,
+    lon,
+    altitude: lat !== null && rawAlt !== null ? rawAlt : null,
+    accuracy: lat !== null && accuracy !== null && accuracy > 0 ? accuracy : null,
+    deviceType: devType,
+    sourceDevice: idx.frequency !== undefined ? 'warhog-piglet-v16' : 'wigle-v14',
+    firstSeenTimestamp,
+    seenTime: timePart ? timePart[1] : ''
+  };
+}
+
 /**
  * Parses wardriving WiFi & BLE beacon logs
  * Matches standard formats from Warhog CYD, Piglet (ESP32-C5/S3),
  * WiGLE CSV v1.4 / v1.6, and ESP32 Marauder output.
+ * Unknown RSSI / channel / auth are returned as null (never invented).
  * @param {string} line
+ * @param {object} [columns] optional name->index map from {@link wigleColumnIndex}
  * @returns {object|null}
  */
-export function parseWardriveLine(line) {
+export function parseWardriveLine(line, columns) {
   if (!line || typeof line !== 'string') return null;
   const clean = line.trim();
   if (!clean || clean.startsWith('WigleWifi-') || clean.startsWith('MAC,SSID,')) return null;
@@ -132,20 +214,21 @@ export function parseWardriveLine(line) {
       const obj = JSON.parse(clean);
       const bssid = (obj.bssid || obj.mac || obj.BSSID || '').toUpperCase();
       if (/^([0-9A-F]{2}[:-]){5}([0-9A-F]{2})$/.test(bssid)) {
-        const lat = obj.lat !== undefined ? parseFloat(obj.lat) : obj.latitude !== undefined ? parseFloat(obj.latitude) : null;
-        const lon = obj.lon !== undefined ? parseFloat(obj.lon) : obj.longitude !== undefined ? parseFloat(obj.longitude) : null;
+        const { lat, lon } = fixOrNull(obj.lat ?? obj.latitude, obj.lon ?? obj.longitude);
+        const alt = toNum(obj.alt);
         return {
           bssid: bssid.replace(/-/g, ':'),
           ssid: obj.ssid || obj.essid || '<Hidden SSID>',
-          rssi: parseInt(obj.rssi ?? -70, 10),
-          channel: parseInt(obj.channel ?? obj.ch ?? 1, 10),
+          rssi: rssiOrNull(obj.rssi),
+          channel: positiveOrNull(obj.channel ?? obj.ch),
           frequency: obj.freq || obj.frequency || null,
-          auth: obj.auth || obj.encryption || 'WPA2',
+          auth: obj.auth || obj.encryption || null,
           deviceType: (obj.type || 'WIFI').toUpperCase(),
           sourceDevice: obj.src || obj.device || (obj.mode === 'WARHOG' ? 'warhog-cyd' : 'piglet'),
-          lat: !Number.isNaN(lat) && lat !== 0 ? lat : null,
-          lon: !Number.isNaN(lon) && lon !== 0 ? lon : null,
-          altitude: obj.alt !== undefined ? parseFloat(obj.alt) : null,
+          lat,
+          lon,
+          altitude: lat !== null ? alt : null,
+          firstSeenTimestamp: Date.now(),
           seenTime: obj.time || new Date().toLocaleTimeString()
         };
       }
@@ -166,73 +249,51 @@ export function parseWardriveLine(line) {
     const gpsPairMatch = clean.match(/GPS[:= ]\s*([+-]?\d+\.\d+)\s*[,/]\s*([+-]?\d+\.\d+)/i);
 
     if (bssidMatch) {
-      const lat = latMatch ? parseFloat(latMatch[1]) : gpsPairMatch ? parseFloat(gpsPairMatch[1]) : null;
-      const lon = lonMatch ? parseFloat(lonMatch[1]) : gpsPairMatch ? parseFloat(gpsPairMatch[2]) : null;
+      const rawLat = latMatch ? latMatch[1] : gpsPairMatch ? gpsPairMatch[1] : null;
+      const rawLon = lonMatch ? lonMatch[1] : gpsPairMatch ? gpsPairMatch[2] : null;
+      const { lat, lon } = fixOrNull(rawLat, rawLon);
       const isWarhog = /WARHOG|CYD/i.test(clean);
       const isPiglet = /PIGLET/i.test(clean);
 
       return {
         bssid: bssidMatch[1].toUpperCase(),
         ssid: ssidMatch ? ssidMatch[1].trim() : '<Hidden SSID>',
-        rssi: rssiMatch ? parseInt(rssiMatch[1], 10) : -70,
-        channel: chMatch ? parseInt(chMatch[1], 10) : 1,
-        auth: authMatch ? authMatch[1] : 'WPA2/WPA3',
+        rssi: rssiMatch ? rssiOrNull(rssiMatch[1]) : null,
+        channel: chMatch ? positiveOrNull(chMatch[1]) : null,
+        auth: authMatch ? authMatch[1] : null,
         deviceType: /\bBLE\b/i.test(clean) ? 'BLE' : 'WIFI',
         sourceDevice: isWarhog ? 'warhog-cyd' : isPiglet ? 'piglet' : 'serial',
-        lat: lat && !Number.isNaN(lat) ? lat : null,
-        lon: lon && !Number.isNaN(lon) ? lon : null,
+        lat,
+        lon,
+        firstSeenTimestamp: Date.now(),
         seenTime: new Date().toLocaleTimeString()
       };
     }
   }
 
   // Pattern 2: CSV lines (WiGLE v1.6 14-col from Warhog CYD & Piglet, WiGLE v1.4 11-col, or 5-col simple CSV)
-  const parts = clean.split(',');
+  const parts = splitCsvLine(clean);
   if (parts.length >= 5) {
-    const macCandidate = parts[0].trim().replace(/^"|"$/g, '');
-    if (/^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/.test(macCandidate)) {
-      const stripQuotes = (s) => (s || '').trim().replace(/^"|"$/g, '');
-
-      // Check if parts[3] looks like a timestamp (YYYY-MM-DD or ISO8601) -> WiGLE CSV v1.4 or v1.6
-      const col3 = stripQuotes(parts[3]);
+    const macCandidate = parts[0].trim();
+    if (MAC_RE.test(macCandidate)) {
+      const col3 = (parts[3] || '').trim();
       const isWigleFormat = /\d{4}-\d{2}-\d{2}|\d{2}:\d{2}:\d{2}/.test(col3) && parts.length >= 10;
 
       if (isWigleFormat) {
-        // WiGLE v1.6 has 14 columns: MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type
-        // WiGLE v1.4 has 11 columns: MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type
-        const isV16 = parts.length >= 13 && parseInt(parts[5], 10) > 1000;
-        const channel = parseInt(parts[4], 10) || 1;
-        const frequency = isV16 ? parseInt(parts[5], 10) || null : null;
-        const rssi = parseInt(parts[isV16 ? 6 : 5], 10) || -70;
-        const rawLat = parseFloat(parts[isV16 ? 7 : 6]);
-        const rawLon = parseFloat(parts[isV16 ? 8 : 7]);
-        const rawAlt = parseFloat(parts[isV16 ? 9 : 8]);
-        const devType = stripQuotes(parts[isV16 ? 13 : 10]) || 'WIFI';
-
-        return {
-          bssid: macCandidate.toUpperCase().replace(/-/g, ':'),
-          ssid: stripQuotes(parts[1]) || '<Hidden SSID>',
-          auth: stripQuotes(parts[2]) || 'OPEN',
-          channel,
-          frequency,
-          rssi,
-          lat: !Number.isNaN(rawLat) && rawLat !== 0 ? rawLat : null,
-          lon: !Number.isNaN(rawLon) && rawLon !== 0 ? rawLon : null,
-          altitude: !Number.isNaN(rawAlt) ? rawAlt : null,
-          deviceType: devType.toUpperCase(),
-          sourceDevice: isV16 ? 'warhog-piglet-v16' : 'wigle-v14',
-          seenTime: col3.split(/[ T]/)[1] || new Date().toLocaleTimeString()
-        };
+        // Header-driven when the file's header line was seen; otherwise by column count.
+        const idx = columns || (parts.length >= 13 ? WIGLE_V16_INDEX : WIGLE_V14_INDEX);
+        return parseWigleFields(parts, idx);
       }
 
       // Simple 5-column CSV: MAC,SSID,Auth,Channel,RSSI
       return {
         bssid: macCandidate.toUpperCase().replace(/-/g, ':'),
-        ssid: stripQuotes(parts[1]) || '<Hidden SSID>',
-        auth: stripQuotes(parts[2]) || 'WPA2',
-        channel: parseInt(parts[3], 10) || 1,
-        rssi: parseInt(parts[4], 10) || -70,
+        ssid: parts[1].trim() || '<Hidden SSID>',
+        auth: parts[2].trim() || null,
+        channel: positiveOrNull(parts[3]),
+        rssi: rssiOrNull(parts[4]),
         deviceType: 'WIFI',
+        firstSeenTimestamp: Date.now(),
         seenTime: new Date().toLocaleTimeString()
       };
     }
@@ -242,7 +303,10 @@ export function parseWardriveLine(line) {
 }
 
 /**
- * Parses a full WiGLE v1.4 / v1.6 CSV file exported from Warhog CYD or Piglet SD card
+ * Parses a full WiGLE v1.4 / v1.6 CSV file exported from Warhog CYD, Piglet SD
+ * card or this app. Quote-aware (commas and newlines inside SSIDs). When a
+ * BSSID appears several times the strongest-RSSI row wins (its position is the
+ * closest to the AP), and the earliest FirstSeen is kept.
  * @param {string} csvContent
  * @returns {{ metadata: object, aps: Array<object>, track: Array<{lat: number, lon: number}> }}
  */
@@ -254,10 +318,11 @@ export function parseWigleCsvFile(csvContent) {
   };
   if (!csvContent || typeof csvContent !== 'string') return result;
 
-  const lines = csvContent.split(/\r?\n/);
+  const text = csvContent.replace(/^﻿/, '');
   const apMap = new Map();
+  let columns = null;
 
-  for (const rawLine of lines) {
+  for (const rawLine of splitCsvRecords(text)) {
     const line = rawLine.trim();
     if (!line) continue;
 
@@ -265,20 +330,43 @@ export function parseWigleCsvFile(csvContent) {
       const tokens = line.split(',');
       result.metadata.format = tokens[0];
       for (const t of tokens.slice(1)) {
-        const [k, v] = t.split('=');
-        if (k && v) result.metadata[k.trim()] = v.trim();
+        const eq = t.indexOf('=');
+        if (eq > 0) {
+          const k = t.slice(0, eq).trim();
+          const v = t.slice(eq + 1).trim();
+          if (k && v) result.metadata[k] = v;
+        }
       }
       continue;
     }
 
-    const parsed = parseWardriveLine(line);
-    if (parsed) {
+    if (/^MAC,/i.test(line)) {
+      columns = wigleColumnIndex(splitCsvLine(line));
+      continue;
+    }
+
+    const parsed = parseWardriveLine(line, columns || undefined);
+    if (!parsed) continue;
+    const prev = apMap.get(parsed.bssid);
+    if (!prev) {
       apMap.set(parsed.bssid, parsed);
-      if (parsed.lat && parsed.lon) {
-        const last = result.track[result.track.length - 1];
-        if (!last || Math.abs(last.lat - parsed.lat) > 0.00002 || Math.abs(last.lon - parsed.lon) > 0.00002) {
-          result.track.push({ lat: parsed.lat, lon: parsed.lon });
-        }
+    } else {
+      const better = (parsed.rssi ?? -Infinity) > (prev.rssi ?? -Infinity) ? parsed : prev;
+      const other = better === parsed ? prev : parsed;
+      const times = [prev.firstSeenTimestamp, parsed.firstSeenTimestamp].filter((t) => typeof t === 'number');
+      const useOtherPos = better.lat === null || better.lat === undefined;
+      apMap.set(parsed.bssid, {
+        ...better,
+        // fill a missing position from the weaker row, never overwrite a real one
+        lat: useOtherPos ? other.lat : better.lat,
+        lon: useOtherPos ? other.lon : better.lon,
+        firstSeenTimestamp: times.length ? Math.min(...times) : null
+      });
+    }
+    if (parsed.lat !== null && parsed.lat !== undefined) {
+      const last = result.track[result.track.length - 1];
+      if (!last || Math.abs(last.lat - parsed.lat) > 0.00002 || Math.abs(last.lon - parsed.lon) > 0.00002) {
+        result.track.push({ lat: parsed.lat, lon: parsed.lon });
       }
     }
   }

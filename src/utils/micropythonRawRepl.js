@@ -75,6 +75,16 @@ export class RawRepl {
     return { stdout, stderr };
   }
 
+  /** Like exec, but a device exception (stderr) is thrown instead of returned. */
+  async execChecked(code, timeoutMs) {
+    const { stdout, stderr } = await this.exec(code, timeoutMs);
+    if (stderr && stderr.trim()) {
+      const lines = stderr.trim().split(/\r?\n/);
+      throw new Error(`device error: ${lines[lines.length - 1]}`);
+    }
+    return stdout;
+  }
+
   async exit() {
     try { await this.write(Uint8Array.of(0x02)); } finally { this.stop(); }
   }
@@ -87,6 +97,17 @@ export async function runInRawRepl(write, subscribe, code, timeoutMs) {
     await repl.enter();
     const { stdout, stderr } = await repl.exec(code, timeoutMs);
     return stderr ? `${stdout}\n${stderr}` : stdout;
+  } finally {
+    await repl.exit().catch(() => {});
+  }
+}
+
+/** Run `fn(repl)` inside ONE raw-REPL session (enter once, leave once, even on error/cancel). */
+export async function withRawRepl(write, subscribe, fn) {
+  const repl = new RawRepl(write, subscribe);
+  try {
+    await repl.enter();
+    return await fn(repl);
   } finally {
     await repl.exit().catch(() => {});
   }

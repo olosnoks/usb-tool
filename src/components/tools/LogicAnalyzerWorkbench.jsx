@@ -14,11 +14,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Crosshair,
-  FileUp
+  FileUp,
+  Save
 } from 'lucide-react';
 import { SAMPLE_RATES, SumpAnalyzer, Fx2LogicAnalyzer } from '../../utils/logicAnalyzerDriver';
 import {
   DECODERS,
+  runStack,
+  serializeLogicSession,
+  parseLogicSession,
   i2cTransactions,
   estimateBaud,
   findTrigger,
@@ -43,11 +47,12 @@ const CHANNEL_DEFAULTS = [
   { id: 7, name: 'D7', color: '#f43f5e' }
 ];
 
+const PALETTE = CHANNEL_DEFAULTS.map((c) => c.color);
+const makeChannels = (count, prev = []) => Array.from({ length: count }, (_, i) => ({ id: i, name: prev[i]?.name || `D${i}`, color: PALETTE[i % PALETTE.length] }));
+
 const KIND_COLORS = { data: '#0e7490', control: '#047857', error: '#be123c' };
 const CHANNEL_HEIGHT = 45;
 const TOP_MARGIN = 30;
-const ANNOTATION_Y = TOP_MARGIN + 8 * CHANNEL_HEIGHT + 4;
-const CANVAS_HEIGHT = ANNOTATION_Y + 26;
 
 const fmtTime = (seconds) => {
   const a = Math.abs(seconds);
@@ -90,15 +95,26 @@ export default function LogicAnalyzerWorkbench() {
   const [progress, setProgress] = useState(0);
   const [triggerMask, setTriggerMask] = useState('00');
   const [triggerValue, setTriggerValue] = useState('00');
+  const [edgeKind, setEdgeKind] = useState('none');     // 'none' | 'rising' | 'falling'
+  const [edgeChannel, setEdgeChannel] = useState(0);
+  const [preTrigger, setPreTrigger] = useState(0);      // percent of the capture before the trigger
+  const [wideFx2, setWideFx2] = useState(false);
+  const [channelCount, setChannelCount] = useState(8);
+  const [triggerIndex, setTriggerIndex] = useState(null);
+  const [maxSamples, setMaxSamples] = useState(null);
+  const [stackId, setStackId] = useState('');
+  const sessionRef = useRef(null);
   const [captureRate, setCaptureRate] = useState(null); // rate the device actually used
   const sumpRef = useRef(null);
   const fx2Ref = useRef(null);
   const fwInputRef = useRef(null);
   const importRef = useRef(null);
 
-  // Digital Sample Buffer (Uint8Array: each byte is 8 channels). Empty until a capture.
+  // Digital sample buffer: Uint8Array for up to 8 channels, Uint16Array / Uint32Array for wider devices. Empty until a capture.
   const [samples, setSamples] = useState(() => new Uint8Array(0));
   const [channels, setChannels] = useState(CHANNEL_DEFAULTS);
+  const annotationY = TOP_MARGIN + channelCount * CHANNEL_HEIGHT + 4;
+  const canvasHeight = annotationY + (stackId ? 50 : 26);
 
   // Protocol decoder: which one, and each decoder's channel mapping and options.
   const [decoderId, setDecoderId] = useState('i2c');
@@ -129,6 +145,16 @@ export default function LogicAnalyzerWorkbench() {
     }
   }, [samples, decoderId, cfg, rate]);
 
+  const stackDef = DECODERS[decoderId].stack?.find((x) => x.id === stackId) || null;
+  const stacked = useMemo(() => {
+    if (!stackDef || !decoded.length) return [];
+    try {
+      return runStack(decoderId, stackDef.id, decoded, cfg.params);
+    } catch (e) {
+      return [{ type: 'error', start: 0, end: 0, kind: 'error', label: e.message }];
+    }
+  }, [decoded, decoderId, stackDef, cfg]);
+
   const measurements = useMemo(
     () => (samples.length ? channels.map((c) => measureChannel(samples, c.id, rate)) : []),
     [samples, channels, rate]
@@ -151,7 +177,7 @@ export default function LogicAnalyzerWorkbench() {
     ctx.fillRect(0, 0, width, height);
     ctx.strokeStyle = '#1e293b';
     ctx.lineWidth = 1;
-    for (let c = 0; c <= 8; c++) {
+    for (let c = 0; c <= channelCount; c++) {
       const y = TOP_MARGIN + c * CHANNEL_HEIGHT;
       ctx.beginPath();
       ctx.moveTo(0, y);
@@ -165,7 +191,7 @@ export default function LogicAnalyzerWorkbench() {
 
     // Waveforms: each pixel covers a range of samples, so draw a vertical
     // bar wherever a pixel holds both levels (keeps short pulses visible).
-    for (let ch = 0; ch < 8; ch++) {
+    for (let ch = 0; ch < channelCount; ch++) {
       const mask = 1 << ch;
       const low = TOP_MARGIN + ch * CHANNEL_HEIGHT + 35;
       const high = low - 24;
@@ -199,21 +225,25 @@ export default function LogicAnalyzerWorkbench() {
       ctx.stroke();
     }
 
-    // Decoder annotations
+    // Decoder annotations (and the stacked decoder's lane below them)
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
-    for (const item of decoded) {
-      const x0 = xOf(item.start);
-      const x1 = Math.max(x0 + 2, xOf(item.end));
-      if (x1 < 0 || x0 > width) continue;
-      ctx.fillStyle = KIND_COLORS[item.kind] || KIND_COLORS.data;
-      ctx.fillRect(x0, ANNOTATION_Y, x1 - x0, 20);
-      const textW = ctx.measureText(item.label).width;
-      if (textW < x1 - x0 - 4) {
-        ctx.fillStyle = '#f8fafc';
-        ctx.fillText(item.label, (x0 + x1) / 2, ANNOTATION_Y + 14);
+    const drawLane = (items, y) => {
+      for (const item of items) {
+        const x0 = xOf(item.start);
+        const x1 = Math.max(x0 + 2, xOf(item.end));
+        if (x1 < 0 || x0 > width) continue;
+        ctx.fillStyle = KIND_COLORS[item.kind] || KIND_COLORS.data;
+        ctx.fillRect(x0, y, x1 - x0, 20);
+        const textW = ctx.measureText(item.label).width;
+        if (textW < x1 - x0 - 4) {
+          ctx.fillStyle = '#f8fafc';
+          ctx.fillText(item.label, (x0 + x1) / 2, y + 14);
+        }
       }
-    }
+    };
+    drawLane(decoded, annotationY);
+    if (stackDef) drawLane(stacked, annotationY + 24);
 
     const drawCursor = (sampleIdx, color, label) => {
       const x = xOf(sampleIdx);
@@ -234,7 +264,21 @@ export default function LogicAnalyzerWorkbench() {
     };
     drawCursor(cursorA, '#22d3ee', 'A');
     drawCursor(cursorB, '#fbbf24', 'B');
-  }, [samples, visibleSamples, viewOffset, channels, cursorA, cursorB, decoded]);
+    if (triggerIndex !== null && triggerIndex !== undefined) {
+      const tx = xOf(triggerIndex);
+      if (tx >= 0 && tx <= width) {
+        ctx.strokeStyle = '#f43f5e';
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(tx, 0);
+        ctx.lineTo(tx, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#f43f5e';
+        ctx.fillText('T', tx, 14);
+      }
+    }
+  }, [samples, visibleSamples, viewOffset, channels, channelCount, cursorA, cursorB, decoded, stacked, stackDef, triggerIndex, annotationY]);
 
   const deltaSeconds = Math.abs(cursorB - cursorA) / rate;
   const frequencyHz = deltaSeconds > 0 ? 1 / deltaSeconds : 0;
@@ -301,7 +345,10 @@ export default function LogicAnalyzerWorkbench() {
     else { setNotice(''); jumpTo(hit); }
   };
 
-  const loadSamples = (buf, rateHz) => {
+  const loadSamples = (buf, rateHz, count = 8, trigger = null) => {
+    setChannelCount(count);
+    setChannels((prev) => makeChannels(count, prev));
+    setTriggerIndex(trigger);
     setSamples(buf);
     setCaptureRate(rateHz);
     setZoomLevel(1);
@@ -330,6 +377,8 @@ export default function LogicAnalyzerWorkbench() {
     setDeviceLabel('');
     setSamples(new Uint8Array(0));
     setCaptureRate(null);
+    setMaxSamples(null);
+    setTriggerIndex(null);
   };
 
   const handleConnectSump = async () => {
@@ -343,8 +392,13 @@ export default function LogicAnalyzerWorkbench() {
         const id = await la.identify();
         sumpRef.current = { la, link };
         setSource('sump');
-        setDeviceLabel(`SUMP: ${id.name || 'device'}${id.probes ? ` · ${id.probes} ch` : ''}${id.maxSampleRate ? ` · max ${id.maxSampleRate / 1e6} MS/s` : ''}`);
+        setDeviceLabel(`SUMP: ${id.name || 'device'} · ${id.channels} ch${id.maxSamples ? ` · ${id.maxSamples.toLocaleString()} samples max` : ''}${id.maxSampleRate ? ` · max ${id.maxSampleRate / 1e6} MS/s` : ''}`);
+        setChannelCount(id.channels);
+        setChannels((prev) => makeChannels(id.channels, prev));
+        setMaxSamples(id.maxSamples || null);
+        if (id.maxSamples && sampleDepth > id.maxSamples) setSampleDepth(id.maxSamples);
         setSamples(new Uint8Array(0));
+        setTriggerIndex(null);
       } catch (e) {
         await link.close();
         throw e;
@@ -404,11 +458,16 @@ export default function LogicAnalyzerWorkbench() {
       if (source === 'sump') {
         const mask = parseInt(triggerMask, 16) || 0;
         const value = parseInt(triggerValue, 16) || 0;
-        const r = await sumpRef.current.la.capture({ sampleRate, samples: sampleDepth, triggerMask: mask, triggerValue: value });
-        loadSamples(r.samples, r.sampleRate);
+        const r = await sumpRef.current.la.capture({
+          sampleRate, samples: sampleDepth, triggerMask: mask, triggerValue: value,
+          edge: edgeKind === 'none' ? null : { channel: Number(edgeChannel), kind: edgeKind },
+          preTrigger: Math.min(90, Math.max(0, Number(preTrigger) || 0)) / 100
+        });
+        loadSamples(r.samples, r.sampleRate, r.channels, r.triggerIndex);
+        if (r.triggerIndex) { setCursorA(r.triggerIndex); setViewOffset(0); }
       } else if (source === 'fx2') {
-        const r = await fx2Ref.current.capture({ sampleRate, samples: sampleDepth, onProgress: (p) => setProgress(Math.round(p * 100)) });
-        loadSamples(r.samples, r.sampleRate);
+        const r = await fx2Ref.current.capture({ sampleRate, samples: sampleDepth, wide: wideFx2, onProgress: (p) => setProgress(Math.round(p * 100)) });
+        loadSamples(r.samples, r.sampleRate, r.channels);
       }
     } catch (err) {
       setError(err.message);
@@ -431,8 +490,9 @@ export default function LogicAnalyzerWorkbench() {
         setSource('file');
         setDeviceLabel(`File: ${file.name}`);
       }
+      const count = r.channelCount || (r.samples instanceof Uint32Array ? 32 : r.samples instanceof Uint16Array ? 16 : 8);
+      loadSamples(r.samples, r.sampleRate, count);
       setChannels((prev) => prev.map((c, i) => ({ ...c, name: r.names?.[i] || c.name })));
-      loadSamples(r.samples, r.sampleRate);
       setNotice(`Loaded ${r.samples.length.toLocaleString()} samples at ${fmtHz(r.sampleRate).replace('Hz', 'S/s')} from ${file.name}.`);
     } catch (err) {
       setError(`Could not read ${file.name}: ${err.message}`);
@@ -441,8 +501,35 @@ export default function LogicAnalyzerWorkbench() {
 
   const names = channels.map((c) => c.name);
   const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
-  const exportVcdFile = () => downloadBlob(exportVcd(samples, rate, names), `capture-${stamp()}.vcd`, 'text/plain');
-  const exportSrFile = async () => downloadBlob(await exportSigrok(samples, rate, names), `capture-${stamp()}.sr`);
+  const exportVcdFile = () => downloadBlob(exportVcd(samples, rate, names, channelCount), `capture-${stamp()}.vcd`, 'text/plain');
+  const exportSrFile = async () => downloadBlob(await exportSigrok(samples, rate, names, channelCount), `capture-${stamp()}.sr`);
+
+  const saveSession = () => downloadBlob(serializeLogicSession({
+    samples, sampleRate: rate, channelNames: names, channelCount, decoderId, decoderConfig, stackId, cursors: [cursorA, cursorB], triggerIndex
+  }), `session-${stamp()}.json`, 'application/json');
+  const loadSession = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setError('');
+    try {
+      const sess = parseLogicSession(await file.text());
+      if (source !== 'sump' && source !== 'fx2') { setSource('file'); setDeviceLabel(`Session: ${file.name}`); }
+      loadSamples(sess.samples, sess.sampleRate, sess.channelCount, sess.triggerIndex);
+      setChannels((prev) => prev.map((c, i) => ({ ...c, name: sess.channelNames[i] || c.name })));
+      if (sess.decoderId && DECODERS[sess.decoderId]) {
+        setDecoderId(sess.decoderId);
+        if (sess.decoderConfig) {
+          setDecoderConfig((prev) => Object.fromEntries(Object.entries(prev).map(([id, v]) => [id, sess.decoderConfig[id] ? { channels: { ...v.channels, ...sess.decoderConfig[id].channels }, params: { ...v.params, ...sess.decoderConfig[id].params } } : v])));
+        }
+      }
+      setStackId(sess.stackId || '');
+      if (sess.cursors) { setCursorA(sess.cursors[0] || 0); setCursorB(sess.cursors[1] || 0); }
+      setNotice(`Loaded session ${file.name}: ${sess.samples.length.toLocaleString()} samples, ${sess.channelCount} channels.`);
+    } catch (err) {
+      setError(`Could not read ${file.name}: ${err.message}`);
+    }
+  };
   const exportDecodedCsv = () => {
     const rows = [['start_s', 'end_s', 'type', 'label']];
     for (const it of decoded) rows.push([(it.start / rate).toFixed(9), (it.end / rate).toFixed(9), it.type, `"${String(it.label).replace(/"/g, '""')}"`]);
@@ -481,13 +568,14 @@ export default function LogicAnalyzerWorkbench() {
       )}
       <input ref={fwInputRef} type="file" accept=".fw,.bin,.hex,.ihx" className="hidden" onChange={handleFirmwareFile} />
       <input ref={importRef} type="file" accept=".vcd,.sr" className="hidden" onChange={handleImport} />
+      <input ref={sessionRef} type="file" accept=".json" className="hidden" onChange={loadSession} />
 
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
             <p className="text-[11px] text-slate-400">
-              Capture 8 channels (D0–D7) from a SUMP device over serial or an FX2 "24MHz 8CH" board running fx2lafw over WebUSB, or open a VCD / PulseView .sr file.
-              Decoders: I2C, UART, SPI, 1-Wire, CAN, WS2812, IR (NEC / RC-5) and SWD.
+              Capture from a SUMP device over serial (all the channels it reports, up to 32) or an FX2 "24MHz 8CH" board running fx2lafw over WebUSB (16 in wide mode), or open a VCD / PulseView .sr file or a saved session.
+              Decoders: I2C, UART, SPI, 1-Wire, CAN, WS2812, IR (NEC / RC-5) and SWD, with stackable decoders (SPI flash commands, I2C registers / EEPROM, NMEA 0183, CAN UDS / OBD / J1939).
             </p>
           </div>
 
@@ -512,6 +600,12 @@ export default function LogicAnalyzerWorkbench() {
             <button onClick={() => importRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-xs font-bold">
               <FileUp className="w-3.5 h-3.5" /> OPEN .VCD / .SR
             </button>
+            <button onClick={() => sessionRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-xs font-bold" title="Load a saved session (.json): capture plus settings">
+              <FileUp className="w-3.5 h-3.5" /> OPEN SESSION
+            </button>
+            <button onClick={saveSession} disabled={!samples.length} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-xs font-bold disabled:opacity-40" title="Save the capture and its settings as JSON">
+              <Save className="w-3.5 h-3.5" /> SAVE SESSION
+            </button>
             <button
               onClick={handleCapture}
               disabled={isCapturing || !source || source === 'file'}
@@ -534,7 +628,7 @@ export default function LogicAnalyzerWorkbench() {
             <div className="flex items-center gap-1.5">
               <span className="text-slate-500 font-bold text-[11px]">SAMPLES:</span>
               <select value={sampleDepth} onChange={(e) => setSampleDepth(Number(e.target.value))} className={select}>
-                {[1024, 4096, 10000, 25000, 50000, 100000, 250000, 1000000].map((s) => (
+                {[1024, 4096, 10000, 25000, 50000, 100000, 250000, 1000000].filter((s) => !(source === 'sump' && maxSamples && s > maxSamples)).map((s) => (
                   <option key={s} value={s}>{s < 10000 ? `${s}` : s < 1e6 ? `${(s / 1000).toFixed(0)}k` : `${s / 1e6}M`} Samples</option>
                 ))}
               </select>
@@ -544,8 +638,29 @@ export default function LogicAnalyzerWorkbench() {
                 <span className="text-slate-500 font-bold text-[11px]">HW TRIGGER MASK:</span>
                 <input value={triggerMask} onChange={(e) => setTriggerMask(e.target.value)} className="w-10 bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300" />
                 <span className="text-slate-500 font-bold text-[11px]">VALUE:</span>
-                <input value={triggerValue} onChange={(e) => setTriggerValue(e.target.value)} className="w-10 bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300" />
+                <input value={triggerValue} onChange={(e) => setTriggerValue(e.target.value)} className="w-12 bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300" />
               </div>
+            )}
+            {source === 'sump' && (
+              <div className="flex items-center gap-1.5" title="SUMP has no edge trigger of its own: an edge is programmed as two stages (old level, then new level)">
+                <span className="text-slate-500 font-bold text-[11px]">EDGE:</span>
+                <select value={edgeKind} onChange={(e) => setEdgeKind(e.target.value)} className={select}>
+                  <option value="none">none</option><option value="rising">rising</option><option value="falling">falling</option>
+                </select>
+                {edgeKind !== 'none' && (
+                  <select value={edgeChannel} onChange={(e) => setEdgeChannel(Number(e.target.value))} className={select}>
+                    {channels.map((c) => <option key={c.id} value={c.id}>D{c.id}</option>)}
+                  </select>
+                )}
+                <span className="text-slate-500 font-bold text-[11px]">PRE-TRIGGER:</span>
+                <input type="number" min="0" max="90" value={preTrigger} onChange={(e) => setPreTrigger(e.target.value)} className="w-12 bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300" />
+                <span className="text-slate-500 text-[11px]">%</span>
+              </div>
+            )}
+            {source === 'fx2' && (
+              <label className="flex items-center gap-1 text-[11px] text-slate-400" title="Ask the firmware for 16-bit samples. Only boards with 16 inputs and wide-capable fx2lafw will give meaningful data on D8-D15.">
+                <input type="checkbox" checked={wideFx2} onChange={(e) => setWideFx2(e.target.checked)} className="accent-cyan-500" /> 16-bit wide mode
+              </label>
             )}
             {captureRate && captureRate !== sampleRate && (
               <span className="text-[10px] text-amber-300">capture is {fmtHz(captureRate).replace('Hz', 'S/s')}</span>
@@ -572,7 +687,7 @@ export default function LogicAnalyzerWorkbench() {
       {/* Waveform Viewport Canvas */}
       <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 shadow-xl flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 pb-1 border-b border-slate-800">
-          <span className="font-bold text-slate-200">DIGITAL CHANNELS (D0 - D7)</span>
+          <span className="font-bold text-slate-200">DIGITAL CHANNELS (D0 - D{channelCount - 1})</span>
           <span className="text-[10px] text-slate-500">Click: cursor A · Shift-click: cursor B · Wheel: pan · Ctrl+wheel: zoom</span>
           <div className="flex items-center gap-1.5">
             <button onClick={exportVcdFile} disabled={!samples.length} className={btn}><Download className="w-3 h-3" /> VCD</button>
@@ -619,10 +734,10 @@ export default function LogicAnalyzerWorkbench() {
           <canvas
             ref={canvasRef}
             width={1200}
-            height={CANVAS_HEIGHT}
+            height={canvasHeight}
             onClick={handleCanvasClick}
             className="w-full block cursor-crosshair"
-            style={{ height: CANVAS_HEIGHT }}
+            style={{ height: canvasHeight }}
           />
           <div className="absolute left-2 top-[34px] space-y-[21px] pointer-events-none select-none">
             {channels.map((ch) => (
@@ -691,8 +806,23 @@ export default function LogicAnalyzerWorkbench() {
               )}
             </label>
           ))}
+          {DECODERS[decoderId].stack && (
+            <label className="flex items-center gap-1">
+              <span className="text-slate-500 font-bold">STACK</span>
+              <select value={stackDef ? stackDef.id : ''} onChange={(e) => setStackId(e.target.value)} className={select}>
+                <option value="">none</option>
+                {DECODERS[decoderId].stack.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+              </select>
+            </label>
+          )}
+          {stackDef && Object.entries(stackDef.params).map(([key, value]) => (
+            <label key={key} className="flex items-center gap-1">
+              <span className="text-slate-500 font-bold">{key}</span>
+              <input type="number" value={cfg.params[key] ?? value} onChange={(e) => updateDecoder('params', key, Number(e.target.value))} className="w-14 bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300" />
+            </label>
+          ))}
           {decoderId === 'uart' && <button onClick={guessBaud} disabled={!samples.length} className={btn}>AUTO-BAUD</button>}
-          <span className="ml-auto text-slate-500">{decoded.length} items{errors ? <span className="text-rose-400"> · {errors} errors</span> : null}</span>
+          <span className="ml-auto text-slate-500">{decoded.length} items{stackDef ? ` · ${stacked.length} stacked` : ''}{errors ? <span className="text-rose-400"> · {errors} errors</span> : null}</span>
           <button onClick={exportDecodedCsv} disabled={!decoded.length} className={btn}><Download className="w-3 h-3" /> CSV</button>
         </div>
 
@@ -715,6 +845,23 @@ export default function LogicAnalyzerWorkbench() {
             {decoded.filter((d) => d.type === 'led').map((d, i) => (
               <span key={i} title={d.label} className="w-5 h-5 rounded border border-slate-700" style={{ background: `rgb(${d.r},${d.g},${d.b})` }} />
             ))}
+          </div>
+        )}
+
+        {stackDef && (
+          <div className="max-h-48 overflow-y-auto border border-cyan-500/30 rounded">
+            <div className="px-2 py-1 text-[10px] text-cyan-300 font-bold bg-slate-900">{stackDef.label.toUpperCase()}</div>
+            <table className="w-full text-[11px]">
+              <tbody>
+                {stacked.slice(0, 1000).map((it, i) => (
+                  <tr key={i} onClick={() => jumpTo(it.start)} className="cursor-pointer hover:bg-slate-900 border-t border-slate-900">
+                    <td className="px-2 py-0.5 text-slate-400 whitespace-nowrap">{fmtTime(it.start / rate)}</td>
+                    <td className={`px-2 py-0.5 font-bold ${it.kind === 'error' ? 'text-rose-300' : it.kind === 'control' ? 'text-emerald-300' : 'text-cyan-200'}`}>{it.label}</td>
+                  </tr>
+                ))}
+                {!stacked.length && <tr><td className="px-2 py-3 text-center text-slate-500">Nothing recognised at this level. Check the base decoder settings first.</td></tr>}
+              </tbody>
+            </table>
           </div>
         )}
 

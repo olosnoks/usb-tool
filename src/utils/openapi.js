@@ -90,14 +90,37 @@ export function resolveRef(spec, node) {
   return n;
 }
 
-export function getServers(spec) {
-  if (Array.isArray(spec.servers) && spec.servers.length) return spec.servers.map((s) => s.url);
-  if (spec.host) {
-    const scheme = (spec.schemes && spec.schemes[0]) || 'https';
-    return [`${scheme}://${spec.host}${spec.basePath || ''}`];
+export const isAbsoluteUrl = (u) => /^https?:\/\//i.test(String(u || '').trim());
+
+function withServerVariables(server) {
+  let url = String(server?.url ?? '');
+  for (const [k, v] of Object.entries(server?.variables || {})) {
+    url = url.split(`{${k}}`).join(String(v?.default ?? v?.enum?.[0] ?? ''));
   }
-  return [''];
+  return url;
 }
+
+/**
+ * Candidate base URLs for a spec. Relative server URLs ("/api/v1") are resolved
+ * against `specUrl` when it is absolute; otherwise they stay relative and the
+ * caller must ask for an absolute base (buildRequest refuses relative bases, so a
+ * request can never be sent to this app's own origin by accident).
+ */
+export function getServers(spec, specUrl = '') {
+  let list;
+  if (Array.isArray(spec.servers) && spec.servers.length) list = spec.servers.map(withServerVariables);
+  else if (spec.host) {
+    const scheme = (spec.schemes && spec.schemes[0]) || 'https';
+    list = [`${scheme}://${spec.host}${spec.basePath || ''}`];
+  } else list = [spec.basePath || ''];
+  return list.map((u) => {
+    if (isAbsoluteUrl(u) || !isAbsoluteUrl(specUrl)) return u;
+    try { return new URL(u || '/', specUrl).href.replace(/\/$/, ''); } catch { return u; }
+  });
+}
+
+/** Stable key for a parameter: a path "id" and a query "id" are different parameters. */
+export const paramKey = (p) => `${p.in}:${p.name}`;
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
 
@@ -117,6 +140,7 @@ export function listOperations(spec) {
         operationId: op.operationId || `${method}_${path}`,
         parameters: params,
         requestBody: op.requestBody ? resolveRef(spec, op.requestBody) : null,
+        consumes: op.consumes || spec.consumes || [],
         raw: op,
       });
     }
@@ -149,22 +173,60 @@ export function exampleForSchema(schema, spec, depth = 0) {
   return null;
 }
 
+const isFormType = (ct) => /^application\/x-www-form-urlencoded/i.test(ct || '');
+
+/** Content type the operation expects for its body (null when it has none). */
+export function bodyContentType(op) {
+  if (op.requestBody) {
+    const keys = Object.keys(op.requestBody.content || {});
+    if (!keys.length) return null;
+    return keys.includes('application/json') ? 'application/json' : keys[0];
+  }
+  const params = op.parameters || [];
+  const consumes = op.consumes || [];
+  if (params.some((p) => p.in === 'body')) return consumes.find((c) => /json/i.test(c)) || consumes[0] || 'application/json';
+  if (params.some((p) => p.in === 'formData')) {
+    return consumes.find(isFormType) || consumes[0] || 'application/x-www-form-urlencoded';
+  }
+  return null;
+}
+
 export function bodySchemaFor(op, spec) {
   if (op.requestBody) {
     const content = op.requestBody.content || {};
-    const json = content['application/json'] || content[Object.keys(content)[0]];
-    return json ? resolveRef(spec, json.schema) : null;
+    const entry = content[bodyContentType(op)] || content[Object.keys(content)[0]];
+    return entry ? resolveRef(spec, entry.schema) : null;
   }
   // swagger 2 body param
   const bodyParam = (op.parameters || []).find((p) => p.in === 'body');
   return bodyParam ? resolveRef(spec, bodyParam.schema) : null;
 }
 
+/** application/x-www-form-urlencoded text from a plain object (arrays repeat the key). */
+export function formEncode(obj) {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (v === null || v === undefined) continue;
+    if (Array.isArray(v)) v.forEach((x) => sp.append(k, typeof x === 'object' ? JSON.stringify(x) : String(x)));
+    else sp.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+  }
+  return sp.toString();
+}
+
+function jsonToForm(text) {
+  try {
+    const v = JSON.parse(text);
+    if (v && typeof v === 'object' && !Array.isArray(v)) return formEncode(v);
+  } catch { /* already form text */ }
+  return text;
+}
+
 export function exampleBody(op, spec) {
   const schema = bodySchemaFor(op, spec);
   if (!schema) return '';
   const ex = exampleForSchema(schema, spec);
-  return ex === null ? '' : JSON.stringify(ex, null, 2);
+  if (ex === null) return '';
+  return isFormType(bodyContentType(op)) && typeof ex === 'object' ? formEncode(ex) : JSON.stringify(ex, null, 2);
 }
 
 function substituteVars(str, env) {
@@ -179,15 +241,20 @@ function substituteVars(str, env) {
 export function buildRequest({ op, spec, baseUrl, paramValues = {}, bodyText = '', auth = { type: 'none' }, env = {} }) {
   let path = op.path;
   const query = [];
+  const form = [];
   const headerLines = [];
   for (const p of op.parameters || []) {
-    const val = paramValues[p.name];
+    const val = paramValues[paramKey(p)];
     if (val === undefined || val === '') continue;
-    if (p.in === 'path') path = path.replace(`{${p.name}}`, encodeURIComponent(val));
+    if (p.in === 'path') path = path.split(`{${p.name}}`).join(encodeURIComponent(val));
     else if (p.in === 'query') query.push(`${encodeURIComponent(p.name)}=${encodeURIComponent(val)}`);
     else if (p.in === 'header') headerLines.push(`${p.name}: ${val}`);
+    else if (p.in === 'formData') form.push([p.name, val]);
   }
-  const base = substituteVars(baseUrl, env).replace(/\/$/, '');
+  const base = substituteVars(baseUrl, env).trim().replace(/\/$/, '');
+  if (!isAbsoluteUrl(base)) {
+    throw new Error('Base URL must be absolute (http:// or https://). A relative base would send the request to this app\'s own origin.');
+  }
   let url = base + substituteVars(path, env);
   if (query.length) url += (url.includes('?') ? '&' : '?') + query.join('&');
 
@@ -196,9 +263,16 @@ export function buildRequest({ op, spec, baseUrl, paramValues = {}, bodyText = '
   else if (auth.type === 'basic' && auth.user) headerLines.push(`Authorization: Basic ${btoa(`${auth.user}:${auth.pass || ''}`)}`);
   else if (auth.type === 'apikey' && auth.token) headerLines.push(`${auth.headerName || 'X-API-Key'}: ${substituteVars(auth.token, env)}`);
 
-  const body = substituteVars(bodyText, env);
+  const ct = bodyContentType(op);
+  let body = substituteVars(bodyText, env);
+  if (isFormType(ct)) {
+    body = body ? jsonToForm(body) : (form.length ? new URLSearchParams(form).toString() : '');
+  }
   const hasBody = body && op.method !== 'GET' && op.method !== 'HEAD';
-  if (hasBody && !headerLines.some((h) => /^content-type:/i.test(h))) headerLines.push('Content-Type: application/json');
+  if (hasBody && !headerLines.some((h) => /^content-type:/i.test(h))) {
+    // multipart needs a boundary the browser must generate, so it is left unset
+    if (!/^multipart\//i.test(ct || '')) headerLines.push(`Content-Type: ${ct || 'application/json'}`);
+  }
 
   return { method: op.method, url, headers: headerLines.join('\n'), body: hasBody ? body : '' };
 }
@@ -207,7 +281,8 @@ export function buildRequest({ op, spec, baseUrl, paramValues = {}, bodyText = '
 const INJECTION_PAYLOADS = ["'", '"><script>alert(1)</script>', '../../../../etc/passwd', '${{7*7}}', "' OR '1'='1", '\u0000', 'A'.repeat(4096)];
 
 /**
- * Generate negative/edge test cases for an operation. Each case returns a
+ * Generate negative/edge test cases for an operation. baseValues is keyed by
+ * paramKey(p) (`${in}:${name}`). Each case returns a
  * description and a mutated { paramValues, bodyText } to send.
  */
 export function fuzzCases(op, spec, baseValues, baseBody) {
@@ -217,27 +292,28 @@ export function fuzzCases(op, spec, baseValues, baseBody) {
   // 1. omit each required parameter
   for (const p of required) {
     const pv = { ...baseValues };
-    delete pv[p.name];
+    delete pv[paramKey(p)];
     cases.push({ label: `omit required "${p.name}"`, paramValues: pv, bodyText: baseBody });
   }
   // 2. wrong type for typed params
   for (const p of params) {
     const t = (resolveRef(spec, p.schema) || p).type || p.type;
     if (t === 'integer' || t === 'number') {
-      cases.push({ label: `"${p.name}" = non-numeric`, paramValues: { ...baseValues, [p.name]: 'not_a_number' }, bodyText: baseBody });
+      cases.push({ label: `"${p.name}" = non-numeric`, paramValues: { ...baseValues, [paramKey(p)]: 'not_a_number' }, bodyText: baseBody });
     }
     if (t === 'boolean') {
-      cases.push({ label: `"${p.name}" = non-boolean`, paramValues: { ...baseValues, [p.name]: 'maybe' }, bodyText: baseBody });
+      cases.push({ label: `"${p.name}" = non-boolean`, paramValues: { ...baseValues, [paramKey(p)]: 'maybe' }, bodyText: baseBody });
     }
   }
   // 3. injection payloads into string params
   const stringParams = params.filter((p) => {
+    if (p.in === 'body') return false;
     const t = (resolveRef(spec, p.schema) || p).type || p.type;
     return !t || t === 'string';
   });
   for (const p of stringParams.slice(0, 4)) {
     for (const payload of INJECTION_PAYLOADS.slice(0, 4)) {
-      cases.push({ label: `"${p.name}" = ${payload.slice(0, 24)}`, paramValues: { ...baseValues, [p.name]: payload }, bodyText: baseBody });
+      cases.push({ label: `"${p.name}" = ${payload.slice(0, 24)}`, paramValues: { ...baseValues, [paramKey(p)]: payload }, bodyText: baseBody });
     }
   }
   // 4. malformed JSON body (for body ops)

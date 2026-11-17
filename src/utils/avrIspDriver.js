@@ -11,77 +11,9 @@
  */
 
 import { SerialLink } from './serialLink';
+import { AVR_CHIP_DATABASE, eepromAfterErase } from './avrChipDatabase';
 
-// Fuse bits are active-low: 0 = programmed.
-// `guard` lists the bits that lock you out of ISP if set wrong.
-export const AVR_CHIP_DATABASE = {
-  0x1E950F: {
-    name: 'ATmega328P', family: 'megaAVR', flashSize: 32768, eepromSize: 1024, pageSize: 128,
-    defaultFuses: { lfuse: 0xFF, hfuse: 0xDE, efuse: 0xFD, lock: 0x0F },
-    guard: { spien: ['hfuse', 0x20], rstdisbl: ['hfuse', 0x80], dwen: ['hfuse', 0x40] },
-    desc: 'Arduino Uno R3, Nano v3, Pro Mini 5V/16MHz'
-  },
-  0x1E9514: {
-    name: 'ATmega328PB', family: 'megaAVR', flashSize: 32768, eepromSize: 1024, pageSize: 128, efuseUnused: 0xf0,
-    defaultFuses: { lfuse: 0xFF, hfuse: 0xDE, efuse: 0xF5, lock: 0x0F },
-    guard: { spien: ['hfuse', 0x20], rstdisbl: ['hfuse', 0x80], dwen: ['hfuse', 0x40] },
-    desc: 'Enhanced ATmega328 with dual USART, SPI, and I2C'
-  },
-  0x1E9406: {
-    name: 'ATmega168', family: 'megaAVR', flashSize: 16384, eepromSize: 512, pageSize: 128,
-    defaultFuses: { lfuse: 0xFF, hfuse: 0xDD, efuse: 0xF8, lock: 0x0F },
-    guard: { spien: ['hfuse', 0x20], rstdisbl: ['hfuse', 0x80], dwen: ['hfuse', 0x40] },
-    desc: 'Arduino Diecimila / older Nano and Pro Mini'
-  },
-  0x1E9307: {
-    name: 'ATmega8', family: 'megaAVR', flashSize: 8192, eepromSize: 512, pageSize: 64, noEfuse: true,
-    defaultFuses: { lfuse: 0xBF, hfuse: 0xCA, efuse: 0xFF, lock: 0x0F },
-    guard: { spien: ['hfuse', 0x20], rstdisbl: ['hfuse', 0x80] },
-    desc: 'Arduino NG / early boards'
-  },
-  0x1E9801: {
-    name: 'ATmega2560', family: 'megaAVR', flashSize: 262144, eepromSize: 4096, pageSize: 256,
-    defaultFuses: { lfuse: 0xFF, hfuse: 0xD8, efuse: 0xFD, lock: 0x0F },
-    guard: { spien: ['hfuse', 0x20] },
-    desc: 'Arduino Mega 2560, 3D Printer Controller (RAMPS)'
-  },
-  0x1E9705: {
-    name: 'ATmega1284P', family: 'megaAVR', flashSize: 131072, eepromSize: 4096, pageSize: 256,
-    defaultFuses: { lfuse: 0xFF, hfuse: 0xDE, efuse: 0xFD, lock: 0x0F },
-    guard: { spien: ['hfuse', 0x20] },
-    desc: 'Sanguino / large-memory 40-pin AVR'
-  },
-  0x1E9587: {
-    name: 'ATmega32U4', family: 'megaAVR (Native USB)', flashSize: 32768, eepromSize: 1024, pageSize: 128, efuseUnused: 0xf0,
-    defaultFuses: { lfuse: 0xFF, hfuse: 0xD8, efuse: 0xCB, lock: 0x2F },
-    guard: { spien: ['hfuse', 0x20] },
-    desc: 'Arduino Leonardo, Pro Micro, BadUSB Keyboard Emulators'
-  },
-  0x1E930B: {
-    name: 'ATtiny85', family: 'tinyAVR', flashSize: 8192, eepromSize: 512, pageSize: 64, efuseUnused: 0xfe,
-    defaultFuses: { lfuse: 0x62, hfuse: 0xDF, efuse: 0xFF, lock: 0xFF },
-    guard: { spien: ['hfuse', 0x20], rstdisbl: ['hfuse', 0x80], dwen: ['hfuse', 0x40] },
-    desc: '8-pin ultra-compact microcontroller (Digispark)'
-  },
-  0x1E9206: {
-    name: 'ATtiny45', family: 'tinyAVR', flashSize: 4096, eepromSize: 256, pageSize: 64, efuseUnused: 0xfe,
-    defaultFuses: { lfuse: 0x62, hfuse: 0xDF, efuse: 0xFF, lock: 0xFF },
-    guard: { spien: ['hfuse', 0x20], rstdisbl: ['hfuse', 0x80], dwen: ['hfuse', 0x40] },
-    desc: '8-pin tinyAVR, 4 KB flash'
-  },
-  0x1E930C: {
-    name: 'ATtiny84', family: 'tinyAVR', flashSize: 8192, eepromSize: 512, pageSize: 64, efuseUnused: 0xfe,
-    defaultFuses: { lfuse: 0x62, hfuse: 0xDF, efuse: 0xFF, lock: 0xFF },
-    guard: { spien: ['hfuse', 0x20], rstdisbl: ['hfuse', 0x80], dwen: ['hfuse', 0x40] },
-    desc: '14-pin tinyAVR'
-  },
-  0x1E9007: {
-    name: 'ATtiny13A', family: 'tinyAVR', flashSize: 1024, eepromSize: 64, pageSize: 32, noEfuse: true,
-    defaultFuses: { lfuse: 0x6A, hfuse: 0xFF, efuse: 0xFF, lock: 0xFF },
-    guard: { spien: ['lfuse', 0x80], rstdisbl: ['hfuse', 0x01], dwen: ['hfuse', 0x08] },
-    desc: '8-pin, 1 KB flash'
-  }
-};
+export { AVR_CHIP_DATABASE, eepromAfterErase };
 
 /**
  * Fuse values that would cut off ISP programming. Returns a list of plain
@@ -100,7 +32,7 @@ export function fuseHazards(chip, fuses) {
 export const STK = {
   OK: 0x10, FAILED: 0x11, NODEVICE: 0x13, INSYNC: 0x14, NOSYNC: 0x15, CRC_EOP: 0x20,
   GET_SYNC: 0x30, GET_PARAMETER: 0x41, SET_DEVICE: 0x42, ENTER_PROGMODE: 0x50, LEAVE_PROGMODE: 0x51,
-  LOAD_ADDRESS: 0x55, UNIVERSAL: 0x56, PROG_PAGE: 0x64, READ_PAGE: 0x74,
+  LOAD_ADDRESS: 0x55, UNIVERSAL: 0x56, PROG_PAGE: 0x64, READ_PAGE: 0x74, READ_SIGN: 0x75,
   HW_VER: 0x80, SW_MAJOR: 0x81, SW_MINOR: 0x82
 };
 
@@ -201,6 +133,20 @@ export class Stk500Programmer {
     await this.cmd([STK.LOAD_ADDRESS, word & 0xff, (word >> 8) & 0xff]);
   }
 
+  /** Read one EEPROM byte with the universal ISP command (works on any STK500v1 programmer). */
+  readEepromByte(addr) { return this.universal(0xa0, (addr >> 8) & 0xff, addr & 0xff, 0x00); }
+
+  async writeEepromByte(addr, value) {
+    await this.universal(0xc0, (addr >> 8) & 0xff, addr & 0xff, value & 0xff);
+    await sleep(6); // t_WD_EEPROM is 3.6 to 4 ms
+  }
+
+  /** STK_READ_SIGN: signature as reported by a bootloader (no ISP involved). */
+  async readBootloaderSignature() {
+    const d = await this.cmd([STK.READ_SIGN], 3);
+    return (d[0] << 16) | (d[1] << 8) | d[2];
+  }
+
   async writePage(byteAddress, data, chip) {
     await this.loadAddress(byteAddress, chip);
     await this.cmd([STK.PROG_PAGE, (data.length >> 8) & 0xff, data.length & 0xff, 0x46, ...data], 0, 2000);
@@ -213,10 +159,11 @@ export class Stk500Programmer {
 }
 
 /**
- * Split an image into pages, skipping pages that are entirely 0xFF (erased).
+ * Split an image into pages, skipping pages that are entirely 0xFF (erased)
+ * unless `skipBlank` is false (needed when the old contents are not erased first).
  * Returns [{ address, data }] with each data padded to a full page.
  */
-export function pagesFromImage(data, startAddress, pageSize) {
+export function pagesFromImage(data, startAddress, pageSize, { skipBlank = true } = {}) {
   const pages = [];
   const first = Math.floor(startAddress / pageSize) * pageSize;
   const end = startAddress + data.length;
@@ -226,7 +173,7 @@ export function pagesFromImage(data, startAddress, pageSize) {
       const src = addr + i - startAddress;
       if (src >= 0 && src < data.length) page[i] = data[src];
     }
-    if (page.some((b) => b !== 0xff)) pages.push({ address: addr, data: page });
+    if (!skipBlank || page.some((b) => b !== 0xff)) pages.push({ address: addr, data: page });
   }
   return pages;
 }
@@ -344,23 +291,137 @@ export class AvrIspClient {
     return back;
   }
 
-  async chipErase() {
+  /**
+   * Read the high fuse and say what a chip erase will do to the EEPROM.
+   * Returns { status: 'preserved' | 'wiped' | 'unknown', text, hfuse }.
+   */
+  async eraseImpact() {
     if (!this.isConnected) throw new Error('Programmer not connected.');
-    await this._prog((p) => p.chipErase());
-    this.log('Chip erased: flash and EEPROM are 0xFF, lock bits cleared.');
+    if (!this.chip) throw new Error('Read the signature first.');
+    const f = await this.readFuses();
+    return { ...eepromAfterErase(this.chip, f.hfuse), hfuse: f.hfuse };
+  }
+
+  /**
+   * Erase flash (and EEPROM unless EESAVE is programmed). With `preserveEeprom`
+   * the EEPROM is dumped first and written back afterwards.
+   */
+  async chipErase({ preserveEeprom = false, onProgress } = {}) {
+    if (!this.isConnected) throw new Error('Programmer not connected.');
+    if (preserveEeprom && !this.chip) throw new Error('Read the signature first: the EEPROM size comes from the chip.');
+    await this._prog(async (p) => {
+      const saved = preserveEeprom ? await this._readEeprom(p, (f) => onProgress?.(Math.round(f * 40))) : null;
+      await p.chipErase();
+      if (saved) {
+        // The erase ends programming mode on some programmers: re-enter.
+        await p.leaveProgmode();
+        await p.enterProgmode();
+        await this._writeEeprom(p, saved, 0, (f) => onProgress?.(40 + Math.round(f * 60)));
+      }
+    });
+    this.log(preserveEeprom ? 'Chip erased, EEPROM restored.' : 'Chip erased: flash and EEPROM are 0xFF (unless EESAVE was set), lock bits cleared.');
+  }
+
+  // ---- reading --------------------------------------------------------------
+
+  async _readFlash(p, start, length, onProgress) {
+    const pageSize = this.chip.pageSize;
+    const first = Math.floor(start / pageSize) * pageSize;
+    const end = start + length;
+    const out = new Uint8Array(length);
+    for (let addr = first; addr < end; addr += pageSize) {
+      const page = await p.readPage(addr, pageSize, this.chip);
+      for (let i = 0; i < pageSize; i++) {
+        const dst = addr + i - start;
+        if (dst >= 0 && dst < length) out[dst] = page[i];
+      }
+      onProgress?.(Math.min(1, (addr + pageSize - start) / length));
+    }
+    return out;
+  }
+
+  /** Read `length` bytes of flash from `start` (default: all of it). */
+  async readFlash({ start = 0, length = null, onProgress } = {}) {
+    if (!this.isConnected) throw new Error('Programmer not connected.');
+    if (!this.chip) throw new Error('Read the signature first: the flash size and page size come from the chip.');
+    const len = length ?? (this.chip.flashSize - start);
+    if (start < 0 || len <= 0 || start + len > this.chip.flashSize) throw new Error(`Range 0x${start.toString(16)}+${len} is outside the ${this.chip.name}'s ${this.chip.flashSize / 1024} KB flash.`);
+    return this._prog((p) => this._readFlash(p, start, len, onProgress));
+  }
+
+  /**
+   * Compare flash with an image. Returns { ok, checked, firstMismatch, expected, actual }.
+   */
+  async verifyFlash(image, { onProgress } = {}) {
+    if (!this.chip) throw new Error('Read the signature first.');
+    const end = image.startAddress + image.data.length;
+    if (end > this.chip.flashSize) throw new Error(`Image ends at 0x${end.toString(16)}, past the ${this.chip.name}'s ${this.chip.flashSize / 1024} KB flash.`);
+    const back = await this.readFlash({ start: image.startAddress, length: image.data.length, onProgress });
+    const bad = image.data.findIndex((b, i) => back[i] !== b);
+    return bad < 0
+      ? { ok: true, checked: image.data.length, firstMismatch: null }
+      : { ok: false, checked: image.data.length, firstMismatch: image.startAddress + bad, expected: image.data[bad], actual: back[bad] };
+  }
+
+  async _readEeprom(p, onProgress) {
+    const n = this.chip.eepromSize;
+    const out = new Uint8Array(n);
+    for (let a = 0; a < n; a++) {
+      out[a] = await p.readEepromByte(a);
+      if ((a & 0x1f) === 0x1f || a === n - 1) onProgress?.((a + 1) / n);
+    }
+    return out;
+  }
+
+  /** Read the whole EEPROM. */
+  async readEeprom({ onProgress } = {}) {
+    if (!this.isConnected) throw new Error('Programmer not connected.');
+    if (!this.chip) throw new Error('Read the signature first: the EEPROM size comes from the chip.');
+    return this._prog((p) => this._readEeprom(p, onProgress));
+  }
+
+  // Byte-wise write that skips bytes already holding the right value, then verifies.
+  async _writeEeprom(p, data, start, onProgress) {
+    let written = 0;
+    for (let i = 0; i < data.length; i++) {
+      const a = start + i;
+      if ((await p.readEepromByte(a)) !== data[i]) {
+        await p.writeEepromByte(a, data[i]);
+        written++;
+      }
+      if ((i & 0x1f) === 0x1f || i === data.length - 1) onProgress?.((i + 1) / data.length);
+    }
+    for (let i = 0; i < data.length; i++) {
+      const got = await p.readEepromByte(start + i);
+      if (got !== data[i]) throw new Error(`EEPROM verify failed at 0x${(start + i).toString(16)}: wrote 0x${hex2(data[i])}, read 0x${hex2(got)}`);
+    }
+    return written;
+  }
+
+  /** Write `data` into the EEPROM at `start` and verify it. */
+  async writeEeprom(data, { start = 0, onProgress } = {}) {
+    if (!this.isConnected) throw new Error('Programmer not connected.');
+    if (!this.chip) throw new Error('Read the signature first: the EEPROM size comes from the chip.');
+    if (start + data.length > this.chip.eepromSize) throw new Error(`EEPROM data ends at 0x${(start + data.length).toString(16)}, past the ${this.chip.name}'s ${this.chip.eepromSize}-byte EEPROM.`);
+    const written = await this._prog((p) => this._writeEeprom(p, data, start, onProgress));
+    this.log(`EEPROM: ${data.length} bytes verified (${written} changed).`);
+    return { bytes: data.length, written };
   }
 
   /**
    * Erase, write an image page by page and verify it.
+   * The erase also wipes the EEPROM unless EESAVE is programmed; `preserveEeprom`
+   * dumps it first and restores it afterwards.
    * @param {{ data: Uint8Array, startAddress: number }} image  e.g. from parseIntelHex.
    */
-  async flashImage(image, { onProgress, erase = true } = {}) {
+  async flashImage(image, { onProgress, erase = true, preserveEeprom = false } = {}) {
     if (!this.isConnected) throw new Error('Programmer not connected.');
     if (!this.chip) throw new Error('Read the signature first: the page size comes from the chip.');
     const end = image.startAddress + image.data.length;
     if (end > this.chip.flashSize) throw new Error(`Image ends at 0x${end.toString(16)}, past the ${this.chip.name}'s ${this.chip.flashSize / 1024} KB flash.`);
     const pages = pagesFromImage(image.data, image.startAddress, this.chip.pageSize);
     await this._prog(async (p) => {
+      const saved = erase && preserveEeprom ? await this._readEeprom(p) : null;
       if (erase) {
         await p.chipErase();
         // The erase ends programming mode on some programmers: re-enter.
@@ -381,6 +442,7 @@ export class AvrIspClient {
         done++;
         onProgress?.(70 + Math.round((done / pages.length) * 30));
       }
+      if (saved) await this._writeEeprom(p, saved, 0);
     });
     this.log(`Wrote and verified ${pages.length} page(s), ${image.data.length} bytes.`);
     return { pages: pages.length, bytes: image.data.length };
@@ -395,6 +457,7 @@ export class AvrIspClient {
     if (!image) throw new Error('Load a bootloader .hex file first.');
     if (!this.chip) throw new Error('Read the signature first.');
     const preset = this.chip.defaultFuses;
+    if (!preset) throw new Error(`The Arduino fuse defaults for the ${this.chip.name} are not known, so "burn bootloader" is disabled for it. Write the fuses and flash the bootloader separately.`);
     await this.chipErase();
     await this.writeFuses({ ...preset, lock: 0x3f });
     await this.flashImage(image, { onProgress, erase: false });
@@ -403,4 +466,101 @@ export class AvrIspClient {
     this.log('Bootloader burned, fuses and lock bits set.');
     return true;
   }
+}
+
+// ---- Intel HEX export ---------------------------------------------------------
+
+/**
+ * Serialise bytes as Intel HEX (data, extended-linear-address and EOF records).
+ * 16-byte rows that are entirely 0xFF are left out, as erased flash needs no record.
+ */
+export function toIntelHex(data, startAddress = 0, { skipBlank = true } = {}) {
+  const lines = [];
+  const rec = (len, addr, type, bytes) => {
+    let sum = len + (addr >> 8) + (addr & 0xff) + type;
+    for (const b of bytes) sum += b;
+    const chk = (-sum) & 0xff;
+    return `:${hex2(len)}${hex2(addr >> 8)}${hex2(addr & 0xff)}${hex2(type)}${bytes.map(hex2).join('')}${hex2(chk)}`;
+  };
+  let upper = -1;
+  for (let off = 0; off < data.length;) {
+    const abs = startAddress + off;
+    // Rows never cross a 16-byte boundary or a 64 KB segment.
+    const room = Math.min(16 - (abs & 0x0f), data.length - off);
+    const row = Array.from(data.subarray(off, off + room));
+    off += room;
+    if (skipBlank && row.every((b) => b === 0xff)) continue;
+    if ((abs >>> 16) !== upper) {
+      upper = abs >>> 16;
+      lines.push(rec(2, 0, 4, [(upper >> 8) & 0xff, upper & 0xff]));
+    }
+    lines.push(rec(row.length, abs & 0xffff, 0, row));
+  }
+  lines.push(':00000001FF');
+  return `${lines.join('\n')}\n`;
+}
+
+// ---- Arduino bootloader upload (STK500v1: optiboot, ATmegaBOOT_168) -------------
+
+/**
+ * Boards that can be programmed through their serial bootloader.
+ * `appLimit` is the first flash byte the bootloader occupies (conservative:
+ * the Arduino IDE's maximum sketch size for the board).
+ */
+export const ARDUINO_BOARDS = {
+  uno: { name: 'Arduino Uno (optiboot)', baud: 115200, signature: 0x1e950f, appLimit: 32256 },
+  'nano-new': { name: 'Arduino Nano, new bootloader (optiboot)', baud: 115200, signature: 0x1e950f, appLimit: 32256 },
+  'nano-old': { name: 'Arduino Nano, old bootloader (ATmegaBOOT)', baud: 57600, signature: 0x1e950f, appLimit: 30720 },
+  'pro-mini': { name: 'Arduino Pro Mini, ATmega328P (5V 16 MHz or 3.3V 8 MHz)', baud: 57600, signature: 0x1e950f, appLimit: 30720 }
+};
+
+/**
+ * Upload a sketch through an STK500v1 bootloader, like `avrdude -c arduino`.
+ * Never touches fuses or the chip erase command and does not use ISP:
+ * sync, signature check, page writes, read-back verify, run.
+ *
+ * @param {SerialLink} link  open at the board's baud rate
+ * @param {{ data: Uint8Array, startAddress: number }} image
+ * @param {{ board: object, resetWithDtr?: boolean, onProgress?: (n:number)=>void, log?: (m:string)=>void }} opts
+ */
+export async function uploadViaBootloader(link, image, { board, resetWithDtr = true, onProgress, log = () => {}, bootWaitMs = 400 } = {}) {
+  if (!board) throw new Error('Choose a board first.');
+  const chip = AVR_CHIP_DATABASE[board.signature];
+  const end = image.startAddress + image.data.length;
+  if (image.startAddress >= board.appLimit) {
+    throw new Error(`The image starts at 0x${image.startAddress.toString(16)}, inside the bootloader area (above 0x${board.appLimit.toString(16)}). Load the sketch .hex (it starts at 0), not a bootloader.`);
+  }
+  if (end > board.appLimit) throw new Error(`The image ends at 0x${end.toString(16)}, past the ${board.appLimit} bytes this board leaves for sketches (the bootloader lives above).`);
+
+  const stk = new Stk500Programmer(link, log);
+  if (resetWithDtr) {
+    await link.setSignals({ dataTerminalReady: false, requestToSend: false });
+    await sleep(250);
+    await link.setSignals({ dataTerminalReady: true, requestToSend: true });
+    await sleep(bootWaitMs);
+  }
+  await stk.sync(10);
+  const sig = await stk.readBootloaderSignature();
+  if (sig !== board.signature) {
+    throw new Error(`The bootloader reports signature 0x${sig.toString(16).padStart(6, '0')}, but ${board.name} has 0x${board.signature.toString(16).padStart(6, '0')}. Pick the right board.`);
+  }
+  // No erase is issued: the bootloader erases each page itself, so blank pages must be written too.
+  const pages = pagesFromImage(image.data, image.startAddress, chip.pageSize, { skipBlank: false });
+  let done = 0;
+  for (const page of pages) {
+    await stk.writePage(page.address, page.data, chip);
+    done++;
+    onProgress?.(Math.round((done / pages.length) * 70));
+  }
+  done = 0;
+  for (const page of pages) {
+    const back = await stk.readPage(page.address, page.data.length, chip);
+    const bad = page.data.findIndex((b, i) => back[i] !== b);
+    if (bad >= 0) throw new Error(`Verify failed at 0x${(page.address + bad).toString(16)}: wrote 0x${hex2(page.data[bad])}, read 0x${hex2(back[bad])}`);
+    done++;
+    onProgress?.(70 + Math.round((done / pages.length) * 30));
+  }
+  await stk.leaveProgmode(); // the bootloader starts the sketch
+  log(`Uploaded and verified ${pages.length} page(s), ${image.data.length} bytes.`);
+  return { pages: pages.length, bytes: image.data.length };
 }

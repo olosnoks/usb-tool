@@ -3,7 +3,7 @@
 import { formula } from './infer.js';
 import { XFER_NAMES } from './model.js';
 import { fmt } from './states.js';
-import { fromHex, hex } from './bytes.js';
+import { fromHex, hex, maxOf, minOf } from './bytes.js';
 import { dict_entries, dict_items, fmt_g, fmt_hex, fmt_pct } from './pyfmt.js';
 
 const xname = (t) => XFER_NAMES[t] ?? 'None';
@@ -48,8 +48,8 @@ export function render(proto, capture = '', sha256 = '') {
   const ids = present(proto.vid) ? `${fmt_hex(proto.vid, 4)}:${fmt_hex(proto.pid, 4)}` : 'unknown (no GET_DESCRIPTOR in capture)';
   L.push(`Device: \`${ids}\``, '',
     "Frame numbers match Wireshark's `frame.number`; open the capture and jump to them to verify each claim.", '');
-  if (proto.handshake && proto.handshake.length) L.push(..._handshake(proto));
-  if (proto.streams && proto.streams.length) L.push(..._streams(proto));
+  if (proto.handshake && proto.handshake.length) for (const _x of _handshake(proto)) L.push(_x);
+  if (proto.streams && proto.streams.length) for (const _x of _streams(proto)) L.push(_x);
   const hid_by_cmd = new Map();
   for (const h of proto.hid || []) {
     if (h.commands) for (const [k, v] of dict_entries(h.commands)) hid_by_cmd.set(k, v);
@@ -99,8 +99,8 @@ export function render(proto, capture = '', sha256 = '') {
     }
     L.push('');
   }
-  if (proto.responses && proto.responses.length) L.push(..._responses(proto));
-  if (proto.observations && proto.observations.length) L.push(..._observations(proto));
+  if (proto.responses && proto.responses.length) for (const _x of _responses(proto)) L.push(_x);
+  if (proto.observations && proto.observations.length) for (const _x of _observations(proto)) L.push(_x);
   if (proto.unmatched && proto.unmatched.length) L.push('## Actions with no host→device data', '', ...proto.unmatched.map((u) => `- ${u}`), '');
   return L.join('\n');
 }
@@ -241,7 +241,7 @@ function _handshake(proto) {
         + 'call `open()` again when the device stops answering after sleep or a replug.');
     }
     if (s.branches && (s.branches.cases instanceof Map ? s.branches.cases.size : Object.keys(s.branches.cases).length)) {
-      L.push(..._branch_lines(s));
+      for (const _x of _branch_lines(s)) L.push(_x);
     }
     for (const u of s.uses) {
       L.push(`- Step ${s.step} request bytes ${u.offset}-${u.offset + u.width - 1} repeat `
@@ -366,8 +366,8 @@ function _responses(proto) {
         run.push(fields.shift());
       }
       if (run.length >= 4) { // a block of independent byte readings: one row
-        const lo = Math.min(...run.map((x) => x.limits[0]));
-        const hi = Math.max(...run.map((x) => x.limits[1]));
+        const lo = minOf(run.map((x) => x.limits[0]));
+        const hi = maxOf(run.map((x) => x.limits[1]));
         L.push(`| ${f.offset}-${run[run.length - 1].offset} | reading | \`u8 readings, seen ${lo}..${hi}\` |`);
         continue;
       }

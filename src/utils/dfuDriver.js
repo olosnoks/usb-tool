@@ -267,6 +267,129 @@ export function parseDfuFunctionalDescriptor(configBytes) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// DfuSe memory layout (ST AN3156 / dfu-util): the alt-setting string
+// descriptor describes the flash map, e.g.
+//   "@Internal Flash  /0x08000000/04*016Kg,01*064Kg,07*128Kg"
+// ---------------------------------------------------------------------------
+
+const UNIT_BYTES = { B: 1, K: 1024, M: 1024 * 1024 };
+
+/**
+ * Decode the flag letter of a DfuSe sector group. a=readable, b=erasable,
+ * c=readable+erasable, d=writable, e=readable+writable, f=erasable+writable,
+ * g=all three.
+ */
+function decodeSectorFlags(letter) {
+  const flags = letter.toLowerCase().charCodeAt(0) - 0x60; // a=1 .. g=7
+  return {
+    flags,
+    readable: (flags & 1) !== 0,
+    erasable: (flags & 2) !== 0,
+    writable: (flags & 4) !== 0
+  };
+}
+
+/**
+ * Parse one DfuSe alt-setting name into { name, start, end, sectors }.
+ * Throws a descriptive Error when the string is not a DfuSe memory layout.
+ */
+export function parseDfuseRegion(name) {
+  const text = String(name ?? '').trim();
+  if (!text.startsWith('@')) {
+    throw new Error(`Not a DfuSe memory layout (must start with "@"): "${text}"`);
+  }
+  const m = /^@\s*([^/]*?)\s*\/\s*(0x[0-9a-fA-F]+)\s*\/\s*(.+)$/.exec(text);
+  if (!m) {
+    throw new Error(`Malformed DfuSe layout, expected "@Name /0xADDR/NN*SSSKg,...": "${text}"`);
+  }
+  let cursor = parseInt(m[2], 16) >>> 0;
+  const start = cursor;
+  const sectors = [];
+  for (const group of m[3].split(',')) {
+    const g = /^\s*(\d+)\s*\*\s*(\d+)\s*([BKMbkm]?)\s*([a-gA-G])\s*$/.exec(group);
+    if (!g) {
+      throw new Error(`Malformed DfuSe sector group "${group.trim()}" in "${text}"`);
+    }
+    const count = parseInt(g[1], 10);
+    const size = parseInt(g[2], 10) * UNIT_BYTES[(g[3] || 'B').toUpperCase()];
+    if (!(count > 0) || !(size > 0)) {
+      throw new Error(`Zero-sized sector group "${group.trim()}" in "${text}"`);
+    }
+    const f = decodeSectorFlags(g[4]);
+    for (let i = 0; i < count; i++) {
+      sectors.push({ start: cursor, size, ...f });
+      cursor += size;
+    }
+  }
+  return { name: m[1], start, end: cursor, sectors };
+}
+
+/** Sector table [ { start, size, flags, readable, erasable, writable } ] for a DfuSe alt-setting string. */
+export function parseDfuseLayout(name) {
+  return parseDfuseRegion(name).sectors;
+}
+
+/**
+ * Sectors that must be erased to program [address, address+length). Throws if
+ * any part of the range is outside the layout or lands in a non-erasable sector.
+ */
+export function planDfuseErase(layout, address, length) {
+  if (!Array.isArray(layout) || layout.length === 0) throw new Error('Empty DfuSe layout.');
+  if (!(length > 0)) return [];
+  const end = address + length;
+  const hit = layout.filter((s) => s.start < end && s.start + s.size > address);
+  const covered = hit.length ? hit[hit.length - 1].start + hit[hit.length - 1].size : address;
+  if (!hit.length || hit[0].start > address || covered < end) {
+    throw new Error(
+      `Image 0x${address.toString(16)}..0x${(end - 1).toString(16)} does not fit inside the selected memory region.`
+    );
+  }
+  const bad = hit.find((s) => s.erasable === false);
+  if (bad) {
+    throw new Error(`Sector at 0x${bad.start.toString(16)} is not erasable on this region.`);
+  }
+  return hit;
+}
+
+/**
+ * List every DFU alt-setting of an opened WebUSB device with its name and any
+ * DfuSe layout. `mode` is 'dfu' (protocol 2) or 'runtime' (protocol 1).
+ */
+export function listDfuAlternates(usbDevice) {
+  const out = [];
+  for (const cfg of usbDevice.configurations || []) {
+    for (const iface of cfg.interfaces || []) {
+      for (const alt of iface.alternates || []) {
+        if (
+          alt.interfaceClass !== DFU_INTERFACE_CLASS ||
+          alt.interfaceSubclass !== DFU_INTERFACE_SUBCLASS
+        ) {
+          continue;
+        }
+        const entry = {
+          interfaceNumber: iface.interfaceNumber,
+          alternate: alt.alternateSetting,
+          protocol: alt.interfaceProtocol,
+          mode: alt.interfaceProtocol === 1 ? 'runtime' : 'dfu',
+          name: alt.interfaceName || '',
+          region: null,
+          layoutError: null
+        };
+        if (entry.name.startsWith('@')) {
+          try {
+            entry.region = parseDfuseRegion(entry.name);
+          } catch (err) {
+            entry.layoutError = err.message;
+          }
+        }
+        out.push(entry);
+      }
+    }
+  }
+  return out;
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 // ---------------------------------------------------------------------------
@@ -439,28 +562,49 @@ export class DfuDevice {
   }
 
   /**
-   * DfuSe download for one element: set the target address, erase the pages it
-   * covers, then program it. DfuSe data blocks use wBlockNum starting at 2, and
+   * DfuSe download for one element: erase what it covers, set the target
+   * address, then program it. DfuSe data blocks use wBlockNum starting at 2, and
    * the device derives the write address from the previously-set pointer plus
    * (wBlockNum - 2) * transferSize.
+   *
+   * Erase strategy (never an implicit mass erase):
+   *  - opts.layout (from parseDfuseLayout): erase only the sectors overlapping the image;
+   *  - else opts.erasePageSize > 0: fixed pages, aligned down to the page boundary;
+   *  - else opts.massErase === true: explicit mass erase;
+   *  - else throw.
    * @param {number} address
    * @param {Uint8Array} data
-   * @param {object} [opts] { erasePageSize }
+   * @param {object} [opts] { layout, erasePageSize, massErase, erased: Set, leave = true }
    * @param {(info:{written:number,total:number})=>void} [onProgress]
    */
   async dfuseDownloadElement(address, data, opts = {}, onProgress) {
     await this.ensureIdle();
 
-    const erasePageSize = opts.erasePageSize || 0;
-    if (erasePageSize > 0) {
-      for (let a = address; a < address + data.length; a += erasePageSize) {
+    const erased = opts.erased instanceof Set ? opts.erased : new Set();
+    if (Array.isArray(opts.layout) && opts.layout.length) {
+      for (const sector of planDfuseErase(opts.layout, address, data.length)) {
+        if (erased.has(sector.start)) continue;
+        this.log(`Erasing sector @ 0x${sector.start.toString(16)} (${sector.size} B)`);
+        await this.dfuseErasePage(sector.start);
+        erased.add(sector.start);
+      }
+    } else if (opts.erasePageSize > 0) {
+      const ps = opts.erasePageSize;
+      const first = address - (address % ps);
+      for (let a = first; a < address + data.length; a += ps) {
+        if (erased.has(a)) continue;
         this.log(`Erasing page @ 0x${a.toString(16)}`);
         await this.dfuseErasePage(a);
+        erased.add(a);
       }
-    } else {
-      // Fall back to a mass erase when page geometry is unknown.
-      this.log('Page size unknown — performing mass erase');
+    } else if (opts.massErase === true) {
+      this.log('Mass erase (explicitly requested)');
       await this.dfuseMassErase();
+    } else {
+      throw new Error(
+        'Unknown flash geometry: refusing to erase. Select a memory region with a layout, ' +
+          'give a page size, or request a mass erase explicitly.'
+      );
     }
 
     await this.dfuseSetAddress(address);
@@ -476,11 +620,82 @@ export class DfuDevice {
       onProgress?.({ written: offset, total });
     }
 
-    // Terminate + manifest.
+    if (opts.leave === false) return;
+    await this.dfuseLeave(address);
+    onProgress?.({ written: total, total });
+  }
+
+  /** Leave DFU mode and jump to the application at `address` (set-address + zero-length DNLOAD + manifest). */
+  async dfuseLeave(address) {
     await this.dfuseSetAddress(address);
     await this._out(DFU_REQUEST.DNLOAD, 0, new Uint8Array(0));
     await this._manifest();
-    onProgress?.({ written: total, total });
+  }
+
+  /** DFU_DETACH (runtime mode to DFU mode). The device re-enumerates; the caller must re-request it. */
+  async detach(timeout = 1000) {
+    await this._out(DFU_REQUEST.DETACH, timeout);
+  }
+
+  /**
+   * Read the device with DFU_UPLOAD. Plain DFU reads from block 0; DfuSe first
+   * sets the address pointer (opts.address) and reads from block 2.
+   * Stops at `length` bytes or at the first short packet, whichever comes first.
+   * @param {number} length   bytes wanted
+   * @param {(info:{read:number,total:number})=>void} [onProgress]
+   * @param {{address?:number}} [opts]
+   * @returns {Promise<Uint8Array>}
+   */
+  async upload(length, onProgress, opts = {}) {
+    await this.ensureIdle();
+    let blockNum = 0;
+    if (this.dfuse) {
+      if (opts.address == null) throw new Error('DfuSe upload needs a start address.');
+      await this.dfuseSetAddress(opts.address);
+      await this.abort(); // back to dfuIDLE so UPLOAD is accepted
+      await this.getStatus();
+      blockNum = 2;
+    }
+    const out = new Uint8Array(length);
+    let got = 0;
+    while (got < length) {
+      const want = Math.min(this.transferSize, length - got);
+      const res = await this._in(DFU_REQUEST.UPLOAD, blockNum, want);
+      const view = res.data;
+      const n = view ? Math.min(view.byteLength, want) : 0;
+      if (n > 0) {
+        out.set(new Uint8Array(view.buffer, view.byteOffset, n), got);
+        got += n;
+        blockNum += 1;
+        onProgress?.({ read: got, total: length });
+      }
+      if ((view ? view.byteLength : 0) < want) break; // short packet ends the upload
+    }
+    try {
+      await this.abort(); // leave upload-idle
+    } catch {
+      /* best effort */
+    }
+    return out.subarray(0, got);
+  }
+
+  /**
+   * Read back expected.length bytes and compare. Returns { ok, length,
+   * mismatchOffset }; mismatchOffset is the first differing offset (or the
+   * returned length when the device sent fewer bytes than expected).
+   */
+  async verify(expected, opts = {}, onProgress) {
+    const got = await this.upload(expected.length, onProgress, opts);
+    const n = Math.min(got.length, expected.length);
+    for (let i = 0; i < n; i++) {
+      if (got[i] !== expected[i]) {
+        return { ok: false, length: got.length, mismatchOffset: i, expected: expected[i], actual: got[i] };
+      }
+    }
+    if (got.length !== expected.length) {
+      return { ok: false, length: got.length, mismatchOffset: got.length };
+    }
+    return { ok: true, length: got.length, mismatchOffset: -1 };
   }
 
   /**
@@ -551,24 +766,21 @@ export async function discoverDfuInterface(usbDevice) {
   const bytes = new Uint8Array(full.data.buffer);
   const func = parseDfuFunctionalDescriptor(bytes);
 
-  // Find the DFU interface from WebUSB's own parsed descriptors.
-  for (const cfg of usbDevice.configurations) {
-    for (const iface of cfg.interfaces) {
-      for (const alt of iface.alternates) {
-        if (
-          alt.interfaceClass === DFU_INTERFACE_CLASS &&
-          alt.interfaceSubclass === DFU_INTERFACE_SUBCLASS
-        ) {
-          return {
-            interfaceNumber: iface.interfaceNumber,
-            alternate: alt.alternateSetting,
-            transferSize: func?.transferSize || 1024,
-            bcdDFU: func?.bcdDFU ?? null,
-            attributes: func || {}
-          };
-        }
-      }
-    }
+  // Find the DFU interface from WebUSB's own parsed descriptors. Prefer a
+  // DFU-mode interface (protocol 2); a runtime-mode one (protocol 1) cannot
+  // download, so it is returned flagged `runtimeOnly` for the caller to explain.
+  const alternates = listDfuAlternates(usbDevice);
+  const pick = alternates.find((a) => a.mode === 'dfu') || alternates[0];
+  if (pick) {
+    return {
+      interfaceNumber: pick.interfaceNumber,
+      alternate: pick.alternate,
+      transferSize: func?.transferSize || 1024,
+      bcdDFU: func?.bcdDFU ?? null,
+      attributes: func || {},
+      runtimeOnly: pick.mode === 'runtime',
+      alternates
+    };
   }
   return null;
 }

@@ -561,7 +561,7 @@ export function generate(proto) {
     hs.push(hs_step(st));
   }
   specs.push(hs.length ? '# handshake, evidence frames ' + proto.handshake.map((st) => st.frame).join(', ') + '\n' : '');
-  specs.push(...notes);
+  for (const _x of notes) specs.push(_x);
   specs.push(`HANDSHAKE = ${py_repr(hs)}\n`);
 
   const queries = [];
@@ -665,7 +665,7 @@ export function generate(proto) {
         ${pre}${body}
 `);
   }
-  out.push(...queries);
+  for (const _x of queries) out.push(_x);
   if (proto.streams && proto.streams.length) {
     const streams = [];
     const tpl = (pattern) => pattern.split(/\s+/).filter(Boolean).map((b) => (/^[0-9a-f]{2}$/.test(b) ? b : '00')).join('');

@@ -10,7 +10,7 @@ export const UTILITY_ARTICLES = [
     toolId: 'micropython',
     category: 'utilities',
     title: 'MicroPython REPL & File Manager — WebFS & Raw Mode Studio',
-    summary: 'Master MicroPython Raw REPL control sequences (0x01-0x04), on-board file browsing and in-browser editing, one-liner execution, and the bundled driver installer.',
+    summary: 'Master MicroPython Raw REPL control sequences (0x01-0x04), on-board file browsing with checksummed chunked transfers, in-browser editing, one-liner execution, stop/reset controls, mip package installs and the bundled driver installer.',
     tags: ['MicroPython', 'CircuitPython', 'Raw REPL', 'File Manager', 'LittleFS', 'FAT', 'boot.py', 'main.py', 'mip', 'WebFS'],
     readTime: '22 min read',
     content: `
@@ -57,18 +57,11 @@ Host (PC)                                   Target Microcontroller
 <details>
 <summary>Deep-Dive: File Upload, Download & Directory Listing Mechanics</summary>
 
-Files cross the serial link as Base64 text embedded in short Python scripts, with marker lines that the host searches for in the output:
+Files cross the serial link as Base64 text in small blocks inside one Raw REPL session, so a large file never has to be compiled as a single script:
 1. **Upload / save**:
-   - The file's bytes (uploads are read as raw bytes; editor text is UTF-8 encoded) are Base64-encoded in the browser and sent as a single script (itself written to the wire in 256-byte pieces):
-     \`\`\`python
-     import ubinascii
-     with open('target_file.ext', 'wb') as f:
-         f.write(ubinascii.a2b_base64('BASE64_DATA'))
-     print("__FILE_WRITE_SUCCESS__")
-     \`\`\`
-   - There is no per-chunk streaming and no checksum verification; success is the \`__FILE_WRITE_SUCCESS__\` marker. Very large files may not fit in one script, and the transfer is text-based (see the note below).
+   - The file's bytes (uploads are read as raw bytes; editor text is UTF-8 encoded) are opened on the device with \`open(path, 'wb')\`, then written in blocks of **768 bytes** (each sent as \`_f.write(ubinascii.a2b_base64('...'))\`), and the file is closed. A progress bar with a **CANCEL** button appears while it runs; cancelling closes the file, which may leave it partial (the log says so).
 2. **Download / edit**:
-   - The device reads the file as bytes, prints it as Base64 between \`__FILE_DATA_START__\` and \`__FILE_DATA_END__\`, and the browser decodes it.
+   - The tool first asks the device for the file size with \`os.stat\`, then reads it block by block. Each block comes back with its length and a byte-sum checksum, and the host rejects the transfer on any length or checksum mismatch (the checksum is a simple additive one, not a CRC).
 3. **Directory Traversal**:
    - The tool lists files and folders using \`os.ilistdir(path)\` (falling back to \`os.listdir\`):
      - Entries are \`(name, type, inode, size)\`.
@@ -81,7 +74,10 @@ Files cross the serial link as Base64 text embedded in short Python scripts, wit
 <details>
 <summary>Deep-Dive: The Bundled Driver Installer (mip tab)</summary>
 
-The **PACKAGE MANAGER (mip)** tab lists a small built-in catalog of drivers (SSD1306 OLED, BME280, AHT10/AHT20, MPU6050, uMQTT Simple, VL53L0X). The source of each driver ships inside the app. **INSTALL TO /lib/** creates \`/lib\` (and \`/lib/umqtt\`) if needed and writes the file; nothing is downloaded from a package index and the real \`mip\` tool is not invoked. The search box filters by name, description or category.
+The **PACKAGE MANAGER (mip)** tab has two parts.
+
+- **mip install** box: type a micropython-lib package (\`umqtt.simple\`, optionally \`name@version\`), a \`github:org/repo/path[@branch]\` spec, or an \`https://.../package.json\` URL and click **mip install**. The browser (not the board) resolves the package, follows its dependencies and downloads the files, then writes them under \`/lib\` (creating folders as needed) using the same chunked transfer, with a status line showing progress. Only \`https\` URLs on \`micropython.org\` and \`raw.githubusercontent.com\` are allowed (redirects included), and destination paths containing \`..\` are rejected. The board needs no network access.
+- **OFFLINE DRIVERS (bundled)**: a small built-in catalog (SSD1306 OLED, BME280, AHT10/AHT20, MPU6050, uMQTT Simple, VL53L0X) whose source ships inside the app. **INSTALL TO /lib/** creates \`/lib\` (and \`/lib/umqtt\`) if needed and writes the file with no download. The search box filters by name, description or category.
 </details>
 
 ---
@@ -89,16 +85,17 @@ The **PACKAGE MANAGER (mip)** tab lists a small built-in catalog of drivers (SSD
 ### 3. Step-by-Step Walkthrough
 
 1. Connect your MicroPython or CircuitPython board with the app's serial connection (set the port and baud rate in the Terminal / connection controls; the workbench uses that shared port and has no baud selector of its own). If several boards are connected, pick one in the **TARGET** selector.
-2. Click **SCAN FILES**:
+2. Use the control row above the header if needed: **Stop (Ctrl-C)** interrupts a running program, **Soft reset** sends Ctrl-C, Ctrl-C, Ctrl-D, **Hard reset** (after a confirmation) runs \`machine.reset()\` and the serial connection may drop, and **New folder** prompts for a name and creates it in the current directory.
+3. Click **SCAN FILES**:
    - The workbench interrupts any running loop, enters Raw REPL, reads \`sys.platform\` and flash usage, and lists the current directory. The platform shows as a badge in the header.
-3. **Navigate**: click a folder name or **ENTER**; use **UP** or the \`.. [Parent Directory]\` row to go back.
-4. **Edit File**: click **EDIT** on a text file. A plain text editor with a line-number gutter opens.
-5. **Download File**: click the download icon on a file row to save it to your computer.
-6. **Upload File**: click **UPLOAD** and choose a file; it is written into the current directory (there is no drag-and-drop).
-7. **NEW SCRIPT**: enter a filename and initial content, then **CREATE & FLASH**.
-8. Click **SAVE TO ON-CHIP FLASH** in the editor to write the file. It does not reboot the board; reset it yourself (or use the one-liner below) to run the new code.
-9. The trash icon deletes a file (after a confirmation). It uses \`os.remove\`, so it only removes files, not folders.
-10. **EXECUTE REPL**: type a one-liner and press Enter or **RUN**; the output appears in the session log.
+4. **Navigate**: click a folder name or **ENTER**; use **UP** or the \`.. [Parent Directory]\` row to go back.
+5. **Edit File**: click **EDIT** on a text file. A plain text editor with a line-number gutter opens.
+6. **Download File**: click the download icon on a file row to save it to your computer (chunked and checksummed, with a progress bar and **CANCEL**).
+7. **Upload File**: click **UPLOAD** and choose a file; it is written into the current directory (there is no drag-and-drop).
+8. **NEW SCRIPT**: enter a filename and initial content, then **CREATE & FLASH**.
+9. Click **SAVE TO ON-CHIP FLASH** in the editor to write the file. It does not reboot the board; reset it yourself (or use the one-liner below) to run the new code.
+10. The trash icon deletes a file (after a confirmation). It uses \`os.remove\`, so it only removes files, not folders.
+11. **EXECUTE REPL**: type a one-liner and press Enter or **RUN**; the output appears in the session log.
 
 ---
 
@@ -230,18 +227,18 @@ The **Telemetry Gauges Workbench** (window title *Telemetry & Attitude Dashboard
 
 ### 1. Under the Hood: Line Parsing & Needle Math
 
-Every new line from the serial stream is tried against three parsers in order; the first one that matches wins. There is no custom regular expression field and no format selector.
+Every new line from the serial stream is tried against three parsers in order; the first one that matches wins. There is no custom regular expression field and no format selector. Lines starting with boot-ROM noise (\`rst:\`, \`boot:\`, \`=>\`, \`Hit any key\`, \`[SYS]\`, \`[WiFi]\`, \`starting\`) are ignored.
 
 <details>
 <summary>Deep-Dive: Supported Line Formats</summary>
 
 | Order | Format | Example Serial Line | Result |
 | :---: | :--- | :--- | :--- |
-| 1 | **JSON object** (line starts with \`{\` and ends with \`}\`) | \`{"rpm": 4820, "temp": 24.5}\` | One channel per key with a numeric value. |
-| 2 | **Key-Value** (\`key=number\` or \`key:number\`) | \`temp=24.5 rpm=3200\` or \`Temp: 24.5 C, Humidity: 62 %\` | One channel per pair, key lower-cased with non-alphanumerics removed. |
-| 3 | **CSV / sentence** (contains a comma, optional \`$TAG,\` prefix, at least 2 numbers) | \`$DATA,12.5,-4.2,24.5,12.1,2400\` | Numbers map by position to \`pitch, roll, temp, volts, rpm, altitude\`, then \`ch_7\`, \`ch_8\`... |
+| 1 | **JSON object** (line starts with \`{\` and ends with \`}\`) | \`{"rpm": 4820, "temp": 24.5}\` | One channel per numeric value; nested objects become dotted names (\`imu.pitch\`), and numeric strings count. |
+| 2 | **Key-Value** (\`key=number\` or \`key:number\`) | \`temp=24.5 rpm=3200\` or \`Temp: 24.5 C, Humidity: 62 %\` | One channel per pair (only when the pairs cover at least 40 % of the line, so prose is not mistaken for data). Scientific notation and \`0x\` hex are accepted. |
+| 3 | **Numeric row** (optional \`$TAG,\` prefix; every token must be a number; separated by comma, semicolon, space or tab) | \`$DATA,12.5,-4.2,24.5\` or \`12.5 -4.2 24.5\` | Unnamed columns become channels \`ch_1\`, \`ch_2\`, \`ch_3\`... |
 
-Channel names are used as-is, so send \`pitch\` and \`roll\` to move the horizon, and names containing \`temp\`, \`volt\`, \`rpm\` or \`alt\` get a \`°C\`, \`V\`, \`RPM\` or \`m\` unit. Any other new key creates a new channel automatically. The dashboard starts with six placeholder channels (pitch, roll, temp, volts, rpm, altitude) holding sample values until real data arrives.
+Channel names are the key lower-cased with everything except letters, digits and underscores removed, so \`Temp\` becomes \`temp\`. Send channels named \`pitch\` and \`roll\` to move the horizon. **The dashboard starts empty**: no channels, sample values or gauges exist until the first matching line arrives; a new key then creates its own channel automatically. Each channel has editable **name**, **unit**, **gauge min** and **gauge max** fields on its card.
 </details>
 
 <details>
@@ -255,7 +252,7 @@ Normalized (t) = (Current_Value - Observed_Min) / (Observed_Max - Observed_Min)
 Needle angle (degrees) = -135 + t * 270
 \`\`\`
 
-The scale is **auto-ranging**: the minimum and maximum are the lowest and highest values seen so far for that channel, not user-set limits. The needle movement is smoothed with a short CSS transition; there is no exponential filter.
+By default the scale is **auto-ranging**: the minimum and maximum are the lowest and highest values seen so far for that channel. If you type a **gauge min** and/or **gauge max** on a channel's card, those override the observed range. The needle movement is smoothed with a short CSS transition; there is no exponential filter.
 </details>
 
 ---
@@ -263,11 +260,13 @@ The scale is **auto-ranging**: the minimum and maximum are the lowest and highes
 ### 2. The Panels
 
 - **Attitude Horizon**: an artificial horizon driven by the \`pitch\` and \`roll\` channels, with the current pitch/roll in degrees in its header.
-- **Circular Speedometer**: pick any channel from the dropdown (or click a metric card) to show it on the dial, with its value, unit, and observed MIN / MAX underneath.
-- **Live Telemetry Feeds**: one card per channel with the latest value and the lowest and highest values seen (arrows down and up). Click a card to put it on the speedometer.
+- **Circular Speedometer**: pick any channel from the dropdown (or click a metric card) to show it on the dial, with its value, unit, and observed MIN / MAX underneath. Before any data arrives it shows \`NO DATA\` / \`waiting for data\`.
+- **Live Telemetry Feeds**: one card per channel with the latest value, a sparkline of recent samples, the lowest and highest values seen (arrows down and up), and the name / unit / gauge min / gauge max fields. Click a card to put it on the speedometer.
+- **History length** (\`20 / 100 / 500 samples\`): how many points each sparkline keeps.
+- **CSV**: downloads every sample received (up to the tool's rolling log limit) as \`telemetry-<time>.csv\`, one row per line with an ISO timestamp column and one column per channel, using your names and units in the header. Disabled until data has arrived.
 - **RESET STATS**: collapses every channel's min and max to its current value, so the auto-range starts over.
 
-There are no warning or danger zones, peak-hold markers, or limits to set.
+There are no warning or danger zones or peak-hold markers.
 
 ---
 
@@ -354,11 +353,15 @@ When a pattern appears in newly received serial text:
 2. If **Audio Chime** is on (default), an alarm sound plays.
 3. If **Auto-Pause Terminal** is on (default), the main terminal is paused.
 4. A line is written to the session log.
-5. **COPY DUMP** copies the stored text of that incident to the clipboard.
+5. If **Notify** is on and the browser tab is hidden, a desktop notification ("Crash alert", naming the matched pattern) is shown, and the tab title flashes \`CRASH ALERT\` until you come back. The first click on **Notify** asks the browser for notification permission; if it is refused or unsupported, a warning appears and Notify stays off. Notify is off by default.
+6. **COPY DUMP** copies the stored text of that incident to the clipboard.
+7. The **+ N lines** box (default 5, 0 to 50) captures that many further lines after the match and appends them to the incident's text, so the end of a long register dump is not cut off.
+
+Each pattern chip also shows a counter of how many times it has matched.
 
 The Deck keeps a rolling buffer of the last ~4 KB of received text and matches against it, so a signature split across two serial chunks is still caught, and one panic fires only once even though it stays in the buffer. Only the first matching pattern counts per received chunk. The stored text starts a little before the match and runs to the end of the buffer.
 
-**Editing the watch list**: remove a pattern with its x, or type a new one in the **+ text or /regex/i** box and press Enter. Plain entries are matched as case-insensitive text; an entry written as \`/pattern/flags\` (for example \`/guru\s+meditation/i\`) is treated as a regular expression. If the regex is invalid, it is matched as plain text and a small warning is shown. The list resets to the defaults when the window is reopened.
+**Editing the watch list**: remove a pattern with its x, or type a new one in the **+ text or /regex/i** box and press Enter. Plain entries are matched as case-insensitive text; an entry written as \`/pattern/flags\` (for example \`/guru\s+meditation/i\`) is treated as a regular expression. If the regex is invalid, it is matched as plain text and a small warning is shown. The list is saved in this browser (local storage) and restored when you reopen the window.
 
 ---
 
@@ -375,46 +378,56 @@ The Deck keeps a rolling buffer of the last ~4 KB of received text and matches a
     toolId: 'automation',
     category: 'utilities',
     title: 'Automated Test Runner & Scripts — Bench Testing Engine',
-    summary: 'Build a table of send / expect / timeout steps, run them against the connected serial device, and export a JSON pass/fail report.',
+    summary: 'Build a table of send / expect / delay / control-line steps with escapes, regex expects, loops, retries and failure branches, run them against the connected serial device, and export JSON, JUnit XML or CSV reports.',
     tags: ['Automation', 'Test Runner', 'Scripting', 'Expect', 'Regression Testing', 'Bench Test', 'QA'],
     readTime: '18 min read',
     content: `
 # Automated Test Runner & Scripts — Bench Testing Engine
 
-The **Automated Test Runner** (window title *Automated Serial Test Runner & Scripting*) lets you define a short sequence of steps, each of which sends text to the connected serial device and waits for a response containing an expected string. It suits repetitive functional checks, modem or bootloader handshakes, and simple factory QA. It is a step table, not a JavaScript scripting environment.
+The **Automated Test Runner** (window title *AUTOMATED SERIAL TEST RUNNER & SCRIPTING*) lets you define a sequence of steps that send bytes to the connected serial device, wait for a response, toggle control lines or change the baud rate, with loops, retries and failure branches. It suits repetitive functional checks, modem or bootloader handshakes, and simple factory QA. It is a step table, not a JavaScript scripting environment.
 
 ---
 
 ### 1. Steps, Presets & Execution
 
-Each step has three fields:
+Each step has a **Step type** (\`send/expect\`, \`delay\`, \`set DTR\`, \`set RTS\`, \`set baud\`) and, for send/expect steps:
 
 | Field | Meaning |
 | :--- | :--- |
-| **Send** | The text transmitted to the device. It is sent exactly as stored, with no line ending added. |
-| **Expect** | A plain substring (not a regular expression) that must appear in the received serial text. |
-| **Timeout** | How long to wait for the substring, in milliseconds. |
+| **Send** | The text transmitted. Escapes are decoded to real bytes: \`\\r\`, \`\\n\`, \`\\t\`, \`\\0\`, \`\\e\` (ESC), \`\\xNN\` (any byte), \`\\\\\` (a backslash) and \`\\$\` (a literal dollar sign). A backslash followed by anything else is sent as typed. \`\${name}\` is replaced by a captured variable (an unknown name is sent literally). |
+| **Line ending** | \`no EOL\` (default), \`CR\`, \`LF\` or \`CRLF\`, appended after the Send text. |
+| **Expect** | What must appear in the data received after the send. Leave empty to send without waiting. |
+| **Expect mode** | \`text\` (substring), \`regex\` (JavaScript regular expression; capture groups are stored as variables \`\${1}\`, \`\${2}\`... and named groups by name), \`any of (||)\` (several substrings separated by \`||\`), or \`must NOT appear\` (the step fails if the text shows up before the timeout). A **case** checkbox makes matching case-insensitive when cleared. |
+| **Timeout** | How long to wait, in milliseconds. |
 
-Use **Add Step** to append a step (default \`AT\r\n\` expecting \`OK\`, 1000 ms) and the trash icon to remove one (the last remaining step cannot be removed). Fields are locked while a suite is running.
+Delay steps take milliseconds; DTR and RTS steps take 1 or 0 (also \`on\`, \`high\`, \`true\`); set-baud steps take a baud rate and reconfigure the active port.
 
-> The preset steps contain real control characters (carriage return, line feed, Ctrl+C). The Send box shows them as whitespace. Typing a backslash followed by the letter r sends those two characters literally; it is not converted to a carriage return.
+Under each step, the flow controls are:
+- **repeat**: \`N times\` runs the step that many times (stopping at the first failure unless on-fail is continue), or \`until matched (max)\` repeats until it passes, up to the given number of tries.
+- **retries**: extra attempts of the step before it counts as failed.
+- **on fail**: \`stop\` (end the suite), \`continue\`, or \`goto step\` (jump to a chosen step number). A built-in loop guard stops a suite after 10,000 step executions.
 
-**Presets** (the buttons in the header) replace the step list:
+Each row also has move-up, move-down, duplicate and remove buttons, and expands to show the received output and iteration details. **Add Step** appends a step; fields are locked while a suite is running.
+
+**Presets** (the buttons in the header, labelled **AT**, **MicroPython**, **U-Boot**) replace the step list:
 - **AT**: *AT Command Modem Test* (\`AT\`, \`ATE0\`, \`AT+CSQ\`).
 - **MicroPython**: *MicroPython REPL Handshake* (Ctrl+C twice expecting \`>>>\`, then print \`sys.platform\`).
 - **U-Boot**: *U-Boot Bootloader Interrupt* (three spaces expecting \`=>\`, then \`version\`).
 
-**RUN TEST SUITE** executes the steps in order: clear the receive buffer, send, then keep collecting everything the device sends after that step's transmit and pass as soon as the expected text shows up in it, or fail when the timeout elapses (text received before the step was sent is not counted). A step shows **PASSED** or **FAILED** with the time taken. The suite keeps going after a failure, pauses 200 ms between steps, and plays a success chime or a warning chirp at the end. The button turns into **ABORT SUITE** while running. Results are also written to the session log.
+**RUN TEST SUITE** executes the steps in order: clear the receive buffer, send, then keep collecting everything the device sends after that step's transmit and pass as soon as the expected text shows up in it, or fail when the timeout elapses (text received before the step was sent is not counted). A step shows **PASSED** or **FAILED** with the time taken. The suite pauses 200 ms between steps and plays a success chime or a warning chirp at the end. The button turns into **ABORT SUITE** while running, and an abort marks the current step **ABORTED**. Results are also written to the session log.
+
+**Suites** can be named in the **Suite** box and stored in this browser with **Save**, reloaded from **Load saved...**, removed with **Delete saved**, and moved between machines with **Export suite** (a JSON file) and **Import**.
 
 ---
 
 ### 2. Exporting Reports
 
-Click **Export Audit Report** to download \`test_report_<timestamp>.json\` containing:
-- The suite name and an ISO timestamp.
-- Every step (send, expect, timeout) with its result status and duration, or \`untested\` if it has not run.
+Three buttons in the action bar download the results of the last run:
+- **JSON**: \`test_report_<timestamp>.json\` with the suite name, an ISO timestamp, and every step (all its settings) with its result, or \`untested\` if it has not run.
+- **JUnit XML**: \`test_report_<timestamp>.xml\`, one \`testcase\` per step (failures, skipped for steps not run or aborted, and the received output), which CI systems can ingest.
+- **CSV**: \`test_report_<timestamp>.csv\` with index, type, send, expect, mode, status, iterations, time_ms, error and output columns (cells starting with \`=\`, \`+\`, \`-\` or \`@\` are prefixed so spreadsheets do not run them as formulas).
 
-It does not include port VID/PID, baud rate, a CSV format, or a transcript of the serial traffic.
+None of them include port VID/PID, baud rate, or a full transcript of the serial traffic.
 
 ---
 
@@ -494,7 +507,7 @@ The Recon tab shows the parts of this tree that WebUSB exposes (VID/PID, names, 
 | :--- | :--- |
 | **PULSE 1200-BAUD KNOCK** | Sets 1200 baud, toggles DTR, then restores 115200. Works on boards that enter their bootloader on the 1200-baud touch (Pico BOOTSEL/UF2, Arduino Leonardo, SAMD21). |
 | **EXECUTE ESP32 STRAPPING** | Toggles RTS (to EN) and DTR (to GPIO0) so an ESP32/ESP8266 with the usual auto-reset circuit boots into ROM download mode. |
-| **SEND DFU_DETACH REQUEST** | Sends the DFU class \`DFU_DETACH\` control transfer through WebUSB. Requires a device selected with **INTERROGATE ANY USB DEVICE**. |
+| **SEND DFU_DETACH REQUEST** | Sends the DFU class \`DFU_DETACH\` control transfer through WebUSB to the device's **DFU interface** (class \`0xFE\`, subclass \`0x01\`, found in any alternate setting) and reports which interface number acknowledged it. If the device has no DFU interface nothing is sent and the status line says so. Requires a device selected with **INTERROGATE ANY USB DEVICE**. |
 | **FIRE AUTOBOOT ABORT STORM** | Sends Space / Ctrl+C / Enter about 26 times at 40 ms intervals; power-cycle the target while it runs to stop U-Boot's autoboot countdown. |
 | **TRANSMIT REBOOT STRINGS** | Sends eight command strings 80 ms apart (\`reboot bootloader\`, \`reboot edl\`, \`reboot fastboot\`, \`machine.bootloader()\`, \`sys bootloader\`, \`boot\`, \`B\`, \`AT+REBOOT\`). |
 
@@ -509,7 +522,7 @@ The sequences are generic; whether any of them works depends on the target firmw
 2. Select the device in the browser's WebUSB permission dialog (the request has no filters, so any device the browser can access is listed; devices held by an OS driver may fail to open or claim).
 3. The **SILICON FINGERPRINT** panel shows product, manufacturer, VID/PID and the chip analysis. The right panel lists the enumerated interfaces with their endpoints and a USB version / serial header.
 4. Click **CLAIM** on an interface to claim it (this fails if the OS or another program owns it).
-5. Pick an **ENDPOINT** and click **LISTEN** to read IN transfers (64 bytes per read, last 50 shown with timestamp, hex and ASCII), or type hex bytes (for example \`41 54 0D 0A\`) and click **SEND BYTES** to write to an OUT endpoint.
+5. Pick an **ENDPOINT**. The list shows each endpoint with its real direction, address and type, for example \`0x81 IN BULK (64B)\` or \`0x01 OUT BULK (64B)\`; IN and OUT endpoints with the same number are separate entries. Click **LISTEN** on an IN endpoint (it reads one packet at a time, sized to the endpoint's packet size; the last 50 are shown with timestamp, hex and ASCII), or type hex bytes (two digits each, for example \`41 54 0D 0A\`) and click **SEND BYTES** to write to an OUT endpoint. Listening on an OUT endpoint, sending on an IN endpoint, using an unclaimed interface or entering malformed hex is refused with an explanation. Disconnecting releases every claimed interface.
 6. **BOOTLOADER FORCERS** and **VAPE & PCB TEARDOWN** (a collapsible step-by-step guide to opening disposable vapes and finding GND, 3.3 V, UART and SWD pads) are the other two tabs.
 
 ---
@@ -528,17 +541,18 @@ The sequences are generic; whether any of them works depends on the target firmw
     toolId: 'esp-dump',
     category: 'utilities',
     title: 'Silicon Memory Dump — Hardware eFuses & Flash Geometry',
-    summary: 'Identify an ESP chip and read its eFuse MAC address through the ROM bootloader, then dump any range of SPI flash to a .bin file via the esptool-js RAM stub.',
+    summary: 'Identify an ESP chip (family, MAC, features, flash size) through esptool-js, read the partition table, and dump any range, a full backup or a single partition of SPI flash to a .bin file via the RAM stub.',
     tags: ['Silicon Dump', 'eFuses', 'Flash Dump', 'esptool', 'ROM Bootloader', 'MAC Address', 'ESP32'],
     readTime: '18 min read',
     content: `
 # Silicon Memory Dump — eFuse & Flash Geometry
 
-The **Silicon Memory Dump** workbench (window title *ESP32 Silicon Inspection & Flash Memory Dump*) has two functions, neither of which writes to the chip's flash:
-- **READ CHIP EFUSES**: uses the ROM bootloader's register-read command (\`READ_REG\`) on the app's connected serial port to identify the chip family and read the factory **MAC address** from eFuse registers. The MAC is only decoded for ESP32, ESP32-S3 and ESP32-C3; for other chips only the family is shown.
-- **DUMP FLASH TO .BIN**: reads a flash range and downloads it as a file, using the esptool-js RAM stub.
+The **Silicon Memory Dump** workbench (window title *ESP32 Silicon Inspection & Flash Memory Dump*) reads from the chip and never writes to its flash. It uses **esptool-js**, bundled with the app through npm (loaded as a lazy chunk, no CDN request), and has three functions:
+- **IDENTIFY CHIP**: connects through esptool-js and shows the **Chip** family, the factory **MAC Address**, **Features / Crystal** and the **Flash** (manufacturer, device and size decoded from the JEDEC id).
+- **READ PARTITION TABLE**: reads the table at \`0x8000\` and lists each partition, with a per-partition **Dump** button.
+- **DUMP FLASH TO .BIN**: reads a flash range (or a full backup, or one partition) and downloads it as a file, using the esptool-js RAM stub.
 
-It does not read or display the other eFuse blocks, security flags, silicon revision or the flash chip's JEDEC ID.
+It does not read or display the other eFuse blocks, security flags or silicon revision.
 
 ---
 
@@ -558,7 +572,7 @@ For reference, the original ESP32 divides its eFuse controller into 4 physical b
 | **BLOCK2** | Secure Boot Key | 256 bits | 256-bit SHA-256 digest or RSA public key hash for cryptographically signed boot verification. |
 | **BLOCK3** | Custom User Data | 256 bits | Free space for OEM serial numbers and device certificates. |
 
-#### SPI Flash JEDEC ID (background only; not read by this tool)
+#### SPI Flash JEDEC ID (decoded by IDENTIFY CHIP into the Flash card)
 SPI flash chips answer the JEDEC command \`0x9F\` with a manufacturer byte and a capacity byte:
 - **Manufacturer Byte**:
   - \`0xEF\`: Winbond Electronics
@@ -576,10 +590,12 @@ SPI flash chips answer the JEDEC command \`0x9F\` with a manufacturer byte and a
 
 ### 2. Using the Tool
 
-1. **READ CHIP EFUSES**: connect the board's serial port in the app first (the button is disabled otherwise). The workbench borrows the port from the terminal, talks to the ROM bootloader, and shows **Target MAC Address** and **Chip Architecture**. The board may need to be in download mode (see the Bootloader Forcers). The workbench does not report Secure Boot, flash encryption or JTAG state; the earlier fixed "Security Flags" label was removed because it was not a measurement.
-2. **Pick a range**: click a **Quick Backup Targets** preset (Bootloader Partition 0x1000 / 28 KB, Partition Table 0x8000 / 4 KB, NVS Storage 0x9000 / 20 KB, Full 4MB Flash Backup 0x0 / 4 MB) or type a **Start Offset (Hex)** and **Dump Size (Bytes)**.
-3. Click **DUMP FLASH TO .BIN**. This does not use the port already connected in the app: the browser asks you to choose a serial port, then esptool-js (loaded from a CDN, so internet access is needed) opens it at 115200 baud, uploads the RAM stub, and reads flash with a progress bar. Because the stub is used, it works on newer ESP chips (S2, S3, C2, C3, C6, H2) as well as the ESP8266 and ESP32.
-4. The result downloads as \`esp_flash_dump_0x<offset>_<length>B.bin\`. If the port is busy, disconnect it in the Terminal and close other serial tabs first.
+1. **Pick the baud rate** in the **Baud** selector (115200, 460800 or 921600). If the faster rate fails, the tool falls back to 115200; the error text suggests retrying at 115200.
+2. **IDENTIFY CHIP**: esptool-js does not use the port already connected in the app; the browser shows its own serial port prompt (the chosen port is reused for later actions). The cards fill in with chip, MAC, features/crystal and flash. The board may need to be in download mode (see the Bootloader Forcers). The workbench does not report Secure Boot, flash encryption or JTAG state.
+3. **Pick a range**: click a **Quick Backup Targets** preset (Bootloader Partition 0x1000 / 28 KB, Partition Table 0x8000 / 4 KB, NVS Storage 0x9000 / 20 KB) or type a **Start Offset (Hex)** and **Dump Size (Bytes)**. The **Full Flash Backup** button is disabled until **IDENTIFY CHIP** has detected the flash; it then shows "0x0 • <size> (detected)" and dumps the whole flash.
+4. **READ PARTITION TABLE** lists Name, Type, Subtype, Offset, Size and Flags for each entry, and reports whether the table's MD5 entry is present and valid, plus any warnings. Click **Dump** on a row to read just that partition.
+5. Click **DUMP FLASH TO .BIN** (or a preset, Full Flash Backup or a partition's Dump). esptool-js uploads the RAM stub and reads flash with a progress bar, so it works on newer ESP chips (S2, S3, C2, C3, C6, H2) as well as the ESP8266 and ESP32.
+6. The result downloads as \`esp_flash_dump_0x<offset>_<length>B.bin\`. If the port is busy, disconnect it in the Terminal and close other serial tabs first.
 
 Dumps from a chip with flash encryption enabled are read as stored (ciphertext).
 
@@ -599,13 +615,13 @@ Dumps from a chip with flash encryption enabled are read as stored (ciphertext).
     toolId: 'usb-descriptors',
     category: 'utilities',
     title: 'USB Descriptor Explorer — lsusb -v in the Browser',
-    summary: 'Pick any USB device and read its descriptor tree — configurations, interfaces, alternate settings, endpoints and string descriptors — with class / subclass / protocol codes decoded into plain language. Read-only.',
+    summary: 'Pick any USB device and read its raw descriptors — device, configurations, interfaces, alternate settings, endpoints, BOS (WebUSB / Microsoft OS 2.0) and string descriptors — with class codes and vendor/product names decoded into plain language, and export an lsusb -v style report. Read-only.',
     tags: ['USB', 'Descriptor', 'lsusb', 'WebUSB', 'Endpoint', 'Interface', 'Class Codes', 'Enumeration'],
     readTime: '10 min read',
     content: `
 # USB Descriptor Explorer
 
-The **USB Descriptor Explorer** is a WebUSB equivalent of \`lsusb -v\`: choose a device from the browser's picker and see exactly how it describes itself to the host — how many configurations it has, what interfaces and alternate settings each one exposes, and the endpoints under each interface. Every class / subclass / protocol triple is decoded into a human label. It is strictly **read-only**: it reads the descriptors the browser already parsed and never sends data to the device.
+The **USB Descriptor Explorer** is a WebUSB equivalent of \`lsusb -v\`: choose a device from the browser's picker and see exactly how it describes itself to the host — how many configurations it has, what interfaces and alternate settings each one exposes, and the endpoints under each interface. Every class / subclass / protocol triple is decoded into a human label. It is **read-only**: it shows what the browser already parsed, and then reads the raw descriptor bytes with standard \`GET_DESCRIPTOR\` control requests (it opens the device for this, and closes it again if it had to open it). It never writes data or sends class or vendor commands.
 
 It's the natural first stop before driving an unfamiliar device with any of the other tools — it tells you which interface and endpoints a protocol lives on.
 
@@ -637,6 +653,15 @@ Device
 | Class triple | \`[255/66/3]\` → "Android fastboot" | Interface class / subclass / protocol. |
 | Endpoint | \`0x81 Bulk 512B\` | Address, transfer type, max packet size. |
 
+The tool also fetches and shows, where the device has them:
+- the raw **device descriptor** hex, the **configuration descriptors** (raw hex per configuration, with power attributes such as self powered / bus powered and remote wakeup) and the device qualifier (USB 2.x only);
+- class-specific descriptors decoded inline (HID report descriptor length, CDC functional descriptors, DFU attributes and transfer size, UVC / audio versions, hub port count);
+- the **BOS descriptor** (USB 2.01 and later), listing its capabilities: USB 2.0 extension (LPM), SuperSpeed, container ID, and platform capabilities **WebUSB** (version, vendor code, landing-page index; the landing-page URL itself needs a vendor request and is not read) and **Microsoft OS 2.0** (Windows version, descriptor-set length; the set is not read);
+- **string descriptors** for every language ID the device offers (manufacturer, product, serial, and the configuration / interface / function strings it references);
+- vendor and product names from the bundled usb.ids list, shown next to the VID:PID.
+
+If a request fails or the device cannot be opened (another driver may own it), a note says so and the cached summary is shown instead.
+
 Known triples it names on sight include SCSI Bulk-Only mass storage (\`8/6/50\`), HID boot keyboard/mouse, CDC ACM serial, DFU, PTP still-image, USBTMC, and Android ADB/fastboot.
 
 ---
@@ -647,13 +672,17 @@ Known triples it names on sight include SCSI Bulk-Only mass storage (\`8/6/50\`)
 | :--- | :--- |
 | **INSPECT A USB DEVICE** | Opens the browser picker; the chosen device's tree is rendered. |
 | **Previously allowed devices** | Re-inspect a device the page was already granted, without the picker. |
-| **Copy report** | Copies a plain-text, \`lsusb\`-style dump for pasting into a bug report. |
+| **Re-read** | Reads the descriptors again from the connected device. |
+| **Copy as lsusb -v** | Copies a plain-text, \`lsusb -v\` style dump (with the raw descriptors decoded) for pasting into a bug report. |
+| **JSON** | Downloads the decoded descriptor data as a JSON file. |
+
+If the device is unplugged, the page keeps showing what was read before it disconnected and says so.
 
 ---
 
 ### 4. Implementation & Architecture
 
-- **Driver:** [\`src/utils/usbDescriptors.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/usbDescriptors.js) — all pure functions. \`describeDevice\` walks the USBDevice tree into a named structure, \`classDetail\` decodes class/subclass/protocol, \`describeEndpoint\` rebuilds the address byte and names the transfer type, and \`toTextReport\` renders the copyable dump.
+- **Driver:** [\`src/utils/usbDescriptors.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/usbDescriptors.js) — all pure functions. \`describeDevice\` walks the USBDevice tree into a named structure, \`classDetail\` decodes class/subclass/protocol, \`describeEndpoint\` rebuilds the address byte and names the transfer type, and \`toTextReport\` renders the summary dump. The raw-descriptor side (\`fetchRawDescriptors\`, \`parseConfigDescriptor\`, \`parseBos\`, \`toLsusbText\`) fetches and decodes the descriptors, and \`src/utils/usbIds.js\` supplies usb.ids names.
 - **Workbench:** [\`src/components/tools/UsbDescriptorExplorer.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/UsbDescriptorExplorer.jsx) renders the summary, the nested configuration/interface/endpoint view, and the granted-device list (\`navigator.usb.getDevices()\`).
 - **Tests:** [\`tests/usbDescriptors.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/usbDescriptors.test.js) checks class decoding, BCD/ID formatting, endpoint address assembly and the full tree against hand-built device objects.
 
@@ -673,7 +702,7 @@ Known triples it names on sight include SCSI Bulk-Only mass storage (\`8/6/50\`)
     toolId: 'hid',
     category: 'utilities',
     title: 'HID Inspector — Decode Keyboards, Mice, Gamepads & Their Live Reports',
-    summary: 'Open any HID device over WebHID, read its report descriptor decoded into named usages, and watch input reports turn into named fields — buttons, axes, keys — in real time.',
+    summary: 'Open any HID device over WebHID, read its report descriptor decoded into named usages, paste a descriptor hex dump to decode it offline, and watch input reports turn into named fields — buttons, axes, keys — in real time.',
     tags: ['HID', 'WebHID', 'Keyboard', 'Mouse', 'Gamepad', 'Report Descriptor', 'Usage Tables', 'Input Report'],
     readTime: '12 min read',
     content: `
@@ -704,8 +733,9 @@ When the device sends an input report, WebHID hands you the report id and a \`Da
 
 | UI Element | Purpose |
 | :--- | :--- |
-| **OPEN HID DEVICE** | Browser picker; opens the device and subscribes to its input reports. **CLOSE** disconnects. |
-| **LIVE INPUT** | The most recent report as raw hex and as decoded, named fields (array items such as pressed keys list the active usages). |
+| **OPEN HID DEVICE** | Browser picker; opens the device and subscribes to its input reports. **CLOSE** disconnects. The count of already-allowed devices updates when devices are plugged in or removed. |
+| **DESCRIPTOR DECODER** | Needs no device. Paste a HID report descriptor as hex (space, comma or \`0x\` separated, a C array with comments, or \`usbhid-dump\` / \`lsusb -v\` style lines with offset prefixes; prose header lines are ignored) and press **DECODE**. It shows the byte count, the top-level usages, whether report IDs are used, each report's layout with its fields, and an item-by-item listing. A malformed token is reported with its line number. Nothing is sent to any device. |
+| **LIVE INPUT** | The most recent report as raw hex and as decoded, named fields (array items such as pressed keys list the active usages). A report whose id is not declared in the device's descriptor is shown raw with a notice, rather than being decoded against the wrong layout. |
 | **REPORT DESCRIPTOR** | Every collection's input / output / feature reports with their sizes and fields (constant padding shows as \`pad\`). |
 | **SEND REPORTS** | Pick an output report, enter hex bytes and press **SEND**; if the device exposes keyboard LED usages, toggle buttons for them appear. For feature reports, **GET** reads one and **SET** writes the hex bytes you typed (after a confirmation). A small log shows what was sent and received. |
 | **REPORT RATE** | Rate (Hz), mean interval, jitter, min, max and sample count over the last 3 seconds of input reports. |
@@ -737,15 +767,22 @@ There is no simulated demo device: the tool needs a real HID device.
     toolId: 'mass-storage',
     category: 'utilities',
     title: 'USB Mass Storage Inspector — SCSI Identity, Capacity & Raw Sectors',
-    summary: 'Read a USB drive at the block level over the Bulk-Only Transport: SCSI identity and capacity, MBR/GPT partitions, FAT/exFAT file browsing with deleted-file recovery, raw sectors, and full images with SHA-256. Strictly read-only: no WRITE command is implemented.',
+    summary: 'Inspect a drive at the block level: open a raw disk image file (the route that works in Chrome) or, experimentally, a live drive over the SCSI Bulk-Only Transport. MBR/GPT partitions, FAT/exFAT browsing with deleted-file recovery, signature file carving, sector viewer, and hashing or imaging with MD5 / SHA-1 / SHA-256, bad-sector handling and a verify pass. Strictly read-only: no WRITE command is implemented.',
     tags: ['Mass Storage', 'SCSI', 'BOT', 'INQUIRY', 'READ CAPACITY', 'Sector', 'WebUSB', 'Forensics', 'FAT', 'exFAT', 'GPT', 'Disk Image', 'Read-only'],
     readTime: '12 min read',
     content: `
 # USB Mass Storage Inspector (Read-Only)
 
-The **Mass Storage Inspector** talks to a USB drive the way the operating system does — at the block level — but only to *read*. It reports what the drive says it is (SCSI **INQUIRY**), how big it is (**READ CAPACITY**), lists its **MBR / GPT partitions** and filesystems, lets you browse FAT12/16/32 and exFAT volumes (including deleted entries), dump any **sector** (**READ(10)**), and save a whole drive or partition as a disk image with its SHA-256. No WRITE command exists in the driver, so it cannot change the drive.
+The **Mass Storage Inspector** reads a disk at the block level, but only to *read*. It has two sources:
 
-> **It claims the drive.** WebUSB takes exclusive control of the interface for the tab, so the OS loses access to that drive until you disconnect. Use a drive that is **not mounted / in use**, and never one with data you cannot afford to disturb. Reading is safe; yanking a mounted disk out from under the OS is not.
+- **OPEN DISK IMAGE FILE** (the dependable route): pick a raw image (\`.img\`, \`.bin\`, \`dd\` output) and the tool reads it in slices without loading it all into memory. Everything below works on it.
+- **LIVE DRIVE (WEBUSB, EXPERIMENTAL)**: talks to a USB drive the way the operating system does, over SCSI Bulk-Only Transport. **Chrome normally refuses this**: see the note below.
+
+Either way it lists the **MBR / GPT partitions** and filesystems, lets you browse FAT12/16/32 and exFAT volumes (including deleted entries), dump any **sector**, **carve** files by signature, and hash the whole disk or a partition (and, for a live drive, save it as an image). No WRITE command exists in the driver, so it cannot change the drive or the image.
+
+> **Why live mode usually fails.** USB mass storage (class \`08\`) is a *protected interface class*: Chrome and other Chromium browsers refuse to let a web page claim it, on every operating system, to stop pages from reading or writing your disks. When that happens the page shows a plain-language explanation and an **OPEN DISK IMAGE FILE INSTEAD** button. It is a browser safety rule, not a fault in the drive or the tool. The workaround is to make a raw image with \`dd\`, FTK Imager or Win32 Disk Imager, then open that file here. If the chooser lists no drives at all, or says another program is using the drive, the page explains those cases too.
+>
+> If live mode does connect, it **claims the drive** exclusively, so the OS loses access to it until you disconnect (the tool asks for confirmation first). Use a drive that is not mounted or in use.
 
 ---
 
@@ -765,12 +802,14 @@ The SCSI commands used here are **INQUIRY** (0x12), **READ CAPACITY(10)** (0x25)
 
 | UI Element | Purpose |
 | :--- | :--- |
-| **INSPECT A DRIVE (WEBUSB)** | Claims the drive (after a confirmation warning) and reads INQUIRY, capacity and the partition table. **DISCONNECT** releases it. |
-| **Identity / capacity fields** | Vendor, Product, Revision, Type, Removable, Block size, Blocks, Capacity. |
-| **PARTITIONS** | Table of partitions (scheme, start LBA, size, detected filesystem). Per row: **BROWSE** (FAT12/16/32 and exFAT only), **LBA** (puts the partition's first sector into the sector viewer), **IMAGE** (saves that partition). **IMAGE WHOLE DRIVE** saves the entire drive. |
-| **Imaging progress** | Shows bytes done, speed and time left, with **CANCEL**; the finished image's SHA-256 is displayed. Where the browser supports it (Chrome/Edge) it streams straight to a file you choose; otherwise it buffers in memory and images over 1 GB are refused. Files are named \`<name>.img\`. |
-| **File browser** | Breadcrumb navigation, name / size / modified (UTC) / attributes. Deleted entries are listed and marked; **VIEW** previews the first 64 KB (text or hex), **SAVE** downloads a file, and **RECOVER** replaces SAVE for deleted ones. Files over 512 MB are not extracted this way (use a full image). |
-| **SECTOR VIEWER** | Enter an LBA and press **READ SECTOR** (or Enter) to dump that one block (the drive's block size, normally 512 bytes) as hex + ASCII. |
+| **OPEN DISK IMAGE FILE** | Opens a raw image file. The info panel then shows Image file, Size, Sectors (512 B) and Access (read-only, range-sliced), and the partition table is scanned. **CLOSE IMAGE** closes it. |
+| **LIVE DRIVE (WEBUSB, EXPERIMENTAL)** | After a confirmation, claims a drive and reads INQUIRY, capacity (using READ CAPACITY(16) when the drive is large) and the partition table. Shows Vendor, Product, Revision, Type, Removable, Block size, Blocks and Capacity. **DISCONNECT** releases it. |
+| **PARTITIONS** | Table of partitions (scheme, type, start LBA, size, detected filesystem). Per row: **BROWSE** (FAT12/16/32 and exFAT), **LBA** (puts the partition's first sector into the sector viewer), **CARVE** (signature-carve the partition), **CARVE FREE** (FAT only: carve just the clusters the FAT marks free, where deleted data lives) and **HASH** (image file) or **IMAGE** (live drive). Header buttons: **CARVE FILES (WHOLE IMAGE / DRIVE)** and **HASH IMAGE** (image file) or **IMAGE WHOLE DRIVE** (live drive). |
+| **continue past bad sectors (zero-fill and log)** / **verify pass (re-read and compare)** | Live drive only. The first re-reads a failing chunk sector by sector, zero-fills sectors that still cannot be read (so the image keeps its length and offsets) and logs them; after a long run of bad sectors it skips ahead in growing steps, and those skipped ranges are flagged. Off, the first read error stops the job. The second re-reads the source after imaging and compares SHA-256. |
+| **Hash / imaging progress** | Bytes done, speed and time left, with **CANCEL**. The result shows **MD5**, **SHA-1** and **SHA-256** computed in the same single pass, the verify-pass result, a coloured bad-sector map (green read fine, red unreadable, amber skipped without a read) and **DOWNLOAD LOG** (hashes plus bad ranges). Image-file mode only hashes; a live drive streams straight to a file you choose in Chrome/Edge, otherwise it buffers in memory and images over 1 GB are refused. Files are named \`<name>.img\`. |
+| **Carve results** | Lists found files (type, disk offset, size; files whose end was not found are marked) with **VIEW** (image preview or hex) and **SAVE**. Signatures: JPEG, PNG, GIF, PDF, ZIP / Office, SQLite and MP4 / MOV, checked on 512-byte boundaries and only reported when their structure is intact. It is a signature scan, so it finds contiguous files and does not rebuild fragmented ones. Files over 512 MB are not saved this way (cut them from the image with \`dd\`). Carving has a **CANCEL** button. |
+| **File browser** | Breadcrumb navigation, name / size / modified (UTC) / attributes, and a **show deleted** checkbox. Deleted entries are marked; **VIEW** previews the first 64 KB (text or hex), **SAVE** downloads a file, and **RECOVER** replaces SAVE for deleted ones. Files over 512 MB are not extracted this way. Filesystems other than FAT/exFAT cannot be browsed; hash, carve or sector-view them instead. |
+| **SECTOR VIEWER** | Enter an LBA and press **READ SECTOR** (or Enter) to dump that one block (normally 512 bytes) as hex + ASCII. |
 
 Deleted-file recovery reads contiguous clusters from the file's first cluster, so it works for files that were not fragmented and whose space has not been reused. There is no simulated demo drive in the UI.
 
@@ -778,9 +817,9 @@ Deleted-file recovery reads contiguous clusters from the file's first cluster, s
 
 ### 3. Implementation & Architecture
 
-- **Driver:** [\`src/utils/massStorageDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/massStorageDriver.js) — \`buildCbw\`/\`parseCsw\`, \`parseInquiry\`/\`parseCapacity\`, and \`MassStorageDevice\` with \`testUnitReady\`/\`inquiry\`/\`readCapacity\`/\`read\`. No write path exists.
-- **Workbench:** [\`src/components/tools/MassStorageWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/MassStorageWorkbench.jsx) — identity, capacity, partitions, file browser, imaging and a hex sector viewer, behind a claim-the-drive confirmation. Partition and filesystem parsing live in \`src/utils/diskImage.js\`.
-- **Tests:** [\`tests/massStorage.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/massStorage.test.js) checks CBW/CSW framing and INQUIRY/capacity/sector reads against a simulated drive.
+- **Driver:** [\`src/utils/massStorageDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/massStorageDriver.js) — \`buildCbw\`/\`parseCsw\`, \`parseInquiry\`/\`parseCapacity\`, and \`MassStorageDevice\` with \`testUnitReady\`/\`inquiry\`/\`readCapacity\`/\`read\`, and \`explainUsbError\`, which turns Chrome's protected-class, no-device and busy failures into the explanations above. No write path exists.
+- **Workbench:** [\`src/components/tools/MassStorageWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/MassStorageWorkbench.jsx) — identity, capacity, partitions, file browser, carving, imaging and a hex sector viewer, with a claim-the-drive confirmation for live mode. Partition and filesystem parsing live in \`src/utils/diskImage.js\`, the hashing/imaging loop (bad-sector handling, verify) in \`src/utils/imaging.js\`, and the file carver in \`src/utils/carve.js\`.
+- **Tests:** [\`tests/massStorage.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/massStorage.test.js) checks CBW/CSW framing and INQUIRY/capacity/sector reads against a simulated drive; \`tests/diskImage.test.js\`, \`tests/imaging.test.js\` and \`tests/carve.test.js\` cover partition/filesystem parsing, imaging and carving.
 
 > SMART and ATA pass-through (SAT) are not included; this is a block-level inspector, not a health tool.
 
@@ -800,13 +839,13 @@ Deleted-file recovery reads contiguous clusters from the file's first cluster, s
     toolId: 'ptp',
     category: 'utilities',
     title: 'PTP / MTP Camera — Pull Photos & Metadata over WebUSB',
-    summary: 'Connect a camera or phone in PTP mode and browse its files: device info, storage and battery, thumbnails, filenames, formats, dimensions and dates, single or bulk download, and (where the device allows) delete and remote capture.',
+    summary: 'Connect a camera or phone in PTP mode and browse its files: device info, storage and battery, thumbnails, filenames, formats, dimensions and dates, single or bulk download, camera settings (exposure, white balance, focus...), a live event log, and (where the device allows) upload, delete and remote capture.',
     tags: ['PTP', 'MTP', 'Camera', 'Photos', 'WebUSB', 'Still Image', 'PIMA 15740', 'Object Info'],
     readTime: '12 min read',
     content: `
 # PTP / MTP Camera
 
-The **PTP** workbench pulls photos and their metadata off a camera or phone using the **Picture Transfer Protocol** — the standard "camera" USB mode (MTP is PTP with vendor extensions). Put the device in PTP mode (on a phone, choose **Transfer photos / PTP** from the USB notification) and you can list every file, read its info, preview thumbnails, and download it. Deleting files and triggering the shutter are also available when the device advertises those operations; the file listing itself is read-only.
+The **PTP** workbench pulls photos and their metadata off a camera or phone using the **Picture Transfer Protocol** — the standard "camera" USB mode (MTP is PTP with vendor extensions). Put the device in PTP mode (on a phone, choose **Transfer photos / PTP** from the USB notification) and you can list every file, read its info, preview thumbnails, and download it. Uploading files, deleting files, triggering the shutter and changing camera settings are also available when the device advertises those operations; the file listing itself is read-only.
 
 ---
 
@@ -820,7 +859,7 @@ PTP is a transaction protocol over bulk endpoints. Everything is a **container**
 
 A read like \`GetObjectInfo\` is: send the Command (with the object handle), read the Data container (the ObjectInfo dataset), read the Response. Datasets use PTP's own encoding — little-endian integers, length-prefixed UTF-16 strings, and count-prefixed arrays.
 
-Key operations: \`OpenSession\`, \`GetDeviceInfo\`, \`GetStorageIDs\`, \`GetStorageInfo\`, \`GetObjectHandles\`, \`GetObjectInfo\`, \`GetObject\`, \`GetThumb\`, \`DeleteObject\`, \`InitiateCapture\`, \`CloseSession\`.
+Key operations: \`OpenSession\`, \`GetDeviceInfo\`, \`GetStorageIDs\`, \`GetStorageInfo\`, \`GetObjectHandles\`, \`GetObjectInfo\`, \`GetObject\`, \`GetThumb\`, \`DeleteObject\`, \`InitiateCapture\`, \`GetDevicePropDesc\` / \`GetDevicePropValue\` / \`SetDevicePropValue\` (camera settings), \`SendObjectInfo\` + \`SendObject\` (upload) and \`CloseSession\`. Asynchronous **events** (\`ObjectAdded\`, \`DevicePropChanged\`, \`CaptureComplete\`...) arrive on a separate interrupt endpoint.
 
 ---
 
@@ -830,10 +869,13 @@ Key operations: \`OpenSession\`, \`GetDeviceInfo\`, \`GetStorageIDs\`, \`GetStor
 | :--- | :--- |
 | **CONNECT CAMERA (WEBUSB)** | Opens the device, opens a session, reads device info, storage and battery, and lists files. **DISCONNECT** closes the session. |
 | **Device panel** | Manufacturer, Model, Firmware, Serial, Battery (if reported), and one field per storage with free / total space. |
-| **FILES table** | Checkbox, thumbnail, Filename, Format, Size, Dimensions, Date, and a per-row download button. The header shows the object count and how many are selected. |
+| **FILES table** | Checkbox, thumbnail, Filename, Format, Size, Dimensions, Date, and a per-row download button. The header shows the object count and how many are selected. At most the first 2,000 objects are listed, and folders are hidden. |
+| **CAMERA SETTINGS** | Shown when the camera reports properties. Lists the common ones it supports (battery, exposure index, exposure time, f-number, exposure program, exposure bias, white balance, focus mode, focal length, flash mode, metering mode, image size, compression, date/time), formatted with units and names. Only settings this camera reports are shown; a writable one that offers a list of allowed values gets a dropdown, and **changes apply to the camera right away**; anything else is shown as text, marked \`(read-only)\` when the camera says so. A refresh button re-reads them. |
+| **CAMERA EVENTS** | Appears when the device has an event endpoint. Tick **listen** to log events as they happen (for example ObjectAdded, DevicePropChanged, CaptureComplete) with timestamps and parameters; try pressing the shutter or changing a setting. |
 | **THUMBNAILS** | Fetches embedded thumbnails for the listed files. |
 | **DOWNLOAD SELECTED / DOWNLOAD ALL** | Saves several files into a folder you pick (Chrome/Edge), or as a single zip if the browser cannot pick a folder. |
 | **DELETE** | Appears only if the device supports \`DeleteObject\`; deletes the selected files after a confirmation. This cannot be undone. |
+| **UPLOAD FILE** | Appears only if the device supports \`SendObjectInfo\` and \`SendObject\`; copies a file from your computer to the camera's first storage after a confirmation, guessing the object format from the file extension, then re-lists files. Nothing is retried: a full or read-only card is reported with the camera's own response name. |
 | **CAPTURE** | Appears only if the device supports \`InitiateCapture\`; fires the shutter, then re-lists files and selects the new ones. |
 | **REFRESH** | Re-list the files (after taking a new photo, say). |
 
@@ -863,13 +905,13 @@ There is no simulated demo camera.
     toolId: 'fido2',
     category: 'utilities',
     title: 'FIDO2 / U2F Security Key Inspector — CTAP-HID over WebHID',
-    summary: 'Read a FIDO2 / U2F authenticator over CTAP-HID: allocate a channel with CTAPHID_INIT, read authenticatorGetInfo (versions, AAGUID, options, limits), and run a PING round-trip. Strictly read-only.',
+    summary: 'Read a FIDO2 / U2F authenticator over CTAP-HID: allocate a channel with CTAPHID_INIT, read authenticatorGetInfo (versions, AAGUID and authenticator name, options, limits, algorithms), PING and WINK. A WebAuthn lab covers the browser-blocklist case. The HID reader is read-only.',
     tags: ['FIDO2', 'U2F', 'CTAP', 'CTAP-HID', 'WebAuthn', 'Security Key', 'CBOR', 'AAGUID', 'WebHID'],
     readTime: '12 min read',
     content: `
 # FIDO2 / U2F Security Key Inspector
 
-The **FIDO2** workbench reads what a security key (YubiKey, SoloKey, Titan, a platform authenticator, …) says about itself over **CTAP-HID**. It allocates a channel, asks the key for its capabilities with **authenticatorGetInfo**, and can run a **PING** round-trip. It is read-only: it never creates, lists, or deletes credentials, never changes the PIN, and never resets the key.
+The **FIDO2** workbench reads what a security key (YubiKey, SoloKey, Titan, a platform authenticator, …) says about itself over **CTAP-HID**. It allocates a channel, asks the key for its capabilities with **authenticatorGetInfo**, and can run a **PING** round-trip or make the key **WINK**. The HID reader is read-only: it never creates, lists, or deletes credentials, never changes the PIN, and never resets the key. A separate **WebAuthn lab** (section 3) does create a test credential, but only through the browser's own WebAuthn API.
 
 ---
 
@@ -889,11 +931,19 @@ FIDO2 commands are **CBOR**-encoded. \`authenticatorGetInfo\` is CTAP2 command \
 | Key | Field |
 | :--- | :--- |
 | 1 | versions (e.g. \`U2F_V2\`, \`FIDO_2_0\`, \`FIDO_2_1\`) |
+| 2 | extensions |
 | 3 | AAGUID (the 16-byte model identifier) |
 | 4 | options (\`rk\` resident keys, \`uv\` user verification, \`clientPin\`, …) |
 | 5 | maxMsgSize |
 | 6 | PIN/UV auth protocols |
 | 9 | transports |
+| 10 | algorithms |
+
+The workbench also decodes the later fields when the key reports them: firmware version, minimum PIN length, maximum credential ID length, credentials in list, credBlob and large-blob sizes, remaining discoverable credentials, force-PIN-change, attestation formats and certifications.
+
+**Keys with no CBOR.** A U2F-only key (no CTAP2 capability in its INIT reply) has no authenticatorGetInfo. The tool skips it, shows the CTAPHID and device version, and displays a notice that there is no AAGUID, options or algorithm list to read.
+
+**Timeouts.** Every receive has a deadline (10 s, 30 s for steps that wait for a touch). A key or transport that never answers produces "Security key did not answer (timeout)." instead of a hang.
 
 ---
 
@@ -901,8 +951,14 @@ FIDO2 commands are **CBOR**-encoded. \`authenticatorGetInfo\` is CTAP2 command \
 
 | UI Element | Purpose |
 | :--- | :--- |
-| **READ SECURITY KEY (WEBHID)** | INIT + authenticatorGetInfo; shows CTAPHID and device version, AAGUID, max message size, versions, options, transports and PIN/UV protocols. **DISCONNECT** closes it. |
+| **READ SECURITY KEY (WEBHID)** | INIT + authenticatorGetInfo; shows CTAPHID and device version, AAGUID, the **Authenticator** name, limits, versions, option chips, extensions, algorithms, attestation formats, certifications, transports and PIN/UV protocols. **DISCONNECT** closes it. |
 | **PING** | A CTAPHID_PING round-trip with 32 bytes; shows "echo matched" or "echo mismatch". |
+| **WINK** | Appears only if the key reports the WINK capability; makes the key blink and shows "winked". |
+| **REGISTER TEST CREDENTIAL** / **AUTHENTICATE** | WebAuthn lab buttons (see below). |
+
+**Authenticator names.** The AAGUID is looked up in the community passkey-authenticator AAGUID list (passkeydeveloper/passkey-authenticator-aaguids on GitHub). The list is not bundled: it is fetched on demand when you read a key or open the lab. If the AAGUID is not in it, the field reads "Unknown (not in the community AAGUID list)".
+
+**WebAuthn lab.** Because the browser blocklist hides keys from WebHID, this section creates and uses a test credential through the browser's own WebAuthn stack, with no flag needed. The relying party ID is always the page's hostname, so the credential only works here. It shows capability chips (WebAuthn, platform authenticator, conditional UI, client capabilities), and has a **Discoverable (resident) credential** checkbox (confirmation required, since it uses a key slot), **User verification** (discouraged / preferred / required) and **Attestation** (direct / indirect / none / enterprise) selectors. **REGISTER TEST CREDENTIAL** decodes the attestation (format, certificate chain, flags, sign count, public key); **AUTHENTICATE** is enabled after registering, or when Discoverable is ticked.
 
 > **Browser blocklist.** Chrome and Edge hide security keys (HID usage page \`F1D0\`) from web pages, so the device chooser normally shows nothing. The page warns about this: to read a key you own you must start the browser with \`--disable-hid-blocklist\` for that session only, which lets every site you visit request blocked HID devices, so close the browser afterwards. There is no simulated demo key.
 
@@ -910,7 +966,7 @@ FIDO2 commands are **CBOR**-encoded. \`authenticatorGetInfo\` is CTAP2 command \
 
 ### 4. Implementation & Architecture
 
-- **Driver:** [\`src/utils/fido2Driver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fido2Driver.js) — a small CBOR decoder (\`decodeCbor\`), \`buildPackets\` for CTAP-HID framing, \`parseGetInfo\`/\`aaguidToString\`, and \`Fido2Device\` with \`init\`/\`getInfo\`/\`ping\`. No credential or reset operations exist.
+- **Driver:** [\`src/utils/fido2Driver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fido2Driver.js) — a small CBOR decoder (\`decodeCbor\`), \`buildPackets\` for CTAP-HID framing, \`parseGetInfo\`/\`aaguidToString\`, and \`Fido2Device\` with \`init\`/\`getInfo\`/\`ping\`/\`wink\`. No credential or reset operations exist in the HID driver.
 - **Workbench:** [\`src/components/tools/Fido2Workbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/Fido2Workbench.jsx).
 - **Tests:** [\`tests/fido2.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fido2.test.js) covers CBOR decoding, AAGUID formatting, packet framing, and INIT / GetInfo / PING against a simulated key.
 
@@ -945,9 +1001,11 @@ It is a browser port of [usb-rea](https://github.com/emirmrkaljevic/usb-rea) by 
 ### 1. Workflow
 
 1. **Look it up first.** The **VID:PID lookup** tab checks a bundled table of devices already supported by liquidctl, rivalcfg, OpenRGB, turing-smart-screen and others. A checkbox adds an online OpenDeviceDB query (it sends only the VID:PID).
-2. **Capture** with Wireshark + USBPcap (Windows) or usbmon (Linux) while the vendor app drives the device. The **How to capture** tab has the steps. The analyzer reads pcap or pcapng files (gzip is fine); there is no live capture in the browser.
-3. **Mark actions.** In the **Action marker** tab, type a label such as \`brightness 50%\` and press Enter (or **Mark**) just before you click it in the app. Start the capture on the same computer: the timestamps use this PC's clock. **End current action**, **Undo last**, **Download .actions.json**, **Clear** and **Use in Analyze →** manage the list. Record at least 3 values per setting. Labels starting with \`seen\` (\`seen rpm 1180, temp 34\`) record what the app displayed, which is used to decode device replies.
-4. **Analyze.** In **Analyze capture**, load the capture, optionally pick the **Target device** (default: the device with the most host-to-device data), load or paste the markers JSON, and click **3. Infer protocol**. **Try the demo (synthetic lamp capture)** runs the whole pipeline on a generated capture with no files.
+2. **Capture** with Wireshark + USBPcap (Windows) or usbmon (Linux) while the vendor app drives the device. The **How to capture** tab has the steps. The analyzer reads pcap or pcapng files (gzip is fine); there is no live capture in the browser. If the file is cut off or corrupt part-way, everything before the damage is still loaded and the tool shows "Capture truncated at frame N" instead of failing.
+3. **Mark actions.** In the **Action marker** tab, type a label such as \`brightness 50%\` and press Enter (or **Mark**) just before you click it in the app. Start the capture on the same computer: the timestamps use this PC's clock. **End current action**, **Undo last**, **Download .actions.json**, **Clear** and **Use in Analyze →** manage the list. Record at least 3 values per setting. If the PC clock and the capture clock disagree, the **Timestamp offset (s)** field on the Analyze tab is added to every marker time. Labels starting with \`seen\` (\`seen rpm 1180, temp 34\`) record what the app displayed, which is used to decode device replies.
+4. **Analyze.** In **Analyze capture**, load the capture, optionally pick the **Target device** (default: the device with the most host-to-device data), load or paste the markers JSON, and click **3. Infer protocol**. The analysis runs in a Web Worker, so the page stays responsive; a progress bar with the current stage is shown and **Cancel** stops it. **Try the demo (synthetic lamp capture)** runs the whole pipeline on a generated capture with no files.
+
+**Packets tab.** After a capture (or the demo) is loaded, the **Packets** tab lists its transfers (Frame, Time, Bus, Dev, EP, Dir, Type, length/setup/ASCII). Filter by device, endpoint number, In/Out, transfer type or a hex substring. Selecting a row shows a hexdump, and for control transfers a decoded setup packet. A **Descriptors found in capture** panel decodes any device, configuration, interface or endpoint descriptors seen; they are only present if the capture began before the device was enumerated.
 
 If you have no markers, click each action with a pause between them, switch to **Labels only (split on pauses)** and list the labels in order, one per line. The traffic is split at the pauses.
 

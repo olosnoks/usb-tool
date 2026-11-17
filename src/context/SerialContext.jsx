@@ -65,6 +65,7 @@ export function SerialProvider({ children }) {
   const boardPortOwnersRef = useRef({});  // boardId -> port-manager owner
   const disconnectRef = useRef(null);     // latest handleDisconnect, for takeovers
   const rxListenersRef = useRef(new Set()); // subscribeRx(): every received chunk, unbatched
+  const boardDecodersRef = useRef({});     // boardId -> persistent streaming TextDecoder
   const boardWriteChainsRef = useRef({});  // boardId -> promise of the last queued write
   // Stable identity, so subscribers' effects don't re-run on every render.
   const subscribeRx = useCallback((fn) => { rxListenersRef.current.add(fn); return () => { rxListenersRef.current.delete(fn); }; }, []);
@@ -97,7 +98,12 @@ export function SerialProvider({ children }) {
 
   // System Log Helper for a Board
   const addLogToBoard = useCallback((boardId, text, type = 'sys', rawBytes = null) => {
-    const timestamp = new Date().toTimeString().split(' ')[0] + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+    const wallDate = new Date();
+    const wallTime = wallDate.getTime();
+    // Monotonic arrival time, taken here at ingest (never at render): the console's
+    // delta view subtracts these, so they must be real.
+    const rawTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : wallTime;
+    const timestamp = wallDate.toTimeString().split(' ')[0] + '.' + String(wallDate.getMilliseconds()).padStart(3, '0');
     updateBoard(boardId, b => ({
       entries: [
         ...b.entries.slice(-1499),
@@ -106,6 +112,8 @@ export function SerialProvider({ children }) {
           type,
           text,
           timestamp,
+          rawTime,
+          wallTime,
           rawBytes
         }
       ]
@@ -149,9 +157,14 @@ export function SerialProvider({ children }) {
       updateBoard(boardId, { rxActivity: false });
     }, 90);
 
-    const decoder = new TextDecoder('utf-8', { fatal: false });
-    const text = decoder.decode(bytes);
-    addLogToBoard(boardId, text, 'rx', bytes);
+    // One persistent decoder per board (stream:true) so a multi-byte UTF-8
+    // character split across chunks is not turned into U+FFFD.
+    let decoder = boardDecodersRef.current[boardId];
+    if (!decoder) decoder = boardDecodersRef.current[boardId] = new TextDecoder('utf-8', { fatal: false });
+    const text = decoder.decode(bytes, { stream: true });
+    // A chunk holding only the first bytes of a character decodes to ''; the
+    // character is emitted with the next chunk.
+    if (text) addLogToBoard(boardId, text, 'rx', bytes);
 
     const startOffset = boardOffsetsRef.current[boardId] || 0;
     const newHexItems = [];
@@ -165,7 +178,7 @@ export function SerialProvider({ children }) {
     boardOffsetsRef.current[boardId] = startOffset + bytes.length;
 
     updateBoard(boardId, b => ({
-      latestRxText: text,
+      ...(text ? { latestRxText: text } : {}),
       hexByteStream: [...b.hexByteStream.slice(-4096), ...newHexItems]
     }));
   }, [addLogToBoard, updateBoard]);
@@ -792,4 +805,9 @@ export function useConsolePause() {
   const [local, setLocal] = useState(false);
   if (ctx && ctx.setConsolePaused) return [ctx.consolePaused, ctx.setConsolePaused];
   return [local, setLocal];
+}
+
+/** The serial context when inside a SerialProvider, otherwise null (never throws). */
+export function useOptionalSerial() {
+  return useContext(SerialContext);
 }

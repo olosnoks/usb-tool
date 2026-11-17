@@ -66,27 +66,60 @@ const server = http.createServer((req, res) => {
     return sendJson(res, 403, { error: `Host not allowed: ${parsed.hostname}` });
   }
 
-  const lib = parsed.protocol === 'https:' ? https : http;
   const headers = { ...req.headers };
   delete headers.host; delete headers.origin; delete headers.referer;
   delete headers['content-length']; // let the client set it from the piped body
 
-  const upstream = lib.request(
-    parsed,
-    { method: req.method, headers, rejectUnauthorized: false },
-    (up) => {
-      cors(res);
-      const out = { ...up.headers };
-      // strip hop-by-hop / CORS-conflicting headers from upstream
-      delete out['access-control-allow-origin'];
-      delete out['content-security-policy'];
-      delete out['transfer-encoding'];
-      res.writeHead(up.statusCode || 502, out);
-      up.pipe(res);
-    },
-  );
-  upstream.on('error', (e) => sendJson(res, 502, { error: `Upstream request failed: ${e.message}` }));
-  req.pipe(upstream);
+  const noBody = req.method === 'GET' || req.method === 'HEAD';
+  const cookies = [];
+  const chain = [];
+
+  // One upstream hop. Redirects are followed manually (GET/HEAD only, max 10) so
+  // the browser can be told the chain and every hop's Set-Cookie.
+  const hop = (url, count) => {
+    const lib = url.protocol === 'https:' ? https : http;
+    const upstream = lib.request(
+      url,
+      { method: req.method, headers: { ...headers, host: url.host }, rejectUnauthorized: false },
+      (up) => {
+        const sc = up.headers['set-cookie'];
+        if (sc) cookies.push(...(Array.isArray(sc) ? sc : [sc]));
+        chain.push({ status: up.statusCode || 0, url: url.href });
+        const loc = up.headers.location;
+        if (noBody && loc && [301, 302, 303, 307, 308].includes(up.statusCode) && count < 10) {
+          let next;
+          try { next = new URL(loc, url); } catch { next = null; }
+          if (next && /^https?:$/.test(next.protocol)
+            && (!ALLOW_HOSTS.length || ALLOW_HOSTS.includes(next.hostname.toLowerCase()))) {
+            up.resume();
+            return hop(next, count + 1);
+          }
+        }
+        cors(res);
+        const out = { ...up.headers };
+        // strip hop-by-hop / CORS-conflicting headers from upstream
+        delete out['access-control-allow-origin'];
+        delete out['content-security-policy'];
+        delete out['transfer-encoding'];
+        delete out['set-cookie']; // browsers hide it from fetch(); expose a copy instead
+        if (cookies.length) out['x-proxy-set-cookie'] = asciiJson(cookies);
+        if (chain.length > 1) out['x-proxy-redirects'] = asciiJson(chain);
+        res.writeHead(up.statusCode || 502, out);
+        up.pipe(res);
+      },
+    );
+    upstream.on('error', (e) => { if (!res.headersSent) sendJson(res, 502, { error: `Upstream request failed: ${e.message}` }); else res.destroy(); });
+    if (noBody) upstream.end(); else req.pipe(upstream);
+  };
+  hop(parsed, 0);
 });
 
-server.listen(PORT, () => console.log(`cors-proxy listening on :${PORT}${ALLOW_HOSTS.length ? ` (allow: ${ALLOW_HOSTS.join(',')})` : ''}`));
+// JSON safe for an HTTP header value (non-ASCII escaped).
+function asciiJson(v) {
+  return JSON.stringify(v).replace(/[^\x20-\x7e]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+}
+
+if (require.main === module) {
+  server.listen(PORT, () => console.log(`cors-proxy listening on :${PORT}${ALLOW_HOSTS.length ? ` (allow: ${ALLOW_HOSTS.join(',')})` : ''}`));
+}
+module.exports = { server };

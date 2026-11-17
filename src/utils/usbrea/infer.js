@@ -10,7 +10,7 @@
 import { commands_of } from './actions.js';
 import { CHECKSUMS, compute } from './checksums.js';
 import { split_values } from './model.js';
-import { hex, readInt, writeInt } from './bytes.js';
+import { hex, readInt, writeInt, minOf } from './bytes.js';
 import { fmt_g, fmt_hex } from './pyfmt.js';
 
 // ---- small Python-compat helpers -------------------------------------------------------------
@@ -415,7 +415,7 @@ export function infer(actions, vid = null, pid = null) {
     head.steps = steps.slice(1);
     if (head.steps.length) {
       head.notes.push(`multi-packet transaction: ${shape.length} packets per action, sent in this order`);
-      head.confidence = py_round_n(Math.min(...steps.map((c) => c.confidence)), 2);
+      head.confidence = py_round_n(minOf(steps.map((c) => c.confidence)), 2);
     }
     commands.push(head);
   }
@@ -434,7 +434,7 @@ export function mark_command_ids(commands) {
   }
   for (const cs of byChan.values()) {
     if (cs.length < 2) continue;
-    const n = Math.min(...cs.map((c) => c.length));
+    const n = minOf(cs.map((c) => c.length));
     for (let off = 0; off < n; off++) {
       const fs = cs.map((c) => c.fields.find((f) => f.offset === off) ?? null);
       if (fs.every((f) => f !== null && (f.kind === 'const' || f.kind === 'command')) && new Set(fs.map((f) => f.const)).size > 1) {

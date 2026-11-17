@@ -89,16 +89,15 @@ function itemUsages(item) {
   return [];
 }
 
-/** Read `size` bits starting at `bitOffset` (LSB-first), optionally signed. */
+/** Read `size` bits starting at `bitOffset` (LSB-first), optionally signed. Works for sizes up to 53 bits. */
 export function readBits(dataView, bitOffset, size, signed) {
   let value = 0;
   for (let i = 0; i < size; i++) {
     const bit = bitOffset + i;
     const byte = dataView.getUint8(bit >> 3);
-    value |= ((byte >> (bit & 7)) & 1) << i;
+    if ((byte >> (bit & 7)) & 1) value += 2 ** i;
   }
-  value >>>= 0;
-  if (signed && size < 32 && (value & (1 << (size - 1)))) value -= 1 << size; // sign-extend
+  if (signed && size > 0 && value >= 2 ** (size - 1)) value -= 2 ** size; // sign-extend
   return value;
 }
 
@@ -210,4 +209,31 @@ export function parseRecording(text) {
     device: j.device || null,
     reports: j.reports.map((r) => ({ t: r.t, reportId: r.reportId, bytes: Uint8Array.from((r.hex.match(/../g) || []).map((h) => parseInt(h, 16))) }))
   };
+}
+
+// ---------------------------------------------------------------------------
+// Pasted report descriptor text -> bytes
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn pasted descriptor text into bytes. Accepts space, comma and 0x forms,
+ * C-array dumps (comments stripped), usbhid-dump / `lsusb -v` style lines with an
+ * "0000:" offset prefix, and ignores prose header lines ("Report Descriptor: (length is 52)").
+ * Throws with the line number and token for anything else that is not a byte.
+ */
+export function parseDescriptorHex(text) {
+  const clean = String(text ?? '').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, ' ');
+  const bytes = [];
+  clean.split(/\r?\n/).forEach((raw, idx) => {
+    const line = raw.replace(/^\s*[0-9a-fA-F]{3,8}:\s+/, '').trim();
+    if (!line) return;
+    if (/[g-zG-Z]{2,}/.test(line)) return; // a prose header such as "Report Descriptor: (length is 52)"
+    for (const tok of line.split(/[\s,;{}]+/).filter(Boolean)) {
+      const h = tok.replace(/^0x/i, '');
+      if (!/^([0-9a-fA-F]{2})+$/.test(h)) throw new Error(`Line ${idx + 1}: "${tok}" is not a hex byte (use two hex digits per byte).`);
+      for (let i = 0; i < h.length; i += 2) bytes.push(parseInt(h.slice(i, i + 2), 16));
+    }
+  });
+  if (!bytes.length) throw new Error('No hex bytes found. Paste the report descriptor, e.g. 05 01 09 06 A1 01 ...');
+  return Uint8Array.from(bytes);
 }

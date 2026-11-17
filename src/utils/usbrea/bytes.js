@@ -77,3 +77,17 @@ export function writeInt(d, off, width, v, endian = 'little') {
 export function ascii(s) {
   return new TextEncoder().encode(s);
 }
+
+/** Math.min over any iterable (array, Set) without spreading: spread overflows the stack on >~120k items. */
+export function minOf(it) {
+  let m = Infinity;
+  for (const v of it) { if (Number.isNaN(v)) return NaN; if (v < m) m = v; }
+  return m;
+}
+
+/** Math.max over any iterable without spreading. */
+export function maxOf(it) {
+  let m = -Infinity;
+  for (const v of it) { if (Number.isNaN(v)) return NaN; if (v > m) m = v; }
+  return m;
+}

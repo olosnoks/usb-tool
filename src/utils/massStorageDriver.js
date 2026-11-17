@@ -1,8 +1,8 @@
 /**
  * massStorageDriver.js — read-only USB Mass Storage (Bulk-Only Transport) +
- * SCSI, for inspecting a drive: INQUIRY (what it is), READ CAPACITY (how big),
- * and READ(10) (raw sectors). It deliberately implements no WRITE command, so
- * it cannot modify the drive.
+ * SCSI, for inspecting a drive: INQUIRY (what it is), READ CAPACITY(10/16)
+ * (how big), and READ(10)/READ(16) (raw sectors). It deliberately implements no
+ * WRITE command, so it cannot modify the drive.
  *
  * I/O goes through an injected transport so the CBW/CSW framing is testable
  * against a fake drive with no hardware (see tests/massStorage.test.js):
@@ -10,15 +10,18 @@
  *     transport.write(Uint8Array) -> Promise<void>   (bulk OUT)
  *     transport.read(maxLength)   -> Promise<Uint8Array> (bulk IN)
  *     transport.close()           -> Promise<void>
+ *     transport.clearHalt(dir)    -> Promise<void>   (optional; 'in' | 'out')
+ *     transport.reset()           -> Promise<void>   (optional; BOT mass storage reset)
+ *
+ * A transport signals an endpoint STALL by throwing an error with `stall = true`.
  *
  * NOTE: a drive claimed here is taken away from the operating system for the
  * session. Prefer a drive the OS has not mounted, and never a disk with data
- * you care about mounted and in use.
+ * you care about mounted and in use. Chrome normally refuses to let a page claim
+ * the mass-storage class at all (see explainUsbError).
  *
  * References: USB Mass Storage Bulk-Only Transport 1.0; SCSI SPC/SBC.
  */
-
-import { buildFatVolume, buildMbrDisk } from './diskImage';
 
 export const MSC_CLASS = { classCode: 0x08, subclassCode: 0x06, protocolCode: 0x50 }; // SCSI transparent, BOT
 const CBW_SIGNATURE = 0x43425355; // 'USBC'
@@ -91,6 +94,31 @@ export function parseCapacity(b) {
   return { lastLba, blockSize, blocks, totalBytes: blocks * blockSize };
 }
 
+/** READ CAPACITY(16) parameter data: 64-bit last LBA, 32-bit block size (big-endian). */
+export function parseCapacity16(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const lastLba = dv.getUint32(0, false) * 2 ** 32 + dv.getUint32(4, false);
+  const blockSize = dv.getUint32(8, false);
+  const blocks = lastLba + 1;
+  return { lastLba, blockSize, blocks, totalBytes: blocks * blockSize };
+}
+
+/**
+ * READ(10) CDB, or READ(16) when the LBA/count does not fit in 32/16 bits (or
+ * `force16`). The 64-bit LBA is split into high and low words so it never wraps.
+ */
+export function buildReadCdb(lba, count, force16 = false) {
+  const hi = Math.floor(lba / 2 ** 32);
+  const lo = lba % 2 ** 32;
+  if (!force16 && hi === 0 && count <= 0xffff && lo + count <= 2 ** 32) {
+    return [0x28, 0, (lo >>> 24) & 0xff, (lo >>> 16) & 0xff, (lo >>> 8) & 0xff, lo & 0xff, 0, (count >>> 8) & 0xff, count & 0xff, 0];
+  }
+  return [0x88, 0,
+    (hi >>> 24) & 0xff, (hi >>> 16) & 0xff, (hi >>> 8) & 0xff, hi & 0xff,
+    (lo >>> 24) & 0xff, (lo >>> 16) & 0xff, (lo >>> 8) & 0xff, lo & 0xff,
+    (count >>> 24) & 0xff, (count >>> 16) & 0xff, (count >>> 8) & 0xff, count & 0xff, 0, 0];
+}
+
 export class MassStorageDevice {
   constructor(transport, { logger = () => {} } = {}) {
     this.transport = transport;
@@ -98,37 +126,80 @@ export class MassStorageDevice {
     this.tag = 0;
     this.chain = Promise.resolve();
     this.blockSize = 512;
+    this.use16 = false;
   }
 
   _serialize(fn) { const r = this.chain.then(fn, fn); this.chain = r.then(() => {}, () => {}); return r; }
 
   async open() { if (this.transport.open) await this.transport.open(); }
 
+  /**
+   * Bulk-Only Mass Storage Reset Recovery (BOT 5.3.4): the class reset request,
+   * then clear the halt on both bulk endpoints. Needed after a phase error, a
+   * CSW that stalls twice, or garbage where a CSW should be.
+   */
+  async resetRecovery() {
+    this.logger('BOT reset recovery');
+    if (this.transport.reset) await this.transport.reset();
+    if (this.transport.clearHalt) {
+      await this.transport.clearHalt('in');
+      await this.transport.clearHalt('out');
+    }
+  }
+
+  /** Read the 13-byte CSW. A STALL gets clearHalt and one retry (BOT 6.7.2); a second stall means reset recovery. */
+  async _readCsw() {
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.transport.read(13); } catch (e) {
+        if (!e.stall) throw e;
+        if (attempt === 0 && this.transport.clearHalt) { await this.transport.clearHalt('in'); continue; }
+        await this.resetRecovery();
+        throw new MassStorageError('The drive stalled the status stage twice; it was reset (Bulk-Only reset recovery).');
+      }
+    }
+  }
+
   /** Run one SCSI command: send CBW, move `dataLength` bytes IN, read the CSW. */
   _command(cdb, dataLength, dirIn = true) {
     return this._serialize(async () => {
       const tag = (this.tag = (this.tag + 1) >>> 0);
-      await this.transport.write(buildCbw(tag, dataLength, dirIn, 0, cdb));
+      try { await this.transport.write(buildCbw(tag, dataLength, dirIn, 0, cdb)); } catch (e) {
+        if (e.stall) { await this.resetRecovery(); throw new MassStorageError('The drive stalled the command; it was reset (Bulk-Only reset recovery).'); }
+        throw e;
+      }
       let data = new Uint8Array();
       if (dataLength > 0 && dirIn) {
         const parts = [];
         let got = 0;
         while (got < dataLength) {
-          const chunk = await this.transport.read(dataLength - got);
+          let chunk;
+          try { chunk = await this.transport.read(dataLength - got); } catch (e) {
+            if (!e.stall) throw e;
+            // The drive ended the data stage early with a STALL: clear it, the CSW then says why.
+            if (this.transport.clearHalt) await this.transport.clearHalt('in');
+            break;
+          }
           if (!chunk.length) break;
           parts.push(chunk); got += chunk.length;
         }
         data = new Uint8Array(got);
         let off = 0; parts.forEach((p) => { data.set(p.subarray(0, Math.min(p.length, got - off)), off); off += p.length; });
       }
-      const csw = parseCsw(await this.transport.read(13));
-      if (csw.tag !== tag) throw new MassStorageError(`CSW tag ${csw.tag} != CBW tag ${tag}.`);
+      let csw;
+      try { csw = parseCsw(await this._readCsw()); } catch (e) {
+        if (e instanceof MassStorageError && /^(Bad|Short) CSW/.test(e.message)) await this.resetRecovery();
+        throw e;
+      }
+      if (csw.tag !== tag) { await this.resetRecovery(); throw new MassStorageError(`CSW tag ${csw.tag} != CBW tag ${tag}.`); }
       if (csw.status === 1) {
         const err = new MassStorageError('SCSI command failed (CSW status 01).');
         err.checkCondition = true;
         throw err;
       }
-      if (csw.status === 2) throw new MassStorageError('Phase error (CSW status 02).');
+      if (csw.status === 2) {
+        await this.resetRecovery();
+        throw new MassStorageError('Phase error (CSW status 02); the drive was reset (Bulk-Only reset recovery).');
+      }
       return data;
     });
   }
@@ -161,19 +232,24 @@ export class MassStorageDevice {
     return parseInquiry(data);
   }
 
+  /** READ CAPACITY(10); a drive over 2 TiB answers 0xFFFFFFFF and is asked again with READ CAPACITY(16). */
   async readCapacity() {
     const data = await this._explain(() => this._command([0x25, 0, 0, 0, 0, 0, 0, 0, 0, 0], 8, true));
-    const cap = parseCapacity(data);
+    let cap = parseCapacity(data);
+    if (cap.lastLba === 0xffffffff) {
+      const d16 = await this._explain(() => this._command([0x9e, 0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0], 32, true));
+      cap = { ...parseCapacity16(d16), capacity16: true };
+    }
     this.blockSize = cap.blockSize || 512;
+    this.use16 = !!cap.capacity16;
     return cap;
   }
 
-  /** Read `count` blocks starting at LBA `lba`. READ(10). */
+  /** Read `count` blocks from LBA `lba`: READ(10), or READ(16) for LBAs past 2^32 and on drives that needed READ CAPACITY(16). */
   async read(lba, count = 1) {
     const bs = this.blockSize || 512;
-    const cdb = [0x28, 0,
-      (lba >>> 24) & 0xff, (lba >>> 16) & 0xff, (lba >>> 8) & 0xff, lba & 0xff,
-      0, (count >>> 8) & 0xff, count & 0xff, 0];
+    const cdb = buildReadCdb(lba, count, this.use16);
+    this.lastCdb = cdb;
     return this._explain(() => this._command(cdb, count * bs, true));
   }
 
@@ -183,6 +259,38 @@ export class MassStorageDevice {
 // ---------------------------------------------------------------------------
 // WebUSB transport
 // ---------------------------------------------------------------------------
+
+const stallError = (dir) => { const e = new MassStorageError(`USB ${dir} endpoint stalled`); e.stall = true; return e; };
+
+/**
+ * Turn a WebUSB failure into a plain-language MassStorageError carrying `kind`:
+ * 'protected-class' (Chrome refuses to let a page claim the storage class),
+ * 'no-device' (chooser cancelled or empty), 'busy' (another program owns it).
+ * Anything else is returned unchanged.
+ */
+export function explainUsbError(err) {
+  const name = err?.name || '';
+  const msg = err?.message || String(err);
+  const make = (kind, text) => { const e = new MassStorageError(text); e.kind = kind; e.cause = err; return e; };
+  if (name === 'SecurityError' || /protected class/i.test(msg)) {
+    return make('protected-class',
+      'Chrome blocks this. USB mass storage (class 08) is a protected interface class: WebUSB refuses to let a web page claim it, on every operating system, so pages cannot read or write your disks. '
+      + 'This is a browser safety rule, not a fault with the drive or with this tool. '
+      + 'To inspect the drive, make a raw image of it with a tool such as dd, FTK Imager or Win32 Disk Imager (reading from the drive), then use OPEN DISK IMAGE FILE here. '
+      + 'Partitions, filesystems, deleted files, hashes and file carving all work on image files.');
+  }
+  if (name === 'NotFoundError') {
+    return make('no-device',
+      'No drive was selected. Either the chooser was cancelled, or Chrome offered no drive: it normally does not list storage-class USB drives for WebUSB at all. '
+      + 'If you expected your drive to appear, this is the protected-class block, and OPEN DISK IMAGE FILE is the way to inspect it.');
+  }
+  if (name === 'NetworkError' || /unable to claim|access denied/i.test(msg)) {
+    return make('busy',
+      'Another program or the operating system is using this drive, so the page could not claim it. Close anything using it, or eject the volume, and try again. '
+      + 'If it still fails, make an image with dd or FTK Imager and use OPEN DISK IMAGE FILE.');
+  }
+  return err;
+}
 
 export function findMscInterface(configuration) {
   for (const iface of configuration?.interfaces || []) {
@@ -207,16 +315,26 @@ export class MscUsbTransport {
     if (!found) throw new MassStorageError('No Bulk-Only Mass Storage interface (class 08 / protocol 50).');
     this.interfaceNumber = found.interfaceNumber;
     this.epOut = found.epOut; this.epIn = found.epIn;
-    await d.claimInterface(this.interfaceNumber);
+    try { await d.claimInterface(this.interfaceNumber); } catch (e) { throw explainUsbError(e); }
   }
   async write(bytes) {
     const r = await this.device.transferOut(this.epOut, bytes);
+    if (r.status === 'stall') throw stallError('OUT');
     if (r.status !== 'ok') throw new MassStorageError(`USB OUT ${r.status}`);
   }
   async read(maxLength) {
     const r = await this.device.transferIn(this.epIn, maxLength);
+    if (r.status === 'stall') throw stallError('IN');
     if (r.status !== 'ok' && !r.data) throw new MassStorageError(`USB IN ${r.status}`);
     return new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
+  }
+  /** CLEAR_FEATURE(ENDPOINT_HALT) on the bulk IN or OUT endpoint. */
+  async clearHalt(direction) {
+    await this.device.clearHalt(direction === 'in' ? 'in' : 'out', direction === 'in' ? this.epIn : this.epOut);
+  }
+  /** Bulk-Only Mass Storage Reset (class request 0xFF to the interface). */
+  async reset() {
+    await this.device.controlTransferOut({ requestType: 'class', recipient: 'interface', request: 0xff, value: 0, index: this.interfaceNumber });
   }
   async close() {
     try { await this.device.releaseInterface(this.interfaceNumber); } catch (e) { /* ignore */ }
@@ -231,6 +349,7 @@ export const MSC_USB_FILTERS = [MSC_CLASS, { classCode: MSC_CLASS.classCode }];
 
 export async function requestMassStorageDevice() {
   if (typeof navigator === 'undefined' || !navigator.usb) throw new MassStorageError('WebUSB needs Chrome or Edge over HTTPS.');
-  const device = await navigator.usb.requestDevice({ filters: MSC_USB_FILTERS });
+  let device;
+  try { device = await navigator.usb.requestDevice({ filters: MSC_USB_FILTERS }); } catch (e) { throw explainUsbError(e); }
   return new MscUsbTransport(device);
 }

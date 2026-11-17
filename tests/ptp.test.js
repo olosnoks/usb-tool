@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   PtpDevice, buildContainer, parseContainerHeader, parseDeviceInfo, parseObjectInfo,
-  DataReader, findPtpInterface, objectFormatName, PTP_TYPE, PTP_OP
+  DataReader, findPtpInterface, objectFormatName, PTP_TYPE, PTP_OP, PTP_PROP, PTP_EVENT,
+  parseDevicePropDesc, formatPropValue, parseEvent, buildObjectInfo, responseName
 } from '../src/utils/ptpDriver';
 import { createSimulatedPtp } from './helpers/sim/ptp';
 
@@ -120,5 +121,131 @@ describe('PTP storage, battery, capture and delete', () => {
     const th = await d.getThumb(1);
     expect(String.fromCharCode(th[0], th[1])).toBe('BM');
     expect((await d.getObjectInfo(1)).thumbFormat).toBe(0x3804);
+  });
+});
+
+describe('PTP device properties', () => {
+  const open = async (opts) => {
+    const t = createSimulatedPtp(opts);
+    const d = new PtpDevice(t);
+    await d.open();
+    await d.openSession();
+    await d.getDeviceInfo();
+    return { d, t };
+  };
+
+  it('formats values with the units the spec defines', () => {
+    expect(formatPropValue(PTP_PROP.FNumber, 280)).toBe('f/2.8');
+    expect(formatPropValue(PTP_PROP.ExposureTime, 40)).toBe('1/250 s');
+    expect(formatPropValue(PTP_PROP.ExposureTime, 20000)).toBe('2 s');
+    expect(formatPropValue(PTP_PROP.ExposureIndex, 800)).toBe('ISO 800');
+    expect(formatPropValue(PTP_PROP.WhiteBalance, 4)).toBe('Daylight');
+    expect(formatPropValue(PTP_PROP.ExposureBiasCompensation, -1000)).toBe('-1.0 EV');
+    expect(formatPropValue(PTP_PROP.BatteryLevel, 55)).toBe('55%');
+  });
+
+  it('reads descriptors with enum and range forms', async () => {
+    const { d } = await open();
+    const iso = await d.getDevicePropDesc(PTP_PROP.ExposureIndex);
+    expect(iso).toMatchObject({ name: 'ISO', writable: true, value: 400, display: 'ISO 400' });
+    expect(iso.options.map((o) => o.value)).toEqual([100, 200, 400, 800, 1600]);
+    const batt = await d.getDevicePropDesc(PTP_PROP.BatteryLevel);
+    expect(batt).toMatchObject({ writable: false, value: 87, form: { type: 'range', min: 0, max: 100 } });
+    expect(await d.getDevicePropValue(PTP_PROP.ExposureTime)).toBe(40);
+  });
+
+  it('lists only the common properties the camera reports', async () => {
+    const { d } = await open();
+    const props = await d.getCommonProps();
+    expect(props.map((p) => p.name)).toEqual(['Battery level', 'ISO', 'Shutter speed', 'Aperture', 'White balance']);
+    d.deviceInfo.devicePropertiesSupported = [0x5001];
+    expect((await d.getCommonProps()).map((p) => p.name)).toEqual(['Battery level']);
+  });
+
+  it('sets an allowed value, and refuses disallowed, read-only and unwritable cases', async () => {
+    const { d, t } = await open();
+    const after = await d.setDeviceProp(PTP_PROP.ExposureIndex, 800);
+    expect(after.value).toBe(800);
+    expect(t.state.lastSet).toEqual({ code: 0x500f, value: 800 });
+    await expect(d.setDeviceProp(PTP_PROP.ExposureIndex, 123)).rejects.toThrow(/not an allowed/);
+    await expect(d.setDeviceProp(PTP_PROP.BatteryLevel, 50)).rejects.toThrow(/read-only/);
+    const ro = await open({ propsWritable: false });
+    await expect(ro.d.setDeviceProp(PTP_PROP.ExposureIndex, 800)).rejects.toThrow(/read-only/);
+  });
+
+  it('a missing property is a named error, not a made-up value', async () => {
+    const { d } = await open();
+    await expect(d.getDevicePropDesc(0x5013)).rejects.toMatchObject({ responseCode: 0x200a, message: expect.stringContaining('Device property not supported') });
+  });
+
+  it('parses a descriptor byte-for-byte', () => {
+    // ISO (0x500f), UINT16, read/write, default 100, current 200, enum [100, 200]
+    const bytes = Uint8Array.from([0x0f, 0x50, 4, 0, 1, 100, 0, 200, 0, 2, 2, 0, 100, 0, 200, 0]);
+    expect(parseDevicePropDesc(bytes)).toMatchObject({ code: 0x500f, value: 200, factoryDefault: 100, form: { type: 'enum', values: [100, 200] } });
+  });
+});
+
+describe('PTP events', () => {
+  it('parses an event container', () => {
+    const c = buildContainer(PTP_TYPE.EVENT, PTP_EVENT.ObjectAdded, 0, [42]);
+    expect(parseEvent(c)).toEqual({ code: 0x4002, name: 'ObjectAdded', transactionId: 0, params: [42] });
+    expect(parseEvent(buildContainer(PTP_TYPE.RESPONSE, 0x2001, 1))).toBeNull();
+  });
+
+  it('delivers events from the interrupt endpoint until stopped', async () => {
+    const t = createSimulatedPtp();
+    const d = new PtpDevice(t);
+    await d.open();
+    t.pushEvent(PTP_EVENT.ObjectAdded, [7]);
+    t.pushEvent(PTP_EVENT.DevicePropChanged, [0x500f]);
+    const seen = [];
+    const h = d.startEventPolling((e) => seen.push(e), { idleMs: 5 });
+    await new Promise((r) => setTimeout(r, 60));
+    h.stop(); await h.done;
+    expect(seen.map((e) => e.name)).toEqual(['ObjectAdded', 'DevicePropChanged']);
+    expect(seen[1].params).toEqual([0x500f]);
+    t.pushEvent(PTP_EVENT.CaptureComplete);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(seen).toHaveLength(2); // stopped: nothing more is consumed
+  });
+
+  it('has no polling when the transport has no event endpoint', () => {
+    const d = new PtpDevice({ write: async () => {}, read: async () => new Uint8Array() });
+    expect(d.startEventPolling(() => {})).toBeNull();
+    const d2 = new PtpDevice({ write: async () => {}, read: async () => new Uint8Array(), readEvent: async () => null, epEvent: null });
+    expect(d2.canPollEvents).toBe(false);
+  });
+});
+
+describe('PTP / MTP upload', () => {
+  it('uploads a file with SendObjectInfo then SendObject', async () => {
+    const t = createSimulatedPtp();
+    const d = new PtpDevice(t);
+    await d.open(); await d.openSession(); await d.getDeviceInfo();
+    expect(d.canUpload).toBe(true);
+    const bytes = new TextEncoder().encode('hello camera');
+    const res = await d.uploadObject({ storageId: 0x10001, filename: 'notes.txt', bytes });
+    expect(res).toMatchObject({ storageId: 0x10001, parent: 0 });
+    expect(t.state.uploads[0]).toMatchObject({ filename: 'notes.txt', size: bytes.length, format: 0x3000 });
+    expect(td.decode(await d.getObject(res.handle))).toBe('hello camera');
+    expect((await d.getObjectInfo(res.handle)).filename).toBe('notes.txt');
+  });
+
+  it('encodes ObjectInfo the parser can read back', () => {
+    const info = parseObjectInfo(buildObjectInfo({ storageId: 5, filename: 'a.jpg', size: 10, parentObject: 3, objectFormat: 0x3801 }));
+    expect(info).toMatchObject({ storageId: 5, objectFormat: 0x3801, compressedSize: 10, parentObject: 3, filename: 'a.jpg' });
+  });
+
+  it('refuses when the device lacks the operations, and names a refusal', async () => {
+    const d = new PtpDevice(createSimulatedPtp());
+    await d.open(); await d.openSession(); await d.getDeviceInfo();
+    d.deviceInfo.operationsSupported = d.deviceInfo.operationsSupported.filter((o) => o !== PTP_OP.SendObject);
+    await expect(d.uploadObject({ storageId: 1, filename: 'x', bytes: new Uint8Array(1) })).rejects.toThrow(/does not support uploading/);
+    const t = createSimulatedPtp();
+    const d2 = new PtpDevice(t);
+    await d2.open(); await d2.openSession(); await d2.getDeviceInfo();
+    t.state.failNext = 0x200c;
+    await expect(d2.uploadObject({ storageId: 1, filename: 'x', bytes: new Uint8Array(1) })).rejects.toThrow(/Store full/);
+    expect(responseName(0x2019)).toBe('Device busy');
   });
 });

@@ -17,6 +17,7 @@ import {
 } from '../../utils/hidInspector';
 import StatusBadge from '../common/StatusBadge';
 import HidReportTools from './hid/HidReportTools';
+import HidDescriptorDecoder from './hid/HidDescriptorDecoder';
 
 import { useSessionError } from '../../utils/sessionLog';
 
@@ -38,6 +39,18 @@ export default function HidInspectorWorkbench() {
   const refreshGranted = useCallback(async () => setGranted(await listGrantedHidDevices()), []);
   useEffect(() => { refreshGranted(); }, [refreshGranted]);
 
+  // Keep the "already allowed" count current when devices are plugged in or removed.
+  useEffect(() => {
+    if (!webHidAvailable) return undefined;
+    const onChange = () => { refreshGranted(); };
+    navigator.hid.addEventListener('connect', onChange);
+    navigator.hid.addEventListener('disconnect', onChange);
+    return () => {
+      navigator.hid.removeEventListener('connect', onChange);
+      navigator.hid.removeEventListener('disconnect', onChange);
+    };
+  }, [webHidAvailable, refreshGranted]);
+
   const buildReportMap = (collections) => {
     const map = {};
     for (const col of collections) for (const r of col.inputReports) map[r.reportId] = r;
@@ -50,13 +63,14 @@ export default function HidInspectorWorkbench() {
   };
 
   const onInputReport = (reportId, dataView) => {
-    const described = reportMapRef.current[reportId] || reportMapRef.current[0];
+    // No silent fallback to report 0: an id the descriptor does not declare is shown raw, not mis-decoded.
+    const described = reportMapRef.current[reportId];
     const bytes = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
     const t = performance.now();
     for (const tap of tapsRef.current) tap(reportId, bytes, t);
     let fields = [];
     try { if (described) fields = decodeReport(described, dataView); } catch (e) { /* undecodable */ }
-    setLastReport({ reportId, hex: hexDump(bytes), fields });
+    setLastReport({ reportId, hex: hexDump(bytes), fields, unknownId: !described });
   };
 
   const connect = async () => {
@@ -136,6 +150,8 @@ export default function HidInspectorWorkbench() {
         {meta && <p className="mt-2 text-[11px] text-slate-500">{meta.vendorId?.toString(16).padStart(4, '0')}:{meta.productId?.toString(16).padStart(4, '0')} — {meta.productName || '(no name)'}</p>}
       </div>
 
+      <HidDescriptorDecoder />
+
       {info && (
         <div className="grid grid-cols-1 @lg:grid-cols-2 gap-4">
           {/* Live input */}
@@ -146,6 +162,9 @@ export default function HidInspectorWorkbench() {
             ) : (
               <>
                 <div className="text-[11px] text-slate-500">Report {lastReport.reportId} — <span className="text-cyan-300">{lastReport.hex}</span></div>
+                {lastReport.unknownId && (
+                  <div className="text-[11px] text-amber-300">Report id {lastReport.reportId} is not in this device's descriptor, so it is shown raw and not decoded.</div>
+                )}
                 <div className="grid grid-cols-2 gap-1.5">
                   {lastReport.fields.map((f, i) => (
                     <div key={i} className="flex justify-between gap-2 px-2 py-1 rounded bg-slate-950 border border-slate-800">

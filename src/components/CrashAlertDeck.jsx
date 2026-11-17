@@ -1,17 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { 
-  ShieldAlert, 
-  Volume2, 
-  VolumeX, 
-  Copy, 
-  Check, 
-  Trash2, 
-  AlertTriangle, 
-  Pause, 
-  Sliders,
-  Sparkles
-} from 'lucide-react';
+import { ShieldAlert, Volume2, VolumeX, Copy, Check, Pause, Bell, BellOff } from 'lucide-react';
 import { alertSynth } from '../utils/audioAlert';
+import { useSerial } from '../context/SerialContext';
 
 const DEFAULT_PATTERNS = [
   'Guru Meditation Error',
@@ -25,6 +15,16 @@ const DEFAULT_PATTERNS = [
 ];
 
 export const TAIL_LIMIT = 4096;
+const PATTERNS_KEY = 'usb-tool.alerts.patterns';
+
+function loadPatterns() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PATTERNS_KEY) : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed) && parsed.every((p) => typeof p === 'string')) return parsed;
+  } catch { /* ignore */ }
+  return DEFAULT_PATTERNS;
+}
 
 /**
  * Patterns written as /body/flags are regular expressions; anything else is a
@@ -79,52 +79,112 @@ export function scanChunk(tail, chunk, compiled) {
 }
 
 export default function CrashAlertDeck({
-  latestTextStream = '',
   onPauseTerminal,
   onLogMessage
 }) {
+  const { subscribeRx } = useSerial();
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [autoPauseEnabled, setAutoPauseEnabled] = useState(true);
+  const [notifyEnabled, setNotifyEnabled] = useState(false);
+  const [contextLines, setContextLines] = useState(5);
   const [customPattern, setCustomPattern] = useState('');
-  const [activePatterns, setActivePatterns] = useState(DEFAULT_PATTERNS);
+  const [activePatterns, setActivePatterns] = useState(loadPatterns);
   const [crashHistory, setCrashHistory] = useState([]);
+  const [counters, setCounters] = useState({});
   const [copiedId, setCopiedId] = useState(null);
 
   const [patternWarning, setPatternWarning] = useState('');
-  const lastProcessedTextRef = useRef('');
   const tailRef = useRef('');
+  const pendingContextRef = useRef(null); // { id, remaining } while capturing lines after a hit
   const compiled = useMemo(() => activePatterns.map(compilePattern), [activePatterns]);
 
-  // Monitor incoming stream
+  // The receive callback outlives renders, so it reads the latest settings through a ref.
+  const liveRef = useRef({});
+  liveRef.current = { compiled, audioEnabled, autoPauseEnabled, notifyEnabled, contextLines, onPauseTerminal, onLogMessage };
+
   useEffect(() => {
-    if (!latestTextStream || latestTextStream === lastProcessedTextRef.current) return;
-    lastProcessedTextRef.current = latestTextStream;
+    try { localStorage.setItem(PATTERNS_KEY, JSON.stringify(activePatterns)); } catch { /* storage unavailable */ }
+  }, [activePatterns]);
 
-    const { tail, hit } = scanChunk(tailRef.current, latestTextStream, compiled);
-    tailRef.current = tail;
-    if (hit) {
-      const pattern = hit.pattern;
-      const time = new Date().toTimeString().split(' ')[0] + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
-      const newCrash = {
-        id: Math.random().toString(36).substring(2, 9),
-        time,
-        signature: pattern,
-        snippet: hit.snippet
-      };
+  // Title flash while the tab is hidden and an alert is unread.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const original = document.title;
+    let timer = null;
+    const stop = () => { clearInterval(timer); timer = null; document.title = original; };
+    const start = () => {
+      if (timer || !document.hidden) return;
+      let on = false;
+      timer = setInterval(() => { on = !on; document.title = on ? '\u26a0 CRASH ALERT' : original; }, 800);
+    };
+    const onVisible = () => { if (!document.hidden) stop(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('usb-tool-crash-alert', start);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('usb-tool-crash-alert', start);
+      stop();
+    };
+  }, []);
 
-      setCrashHistory(prev => [newCrash, ...prev.slice(0, 49)]);
+  // Monitor every received chunk (unbatched), so nothing is dropped between renders and
+  // identical consecutive chunks are each scanned.
+  useEffect(() => {
+    if (!subscribeRx) return undefined;
+    const decoder = new TextDecoder();
+    return subscribeRx((bytes) => {
+      const text = decoder.decode(bytes, { stream: true });
+      if (!text) return;
+      const live = liveRef.current;
 
-      if (audioEnabled) {
-        alertSynth.playCrashAlarm();
+      // Capture "N lines after" a previous hit into that incident.
+      const pend = pendingContextRef.current;
+      if (pend && pend.remaining > 0) {
+        let taken = '';
+        for (const ch of text) {
+          if (pend.remaining <= 0) break;
+          taken += ch;
+          if (ch === '\n') pend.remaining -= 1;
+        }
+        if (taken) setCrashHistory((prev) => prev.map((c) => (c.id === pend.id ? { ...c, snippet: c.snippet + taken } : c)));
+        if (pend.remaining <= 0) pendingContextRef.current = null;
       }
 
-      if (autoPauseEnabled && onPauseTerminal) {
-        onPauseTerminal(true);
-      }
+      const { tail, hit } = scanChunk(tailRef.current, text, live.compiled);
+      tailRef.current = tail;
+      if (!hit) return;
 
-      onLogMessage?.(`[CRASH ALERT] Matched signature "${pattern}" @ ${time}!`, 'sys');
+      const now = new Date();
+      const time = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+      const id = Math.random().toString(36).substring(2, 9);
+      const crash = { id, time, signature: hit.pattern, snippet: hit.snippet };
+      setCrashHistory(prev => [crash, ...prev.slice(0, 49)]);
+      setCounters(prev => ({ ...prev, [hit.pattern]: (prev[hit.pattern] || 0) + 1 }));
+      pendingContextRef.current = live.contextLines > 0 ? { id, remaining: live.contextLines } : null;
+
+      if (live.audioEnabled) alertSynth.playCrashAlarm();
+      if (live.autoPauseEnabled && live.onPauseTerminal) live.onPauseTerminal(true);
+      live.onLogMessage?.(`[CRASH ALERT] Matched signature "${hit.pattern}" @ ${time}!`, 'sys');
+
+      if (typeof document !== 'undefined' && document.hidden) {
+        if (live.notifyEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          try { new Notification('Crash alert', { body: `Matched "${hit.pattern}"` }); } catch { /* unsupported context */ }
+        }
+        try { window.dispatchEvent(new Event('usb-tool-crash-alert')); } catch { /* no window */ }
+      }
+    });
+  }, [subscribeRx]);
+
+  const toggleNotifications = async () => {
+    if (notifyEnabled) { setNotifyEnabled(false); return; }
+    if (typeof Notification === 'undefined') {
+      setPatternWarning('Desktop notifications are not supported in this browser.');
+      return;
     }
-  }, [latestTextStream, compiled, audioEnabled, autoPauseEnabled, onPauseTerminal, onLogMessage]);
+    const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission;
+    if (permission === 'granted') { setNotifyEnabled(true); setPatternWarning(''); }
+    else setPatternWarning('Notification permission was not granted.');
+  };
 
   const addCustomPattern = (e) => {
     e.preventDefault();
@@ -167,6 +227,31 @@ export default function CrashAlertDeck({
           </button>
 
           <button
+            onClick={toggleNotifications}
+            title="Desktop notification when an alert fires while this tab is hidden"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all ${
+              notifyEnabled ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-slate-900 text-slate-500 border-slate-800'
+            }`}
+          >
+            {notifyEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+            <span>Notify</span>
+          </button>
+
+          <label className="flex items-center gap-1 text-[11px] text-slate-400" title="Lines captured after a match">
+            <span>+</span>
+            <input
+              type="number"
+              min={0}
+              max={50}
+              value={contextLines}
+              onChange={(e) => setContextLines(Math.max(0, Math.min(50, Number(e.target.value) || 0)))}
+              aria-label="Lines of context after a match"
+              className="w-12 bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-slate-300"
+            />
+            <span>lines</span>
+          </label>
+
+          <button
             onClick={() => setAutoPauseEnabled(!autoPauseEnabled)}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all ${
               autoPauseEnabled ? 'bg-cyan-500/20 text-cyber-cyan border-cyan-500/40' : 'bg-slate-900 text-slate-500 border-slate-800'
@@ -190,6 +275,9 @@ export default function CrashAlertDeck({
               className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-[11px] text-rose-400"
             >
               <span>{pat}</span>
+              {counters[pat] > 0 && (
+                <span className="px-1 rounded bg-rose-950 text-rose-300 text-[10px]" title="Times matched">{counters[pat]}</span>
+              )}
               <button
                 onClick={() => removePattern(pat)}
                 className="text-slate-600 hover:text-slate-300 ml-1"

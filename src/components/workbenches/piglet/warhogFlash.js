@@ -2,13 +2,12 @@
 // official WarHog web flasher's c5flash.js (olosnoks/warhog web-flasher/c5flash.js),
 // so a board flashes here exactly as it does on the hosted flasher.
 //
-// Same engine: esptool-js 0.7.0 loaded from unpkg, the same four ESP32-C5 ROM
+// Same engine: esptool-js 0.7.0 (npm dependency, lazy chunk), the same four ESP32-C5 ROM
 // (--no-stub) patches, the same leading/trailing 0xFF trim, and the same
 // compressed writeFlash + hard reset. The only adaptation is that progress is
 // reported through a `report(st)` callback (for the React progress block)
 // instead of writing into the card's DOM.
 
-const ESPTOOL_JS = 'https://unpkg.com/esptool-js@0.7.0/bundle.js';
 const SECTOR_SIZE = 0x1000; // 4 KB flash sector
 
 export function isWebSerialSupported() {
@@ -134,7 +133,7 @@ export async function flashBoardFirmware({ binUrl, expectChip, report }) {
   // Request the serial port on the click gesture, before awaiting the network
   // import/download (which can expire Chrome's user activation).
   report({ stage: 'Choose the board’s serial port', sub: 'Pick it in the browser prompt.' });
-  const esptoolPromise = import(/* @vite-ignore */ ESPTOOL_JS);
+  const esptoolPromise = import('esptool-js');
   const fwPromise = fetch(binUrl, { cache: 'no-store' }).then(async (resp) => {
     if (!resp.ok) throw new Error('couldn’t fetch image (' + resp.status + ')');
     return new Uint8Array(await resp.arrayBuffer());

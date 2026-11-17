@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { proxiedFetch, isProxyEnabled, describeNetworkError } from '../../utils/netClient';
+import { sendHttp, hexDumpBytes, timeoutFromSeconds, downloadBlob, toCsv } from '../../utils/httpSend';
+import { toCurl } from '../../utils/httpImport';
 import {
-  parseSpec, listOperations, getServers, buildRequest, exampleBody, fuzzCases,
+  parseSpec, listOperations, getServers, buildRequest, exampleBody, fuzzCases, paramKey, isAbsoluteUrl, bodyContentType,
 } from '../../utils/openapi';
 import ProxyConfig from './common/ProxyConfig';
 
@@ -19,14 +21,14 @@ function parseHeaderText(text) {
   return h;
 }
 
-async function sendBuilt(built) {
+async function sendBuilt(built, { signal, timeoutMs } = {}) {
   const opts = { method: built.method, headers: parseHeaderText(built.headers), redirect: 'follow' };
   if (built.body && built.method !== 'GET' && built.method !== 'HEAD') opts.body = built.body;
-  const start = performance.now();
-  const resp = await proxiedFetch(built.url, opts);
-  const text = await resp.text();
-  return { status: resp.status, statusText: resp.statusText, size: text.length, timeMs: Math.round(performance.now() - start), body: text, headers: [...resp.headers.entries()] };
+  return sendHttp(built.url, opts, { signal, timeoutMs });
 }
+
+const isCancel = (e) => e?.name === 'AbortError' || e?.name === 'TimeoutError';
+const errText = (e) => (isCancel(e) ? e.message : describeNetworkError(e));
 
 function parseVars(text) {
   const env = {};
@@ -56,6 +58,8 @@ export default function ApiClientWorkbench({ onLogMessage, hideProxyConfig = fal
   const [busy, setBusy] = useState(false);
   const [fuzzRows, setFuzzRows] = useState([]);
   const [fuzzing, setFuzzing] = useState(false);
+  const [timeoutSec, setTimeoutSec] = useState('30');
+  const abortRef = useRef(null);
 
   const log = (msg) => onLogMessage?.(msg);
   const ops = useMemo(() => (spec ? listOperations(spec) : []), [spec]);
@@ -64,7 +68,7 @@ export default function ApiClientWorkbench({ onLogMessage, hideProxyConfig = fal
   const loadSpec = (text) => {
     try {
       const s = parseSpec(text);
-      const srv = getServers(s);
+      const srv = getServers(s, specUrl.trim());
       setSpec(s); setServers(srv); setBaseUrl(srv[0] || ''); setSpecError(''); setSelected(null);
       log(`Loaded spec: ${s.info?.title || 'untitled'} — ${listOperations(s).length} operation(s)`);
     } catch (e) { setSpecError(e.message); setSpec(null); log(`Spec error: ${e.message}`); }
@@ -85,39 +89,65 @@ export default function ApiClientWorkbench({ onLogMessage, hideProxyConfig = fal
     setResponse(null);
     setFuzzRows([]);
     const pv = {};
-    (op.parameters || []).forEach((p) => { if (p.example !== undefined) pv[p.name] = p.example; });
+    (op.parameters || []).forEach((p) => { if (p.example !== undefined) pv[paramKey(p)] = p.example; });
     setParamValues(pv);
     setBodyText(exampleBody(op, spec));
   };
 
+  const timeoutMs = timeoutFromSeconds(timeoutSec);
+  const baseOk = isAbsoluteUrl(baseUrl.replace(/\{\{(\w+)\}\}/g, (_, k) => env[k] ?? ''));
+
+  const cancel = () => abortRef.current?.abort();
+
   const send = async () => {
     if (!selected) return;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setBusy(true); setResponse(null);
-    const built = buildRequest({ op: selected, spec, baseUrl, paramValues, bodyText, auth, env });
-    log(`${built.method} ${built.url}${isProxyEnabled() ? ' (via proxy)' : ''}`);
-    try { setResponse(await sendBuilt(built)); }
-    catch (e) { setResponse({ error: describeNetworkError(e) }); }
+    try {
+      const built = buildRequest({ op: selected, spec, baseUrl, paramValues, bodyText, auth, env });
+      log(`${built.method} ${built.url}${isProxyEnabled() ? ' (via proxy)' : ''}`);
+      setResponse({ ...(await sendBuilt(built, { signal: ctrl.signal, timeoutMs })), built });
+    } catch (e) { setResponse({ error: isCancel(e) || /Base URL/.test(e.message) ? e.message : describeNetworkError(e) }); }
+    abortRef.current = null;
     setBusy(false);
   };
 
   const runFuzz = async () => {
     if (!selected) return;
-    setFuzzing(true); setFuzzRows([]);
     const cases = fuzzCases(selected, spec, paramValues, bodyText);
+    if (!cases.length) { log('No fuzz cases for this endpoint'); return; }
+    if (typeof window !== 'undefined' && !window.confirm(`This sends ${cases.length} request(s) to ${baseUrl}. Only fuzz APIs you own or are authorized to test. Continue?`)) return;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setFuzzing(true); setFuzzRows([]);
     log(`Fuzzing ${selected.method} ${selected.path}: ${cases.length} case(s)`);
     const rows = [];
     for (const c of cases) {
-      const built = buildRequest({ op: selected, spec, baseUrl, paramValues: c.paramValues, bodyText: c.bodyText, auth, env });
+      if (ctrl.signal.aborted) break;
       try {
-        const res = await sendBuilt(built);
+        const built = buildRequest({ op: selected, spec, baseUrl, paramValues: c.paramValues, bodyText: c.bodyText, auth, env });
+        const res = await sendBuilt(built, { signal: ctrl.signal, timeoutMs });
         rows.push({ label: c.label, status: res.status, length: res.size, flag: res.status >= 500 });
       } catch (e) {
-        rows.push({ label: c.label, status: 'err', length: 0, flag: true, note: describeNetworkError(e) });
+        if (ctrl.signal.aborted) break;
+        rows.push({ label: c.label, status: 'err', length: 0, flag: true, note: errText(e) });
       }
       setFuzzRows([...rows]);
     }
+    log(ctrl.signal.aborted ? 'Fuzz cancelled' : 'Fuzz complete');
+    abortRef.current = null;
     setFuzzing(false);
-    log('Fuzz complete');
+  };
+
+  const exportFuzz = () => {
+    downloadBlob(toCsv(['case', 'status', 'length', 'flagged', 'note'], fuzzRows.map((r) => [r.label, r.status, r.length, r.flag ? 'yes' : 'no', r.note || ''])), 'api-fuzz-results.csv', 'text/csv');
+  };
+
+  const copyCurl = () => {
+    if (!response?.built) return;
+    navigator.clipboard?.writeText(toCurl(response.built));
+    log('Copied as curl');
   };
 
   const shownOps = ops.filter((o) => !filter || `${o.method} ${o.path} ${o.summary}`.toLowerCase().includes(filter.toLowerCase()));
@@ -150,8 +180,9 @@ export default function ApiClientWorkbench({ onLogMessage, hideProxyConfig = fal
                 {servers.map((s) => <option key={s}>{s}</option>)}
               </select>
             )}
-            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200" />
+            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.example.com" className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200" />
           </div>
+          {!baseOk && <p role="alert" className="mb-2 text-xs text-amber-300">The base URL must be absolute (http:// or https://). This spec declares a relative server URL; enter the full API origin to enable Send.</p>}
           <div className="flex flex-wrap gap-2 mb-3 items-start">
             <div className="flex-1 min-w-[12rem]">
               <label className="text-xs text-gray-400">Variables ({'{{name}}'} — one NAME=value per line)</label>
@@ -187,35 +218,44 @@ export default function ApiClientWorkbench({ onLogMessage, hideProxyConfig = fal
               ) : (
                 <div>
                   <div className="mb-2"><span className={`font-bold ${METHOD_COLORS[selected.method]}`}>{selected.method}</span> <span className="text-gray-200 break-all">{selected.path}</span></div>
-                  {(selected.parameters || []).length > 0 && (
+                  {(selected.parameters || []).some((p) => p.in !== 'body') && (
                     <div className="mb-2 space-y-1">
-                      {selected.parameters.map((p) => (
-                        <div key={p.name + p.in} className="flex items-center gap-2">
+                      {selected.parameters.filter((p) => p.in !== 'body').map((p) => (
+                        <div key={paramKey(p)} className="flex items-center gap-2">
                           <label className="text-xs text-gray-400 w-40 shrink-0 truncate" title={p.description || ''}>{p.name} <span className="text-gray-600">({p.in}{p.required ? ', req' : ''})</span></label>
-                          <input value={paramValues[p.name] ?? ''} onChange={(e) => setParamValues({ ...paramValues, [p.name]: e.target.value })} className="flex-1 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200" />
+                          <input value={paramValues[paramKey(p)] ?? ''} onChange={(e) => setParamValues({ ...paramValues, [paramKey(p)]: e.target.value })} className="flex-1 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200" />
                         </div>
                       ))}
                     </div>
                   )}
                   {(selected.method !== 'GET' && selected.method !== 'HEAD') && (
-                    <textarea value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={5} placeholder="request body (JSON)" className="w-full mb-2 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
+                    <textarea value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={5} placeholder={`request body (${bodyContentType(selected) || 'application/json'})`} className="w-full mb-2 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
                   )}
                   <div className="flex gap-2">
-                    <button onClick={send} disabled={busy} className="px-3 py-1 bg-cyan-600 text-white rounded hover:bg-cyan-500 disabled:opacity-40">{busy ? 'Sending…' : 'Send'}</button>
-                    <button onClick={runFuzz} disabled={fuzzing} className="px-3 py-1 bg-rose-600 text-white rounded hover:bg-rose-500 disabled:opacity-40">{fuzzing ? 'Fuzzing…' : 'Fuzz endpoint'}</button>
+                    <button onClick={send} disabled={busy || fuzzing || !baseOk} className="px-3 py-1 bg-cyan-600 text-white rounded hover:bg-cyan-500 disabled:opacity-40">{busy ? 'Sending…' : 'Send'}</button>
+                    <button onClick={runFuzz} disabled={busy || fuzzing || !baseOk} className="px-3 py-1 bg-rose-600 text-white rounded hover:bg-rose-500 disabled:opacity-40">{fuzzing ? 'Fuzzing…' : 'Fuzz endpoint'}</button>
+                    {(busy || fuzzing) && <button onClick={cancel} className="px-3 py-1 bg-red-700 text-white rounded hover:bg-red-600">Cancel</button>}
+                    <label className="text-xs text-gray-400 self-center">Timeout <input aria-label="Timeout seconds" value={timeoutSec} onChange={(e) => setTimeoutSec(e.target.value)} className="w-12 bg-slate-900 border border-slate-800 rounded p-0.5 text-xs text-gray-200 text-center" /> s</label>
                   </div>
 
                   {response && !response.error && (
                     <div className="mt-3">
-                      <div>Status: <span className={response.status < 400 ? 'text-green-400' : 'text-red-400'}>{response.status} {response.statusText}</span> <span className="text-gray-500 text-xs">{response.size}b · {response.timeMs}ms</span></div>
-                      <pre className="mt-1 bg-slate-800 p-2 rounded overflow-auto text-xs" style={{ maxHeight: '30vh' }}>{response.body}</pre>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span>Status: <span className={response.status < 400 ? 'text-green-400' : 'text-red-400'}>{response.status} {response.statusText}</span></span>
+                        <span className="text-gray-500 text-xs">{response.size} bytes · {response.timeMs}ms{response.isBinary ? ' · binary' : ''}</span>
+                        <button onClick={copyCurl} className="px-2 py-0.5 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Copy as curl</button>
+                        {response.isBinary && <button onClick={() => downloadBlob(response.bytes, `response-${response.status}.bin`, response.contentType || 'application/octet-stream')} className="px-2 py-0.5 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Save response</button>}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-400">Response headers:</div>
+                      <pre className="bg-slate-800 p-2 rounded overflow-auto text-xs" style={{ maxHeight: '12vh' }}>{response.headers.map(([k, v]) => `${k}: ${v}`).join('\n')}</pre>
+                      <pre className="mt-1 bg-slate-800 p-2 rounded overflow-auto text-xs" style={{ maxHeight: '30vh' }}>{response.isBinary ? hexDumpBytes(response.bytes) : response.body}</pre>
                     </div>
                   )}
                   {response?.error && <p className="text-red-400 text-xs mt-2">{response.error}</p>}
 
                   {fuzzRows.length > 0 && (
                     <div className="mt-3">
-                      <div className="text-xs text-gray-400 mb-1">Fuzz results (5xx / errors highlighted):</div>
+                      <div className="text-xs text-gray-400 mb-1 flex items-center gap-2">Fuzz results (5xx / errors highlighted): <button onClick={exportFuzz} className="px-2 py-0.5 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Export CSV</button></div>
                       <div className="overflow-auto" style={{ maxHeight: '28vh' }}>
                         <table className="w-full text-xs font-mono border-collapse">
                           <thead className="bg-slate-800 text-left"><tr><th className="p-1">Case</th><th className="p-1">Status</th><th className="p-1">Length</th></tr></thead>

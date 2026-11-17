@@ -83,6 +83,24 @@ export function parsePreamble(text) {
   return { format: f[0], type: f[1], points: f[2], count: f[3], xinc: f[4], xorig: f[5], xref: f[6], yinc: f[7], yorig: f[8], yref: f[9] };
 }
 
+/** Bulk transfers (waveforms, screenshots) get a longer timeout than console queries. */
+export const BULK_TIMEOUT_MS = 30000;
+const bulkOpts = (inst) => ({ timeoutMs: Math.max(inst?.timeoutMs || 0, BULK_TIMEOUT_MS) });
+
+/**
+ * Drain the instrument's SYST:ERR? queue (stops at "0,No error" or after `max`).
+ * Returns the non-zero error strings.
+ */
+export async function drainErrors(inst, max = 10) {
+  const errors = [];
+  for (let i = 0; i < max; i++) {
+    const e = String(await inst.query('SYST:ERR?')).trim();
+    if (/^\+?0\b/.test(e)) break;
+    errors.push(e);
+  }
+  return errors;
+}
+
 /**
  * Read one channel's displayed waveform.
  * Returns { times, volts, xinc, points, source, formula }.
@@ -96,7 +114,7 @@ export async function fetchWaveform(inst, profile, channel = 1, { points = 1000 
     const tdiv = parseNumber(await inst.query('TDIV?'));
     const sara = parseNumber(await inst.query('SARA?'));
     await inst.write(`${ch}:WF? DAT2`);
-    const raw = parseIeeeBlock(await inst.read());
+    const raw = parseIeeeBlock(await inst.read(bulkOpts(inst)));
     const volts = new Float64Array(raw.length);
     for (let i = 0; i < raw.length; i++) {
       const code = raw[i] > 127 ? raw[i] - 256 : raw[i];
@@ -119,7 +137,7 @@ export async function fetchWaveform(inst, profile, channel = 1, { points = 1000 
     const yoff = await g('WFMOUTPRE:YOFF?');
     const yzero = await g('WFMOUTPRE:YZERO?');
     await inst.write('CURVE?');
-    const raw = parseIeeeBlock(await inst.read());
+    const raw = parseIeeeBlock(await inst.read(bulkOpts(inst)));
     const volts = Float64Array.from(raw, (b) => ((b > 127 ? b - 256 : b) - yoff) * ymult + yzero);
     return { times: Float64Array.from(volts, (_, i) => xzero + i * xinc), volts, xinc, points: raw.length, source: `CH${channel}`, formula: '(code − YOFF) × YMULT + YZERO' };
   }
@@ -134,7 +152,7 @@ export async function fetchWaveform(inst, profile, channel = 1, { points = 1000 
   await inst.write(':WAV:FORM BYTE');
   const pre = parsePreamble(await inst.query(':WAV:PRE?'));
   await inst.write(':WAV:DATA?');
-  const raw = parseIeeeBlock(await inst.read());
+  const raw = parseIeeeBlock(await inst.read(bulkOpts(inst)));
   const volts = new Float64Array(raw.length);
   // Rigol: (code − YORigin − YREFerence) × YINCrement. Keysight: (code − yref) × yinc + yorigin.
   if (fam === 'rigol') for (let i = 0; i < raw.length; i++) volts[i] = (raw[i] - pre.yorig - pre.yref) * pre.yinc;
@@ -183,15 +201,15 @@ export async function fetchScreenshot(inst, profile) {
   let raw;
   if (profile.family === 'siglent') {
     await inst.write('SCDP');
-    raw = await inst.read();
+    raw = await inst.read(bulkOpts(inst));
   } else if (profile.family === 'rigol') {
     await inst.write(':DISP:DATA? ON,OFF,PNG');
-    raw = await inst.read();
+    raw = await inst.read(bulkOpts(inst));
   } else if (profile.family === 'tek') {
     throw new Error('Tektronix scopes save screenshots to their own storage; use SAVE:IMAGE on the instrument.');
   } else {
     await inst.write(':DISP:DATA? PNG,COL');
-    raw = await inst.read();
+    raw = await inst.read(bulkOpts(inst));
   }
   let data = imageMime(raw) ? raw : parseIeeeBlock(raw);
   const mime = imageMime(data);

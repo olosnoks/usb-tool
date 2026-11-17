@@ -336,7 +336,7 @@ export const UDS_NRC = {
   0x35: 'invalid key', 0x36: 'exceeded number of attempts', 0x37: 'required time delay not expired',
   0x70: 'upload/download not accepted', 0x71: 'transfer data suspended', 0x72: 'general programming failure',
   0x73: 'wrong block sequence counter', 0x78: 'response pending', 0x7e: 'sub-function not supported in active session',
-  0x7f: 'service not supported in active session'
+  0x7f: 'service not supported in active session', 0x92: 'voltage too high', 0x93: 'voltage too low'
 };
 
 export const UDS_SERVICES = {
@@ -372,10 +372,27 @@ export function formatDidValue(bytes) {
   return b.map((x) => hex(x)).join(' ');
 }
 
+export class UdsDeclinedError extends Error {}
+
+const bytesBE = (value, n) => Array.from({ length: n }, (_, i) => Math.floor(value / 2 ** (8 * (n - 1 - i))) & 0xff);
+
+export const UDS_ROUTINE_TYPES = { 1: 'start', 2: 'stop', 3: 'request results' };
+
 export class UdsClient {
-  constructor(isotp, { p2StarMs = 5000 } = {}) {
+  /**
+   * `confirm(message) => boolean` is asked before every service that changes
+   * the ECU (routine start/stop, write DID, communication control, DTC setting,
+   * security key). Without one those services refuse to run; in the UI pass
+   * `confirmAction` from utils/sessionLog.
+   */
+  constructor(isotp, { p2StarMs = 5000, confirm = null } = {}) {
     this.tp = isotp;
     this.p2StarMs = p2StarMs;
+    this.confirm = confirm;
+  }
+
+  _confirmed(message) {
+    if (!this.confirm || !this.confirm(message)) throw new UdsDeclinedError(`Not sent: ${message.split('\n')[0]}`);
   }
 
   async request(bytes, { timeoutMs } = {}) {
@@ -436,6 +453,80 @@ export class UdsClient {
   }
 
   clearDtcs(group = 0xffffff) { return this.request([0x14, (group >> 16) & 0xff, (group >> 8) & 0xff, group & 0xff]); }
+
+  // --- SecurityAccess (0x27): the standard seed/key exchange only. The key is
+  // always supplied by the user; this tool does not compute or guess keys. ---
+
+  /** 27 <odd level>: ask for a seed. An all-zero seed means the level is already unlocked. */
+  async requestSeed(level = 0x01) {
+    if (!Number.isInteger(level) || level < 1 || level > 0x7d || level % 2 === 0) throw new RangeError('A seed request uses an odd level (01, 03, 05, ...).');
+    const r = await this.request([0x27, level]);
+    if (r[1] !== level) throw new Error(`Reply was for security level 0x${hex(r[1])}.`);
+    const seed = r.slice(2);
+    return { level, seed, unlocked: seed.length > 0 && seed.every((b) => b === 0) };
+  }
+
+  /** 27 <level+1> <key>: send the key the user computed. Confirmation required. */
+  async sendKey(level, key) {
+    const k = Array.from(key || []);
+    if (!k.length) throw new Error('Enter the key (hex) for this seed first; none is computed for you.');
+    this._confirmed(`Send SecurityAccess key (27 ${hex(level + 1)}, ${k.length} bytes) to this ECU?\nWrong keys count against the ECU's attempt limit and can lock it for a while.`);
+    const r = await this.request([0x27, level + 1, ...k]);
+    return { level, accepted: r[0] === 0x67 };
+  }
+
+  /** Both steps: keyProvider(seed, level) returns the key bytes (the UI asks the user). */
+  async securityAccess(level, keyProvider) {
+    const s = await this.requestSeed(level);
+    if (s.unlocked) return { level, accepted: true, alreadyUnlocked: true, seed: s.seed };
+    const key = await keyProvider(s.seed, level);
+    const r = await this.sendKey(level, key);
+    return { ...r, seed: s.seed };
+  }
+
+  // --- Services that act on the ECU. All ask for confirmation first. ---
+
+  /** 31 <type> <routine id> [option record]. type 1 start, 2 stop, 3 request results (read-only, no prompt). */
+  async routineControl(type, routineId, option = []) {
+    if (!UDS_ROUTINE_TYPES[type]) throw new RangeError('Routine control type is 1 (start), 2 (stop) or 3 (results).');
+    if (!Number.isInteger(routineId) || routineId < 0 || routineId > 0xffff) throw new RangeError('A routine ID is 16 bits.');
+    if (type !== 3) this._confirmed(`Send UDS RoutineControl ${UDS_ROUTINE_TYPES[type]} for routine 0x${hex(routineId, 4)} to this ECU?\nRoutines can erase memory, actuate outputs or change calibration.`);
+    const r = await this.request([0x31, type, routineId >> 8, routineId & 0xff, ...option]);
+    if (r[1] !== type || ((r[2] << 8) | r[3]) !== routineId) throw new Error('The routine reply did not echo the request.');
+    return { type, routineId, status: r.slice(4) };
+  }
+
+  /** 2E <DID> <data>: write a data identifier. */
+  async writeDid(did, bytes) {
+    const data = Array.from(bytes || []);
+    if (!Number.isInteger(did) || did < 0 || did > 0xffff) throw new RangeError('A DID is 16 bits.');
+    if (!data.length) throw new Error('Nothing to write.');
+    this._confirmed(`Write ${data.length} byte${data.length === 1 ? '' : 's'} to DID 0x${hex(did, 4)}${UDS_DIDS[did] ? ` (${UDS_DIDS[did]})` : ''} on this ECU?\nThis changes what is stored in the ECU.`);
+    const r = await this.request([0x2e, did >> 8, did & 0xff, ...data]);
+    if (((r[1] << 8) | r[2]) !== did) throw new Error(`Reply was for DID 0x${hex((r[1] << 8) | r[2], 4)}.`);
+    return r;
+  }
+
+  /** 23 ReadMemoryByAddress (read-only). */
+  async readMemory(address, size, { addressBytes = 4, sizeBytes = 2 } = {}) {
+    if (addressBytes < 1 || addressBytes > 5 || sizeBytes < 1 || sizeBytes > 5) throw new RangeError('Address and size fields are 1 to 5 bytes.');
+    if (!(size > 0) || size >= 2 ** (8 * sizeBytes)) throw new RangeError(`Size must fit in ${sizeBytes} byte(s).`);
+    if (address < 0 || address >= 2 ** (8 * addressBytes)) throw new RangeError(`Address must fit in ${addressBytes} byte(s).`);
+    const r = await this.request([0x23, (sizeBytes << 4) | addressBytes, ...bytesBE(address, addressBytes), ...bytesBE(size, sizeBytes)]);
+    return r.slice(1);
+  }
+
+  /** 28 CommunicationControl: 00 enable rx+tx, 01 enable rx/disable tx, 02 disable rx/enable tx, 03 disable both. */
+  async communicationControl(controlType = 0x00, communicationType = 0x01) {
+    this._confirmed(`Send UDS CommunicationControl (28 ${hex(controlType)} ${hex(communicationType)}) to this ECU?\nDisabling communication can silence the ECU on the bus.`);
+    return this.request([0x28, controlType, communicationType]);
+  }
+
+  /** 85 ControlDTCSetting: 01 on, 02 off (stops the ECU from logging DTCs). */
+  async controlDtcSetting(setting = 0x01, option = []) {
+    this._confirmed(`Send UDS ControlDTCSetting (85 ${hex(setting)}) to this ECU?\n${setting === 2 ? 'DTC logging stays off until you turn it back on or the session ends.' : 'This turns DTC logging back on.'}`);
+    return this.request([0x85, setting, ...option]);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -479,6 +570,233 @@ export function decodeSupportedPids(base, bytes) {
   const out = [];
   for (let i = 0; i < 32; i++) if (bytes[i >> 3] & (0x80 >> (i & 7))) out.push(base + i + 1);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// SAE J1939 (heavy vehicles, marine, agriculture): 29-bit identifiers
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a 29-bit J1939 identifier: priority (3 bits), PGN, source address and,
+ * for PDU1 messages (PF < 240), the destination address. PDU2 messages are
+ * broadcast: `da` is 0xFF.
+ */
+export function decodeJ1939Id(id) {
+  const priority = (id >>> 26) & 0x07;
+  const edp = (id >>> 25) & 1;
+  const dp = (id >>> 24) & 1;
+  const pf = (id >>> 16) & 0xff;
+  const ps = (id >>> 8) & 0xff;
+  const sa = id & 0xff;
+  const pdu1 = pf < 240;
+  const pgn = ((edp << 17) | (dp << 16) | (pf << 8) | (pdu1 ? 0 : ps)) >>> 0;
+  return { priority, pgn, sa, da: pdu1 ? ps : 0xff, pdu1 };
+}
+
+/** Build a 29-bit identifier from priority, PGN, source and (PDU1 only) destination. */
+export function buildJ1939Id({ priority = 6, pgn, sa, da = 0xff }) {
+  const pf = (pgn >> 8) & 0xff;
+  const low = pf < 240 ? da & 0xff : pgn & 0xff;
+  return (((priority & 7) << 26) | (((pgn >> 16) & 3) << 24) | (pf << 16) | (low << 8) | (sa & 0xff)) >>> 0;
+}
+
+/** PGN request (PGN 59904): ask `da` (0xFF = everyone) to send `pgn`. Returns a frame for the sender. */
+export function buildJ1939Request(pgn, { da = 0xff, sa = 0xf9, priority = 6 } = {}) {
+  if (!Number.isInteger(pgn) || pgn < 0 || pgn > 0x3ffff) throw new RangeError('A PGN is 18 bits (0-262143).');
+  return {
+    id: buildJ1939Id({ priority, pgn: 59904, sa, da }),
+    isExtended: true,
+    dlc: 3,
+    data: Uint8Array.from([pgn & 0xff, (pgn >> 8) & 0xff, (pgn >> 16) & 0x03])
+  };
+}
+
+// [acronym, name] by PGN (SAE J1939-71 / -21 / -81 names for the common ones).
+export const J1939_PGNS = {
+  0: ['TSC1', 'Torque/Speed Control 1'],
+  59392: ['ACKM', 'Acknowledgment'],
+  59904: ['RQST', 'Request'],
+  60160: ['TP.DT', 'Transport Protocol Data Transfer'],
+  60416: ['TP.CM', 'Transport Protocol Connection Management'],
+  60928: ['AC', 'Address Claimed'],
+  61184: ['PROPA', 'Proprietary A'],
+  61440: ['ERC1', 'Electronic Retarder Controller 1'],
+  61441: ['EBC1', 'Electronic Brake Controller 1'],
+  61442: ['ETC1', 'Electronic Transmission Controller 1'],
+  61443: ['EEC2', 'Electronic Engine Controller 2'],
+  61444: ['EEC1', 'Electronic Engine Controller 1'],
+  61445: ['ETC2', 'Electronic Transmission Controller 2'],
+  61449: ['VDC2', 'Vehicle Dynamic Stability Control 2'],
+  64965: ['ECUID', 'ECU Identification Information'],
+  65098: ['ETC7', 'Electronic Transmission Controller 7'],
+  65110: ['AT1T1I', 'Aftertreatment 1 DEF Tank 1 Information'],
+  65132: ['TCO1', 'Tachograph'],
+  65217: ['VDHR', 'High Resolution Vehicle Distance'],
+  65226: ['DM1', 'Active Diagnostic Trouble Codes'],
+  65227: ['DM2', 'Previously Active Diagnostic Trouble Codes'],
+  65228: ['DM3', 'Diagnostic Data Clear/Reset of Previously Active DTCs'],
+  65229: ['DM4', 'Freeze Frame Parameters'],
+  65230: ['DM5', 'Diagnostic Readiness 1'],
+  65231: ['DM6', 'Pending Diagnostic Trouble Codes'],
+  65235: ['DM11', 'Diagnostic Data Clear/Reset for Active DTCs'],
+  65236: ['DM12', 'Emissions-Related Active DTCs'],
+  65242: ['SOFT', 'Software Identification'],
+  65247: ['EEC3', 'Electronic Engine Controller 3'],
+  65248: ['VD', 'Vehicle Distance'],
+  65249: ['RCFG', 'Retarder Configuration'],
+  65250: ['TCFG', 'Transmission Configuration'],
+  65251: ['ECFG', 'Engine Configuration'],
+  65252: ['SHUTDN', 'Shutdown'],
+  65253: ['HOURS', 'Engine Hours, Revolutions'],
+  65254: ['TD', 'Time/Date'],
+  65255: ['VH', 'Vehicle Hours'],
+  65256: ['VDS', 'Vehicle Direction/Speed'],
+  65257: ['LFC', 'Fuel Consumption (Liquid)'],
+  65258: ['VW', 'Vehicle Weight'],
+  65259: ['CI', 'Component Identification'],
+  65260: ['VI', 'Vehicle Identification'],
+  65261: ['CCSS', 'Cruise Control/Vehicle Speed Setup'],
+  65262: ['ET1', 'Engine Temperature 1'],
+  65263: ['EFL/P1', 'Engine Fluid Level/Pressure 1'],
+  65264: ['PTO', 'Power Takeoff Information'],
+  65265: ['CCVS', 'Cruise Control/Vehicle Speed'],
+  65266: ['LFE', 'Fuel Economy (Liquid)'],
+  65267: ['VP', 'Vehicle Position'],
+  65268: ['TIRE', 'Tire Condition'],
+  65269: ['AMB', 'Ambient Conditions'],
+  65270: ['IC1', 'Inlet/Exhaust Conditions 1'],
+  65271: ['VEP1', 'Vehicle Electrical Power 1'],
+  65272: ['TRF1', 'Transmission Fluids 1'],
+  65274: ['BRAKES', 'Brakes'],
+  65275: ['RF', 'Retarder Fluids'],
+  65276: ['DD', 'Dash Display'],
+  65277: ['AF', 'Alternate Fuel 1'],
+  65278: ['AWPP', 'Auxiliary Water Pump Pressure'],
+  65279: ['WFI', 'Water in Fuel Indicator 1']
+};
+
+export function j1939PgnName(pgn) {
+  const e = J1939_PGNS[pgn];
+  if (e) return { acronym: e[0], name: e[1] };
+  if (pgn >= 61184 && pgn <= 61439) return { acronym: 'PROPA', name: 'Proprietary A (manufacturer specific)' };
+  if (pgn >= 65280 && pgn <= 65535) return { acronym: 'PROPB', name: 'Proprietary B (manufacturer specific)' };
+  return { acronym: null, name: null };
+}
+
+export const J1939_FMI = {
+  0: 'data valid but above normal range (most severe)', 1: 'data valid but below normal range (most severe)',
+  2: 'data erratic, intermittent or incorrect', 3: 'voltage above normal or shorted high', 4: 'voltage below normal or shorted low',
+  5: 'current below normal or open circuit', 6: 'current above normal or grounded', 7: 'mechanical system not responding',
+  8: 'abnormal frequency, pulse width or period', 9: 'abnormal update rate', 10: 'abnormal rate of change',
+  11: 'root cause not known', 12: 'bad intelligent device', 13: 'out of calibration', 14: 'special instructions',
+  15: 'data valid but above normal range (least severe)', 16: 'data valid but above normal range (moderately severe)',
+  17: 'data valid but below normal range (least severe)', 18: 'data valid but below normal range (moderately severe)',
+  19: 'network data error', 20: 'data drifted high', 21: 'data drifted low', 31: 'condition exists'
+};
+
+// Numeric SPN fields per PGN: { spn, name, unit, off (byte), len (bytes), scale, offset }.
+const F = (spn, name, unit, off, len, scale, offset = 0) => ({ spn, name, unit, off, len, scale, offset });
+const J1939_SPNS = {
+  61443: [F(91, 'Accelerator pedal position 1', '%', 1, 1, 0.4), F(92, 'Engine percent load at current speed', '%', 2, 1, 1)],
+  61444: [F(512, 'Driver demand engine torque', '%', 1, 1, 1, -125), F(513, 'Actual engine torque', '%', 2, 1, 1, -125), F(190, 'Engine speed', 'rpm', 3, 2, 0.125)],
+  65217: [F(917, 'Total vehicle distance (high res)', 'km', 0, 4, 0.005), F(918, 'Trip distance (high res)', 'km', 4, 4, 0.005)],
+  65247: [F(514, 'Nominal friction torque', '%', 0, 1, 1, -125), F(515, 'Desired operating speed', 'rpm', 1, 2, 0.125)],
+  65248: [F(244, 'Trip distance', 'km', 0, 4, 0.125), F(245, 'Total vehicle distance', 'km', 4, 4, 0.125)],
+  65253: [F(247, 'Total engine hours', 'h', 0, 4, 0.05), F(249, 'Total engine revolutions', 'r', 4, 4, 1000)],
+  65257: [F(182, 'Trip fuel', 'L', 0, 4, 0.5), F(250, 'Total fuel used', 'L', 4, 4, 0.5)],
+  65262: [F(110, 'Engine coolant temperature', '°C', 0, 1, 1, -40), F(174, 'Fuel temperature', '°C', 1, 1, 1, -40), F(175, 'Engine oil temperature', '°C', 2, 2, 0.03125, -273)],
+  65263: [F(94, 'Fuel delivery pressure', 'kPa', 0, 1, 4), F(98, 'Engine oil level', '%', 2, 1, 0.4), F(100, 'Engine oil pressure', 'kPa', 3, 1, 4), F(111, 'Coolant level', '%', 7, 1, 0.4)],
+  65265: [F(84, 'Wheel-based vehicle speed', 'km/h', 1, 2, 1 / 256), F(86, 'Cruise control set speed', 'km/h', 5, 1, 1)],
+  65266: [F(183, 'Fuel rate', 'L/h', 0, 2, 0.05), F(184, 'Instantaneous fuel economy', 'km/L', 2, 2, 1 / 512), F(51, 'Throttle position', '%', 6, 1, 0.4)],
+  65269: [F(108, 'Barometric pressure', 'kPa', 0, 1, 0.5), F(171, 'Ambient air temperature', '°C', 3, 2, 0.03125, -273), F(172, 'Air inlet temperature', '°C', 5, 1, 1, -40)],
+  65270: [F(102, 'Boost pressure', 'kPa', 1, 1, 2), F(105, 'Intake manifold temperature', '°C', 2, 1, 1, -40), F(173, 'Exhaust gas temperature', '°C', 5, 2, 0.03125, -273)],
+  65271: [F(114, 'Net battery current', 'A', 0, 1, 1, -125), F(115, 'Alternator current', 'A', 1, 1, 1), F(167, 'Charging system potential', 'V', 2, 2, 0.05), F(168, 'Battery potential', 'V', 4, 2, 0.05)],
+  65276: [F(80, 'Washer fluid level', '%', 0, 1, 0.4), F(96, 'Fuel level 1', '%', 1, 1, 0.4)]
+};
+
+const le = (data, off, len) => {
+  let v = 0;
+  for (let i = len - 1; i >= 0; i--) v = v * 256 + data[off + i];
+  return v;
+};
+
+/** J1939 NAME (the 8 data bytes of an Address Claimed message). */
+export function decodeJ1939Name(d) {
+  if (d.length < 8) return null;
+  const groups = ['global', 'on-highway', 'agricultural/forestry', 'construction', 'marine', 'industrial/process control'];
+  const industryGroup = (d[7] >> 4) & 7;
+  return {
+    identityNumber: d[0] | (d[1] << 8) | ((d[2] & 0x1f) << 16),
+    manufacturerCode: (d[2] >> 5) | (d[3] << 3),
+    ecuInstance: d[4] & 7,
+    functionInstance: d[4] >> 3,
+    func: d[5],
+    vehicleSystem: d[6] >> 1,
+    vehicleSystemInstance: d[7] & 0x0f,
+    industryGroup,
+    industryGroupName: groups[industryGroup] || `group ${industryGroup}`,
+    arbitraryAddressCapable: !!(d[7] & 0x80)
+  };
+}
+
+/** One 4-byte DM1/DM2 trouble code: SPN (19 bits), FMI, occurrence count, SPN conversion method. */
+export function decodeJ1939Dtc(b0, b1, b2, b3) {
+  const fmi = b2 & 0x1f;
+  return { spn: b0 | (b1 << 8) | (((b2 >> 5) & 7) << 16), fmi, fmiText: J1939_FMI[fmi] || null, occurrences: b3 & 0x7f, conversionMethod: (b3 >> 7) & 1 };
+}
+
+/**
+ * Decode the payload of a J1939 message. Returns an array of
+ * { spn, name, value, unit, text? }; values the sender marks "not available"
+ * (all ones) or "error" are reported with value null and a text, never as numbers.
+ * Only PGNs with a table above (plus DM1/DM2, Address Claimed, Request, VIN)
+ * are decoded; others return an empty array.
+ */
+export function decodeJ1939Pgn(pgn, data) {
+  if (pgn === 59904) {
+    if (data.length < 3) return [];
+    const req = le(data, 0, 3);
+    return [{ spn: null, name: 'Requested PGN', value: req, unit: '', text: `${req}${j1939PgnName(req).acronym ? ` (${j1939PgnName(req).acronym})` : ''}` }];
+  }
+  if (pgn === 60928) {
+    const n = decodeJ1939Name(data);
+    return n ? [{ spn: null, name: 'NAME', value: null, unit: '', text: `identity ${n.identityNumber}, manufacturer ${n.manufacturerCode}, function ${n.func}, system ${n.vehicleSystem}, ${n.industryGroupName}${n.arbitraryAddressCapable ? ', arbitrary address' : ''}` }] : [];
+  }
+  if (pgn === 65226 || pgn === 65227) {
+    if (data.length < 2) return [];
+    const out = [{ spn: null, name: 'Lamp status', value: data[0], unit: '', text: `MIL ${(data[0] >> 6) & 3}, red stop ${(data[0] >> 4) & 3}, amber warning ${(data[0] >> 2) & 3}, protect ${data[0] & 3}` }];
+    for (let i = 2; i + 3 < data.length; i += 4) {
+      if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 0 && data[i + 3] === 0) continue;
+      if (data[i] === 0xff && data[i + 1] === 0xff && data[i + 2] === 0xff && data[i + 3] === 0xff) continue;
+      const d = decodeJ1939Dtc(data[i], data[i + 1], data[i + 2], data[i + 3]);
+      out.push({ spn: d.spn, name: `DTC SPN ${d.spn} FMI ${d.fmi}`, value: d.occurrences, unit: 'x', text: `${d.fmiText || 'FMI ' + d.fmi}, count ${d.occurrences}` });
+    }
+    return out;
+  }
+  if (pgn === 65260) {
+    const text = String.fromCharCode(...Array.from(data).filter((b) => b >= 0x20 && b < 0x7f && b !== 0x2a));
+    return [{ spn: 237, name: 'Vehicle identification number', value: null, unit: '', text }];
+  }
+  const out = [];
+  for (const f of J1939_SPNS[pgn] || []) {
+    if (f.off + f.len > data.length) continue;
+    const raw = le(data, f.off, f.len);
+    // J1939-71: a top byte of 0xFF means "not available", 0xFE "error", 0xFB-0xFD reserved.
+    const topByte = Math.floor(raw / 2 ** (8 * (f.len - 1)));
+    if (topByte >= 0xfb) {
+      out.push({ spn: f.spn, name: f.name, value: null, unit: f.unit, text: topByte === 0xff ? 'not available' : topByte === 0xfe ? 'error' : 'reserved' });
+      continue;
+    }
+    out.push({ spn: f.spn, name: f.name, value: Number((raw * f.scale + f.offset).toPrecision(10)), unit: f.unit });
+  }
+  return out;
+}
+
+/** Full decode of a received extended frame: id fields, PGN name and signals. null for 11-bit frames. */
+export function decodeJ1939Frame(frame) {
+  if (!frame.isExtended) return null;
+  const id = decodeJ1939Id(frame.id);
+  return { ...id, ...j1939PgnName(id.pgn), signals: decodeJ1939Pgn(id.pgn, frame.data) };
 }
 
 // ---------------------------------------------------------------------------

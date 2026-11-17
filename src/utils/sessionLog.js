@@ -171,16 +171,87 @@ export function installDeviceCapture(nav = typeof navigator !== 'undefined' ? na
 // Export
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Redaction (applied on export unless the user explicitly includes unredacted text)
+// ---------------------------------------------------------------------------
+
+const MASK = '[REDACTED]';
+const SECRET_RULES = [
+  // Authorization headers and bearer tokens
+  [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, (m, scheme) => `${scheme} ${MASK}`],
+  // key=value / key: value pairs for common secret names
+  [/\b((?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|refresh[_-]?token|token|secret|client[_-]?secret|passwd|password|pwd|passphrase|psk)["']?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;&"']+)/gi, (m, pre) => `${pre}${MASK}`],
+  // JWT-shaped strings
+  [/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*/g, MASK],
+  // Private key blocks
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, MASK],
+  // Long hex strings (hashes, keys, tokens): 32+ hex chars
+  [/\b[0-9a-fA-F]{32,}\b/g, MASK],
+  // Long base64 / base64url runs (40+ chars) that are not plain words
+  [/(?<![A-Za-z0-9+/_-])(?=[A-Za-z0-9+/_-]*\d)(?=[A-Za-z0-9+/_-]*[A-Za-z])[A-Za-z0-9+/_-]{40,}={0,2}/g, MASK],
+];
+const MAC_RE = /\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b/g;
+const SSID_RE = /\b(SSID|ESSID)(["']?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi;
+
+/**
+ * Mask common secret shapes in a string: Bearer/Basic credentials, api_key= /
+ * password= / token= style pairs, JWTs, private-key blocks, long hex strings and
+ * long base64 runs. Ordinary text (including short VID:PID pairs and hostnames)
+ * is left alone. Pass { network: true } to also mask MAC addresses and SSID= values.
+ */
+export function redact(text, { network = false } = {}) {
+  let out = String(text ?? '');
+  for (const [re, to] of SECRET_RULES) out = out.replace(re, to);
+  if (network) {
+    out = out.replace(MAC_RE, 'XX:XX:XX:XX:XX:XX');
+    out = out.replace(SSID_RE, (m, k, sep) => `${k}${sep}${MASK}`);
+  }
+  return out;
+}
+
+function redactValue(v, opts) {
+  if (typeof v === 'string') return redact(v, opts);
+  if (Array.isArray(v)) return v.map((x) => redactValue(x, opts));
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactValue(x, opts)]));
+  return v;
+}
+
+/** Copy of the entries with every text (and string inside data) redacted. */
+export function redactEntries(list, opts) {
+  return list.map((e) => {
+    const out = { ...e, text: redact(e.text, opts) };
+    if (e.data !== undefined) out.data = redactValue(e.data, opts);
+    return out;
+  });
+}
+
+/** Environment facts for the report header: app version, browser, Web Serial / WebUSB support. */
+export function describeEnvironment(nav = typeof navigator !== 'undefined' ? navigator : null, appVersion) {
+  const env = {};
+  if (appVersion) env.appVersion = appVersion;
+  if (nav) {
+    env.userAgent = nav.userAgent;
+    env.webSerial = 'serial' in nav;
+    env.webUsb = 'usb' in nav;
+    env.webHid = 'hid' in nav;
+  }
+  return env;
+}
+
 const pad = (n, w = 2) => String(n).padStart(w, '0');
 const clock = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`; };
 const LEVEL_TAG = { info: '', ok: 'OK', warn: 'WARN', error: 'ERROR', action: 'ACTION', device: 'DEVICE' };
 
-export function exportJson(list = entries, meta = {}) {
-  return JSON.stringify({ format: 'skon-session-log', version: 1, exported: new Date().toISOString(), ...meta, entries: list }, null, 2);
+/** `redactOptions`: false for raw output (explicit opt-in), otherwise an options object for redact() (default: redact). */
+export function exportJson(list = entries, meta = {}, redactOptions = {}) {
+  const shown = redactOptions === false ? list : redactEntries(list, redactOptions);
+  const out = redactOptions === false ? meta : redactValue(meta, redactOptions);
+  return JSON.stringify({ format: 'skon-session-log', version: 1, exported: new Date().toISOString(), ...out, redacted: redactOptions !== false, entries: shown }, null, 2);
 }
 
 /** A readable report: summary, devices used, actions and errors, then the full timeline. */
-export function exportMarkdown(list = entries, { title = "Skon's USB Tool session", userAgent } = {}) {
+export function exportMarkdown(list = entries, { title = "Skon's USB Tool session", userAgent, environment, redact: redactOptions = {} } = {}) {
+  if (redactOptions !== false) list = redactEntries(list, redactOptions);
   const lines = [`# ${title}`, ''];
   if (!list.length) return `${lines.join('\n')}No entries.\n`;
   const start = list[0].t;
@@ -193,7 +264,12 @@ export function exportMarkdown(list = entries, { title = "Skon's USB Tool sessio
     `- **Tools:** ${tools.join(', ')}`,
     `- **Entries:** ${list.length} (${count('error')} errors, ${count('warn')} warnings, ${count('action')} confirmations)`
   );
-  if (userAgent) lines.push(`- **Browser:** ${userAgent}`);
+  const yn = (v) => (v ? 'yes' : 'no');
+  if (environment?.appVersion) lines.push(`- **App version:** ${environment.appVersion}`);
+  const ua = environment?.userAgent || userAgent;
+  if (ua) lines.push(`- **Browser:** ${ua}`);
+  if (environment && 'webSerial' in environment) lines.push(`- **Web Serial / WebUSB / WebHID:** ${yn(environment.webSerial)} / ${yn(environment.webUsb)} / ${yn(environment.webHid)}`);
+  lines.push(`- **Redaction:** ${redactOptions === false ? 'OFF (unredacted)' : 'on (secret-shaped text masked)'}`);
   const devices = new Map();
   list.filter((e) => e.level === 'device' && e.data).forEach((e) => devices.set(deviceLabel(e.data), e.tool));
   if (devices.size) {

@@ -29,45 +29,52 @@ function _m4(data, a, b, c, d) {
   return data.length >= 4 && data[0] === a && data[1] === b && data[2] === c && data[3] === d;
 }
 
-/** Yield [frame_no, ts, linktype, raw] for each packet. `data` = capture file bytes (gzip ok). */
-export function* iter_packets(data) {
+/** Yield [frame_no, ts, linktype, raw] for each packet. `data` = capture file bytes (gzip ok).
+ * `info` (optional object) receives `truncated_at`: the 1-based frame number where a cut-off or corrupt
+ * record was found (that partial frame is not yielded), or stays null for a clean file. */
+export function* iter_packets(data, info = null) {
+  if (info) info.truncated_at = null;
   data = _u8(data);
   if (data.length >= 2 && data[0] === 0x1f && data[1] === 0x8b) data = ungzip(data);
   if (_m4(data, 0xd4, 0xc3, 0xb2, 0xa1) || _m4(data, 0xa1, 0xb2, 0xc3, 0xd4)
       || _m4(data, 0x4d, 0x3c, 0xb2, 0xa1) || _m4(data, 0xa1, 0xb2, 0x3c, 0x4d)) {
-    yield* _iter_pcap(data);
+    yield* _iter_pcap(data, info);
   } else if (_m4(data, 0x0a, 0x0d, 0x0d, 0x0a)) {
-    yield* _iter_pcapng(data);
+    yield* _iter_pcapng(data, info);
   } else {
     throw new Error('not a pcap/pcapng file');
   }
 }
 
-export function* _iter_pcap(data) {
+export function* _iter_pcap(data, info = null) {
   const le = _m4(data, 0xd4, 0xc3, 0xb2, 0xa1) || _m4(data, 0x4d, 0x3c, 0xb2, 0xa1);
   const nano = _m4(data, 0x4d, 0x3c, 0xb2, 0xa1) || _m4(data, 0xa1, 0xb2, 0x3c, 0x4d);
   const dv = _view(data);
   const linktype = dv.getUint32(20, le);
   let off = 24;
   let n = 0;
-  while (off + 16 <= data.length) {
+  while (off < data.length) {
+    if (off + 16 > data.length) { if (info) info.truncated_at = n + 1; return; }
     const sec = dv.getUint32(off, le);
     const frac = dv.getUint32(off + 4, le);
     const incl = dv.getUint32(off + 8, le);
     off += 16;
+    if (off + incl > data.length) { if (info) info.truncated_at = n + 1; return; }
     n += 1;
     yield [n, sec + frac / (nano ? 1e9 : 1e6), linktype, data.subarray(off, off + incl)];
     off += incl;
   }
 }
 
-export function* _iter_pcapng(data) {
+export function* _iter_pcapng(data, info = null) {
   const dv = _view(data);
   let off = 0;
   let n = 0;
   let le = true;
   let ifaces = []; // [linktype, resolution]
-  while (off + 12 <= data.length) {
+  let last_ts = 0.0;
+  while (off < data.length) {
+    if (off + 12 > data.length) { if (info) info.truncated_at = n + 1; return; }
     const btype = dv.getUint32(off, le);
     if (btype === 0x0a0d0d0a) {
       // byte-order magic 4D 3C 2B 1A = little endian
@@ -75,7 +82,7 @@ export function* _iter_pcapng(data) {
       ifaces = [];
     }
     const blen = dv.getUint32(off + 4, le);
-    if (blen < 12) break;
+    if (blen < 12 || blen % 4 || off + blen > data.length) { if (info) info.truncated_at = n + 1; return; }
     const body = data.subarray(off + 8, off + blen - 4);
     const bv = _view(body);
     if (btype === 1) { // IDB
@@ -100,11 +107,12 @@ export function* _iter_pcapng(data) {
       const cap = bv.getUint32(12, le);
       const [lt, res] = iid < ifaces.length ? ifaces[iid] : [LINUX_MMAPPED, 1e-6];
       n += 1;
-      yield [n, (hi * 4294967296 + lo) * res, lt, body.subarray(20, 20 + cap)];
+      last_ts = (hi * 4294967296 + lo) * res;
+      yield [n, last_ts, lt, body.subarray(20, 20 + cap)];
     } else if (btype === 3) { // SPB
       const [lt] = ifaces.length ? ifaces[0] : [LINUX_MMAPPED, 1e-6];
       n += 1;
-      yield [n, 0.0, lt, body.subarray(4)];
+      yield [n, last_ts, lt, body.subarray(4)]; // SPBs carry no timestamp: reuse the previous packet's
     }
     off += blen;
   }
@@ -185,15 +193,18 @@ export function parse_usbpcap(frame, ts, raw) {
 }
 
 /** Transfers of a capture. `data` = bytes of a pcap/pcapng file (optionally gzip-compressed). */
-export function read_transfers(data) {
+export function read_transfers(data, info = null) {
   const out = [];
-  for (const [frame, ts, lt, raw] of iter_packets(data)) {
+  let frames = 0;
+  for (const [frame, ts, lt, raw] of iter_packets(data, info)) {
+    frames = frame;
     let t = null;
     if (lt === LINUX_MMAPPED && raw.length >= 64) t = parse_usbmon(frame, ts, raw, 64);
     else if (lt === LINUX && raw.length >= 48) t = parse_usbmon(frame, ts, raw, 48);
     else if (lt === USBPCAP && raw.length >= 27) t = parse_usbpcap(frame, ts, raw);
     if (t !== null) out.push(t);
   }
+  if (info) info.frames = frames;
   return out;
 }
 

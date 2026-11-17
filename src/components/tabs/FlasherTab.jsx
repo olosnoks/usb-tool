@@ -33,7 +33,8 @@ export default function FlasherTab() {
     port,
     addLog,
     sendRawBytes,
-    borrowPort
+    borrowPort,
+    activeBoard
   } = useSerial();
 
   // Sub-view: 'catalog' (ESP Terminator 400+ presets) | 'slots' (Custom Multi-Slot Flasher)
@@ -73,6 +74,8 @@ export default function FlasherTab() {
   // Flasher protocol engine options
   const [flasherMode, setFlasherMode] = useState('esp-rom'); // 'esp-rom' | 'raw-stream'
   const [blockSize, setBlockSize] = useState(1024);
+  const [espBaud, setEspBaud] = useState(115200);       // ROM flashing rate; falls back to 115200 on failure
+  const [compressWrites, setCompressWrites] = useState(true);
   const [chunkDelay, setChunkDelay] = useState(10);
   const [isFlashing, setIsFlashing] = useState(false);
 
@@ -246,13 +249,17 @@ export default function FlasherTab() {
       // ROM client can read the chip's replies, and hand it back afterwards.
       const run = borrowPort || ((fn) => fn(port));
       let client = null;
+      let usedBaud = 115200;
 
       try {
         await run(async (p) => {
-          client = new EspBootloaderClient(p, addLog);
+          client = new EspBootloaderClient(p, addLog, { compress: compressWrites });
+          const terminalBaud = Number(activeBoard?.baudRate) || 115200;
           try {
             // Reset into the ROM, sync (fails if the chip never answers), detect the chip, attach SPI flash
             await client.connect(resetHoldMs, bootPinHoldMs, 8);
+            // Optionally switch to a faster rate (falls back to 115200 by itself)
+            if (espBaud > 115200) await client.negotiateBaud(espBaud);
 
             // Flash the partitions in order; each image is MD5-verified (not on ESP8266)
             await client.flashMultiplePartitions(
@@ -280,10 +287,13 @@ export default function FlasherTab() {
               abortController.signal
             );
           } finally {
+            usedBaud = client.baud;
+            // Hand the port back at the rate the Terminal was using.
+            try { await client.restoreBaud(terminalBaud); } catch (e) { addLog(`[ESP FLASHER] Could not restore ${terminalBaud} baud: ${e.message}`, 'sys'); }
             await client.release();
           }
         });
-        addLog(`[ESP FLASHER] Done: ${totalPayloadSize} bytes in ${partitionsToFlash.length} partition(s) written to the ${client.chip}${client.isEsp8266 ? '' : ' and MD5-verified'} in ${Math.floor((Date.now() - startTime) / 1000)}s. Chip reset into the application.`, 'sys');
+        addLog(`[ESP FLASHER] Done: ${totalPayloadSize} bytes in ${partitionsToFlash.length} partition(s) written to the ${client.chip}${client.isEsp8266 ? ' (not verified: the ESP8266 ROM has no MD5)' : ' and MD5-verified'}${client.lastWrite?.compressed ? ', compressed' : ''} at ${usedBaud}${espBaud > usedBaud && !client.isEsp8266 ? ' (fallback from ' + espBaud + ')' : ''} baud in ${Math.floor((Date.now() - startTime) / 1000)}s. Chip reset into the application.`, 'sys');
       } catch (err) {
         if (err?.aborted || abortController.signal.aborted) {
           addLog(`[ESP FLASHER] Aborted: ${err.message || 'flash stopped'}. The port is still connected; the chip may hold a partial image, so re-flash before relying on it.`, 'sys');
@@ -300,7 +310,14 @@ export default function FlasherTab() {
       return;
     }
 
-    // Mode 2: Raw UART Block Streamer
+    // Mode 2: Raw UART stream. There is no protocol, no acknowledgement and no
+    // read-back, so this can only report what was sent, never what was written.
+    if (!window.confirm('Raw UART stream: the bytes are written to the serial port with no protocol, no acknowledgement and no verification. Nothing can confirm the target received or stored them. Send anyway?')) {
+      setIsFlashing(false);
+      isFlashingRef.current = false;
+      abortRef.current = null;
+      return;
+    }
     try {
       addLog(`[RAW FLASHER] Streaming ${partitionsToFlash.length} partition(s) sequentially...`, 'sys');
       let aggregateWritten = 0;
@@ -342,7 +359,7 @@ export default function FlasherTab() {
           }
         }
       }
-      addLog(`[RAW FLASHER] Completed raw streaming ${aggregateWritten} bytes!`, 'sys');
+      addLog(`[RAW FLASHER] Sent ${aggregateWritten} bytes (unverified: the target gave no acknowledgement, so this does not mean it was written).`, 'sys');
     } catch (err) {
       console.error(err);
       addLog(`[RAW FLASHER ERROR] ${err.message}`, 'sys');
@@ -611,9 +628,41 @@ export default function FlasherTab() {
                 className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-cyan-300 font-bold outline-none"
               >
                 <option value="esp-rom">ESP ROM Bootloader (SLIP / Sync)</option>
-                <option value="raw-stream">Raw UART Block Streamer</option>
+                <option value="raw-stream">Raw UART stream (no protocol, unverified)</option>
               </select>
             </div>
+
+            {flasherMode === 'esp-rom' && (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-500 text-[11px] font-bold">BAUD:</span>
+                  <select
+                    value={espBaud}
+                    onChange={(e) => setEspBaud(Number(e.target.value))}
+                    disabled={isFlashing}
+                    title="Rate used while flashing; falls back to 115200 if the chip stops answering. ESP8266 stays at 115200."
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 font-bold outline-none"
+                  >
+                    {[115200, 230400, 460800, 921600].map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+                <label
+                  className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 cursor-pointer"
+                  title="zlib-compressed writes (ESP32 family); the ESP8266 ROM always writes uncompressed"
+                >
+                  <input
+                    type="checkbox"
+                    checked={compressWrites}
+                    onChange={(e) => setCompressWrites(e.target.checked)}
+                    disabled={isFlashing}
+                    className="accent-amber-500"
+                  />
+                  COMPRESS
+                </label>
+              </>
+            )}
 
             {/* Block Size */}
             <div className="flex items-center gap-1.5">

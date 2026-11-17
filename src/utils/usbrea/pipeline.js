@@ -16,10 +16,18 @@ import { fromHex, hex } from './bytes.js';
  * @param {object|string|null} markers  actions JSON (object or text); ignored when `labels` is given
  * @param {number|null} device  USB device address; default = the one with the most OUT data
  * @param {string[]|null} labels  action labels in order, for captures without markers (split on gaps)
+ * @param {{onProgress?: function(string, number), markerOffset?: number}} [opts]  progress callback (stage, 0..1) and a
+ *   seconds offset added to every marker time
  */
-export function analyze(capture, markers = null, device = null, labels = null) {
+export function analyze(capture, markers = null, device = null, labels = null, opts = {}) {
+  const progress = (stage, f) => { if (opts && opts.onProgress) opts.onProgress(stage, f); };
+  const offset = Number(opts && opts.markerOffset) || 0;
+  progress('Reading capture', 0);
   let ts = read_transfers(capture);
-  const t0 = ts.length ? Math.min(...ts.map((t) => t.ts)) : 0;
+  progress('Finding streams', 0.2);
+  let t0 = Infinity;
+  for (const t of ts) if (t.ts < t0) t0 = t.ts;
+  if (!ts.length) t0 = 0;
   const ids = find_ids(ts);
   if (device === null || device === undefined) {
     // the device with the most host->device data is almost always the target
@@ -46,7 +54,9 @@ export function analyze(capture, markers = null, device = null, labels = null) {
     if (!markers) throw new Error('No action markers: load the .actions.json from `usb-rea mark`, or type the labels in order.');
     marks = load_markers(typeof markers === 'string' ? JSON.parse(markers) : markers);
   }
+  if (offset) marks = marks.map((m) => ({ ...m, start: m.start + offset, end: m.end + offset }));
   const seen = observations(marks, t0);
+  progress('Assigning actions', 0.4);
   // a mid-capture re-handshake is session setup, not part of an action
   const reopens = find_reopens(everything, background, marks);
   if (reopens && reopens.length) {
@@ -54,6 +64,7 @@ export function analyze(capture, markers = null, device = null, labels = null) {
     ts = ts.filter((t) => !drop.has(t));
   }
   const acts = assign(ts, marks);
+  progress('Inferring commands', 0.55);
   const proto = infer(acts, vid, pid);
   proto.switches = find_switches(acts, proto.commands);
   proto.states = find_states(acts, proto.commands);
@@ -63,6 +74,7 @@ export function analyze(capture, markers = null, device = null, labels = null) {
     endpoint: b.key[1], xfer_type: b.key[2], setup: b.key[3] || null, payload: pattern(b.data, b.mask),
     count: b.count, period: b.period, frames: b.frames.slice(0, 5),
   }));
+  progress('Analyzing responses', 0.75);
   proto.responses = analyze_responses(everything, proto.commands, background, seen);
   proto.states = proto.states.concat(find_reported(acts, proto.commands, proto.responses, everything));
   proto.handshake = find_handshake(everything, background, marks, proto.commands, t0, reopens);
@@ -72,6 +84,7 @@ export function analyze(capture, markers = null, device = null, labels = null) {
       .filter((f) => f.name === o.name && f.observed.some((x) => x[3] === o.time))
       .map((f) => `${r.query} ${_span(f)}`)),
   }));
+  progress('Done', 1);
   return proto;
 }
 

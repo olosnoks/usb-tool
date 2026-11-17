@@ -10,8 +10,8 @@ export const CORE_ARTICLES = [
     toolId: null,
     category: 'core',
     title: 'Using the Workspace — Windows, Tiling & Shortcuts',
-    summary: 'How the app itself works: the sidebar, the windowed desktop (drag, resize, minimize, maximize, tiling and snap), running more than one tool at once, per-window zoom, themes, the command palette, the terminal drawer, and every keyboard shortcut.',
-    tags: ['Workspace', 'Windows', 'Tiling', 'Snap', 'Zoom', 'Shortcuts', 'Sidebar', 'Command Palette', 'Getting Started'],
+    summary: 'How the app itself works: the Start menu, the windowed desktop (drag, resize, minimize, maximize, tiling and snap), running more than one tool at once, per-window zoom, themes, the command palette, the terminal drawer, and every keyboard shortcut.',
+    tags: ['Workspace', 'Windows', 'Tiling', 'Snap', 'Zoom', 'Shortcuts', 'Start Menu', 'Command Palette', 'Getting Started'],
     readTime: '9 min read',
     content: `
 # Using the Workspace
@@ -22,13 +22,16 @@ Skon's USB Tool is a **windowed workspace**, like a tiny desktop inside your bro
 
 ---
 
-### 1. The sidebar — opening tools
+### 1. The Start menu — opening tools
 
-The left sidebar lists every tool, grouped by category. Click a tool to open it in a window on the desktop.
+Click the **START** button at the left end of the taskbar (or press \`Alt\` + \`S\`) to open the Start menu. It pops up from the taskbar like the classic Windows menu.
 
-- **A tool you already opened** shows a small coloured dot. Clicking it again does not open a second copy — it brings the existing window to the front.
-- **Filter** the list with the search box at the top of the sidebar.
-- **Collapse** the sidebar with the chevron to give the desktop more room; your choice is remembered.
+- **Categories** are listed in the menu. Hover or click one to open its sub-list as a flyout to the right; sub-categories cascade further. On narrow screens the flyouts stack instead.
+- **Click a tool** to open it in a window. A tool you already opened is brought to the front instead of opening a second copy.
+- **Search** with the box at the top ("Type to search tools"). While you type, the menu shows a ranked list of matches with each tool's category. \`Ctrl\` + \`K\` still opens the command palette.
+- **Keyboard:** \`↑\` / \`↓\` move, \`→\` or \`Enter\` opens a category or launches a tool, \`←\` goes back a level, \`Esc\` clears the search and then closes the menu.
+- **Recent** shows the last five tools you launched, and **All tools** lists everything in one flat list.
+- The footer has shortcuts to the Wiki, the Pinouts reference and Chip Intelligence.
 - Entries marked **DEMO** are interface previews without hardware support yet.
 
 ---
@@ -41,7 +44,7 @@ Each tool lives in a window you can move, size and stack like any desktop app.
 - **Resize:** drag any edge or corner.
 - **Minimize / maximize / close:** the buttons at the right of the title bar. Minimize parks the window on the taskbar; the tool keeps running and its device stays connected. Double-clicking the title bar also toggles maximize.
 - **Focus:** click anywhere on a window to bring it to the front. The focused window has a coloured border.
-- **Taskbar:** the strip along the bottom lists every open window. Click an entry to focus or restore it. On the right are **Tile** (arrange all windows in a grid), **Cascade** (stack them diagonally) and **Close all**.
+- **Taskbar:** the strip along the bottom has the **Start** button, then lists every open window. Click an entry to focus or restore it. On the right are **Tile** (arrange all windows in a grid), **Cascade** (stack them diagonally) and **Close all**.
 
 Your whole layout — window positions, sizes, zoom and which tools are open — is saved and restored the next time you visit.
 
@@ -76,9 +79,9 @@ The taskbar's **Tile** button does the same for every open window at once.
 Sometimes you want two of the same tool — for example two PortaPack receivers, each on a different HackRF. There are two ways to open another instance:
 
 - Click the **duplicate** button in a window's title bar (the copy-plus icon, left of minimize).
-- **Alt-click** (or Ctrl-click) the tool in the sidebar.
+- **Alt-click** (or Ctrl-click) the tool in the Start menu.
 
-Each instance is fully separate, with its own device connection, and is numbered in its title and on the taskbar — "PortaPack Mayhem SDR (2)". A plain sidebar click still just focuses the first instance, so you never open extra windows by accident.
+Each instance is fully separate, with its own device connection, and is numbered in its title and on the taskbar — "PortaPack Mayhem SDR (2)". A plain Start-menu click still just focuses the first instance, so you never open extra windows by accident.
 
 > A few tools keep some state shared across instances (for example the Mayhem tool's ADS-B aircraft list). Tuning, audio, capture and the like are always per window.
 
@@ -104,7 +107,7 @@ The header has a colour-theme dropdown (with a swatch preview) that restyles the
 ### 7. The command palette & the terminal drawer
 
 - **Command palette** — press \`Ctrl\` + \`K\` (or \`⌘\` + \`K\`) to open a searchable list of every tool and common action: connect, disconnect, clear logs, set baud, export the session, open the pinouts or chip-intelligence references, and jump to any tool.
-- **Terminal drawer** — press \`Ctrl\` + backtick (the \`~\` key) or \`Ctrl\` + \`J\` to slide a live serial console up from the bottom, over whatever tool you are using, so you can watch raw output without leaving the current window.
+- **Terminal drawer** — press \`Ctrl\` + backtick (the \`~\` key) or \`Ctrl\` + \`J\` (or click **SERIAL** in the header) to drop a live serial console down from just below the header, above whatever tool you are using, so you can watch raw output without leaving the current window.
 - **Workspace presets** — \`Alt\` + \`1\` … \`Alt\` + \`6\` jump to the preset layouts shown in the header.
 
 ---
@@ -114,13 +117,14 @@ The header has a colour-theme dropdown (with a swatch preview) that restyles the
 | Shortcut | Action |
 | :--- | :--- |
 | \`Ctrl\` + \`K\` | Command palette |
+| \`Alt\` + \`S\` | Start menu |
 | \`Ctrl\` + backtick or \`Ctrl\` + \`J\` | Toggle the terminal drawer |
 | \`Alt\` + \`1\`…\`6\` | Workspace presets |
 | \`Ctrl\` + \`Alt\` + \`←\` / \`→\` | Tile the focused window to the left / right half |
 | \`Ctrl\` + \`Alt\` + \`↑\` / \`↓\` | Maximize / restore the focused window |
 | \`Ctrl\` + mouse wheel (over a window) | Zoom that tool |
 | Double-click a title bar | Maximize / restore |
-| Alt-click a sidebar tool | Open another instance |
+| Alt-click a Start-menu tool | Open another instance |
 
 ---
 
@@ -207,28 +211,35 @@ If connecting an external USB-to-UART bridge (CH340, CP2102, FT232R) to a bare m
 
 ### 4. Interactive Console Controls & Features
 
-**Connection controls** (the BAUD / CONNECT strip, also shown in the terminal drawer header): a board selector, the **BAUD** dropdown, RX/TX activity lights, an ONLINE/OFFLINE badge, **CONNECT**, **BLE** and **DISCONNECT**. The baud list is \`300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880 (ESP8266 boot ROM), 115200, 230400, 460800, 921600, 1000000, 1500000, 2000000\` and is **locked while connected** — disconnect to change it. The advanced serial settings (data bits 8/7, stop bits 1/2, parity none/even/odd, flow control none/hardware) also cannot be changed while connected.
+**Connection controls** (the BAUD / CONNECT strip, also shown in the middle of the app header next to the **SERIAL** drawer toggle): a board selector, the **BAUD** dropdown, RX/TX activity lights, an ONLINE/OFFLINE badge, **CONNECT**, **BLE** and **DISCONNECT**. The baud list is \`300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880 (ESP8266 boot ROM), 115200, 230400, 460800, 921600, 1000000, 1500000, 2000000\` and is **locked while connected** — disconnect to change it. The advanced serial settings (data bits 8/7, stop bits 1/2, parity none/even/odd, flow control none/hardware) also cannot be changed while connected.
 
-The **Terminal** window itself has a mode bar with three side-panel toggles — **Hex Stream**, **Baud Hunter** and **Protocol Injector** — next to the **ANSI STREAM CONSOLE**:
+The **Terminal** window itself has a mode bar: a **Log view / Interactive** switch and three side-panel toggles — **Hex Stream**, **Baud Hunter** and **Protocol Injector** — next to the **ANSI STREAM CONSOLE**. The console keeps the last 1,500 chunks; every chunk carries the real wall-clock time it arrived (to the millisecond) and a monotonic arrival time used for the deltas.
 
-1. **STREAM / Δt TIMELINE**: STREAM is the classic colour log (RX/TX/SYS tags). Δt TIMELINE is a table of time, delta, direction, length, ASCII payload and hex bytes, with **all / rx / tx** filters.
-2. **Search box** ("Search stream..."): highlights matching text and shows the match count.
+1. **STREAM / LINES / Δt TIMELINE**: STREAM is the classic colour log (RX/TX/SYS tags, one row per received chunk). **LINES** re-assembles the byte stream into whole lines, so a line that arrived in several pieces appears as one row (the **RX line end** option in the TOOLS drawer picks Auto, LF, CR or CRLF). Δt TIMELINE is a table of time, delta, direction, length, ASCII payload and hex bytes (first 16), with **all / rx / tx** filters.
+2. **Search box** ("Search stream..."): highlights matching text and shows the match position and count. The **\`.*\`** button switches to regular-expression search (the box turns red and shows **ERR** on an invalid pattern); the up/down chevrons (or Enter / Shift+Enter) jump between matches, and **FILTER** hides every row that does not match.
 3. **Timestamps** (clock icon): shows or hides the per-line timestamp.
-4. **Save icon (stream direct to disk)**: pipes every new line to a \`.log\`/\`.txt\` file you pick through the File System Access API (Chrome/Edge/Opera), for long unattended logs. Click the stop icon to close the file.
-5. **PAUSE / PAUSED**: freezes the view on a snapshot; new data keeps being logged (and streamed to disk).
-6. **Auto-scroll** (down arrow): follows the newest line; scrolling up manually turns it off, scrolling back to the bottom turns it on again.
-7. **Export**: in STREAM view the download icon saves the session as \`skons-serial-log-<timestamp>.log\`; in Δt TIMELINE view it saves a CSV timeline instead.
-8. **Clear** (trash icon): clears the terminal buffer without disconnecting.
-9. **Send bar**: type a command and press **SEND** (or Enter); the **Up/Down arrow keys** recall the last 50 commands. The line-ending dropdown offers:
-   - **CRLF (\\r\\n)**: default; AT-command modems and many CLIs.
-   - **LF (\\n)**: MicroPython REPL, Linux shells.
-   - **CR (\\r)**: U-Boot style prompts.
+4. **Disk logging**: the format dropdown chooses **RAW** (the exact bytes, \`.bin\`), **TEXT+TS** (timestamped text) or **HEX+TS** (timestamped hex). The disc icon then pipes the incoming RX byte stream to a file you pick through the File System Access API (Chrome/Edge/Opera), for long unattended logs; the stop icon closes the file. Logging also ends when the port disconnects.
+5. **TOOLS**: opens a drawer with
+   - **CTRL:** buttons **Ctrl-C**, **Ctrl-D**, **Ctrl-Z** and **ESC**, which send the raw control byte.
+   - **Local echo (show TX)** and **RX line end** (Auto / LF / CR / CRLF).
+   - **SEND FILE:** send a file **per char** or **per line** with a delay in ms between units, a byte progress counter and **Cancel**. Use the delay for devices that drop bytes on a fast paste.
+   - **MACROS:** type a **Name** and a text (\`\\r\`, \`\\n\`, \`\\xNN\` escapes are expanded), then **Save macro**. It is stored with the line ending currently selected in the send bar and appears as a button that sends it. **Export** / **Import** move your macros as JSON. Macros live in the browser's local storage.
+   - **HIGHLIGHT:** **Add rule** with a regex such as \`error|panic\` to colour matching text in the log; rules are saved in the browser and removed with the x.
+6. **PAUSE / PAUSED**: freezes the view on a snapshot; new data keeps being logged (and streamed to disk).
+7. **Auto-scroll** (down arrow): follows the newest line; scrolling up manually turns it off, scrolling back to the bottom turns it on again.
+8. **Export**: in STREAM view the download icon saves the session as \`skons-serial-log-<timestamp>.log\`; in Δt TIMELINE view it saves a CSV timeline instead.
+9. **Clear** (trash icon): clears the terminal buffer without disconnecting.
+10. **Send bar**: type a command and press **SEND** (or Enter); the **Up/Down arrow keys** recall the last 50 commands. The line-ending dropdown offers:
+   - **CRLF (\r\n)**: default; AT-command modems and many CLIs.
+   - **LF (\n)**: MicroPython REPL, Linux shells.
+   - **CR (\r)**: U-Boot style prompts.
    - **None (Raw)**: sends exactly what you typed.
    - **Hex Bytes**: the text box is parsed as hex bytes (e.g. \`55 AA 01\`) and sent raw.
-10. **Hex Stream panel**: a hex + ASCII dump of the incoming/outgoing bytes (last ~4,096 bytes kept) with a row-width toggle, hex search (e.g. \`55 AA\`), auto-scroll, **Copy as Hex String**, **Copy as C-Array** and clear.
-11. **Protocol Injector panel**: type hex bytes, pick a checksum (Modbus CRC-16 LE/BE, Sum8, Two's-complement Sum8, XOR/LRC, CRC-16 CCITT/XMODEM, or none), see the computed frame, and **INJECT HEX FRAME TO SERIAL BUS**. Presets (Modbus reads/writes, ESP ROM sync frame, a ping frame) are built in and you can save your own.
+11. **Interactive mode**: the **Interactive** button replaces the log and send bar with a keystroke-passthrough terminal. Click the screen to capture the keyboard and every key goes straight to the device (arrow keys, Tab, Ctrl combinations), so shells, the MicroPython REPL and line editors behave as in PuTTY; paste works too. Its header offers **Enter** (CR / CRLF / LF), **Backspace** (DEL 0x7F / BS 0x08), **Bracketed paste** (Auto / On / Off) and **Local echo**. It is a built-in emulator (10,000 rows of scrollback) that handles cursor movement, erase, 16-colour text and the alternate screen used by \`vi\`/\`top\`; it does not do scroll regions, 256/true colour, background colours or mouse reporting. Switching back to Log view loses no data.
+12. **Hex Stream panel**: a hex + ASCII dump of the incoming and outgoing bytes (the last 4,096 bytes are kept, the newest 1,536 shown) with a row-width toggle (8/16), hex search (e.g. \`55 AA\`), auto-scroll, **Copy as Hex String**, **Copy as C-Array** and clear.
+13. **Protocol Injector panel**: type hex bytes, pick a checksum (Modbus CRC-16 LE/BE, Sum8, Two's-complement Sum8, XOR/LRC, CRC-16 CCITT/XMODEM, or none), see the computed frame, and **INJECT HEX FRAME TO SERIAL BUS**. Presets (Modbus reads/writes, ESP ROM sync frame, a ping frame) are built in and you can save your own.
 
-There is no local-echo toggle and no macro keypad in this tab. Press \`Ctrl+L\` while focus is anywhere in the console (including the input box) to clear it, or use the trash icon. (Macro Decks live in the Advanced Lab tool.)
+Press \`Ctrl+L\` while focus is anywhere in the console (including the input box) to clear it, or use the trash icon.
 
 <details>
 <summary>Deep-Dive: How Baud Hunter Automatically Detects Unknown Frequencies</summary>
@@ -241,6 +252,7 @@ Open the **Baud Hunter** panel and click **RUN BAUD SCAN** (you must be connecte
    - **Shannon entropy**: text typically scores around 3–5.8 bits per byte.
    - A penalty applies if more than half the bytes are \`0x00\` or \`0xFF\` (floating-line noise).
 4. The results table lists **Baud**, **Confidence** (%), **Verdict** (HIGH PROBABILITY / MODERATE / LOW / UNLIKELY / NO DATA) and an **Apply** button per row. It does **not** auto-lock a winner: you choose and click **Apply**.
+5. While a scan runs a red **STOP** button appears next to the scan button. Stopping (or leaving the tab) ends the scan after the current rate and always restores your original baud rate and the console read loop; a status line reports "Scan stopped" or "Scan complete" (or tells you to reconnect if the original rate could not be restored).
 
 Framing errors are not counted (WebSerial does not expose them), 300–4800 baud are not scanned, and a silent device that never answers a CR/LF scores "NO DATA" at every rate, so reset the board during an active or passive scan.
 </details>
@@ -248,7 +260,7 @@ Framing errors are not counted (WebSerial does not expose them), 300–4800 baud
 <details>
 <summary>Complete ANSI / VT100 Terminal Control Sequences (CSI & TrueColor)</summary>
 
-The console renders **SGR colour/style sequences only** (\`ESC [ ... m\`). Cursor movement, screen clearing and 24-bit colour are **not** interpreted, so a full-screen ncurses-style UI will not draw correctly.
+The **Log view** renders **SGR colour/style sequences only** (\`ESC [ ... m\`). Cursor movement, screen clearing and 24-bit colour are **not** interpreted there. For full-screen programs (\`vi\`, \`top\`, menu UIs) switch to **Interactive** mode, whose built-in emulator handles cursor movement, erase and the alternate screen (still no 256/true colour or background colours).
 
 | Control Sequence | Supported | Effect |
 | :--- | :---: | :--- |
@@ -336,7 +348,7 @@ The chip is identified from the ROM's chip-detect register after sync. Recognise
 
 The ESP32-S2 uses \`0x1000\` like the classic ESP32 but has no preset of its own; type the offsets yourself. Offsets for other chips (C5, H2, ...) follow your firmware's own documentation; merged images ("\`.merged.bin\`") are normally written at \`0x0\`.
 
-**Speed:** the flasher uses the ROM bootloader directly (no RAM stub, no baud switch), so it transfers at the baud rate selected in the BAUD dropdown, in 1 KB blocks. Pick 460800 or 921600 *before* connecting if your adapter and cable allow it; 115200 always works. Reading flash back is not offered (it needs the stub).
+**Speed:** the flasher uses the ROM bootloader directly (no RAM stub). After sync it negotiates the **BAUD** dropdown rate (115200, 230400, 460800 or 921600) with CHANGE_BAUDRATE, reopens the port at that rate and re-syncs. If the chip stops answering at the faster rate, the tool logs the failure, drops back to 115200, resets the chip into the ROM again and carries on. The ESP8266 and USB-Serial/JTAG ports always stay at 115200. After flashing, the port is returned to the rate the Terminal was using. With **COMPRESS** ticked (default) ESP32-family images are sent as a zlib stream, which cuts transfer time for compressible images; the ESP8266 ROM always writes uncompressed. Reading flash back is not offered in this tab (it needs the stub); the **ESP Flash Dump** tool covers backups.
 
 ---
 
@@ -376,15 +388,17 @@ All communication with the ESP ROM bootloader uses **SLIP (Serial Line Internet 
 | **\`0x08\`** | **SYNC** | Sends \`0x07 0x07 0x12 0x20\` followed by 32 \`0x55\` bytes; retried up to 8 times |
 | **\`0x0A\`** | **READ_REG** | Reads the chip-detect register (\`0x40001000\`) to identify the silicon |
 | **\`0x0D\`** | **SPI_ATTACH** | Attaches the SPI flash (ESP32 family) |
-| **\`0x0B\`** | **SPI_SET_PARAMS** | Tells the ROM the flash geometry (sized at 16 MB so any offset is accepted) |
+| **\`0x0B\`** | **SPI_SET_PARAMS** | Tells the ROM the flash geometry (the size detected from the JEDEC id, or 16 MB if it could not be read) |
 | **\`0x02\`** | **FLASH_BEGIN** | Erases the target range and announces block count / size |
 | **\`0x03\`** | **FLASH_DATA** | Streams 1,024-byte blocks, each with a sequence number and checksum |
+| **\`0x0F\`** | **CHANGE_BAUDRATE** | Switches the chip to the selected baud rate; the port is reopened and re-synced |
+| **\`0x10\` / \`0x11\` / \`0x12\`** | **FLASH_DEFL_BEGIN / DATA / END** | Compressed (zlib) writes on the ESP32 family; skipped for incompressible images and on ESP8266 |
 | **\`0x13\`** | **SPI_FLASH_MD5** | Asks the chip for the MD5 of the written range (not available on ESP8266) |
 
-Opcodes such as CHANGE_BAUDRATE, the compressed FLASH_DEFL_* family and FLASH_END exist in the protocol but are not used: the tool resets the chip into the app with DTR/RTS after flashing instead of sending FLASH_END.
+FLASH_END is not used on the plain path: the tool resets the chip into the app with DTR/RTS after flashing. Before the first erase, the JEDEC id (SPI command 0x9F, read through the SPI host registers) gives the flash size; an image that would end past the detected flash is refused with "Nothing was erased". If the size cannot be read, the check is skipped and the log says so.
 
 #### No RAM stub
-The Espressif \`esptool\` normally uploads a small "stub" flasher into RAM for higher speed, compression and flash reading. This tool does **not** load a stub, so writes run at the ROM's own speed and the baud rate you selected.
+The Espressif \`esptool\` normally uploads a small "stub" flasher into RAM for higher speed, compression and flash reading. This tool does **not** load a stub; it relies on the ROM's own baud switch and compressed-write commands instead.
 </details>
 
 <details>
@@ -436,10 +450,12 @@ The tool has two sub-tabs: **Cloud Firmware Catalog (400+ Presets)** (the defaul
 1. Optionally click a layout preset: **ESP32 (Classic)**, **ESP32-S3 / C3 / C2 / C6**, **ESP8266 / NodeMCU** or **Single Custom Binary**. Presets fill in slot labels and offsets (bootloader \`0x1000\` or \`0x0000\`, partition table \`0x8000\`, app \`0x10000\`; optional storage slots are unticked by default).
 2. For each slot, set the **OFFSET** (hex, e.g. \`0x10000\`; "Invalid Hex" is shown otherwise), tick or untick it, and select a \`.bin\`, \`.hex\` (Intel HEX) or \`.uf2\` file. For HEX/UF2 files with a start address, the offset is filled in automatically.
 3. Use the add-slot button (up to **4** slots) or the trash icon on a slot (at least one must remain).
-4. Under **BOOTLOADER ENGINE & TIMING CONTROLS**, leave **PROTOCOL** on **ESP ROM Bootloader (SLIP / Sync)**. **Reset Pulse Duration** (50–500 ms, default 150) and **Boot Pin (IO0) Hold Duration** (20–250 ms, default 50) tune the DTR/RTS auto-reset. **BLOCK SIZE** offers 256–4096 bytes but the ROM mode caps writes at 1024.
-5. Click **FLASH n PARTITION(S) [size]**. The tool resets into the bootloader, syncs, detects the chip, flashes each enabled slot in order with a per-slot MD5 check, then resets the chip into the application. Progress, speed, elapsed time and ETA are shown; **ABORT** stops both modes between blocks: an ESP ROM flash stops after the block in flight, skips the MD5 check and the reset, logs "Aborted", and leaves the port connected and usable. The chip may be left with a partial image, so flash again before relying on it.
+4. Under **BOOTLOADER ENGINE & TIMING CONTROLS**, leave **PROTOCOL** on **ESP ROM Bootloader (SLIP / Sync)**. **Reset Pulse Duration** (50–500 ms, default 150) and **Boot Pin (IO0) Hold Duration** (20–250 ms, default 50) tune the DTR/RTS auto-reset. **BAUD** (115200–921600) and **COMPRESS** sit in the same strip. **BLOCK SIZE** offers 256–4096 bytes but the ROM mode caps writes at 1024.
+5. Click **FLASH n PARTITION(S) [size]**. The tool resets into the bootloader, syncs, detects the chip, negotiates the baud rate (falling back to 115200 on failure), checks the images against the detected flash size before erasing, flashes each enabled slot in order with a per-slot MD5 check, then resets the chip into the application. The final log line reports the baud rate used (and "fallback from ..." if it dropped), whether the write was compressed, and whether it was MD5-verified. Progress, speed, elapsed time and ETA are shown; **ABORT** (shown while flashing) stops both modes between blocks: an ESP ROM flash stops after the block in flight, skips the MD5 check and the reset, logs "Aborted", restores the port's baud rate and leaves the port connected and usable. The chip may be left with a partial image, so flash again before relying on it.
 
-The alternative **PROTOCOL: Raw UART Block Streamer** simply writes the file bytes to the serial port in blocks (with a configurable delay). It does not talk to any bootloader, does not erase or verify, and is for custom targets that accept a raw byte stream.
+The alternative **PROTOCOL: Raw UART Block Streamer** simply writes the file bytes to the serial port in blocks (with a configurable delay). It does not talk to any bootloader, does not erase or verify, and is for custom targets that accept a raw byte stream. The dropdown labels it "Raw UART stream (no protocol, unverified)", and the final log says the target gave no acknowledgement, so it does not prove the bytes were written.
+
+**Proxmark and other WebFlashService targets:** the built-in Proxmark flash manifests carry no real published SHA-256 hashes yet (the earlier placeholders were hashes of test strings), so those entries are disabled and flashing is refused until a real hash is supplied through a manifest generated from the release files.
 
 <details>
 <summary>Troubleshooting: Unbricking Boards with Failed Auto-Reset (Button Dance)</summary>
@@ -557,19 +573,31 @@ Two sliders set the timing: **Reset Hold Duration** (50–500 ms, default 150) a
 - **NORMAL REBOOT TO APP** pulses EN low for 120 ms and releases it with IO0 idle so the board boots its application.
 - **Pro Tip**: if your board has a large capacitor on the reset line (e.g. 10uF), the default 150 ms may be marginal; raise the reset slider to **250 ms** or more.
 
-#### 2. Manual UART Pin Toggles
+#### 2. Reset & Bootloader Profiles
+The **RESET & BOOTLOADER PROFILES** panel runs a ready-made DTR/RTS sequence for a family of boards, using the same two hold sliders as above. Pick one in **PROFILE:**; when the connected adapter's USB vendor/product ID is recognised the panel shows a **Suggested for this USB ID** badge and pre-selects it (only a suggestion, nothing runs by itself):
+- **ESP32 / ESP8266 (UART bridge, DTR=IO0 RTS=EN)**: the classic auto-reset wiring.
+- **ESP32-S/C native USB (USB-Serial/JTAG)**: the sequence for chips whose USB port is the built-in USB-Serial/JTAG peripheral.
+- **Arduino (DTR auto-reset, serial bootloader)**: one DTR pulse; bootloader entry and reset are the same pulse because the bootloader runs after any reset.
+- **STM32 (BOOT0 + NRST on DTR/RTS)**: choose which signal drives BOOT0 (**DTR (NRST on RTS)** or **RTS (NRST on DTR)**) and tick **invert BOOT0** / **invert NRST** to match your adapter.
+- **RP2040 / nRF52 / Adafruit / Teensy (1200-baud touch)**: no signal sequence; the button becomes **SEND 1200-BAUD TOUCH**, which opens the port at 1200 baud with DTR/RTS low and closes it. The board re-enumerates (an RP2040 shows up as a USB drive such as RPI-RP2), so a notice appears with a **CONNECT NEW PORT** button for the new serial port.
+
+**ENTER BOOTLOADER (PROFILE)** and **RESET (PROFILE)** run the selected profile, and **Invert DTR/RTS polarity** flips the whole sequence if your adapter or circuit is wired the other way. After a run the panel prints the measured hold times, since browser timers are not exact.
+
+The **Custom sequence editor** (expand it) lets you build your own: each step sets DTR and RTS to **keep / assert / release** and a **hold** time; use **+ step** and **remove**, then **Run**. **Save** stores it by name in the browser (click a name under **Saved:** to reload it), and **Export JSON** / **Import JSON** exchange sequences as \`{"name":"...","steps":[{"dtr":false,"rts":true,"waitMs":100}]}\`.
+
+#### 3. Manual UART Pin Toggles
 - **DTR PIN** and **RTS PIN** are toggle buttons. Each shows \`ASSERTED (HIGH)\` or \`IDLE (LOW)\` (see the polarity note above). Use them to hold EN (reset) or IO0 (boot) while you probe voltages with a multimeter, then toggle again to release.
 - **UART Line Break**: a slider (50–1000 ms, default 250) and an **ASSERT n ms UART BREAK** button that holds TXD low for that long.
 
-#### 3. Live Hardware Input Signals
+#### 4. Live Hardware Input Signals
 **CTS, DSR, DCD and RI** are polled from the adapter every 250 ms (\`port.getSignals()\`) and shown as HIGH/LOW.
 
-#### 4. U-Boot Interrupt Spammer & Bootloader Halter
+#### 5. U-Boot Interrupt Spammer & Bootloader Halter
 When working with Linux Single Board Computers (Raspberry Pi, Orange Pi, Banana Pi, OpenWrt Wi-Fi routers, IP cameras):
 - The U-Boot bootloader provides a recovery shell to re-flash Linux kernels, dump flash memory, or bypass root passwords.
 - U-Boot only pauses autoboot if it receives a keypress (Space, Enter, or \`Ctrl+C\`) within its autoboot countdown after power-on.
-- **How to Use**: choose an **INTERRUPT KEY** (Spacebar \`0x20\`, Enter \`\\r\\n\`, Ctrl+C \`0x03\`, Escape \`0x1B\` or a custom string), set the **BURST INTERVAL** (10–100 ms, default 25 ms) and click **START SPAMMER**. Power cycle or reset your board. A burst counter runs until the tool sees one of these prompts at the end of the received text and stops itself: \`=>\`, \`u-boot>\`, \`cfe>\`, or \`redboot>\` (a "Caught" badge shows the match). Click **STOP SPAMMER** to stop manually.
-- **Quick Bootloader Actions** (send commands with an LF ending): **Bypass Root Password (init=/bin/sh)** sends \`setenv bootargs "\${bootargs} init=/bin/sh"\` then \`boot\`; **Dump Environment (printenv)**; **Target Version (version)**; **Memory Hexdump (md.b)** sends \`md.b 0x80000000 0x100\` (adjust the address in the Terminal for your SoC).
+- **How to Use**: choose an **INTERRUPT KEY** (Spacebar \`0x20\`, Enter \`\\r\\n\`, Ctrl+C \`0x03\`, Escape \`0x1B\` or a custom string), set the **BURST INTERVAL** (10–100 ms, default 25 ms) and click **START SPAMMER**. Power cycle or reset your board. A burst counter runs until the tool sees one of these prompts in the received text (even without a trailing newline) and stops itself: \`=>\`, \`u-boot>\`, \`cfe>\`, \`redboot>\`, \`# \` or \`$ \` (a "Caught" badge shows the match). It never sends after the catch. Click **STOP SPAMMER** to stop manually.
+- **Quick Bootloader Actions** (send commands with an LF ending): **Bypass Root Password (init=/bin/sh)** (asks for confirmation first, because it changes the target's boot behaviour) sends \`setenv bootargs "\${bootargs} init=/bin/sh"\` then \`boot\`; **Dump Environment (printenv)**; **Target Version (version)**; **Memory Hexdump (md.b)** sends \`md.b 0x80000000 0x100\` (adjust the address in the Terminal for your SoC).
 
 <details>
 <summary>U-Boot Command Prompt Environment Variable Reference & Kernel Boot Commands</summary>

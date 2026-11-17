@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSerial } from '../context/SerialContext';
-import { runInRawRepl } from '../utils/micropythonRawRepl';
+import { runInRawRepl, withRawRepl } from '../utils/micropythonRawRepl';
 import { 
   FileCode, 
   Folder, 
@@ -24,7 +24,8 @@ import {
   Package,
   Search
 } from 'lucide-react';
-import { pyStr, buildReadScript, buildWriteScript, buildDeleteScript, parseFileOutput } from '../utils/micropythonFiles';
+import { pyStr, buildDeleteScript, writeFileChunked, readFileChunked } from '../utils/micropythonFiles';
+import { resolvePackage } from '../utils/micropythonMip';
 import { MICROPYTHON_DRIVERS } from '../utils/microPythonDrivers';
 
 export default function MicroPythonFileManager({
@@ -70,8 +71,94 @@ export default function MicroPythonFileManager({
     try {
       return await runInRawRepl(sendRawBytes, subscribeRx, codeStr, timeoutMs);
     } catch (err) {
+      // Surface the real failure to the caller/UI instead of looking like an empty result.
       onLogMessage?.(`[MICROPYTHON] ${err.message}`, 'sys');
-      return '';
+      throw err;
+    }
+  };
+
+  // Transfer progress + cancel for chunked reads/writes
+  const [transfer, setTransfer] = useState(null); // { label, done, total }
+  const abortRef = useRef(null);
+  const runTransfer = async (label, fn) => {
+    const ctl = new AbortController();
+    abortRef.current = ctl;
+    setTransfer({ label, done: 0, total: 0 });
+    try {
+      return await withRawRepl(sendRawBytes, subscribeRx, (repl) => fn(repl, {
+        signal: ctl.signal,
+        onProgress: (done, total) => setTransfer({ label, done, total }),
+      }));
+    } finally {
+      abortRef.current = null;
+      setTransfer(null);
+    }
+  };
+  const cancelTransfer = () => abortRef.current?.abort();
+
+  // Device control: Ctrl-C stop, soft reset (Ctrl-D), hard reset (machine.reset)
+  const handleDeviceControl = async (kind) => {
+    if (!isConnected) return;
+    try {
+      if (kind === 'stop') await sendRawBytes(Uint8Array.of(0x03, 0x03));
+      else if (kind === 'soft') await sendRawBytes(Uint8Array.of(0x03, 0x03, 0x04));
+      else if (kind === 'hard') {
+        if (!confirm('Hard reset the board? The serial connection may drop.')) return;
+        await sendRawBytes(new TextEncoder().encode('\x03\x03import machine; machine.reset()\r\n'));
+      }
+      onLogMessage?.(`[MICROPYTHON] ${kind} sent`, 'sys');
+    } catch (err) {
+      onLogMessage?.(`[MICROPYTHON] ${kind} failed: ${err.message}`, 'sys');
+    }
+  };
+
+  const handleMkdir = async () => {
+    const name = prompt('New folder name');
+    if (!name) return;
+    const full = currentPath === '.' ? name : `${currentPath}/${name}`;
+    setIsExecuting(true);
+    try {
+      const out = await executeInRawRepl(`import os\nos.mkdir(${pyStr(full)})\nprint("__OK__")`);
+      if (!out.includes('__OK__')) throw new Error(out.trim() || 'mkdir failed');
+      await handleScanFiles(currentPath);
+    } catch (err) {
+      alert(`mkdir failed: ${err.message}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  // mip: install by name / github: spec / URL, fetched in the browser, written to /lib
+  const [mipStatus, setMipStatus] = useState('');
+  const handleMipInstall = async () => {
+    const spec = customPackageName.trim();
+    if (!isConnected || !spec) return;
+    setIsExecuting(true);
+    setMipStatus('Resolving...');
+    try {
+      const files = await resolvePackage(spec, { onStatus: setMipStatus });
+      await runTransfer(`mip ${spec}`, async (repl, opts) => {
+        const dirs = new Set(['/lib']);
+        for (const f of files) {
+          const parts = f.path.split('/').slice(1, -1);
+          let cur = '';
+          for (const part of parts) { cur += '/' + part; dirs.add(cur); }
+        }
+        for (const d of [...dirs].sort()) {
+          await repl.execChecked(`import os\ntry:\n    os.mkdir(${pyStr(d)})\nexcept OSError:\n    pass`);
+        }
+        for (const f of files) {
+          setMipStatus(`Writing ${f.path}`);
+          await writeFileChunked(repl, f.path, f.bytes, opts);
+        }
+      });
+      setMipStatus(`Installed ${files.length} file(s): ${files.map((f) => f.path).join(', ')}`);
+      onLogMessage?.(`[MIP] Installed ${spec}: ${files.map((f) => f.path).join(', ')}`, 'sys');
+    } catch (err) {
+      setMipStatus(`Failed: ${err.message}`);
+      onLogMessage?.(`[MIP ERROR] ${err.message}`, 'err');
+    } finally {
+      setIsExecuting(false);
     }
   };
 
@@ -153,25 +240,13 @@ print("__PY_DATA_END__")
     const fullPath = getFullPath(fileName);
     onLogMessage?.(`[MICROPYTHON] Reading file "${fullPath}"...`, 'sys');
 
-    const readPython = buildReadScript(fullPath);
-
     try {
-      const output = await executeInRawRepl(readPython);
-      const startMarker = '__FILE_DATA_START__';
-      const endMarker = '__FILE_DATA_END__';
-
-      const sIdx = output.indexOf(startMarker);
-      const eIdx = output.indexOf(endMarker);
-
-      if (sIdx !== -1 && eIdx !== -1) {
-        const textContent = new TextDecoder().decode(parseFileOutput(output));
-        setEditingFile({ name: fullPath, content: textContent });
-        onLogMessage?.(`[MICROPYTHON] Successfully loaded "${fullPath}" (${textContent.length} chars)`, 'sys');
-      } else {
-        alert(`Could not read "${fullPath}" from device. See console for details.`);
-      }
+      const bytes = await runTransfer(`Reading ${fullPath}`, (repl, opts) => readFileChunked(repl, fullPath, opts));
+      const textContent = new TextDecoder().decode(bytes);
+      setEditingFile({ name: fullPath, content: textContent });
+      onLogMessage?.(`[MICROPYTHON] Successfully loaded "${fullPath}" (${bytes.length} bytes)`, 'sys');
     } catch (err) {
-      alert(`Error reading file: ${err.message}`);
+      if (err.name !== 'AbortError') alert(`Error reading file: ${err.message}`);
     } finally {
       setIsExecuting(false);
     }
@@ -184,28 +259,18 @@ print("__PY_DATA_END__")
     const fullPath = getFullPath(fileName);
     onLogMessage?.(`[MICROPYTHON] Downloading "${fullPath}" to PC...`, 'sys');
 
-    const readPython = buildReadScript(fullPath);
-
     try {
-      const output = await executeInRawRepl(readPython);
-      const startMarker = '__FILE_DATA_START__';
-      const endMarker = '__FILE_DATA_END__';
-
-      const sIdx = output.indexOf(startMarker);
-      const eIdx = output.indexOf(endMarker);
-
-      if (sIdx !== -1 && eIdx !== -1) {
-        const blob = new Blob([parseFileOutput(output)], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        a.click();
-        URL.revokeObjectURL(url);
-        onLogMessage?.(`[MICROPYTHON] "${fileName}" downloaded to host`, 'sys');
-      }
+      const bytes = await runTransfer(`Downloading ${fullPath}`, (repl, opts) => readFileChunked(repl, fullPath, opts));
+      const blob = new Blob([bytes], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+      onLogMessage?.(`[MICROPYTHON] "${fileName}" downloaded to host`, 'sys');
     } catch (err) {
-      alert(`Download failed: ${err.message}`);
+      if (err.name !== 'AbortError') alert(`Download failed: ${err.message}`);
     } finally {
       setIsExecuting(false);
     }
@@ -217,20 +282,15 @@ print("__PY_DATA_END__")
     setIsExecuting(true);
     onLogMessage?.(`[MICROPYTHON] Writing file "${targetFilePath}" to flash...`, 'sys');
 
-    const writePython = buildWriteScript(targetFilePath, content);
-
     try {
-      const output = await executeInRawRepl(writePython);
-      if (output.includes('__FILE_WRITE_SUCCESS__')) {
-        onLogMessage?.(`[MICROPYTHON] Successfully saved "${targetFilePath}"!`, 'sys');
-        setEditingFile(null);
-        setIsNewFileModal(false);
-        await handleScanFiles(currentPath);
-      } else {
-        alert('File write failed. See logs for details.');
-      }
+      await runTransfer(`Writing ${targetFilePath}`, (repl, opts) => writeFileChunked(repl, targetFilePath, content, opts));
+      onLogMessage?.(`[MICROPYTHON] Successfully saved "${targetFilePath}"!`, 'sys');
+      setEditingFile(null);
+      setIsNewFileModal(false);
+      await handleScanFiles(currentPath);
     } catch (err) {
-      alert(`Write failed: ${err.message}`);
+      if (err.name === 'AbortError') onLogMessage?.(`[MICROPYTHON] Write of "${targetFilePath}" cancelled (file may be partial)`, 'sys');
+      else alert(`Write failed: ${err.message}`);
     } finally {
       setIsExecuting(false);
     }
@@ -336,6 +396,22 @@ except:
 
   return (
     <div className="bg-cyber-darkest border border-cyber-border rounded-xl shadow-xl p-4 flex flex-col gap-3 font-mono text-xs">
+      {transfer && (
+        <div className="flex items-center gap-2 bg-slate-950 border border-cyan-800 rounded-lg px-3 py-2 text-[11px] text-slate-300">
+          <span className="truncate">{transfer.label}</span>
+          <div className="flex-1 h-1.5 bg-slate-800 rounded overflow-hidden">
+            <div className="h-full bg-cyan-500" style={{ width: `${transfer.total ? Math.round((transfer.done / transfer.total) * 100) : 0}%` }} />
+          </div>
+          <span>{transfer.done}/{transfer.total} B</span>
+          <button onClick={cancelTransfer} className="px-2 py-0.5 rounded bg-rose-700 text-white font-bold">CANCEL</button>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+        <button onClick={() => handleDeviceControl('stop')} disabled={!isConnected} className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40">Stop (Ctrl-C)</button>
+        <button onClick={() => handleDeviceControl('soft')} disabled={!isConnected} className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40">Soft reset</button>
+        <button onClick={() => handleDeviceControl('hard')} disabled={!isConnected} className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40">Hard reset</button>
+        <button onClick={handleMkdir} disabled={!isConnected || isExecuting} className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40">New folder</button>
+      </div>
       {/* Top Banner */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-cyber-border">
         <div className="flex items-center gap-2">
@@ -602,7 +678,7 @@ except:
               <Package className="w-5 h-5 text-cyber-cyan" />
               <div>
                 <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
-                  MICROPYTHON DRIVER REPOSITORY (mip)
+                  OFFLINE DRIVERS (bundled) + mip
                   <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
                     VIPERIDE / MIP INTEGRATION
                   </span>
@@ -624,6 +700,25 @@ except:
                 className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-slate-200 text-xs outline-none focus:border-cyan-500"
               />
             </div>
+          </div>
+
+          {/* Real mip: name, github: spec or URL (fetched in the browser, https + allow-listed hosts) */}
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              placeholder="mip install: umqtt.simple, github:org/repo/path, or https://.../package.json"
+              value={customPackageName}
+              onChange={e => setCustomPackageName(e.target.value)}
+              className="flex-1 min-w-[16rem] bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-slate-200 text-xs outline-none focus:border-cyan-500"
+            />
+            <button
+              onClick={handleMipInstall}
+              disabled={!isConnected || isExecuting || !customPackageName.trim()}
+              className="px-3 py-1.5 rounded-lg bg-cyan-600 text-white font-bold text-xs disabled:opacity-40"
+            >
+              mip install
+            </button>
+            {mipStatus && <span className="text-[11px] text-slate-400 w-full">{mipStatus}</span>}
           </div>
 
           {/* Drivers Grid */}

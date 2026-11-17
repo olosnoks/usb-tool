@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { KeyRound, Usb, Power, ShieldAlert, Activity, Loader2 } from 'lucide-react';
-import { Fido2Device, requestFido2Device } from '../../utils/fido2Driver';
+import { Fido2Device, requestFido2Device, loadAaguidNames, aaguidName } from '../../utils/fido2Driver';
 import StatusBadge from '../common/StatusBadge';
+import WebAuthnLab from './fido2/WebAuthnLab';
 
 import { useSessionError } from '../../utils/sessionLog';
 export default function Fido2Workbench() {
@@ -11,6 +12,7 @@ export default function Fido2Workbench() {
   const [info, setInfo] = useState(null); // getInfo
   const [ping, setPing] = useState(null);
   const [busy, setBusy] = useState('');
+  const [winked, setWinked] = useState(false);
   const [error, setError] = useSessionError('FIDO2');
   const webHidAvailable = typeof navigator !== 'undefined' && 'hid' in navigator;
 
@@ -20,8 +22,12 @@ export default function Fido2Workbench() {
       const transport = await requestFido2Device();
       const d = new Fido2Device(transport);
       await d.open();
-      setCtap(await d.init());
-      setInfo(await d.getInfo());
+      const ci = await d.init();
+      setCtap(ci);
+      // U2F-only keys have no CBOR / getInfo. Names come from the community AAGUID list, fetched on demand.
+      const gi = ci.capCbor ? await d.getInfo() : null;
+      if (gi?.aaguid) { await loadAaguidNames(); gi.aaguidName = aaguidName(gi.aaguid); }
+      setInfo(gi);
       setDev(d); setStatus('online');
     } catch (err) { setError(err.message); setStatus('warning'); }
     finally { setBusy(''); }
@@ -29,7 +35,14 @@ export default function Fido2Workbench() {
 
   const disconnect = async () => {
     try { await dev?.close(); } catch (e) { /* ignore */ }
-    setDev(null); setStatus('offline'); setCtap(null); setInfo(null); setPing(null);
+    setDev(null); setStatus('offline'); setCtap(null); setInfo(null); setPing(null); setWinked(false);
+  };
+
+  const doWink = async () => {
+    setBusy('wink'); setError('');
+    try { await dev.wink(); setWinked(true); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(''); }
   };
 
   const doPing = async () => {
@@ -65,6 +78,7 @@ export default function Fido2Workbench() {
             Chrome and Edge hide security keys (HID usage page F1D0) from web pages, so the device chooser normally shows nothing here.
             To read a key you own, start the browser with <code className="text-amber-200">--disable-hid-blocklist</code> for this session only,
             then close it again: that flag lets every site you visit ask for blocked HID devices.
+            No flag needed for the <a href="#webauthn-lab" className="text-amber-200 underline">WebAuthn lab</a> below: it talks to the key through the browser&apos;s own WebAuthn stack.
           </span>
         </div>
         {error && (
@@ -86,11 +100,23 @@ export default function Fido2Workbench() {
               <button onClick={doPing} disabled={!!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-slate-800 text-xs font-bold disabled:opacity-40">
                 <Activity className="w-3.5 h-3.5" /> {busy === 'ping' ? 'PINGING...' : 'PING'}
               </button>
+              {ctap?.capWink && (
+                <button onClick={doWink} disabled={!!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-slate-800 text-xs font-bold disabled:opacity-40">
+                  {busy === 'wink' ? 'WINKING...' : 'WINK'}
+                </button>
+              )}
+              {winked && <span className="text-emerald-400">winked ✓</span>}
               {ping != null && <span className={ping ? 'text-emerald-400' : 'text-rose-400'}>{ping ? 'echo matched ✓' : 'echo mismatch ✗'}</span>}
             </>
           )}
         </div>
       </div>
+
+      {ctap && !ctap.capCbor && (
+        <div className="flex items-start gap-2 p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200">
+          <ShieldAlert className="w-4 h-4 shrink-0" /> This key is U2F-only (CTAPHID version {ctap.protocolVersion}, firmware {ctap.deviceVersion}): it has no CTAP2 / CBOR support, so there is no AAGUID, options or algorithm list to read.
+        </div>
+      )}
 
       {info && (
         <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
@@ -98,7 +124,16 @@ export default function Fido2Workbench() {
             <Field label="CTAPHID version" value={ctap?.protocolVersion} />
             <Field label="Device version" value={ctap?.deviceVersion} />
             <Field label="AAGUID" value={info.aaguid} />
+            <Field label="Authenticator" value={info.aaguidName || (info.aaguid ? 'Unknown (not in the community AAGUID list)' : null)} />
             <Field label="Max msg size" value={info.maxMsgSize} />
+            <Field label="Firmware version" value={info.firmwareVersion} />
+            <Field label="Min PIN length" value={info.minPinLength} />
+            <Field label="Max cred ID length" value={info.maxCredentialIdLength} />
+            <Field label="Max creds in list" value={info.maxCredentialCountInList} />
+            <Field label="Max cred blob" value={info.maxCredBlobLength} />
+            <Field label="Max large blob array" value={info.maxSerializedLargeBlobArray} />
+            <Field label="Remaining discoverable creds" value={info.remainingDiscoverableCredentials} />
+            <Field label="Force PIN change" value={info.forcePinChange == null ? null : String(info.forcePinChange)} />
           </div>
           <div>
             <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Versions</span>
@@ -116,6 +151,10 @@ export default function Fido2Workbench() {
               </div>
             </div>
           )}
+          {info.extensions.length > 0 && <ChipList label="Extensions" items={info.extensions} />}
+          {info.algorithms.length > 0 && <ChipList label="Algorithms" items={info.algorithms.map((a) => `${a.name || a.alg}${a.type ? ` (${a.type})` : ''}`)} />}
+          {info.attestationFormats.length > 0 && <ChipList label="Attestation formats" items={info.attestationFormats} />}
+          {Object.keys(info.certifications).length > 0 && <ChipList label="Certifications" items={Object.entries(info.certifications).map(([k, v]) => `${k}: ${v}`)} />}
           {(info.transports.length > 0 || info.pinUvAuthProtocols.length > 0) && (
             <div className="grid grid-cols-2 gap-3">
               {info.transports.length > 0 && <Field label="Transports" value={info.transports.join(', ')} />}
@@ -124,6 +163,18 @@ export default function Fido2Workbench() {
           )}
         </div>
       )}
+      <WebAuthnLab />
+    </div>
+  );
+}
+
+function ChipList({ label, items }) {
+  return (
+    <div>
+      <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">{label}</span>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((v) => <span key={v} className="px-2 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-800">{v}</span>)}
+      </div>
     </div>
   );
 }

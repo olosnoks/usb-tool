@@ -57,6 +57,7 @@ import {
   fetchOsrmRoadRoute,
   channelToFrequency,
   WIGLE_PREHEADER,
+  SYNTHETIC_NOTICE,
   WIGLE_HEADER,
   SSID_PROFILES,
   VECTOR_FONTS,
@@ -1016,7 +1017,8 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
   };
 
   const getCleanBaseFilename = () => {
-    return (text || 'demo').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    // SYNTHETIC_ prefix: generated files must never pass for real survey logs by name either.
+    return 'SYNTHETIC_' + (text || 'demo').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
   };
 
   const estimatedParts = useMemo(() => {
@@ -1156,6 +1158,12 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
   return (
     <div className="w-full space-y-2.5">
+      {/* Data-integrity notice: generated rows must not be mistaken for a real survey */}
+      <div role="alert" className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/40 text-amber-200 rounded-xl px-3 py-2 text-[11px] leading-snug">
+        <span className="font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 shrink-0">SYNTHETIC</span>
+        <span>{SYNTHETIC_NOTICE} Every export is marked SYNTHETIC in its header, rows and file name.</span>
+      </div>
+
       {/* Top Banner / Tool Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 px-3 py-2 rounded-xl border border-slate-800 backdrop-blur-sm">
         <div className="flex items-center gap-2.5">
@@ -2281,11 +2289,13 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 <label className="flex items-center gap-2 cursor-pointer text-[11px] text-slate-300">
                   <input
                     type="checkbox"
-                    checked={includePreheader}
-                    onChange={(e) => setIncludePreheader(e.target.checked)}
-                    className="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0"
+                    checked
+                    disabled
+                    readOnly
+                    title="Always on: the WiGLE header carries the SYNTHETIC marker"
+                    className="rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-0 opacity-60"
                   />
-                  <span>WiGLE Header</span>
+                  <span title="Always on: the WiGLE header carries the SYNTHETIC marker">WiGLE Header (SYNTHETIC)</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer text-[11px] text-slate-300 mt-1">
                   <input

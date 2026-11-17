@@ -1,12 +1,13 @@
 {
   "name": "skons-web-flasher",
   "private": true,
+  "license": "MIT",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build:mayhem": "esbuild src/mayhem-mobile/src/main.ts --bundle --outfile=public/mayhem/build/app.js --format=esm --target=es2020 --minify && esbuild src/mayhem-mobile/src/dsp.worker.ts --bundle --outfile=public/mayhem/build/dsp-worker.js --format=esm --target=es2020 --minify",
-    "build": "vite build",
+    "build": "vite build && node scripts/build-notices.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -22,6 +23,7 @@
     "@openipc-rs/web": "^0.1.40",
     "@uiw/react-codemirror": "^4.25.12",
     "crypto-js": "^4.2.0",
+    "esptool-js": "0.7.0",
     "jszip": "^3.10.2",
     "jwt-decode": "^4.0.0",
     "leaflet": "^1.9.4",

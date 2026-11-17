@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal, Radio, HardDrive, Crosshair, Download, Play, Square, Upload, Trash2, Send } from 'lucide-react';
+import { Terminal, Radio, HardDrive, Crosshair, Download, Play, Square, Upload, Trash2, Send, Cpu } from 'lucide-react';
 import { parseFlm, readPack, flmSectors, loadFirmwareImage, itmText } from '../../../utils/cortexDebug';
+import { packStore } from '../../../utils/packStore';
+import PeripheralsPanel from './PeripheralsPanel';
 
 import { confirmAction } from '../../../utils/sessionLog';
 const parseHex = (s) => {
@@ -27,7 +29,8 @@ const TABS = [
   { id: 'swo', label: 'SWO / ITM', icon: Radio },
   { id: 'flash', label: 'FLASH', icon: HardDrive },
   { id: 'bp', label: 'BREAK / WATCH', icon: Crosshair },
-  { id: 'dump', label: 'DUMP', icon: Download }
+  { id: 'dump', label: 'DUMP', icon: Download },
+  { id: 'periph', label: 'PERIPHERALS (SVD)', icon: Cpu }
 ];
 
 /**
@@ -35,7 +38,7 @@ const TABS = [
  * CMSIS-DAP debugger. `busyRef` is shared with the parent so background
  * polling never interleaves with other probe commands.
  */
-export default function DebugFeaturesPanel({ client, guard, busyRef, targetState, setTargetState, setError }) {
+export default function DebugFeaturesPanel({ client, guard, busyRef, targetState, setTargetState, setError, onSymbols }) {
   const [tab, setTab] = useState('rtt');
 
   // RTT
@@ -77,6 +80,8 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
   // Breakpoints
   const [units, setUnits] = useState(null);
   const [bpAddr, setBpAddr] = useState('0x08000100');
+  const [bpSymbol, setBpSymbol] = useState('');
+  const [savedAlgos, setSavedAlgos] = useState([]);
   const [wpAddr, setWpAddr] = useState('0x20000000');
   const [wpSize, setWpSize] = useState(4);
   const [wpAccess, setWpAccess] = useState('write');
@@ -126,6 +131,7 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
   }, [rtt, swo]);
 
   useEffect(() => () => { client.stopSwo(); }, []);
+  useEffect(() => { Promise.all([packStore.list('pack'), packStore.list('flm')]).then(([a, b]) => setSavedAlgos([...a.map((n) => ({ kind: 'pack', name: n })), ...b.map((n) => ({ kind: 'flm', name: n }))])); }, []);
 
   const startRtt = () => guard('rtt', async () => {
     setScanProgress(0);
@@ -166,6 +172,29 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
     setError('');
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
+      await loadAlgoBytes(file.name, bytes, true);
+    } catch (err) {
+      setError(`Could not load ${file.name}: ${err.message}`);
+    }
+  };
+
+  const loadSavedAlgo = async (value) => {
+    if (!value) return;
+    const [kind, ...rest] = value.split(':');
+    const name = rest.join(':');
+    setError('');
+    try {
+      const bytes = await packStore.load(kind, name);
+      if (!bytes) throw new Error('it is not in the browser store any more');
+      await loadAlgoBytes(name, bytes, false);
+    } catch (err) {
+      setError(`Could not load ${name}: ${err.message}`);
+    }
+  };
+
+  const loadAlgoBytes = async (fileName, bytes, persist) => {
+    {
+      const file = { name: fileName };
       if (/\.(pack|zip)$/i.test(file.name)) {
         const p = await readPack(bytes);
         if (!p.algorithms.length) throw new Error('The pack contains no .FLM flash algorithms.');
@@ -180,8 +209,12 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
         setFlm(f);
         setBinBase(h8(f.devAddr));
       }
-    } catch (err) {
-      setError(`Could not load ${file.name}: ${err.message}`);
+      if (persist) {
+        const kind = /\.(pack|zip)$/i.test(file.name) ? 'pack' : 'flm';
+        if (await packStore.save(kind, file.name, bytes)) {
+          setSavedAlgos((a) => (a.some((x) => x.kind === kind && x.name === file.name) ? a : [...a, { kind, name: file.name }]));
+        }
+      }
     }
   };
 
@@ -211,6 +244,9 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
   const doFlash = () => guard('flash', async () => {
     if (!flm || !image) throw new Error('Load a flash algorithm and a firmware file first.');
     const segments = loadFirmwareImage(image.name, image.bytes, parseHex(binBase));
+    if (image.bytes[0] === 0x7f && image.bytes[1] === 0x45 && image.bytes[2] === 0x4c && image.bytes[3] === 0x46) {
+      try { onSymbols?.(image.bytes, image.name); } catch (e) { /* no symbol table: addresses stay numeric */ }
+    }
     const total = segments.reduce((n, s) => n + s.data.length, 0);
     const ranges = segments.map((s) => `${h8(s.addr)}-${h8(s.addr + s.data.length - 1)}`).join(', ');
     if (!confirmAction(`Program ${image.name} (${total} bytes at ${ranges}) into ${flm.name}?\n\n${chipErase ? 'The WHOLE chip is erased first.' : 'Only the sectors the image touches are erased.'}`)) return;
@@ -232,6 +268,29 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
       setTargetState(client.targetState);
     }
   });
+
+  const doMassErase = () => guard('mass-erase', async () => {
+    if (!flm) throw new Error('Load a flash algorithm first: mass erase uses its EraseChip().');
+    if (!confirmAction(`MASS ERASE the whole ${flm.name} (${flm.devSize / 1024} KB)?\n\nThe core is reset and halted first. All firmware on the chip is lost.`)) return;
+    setFlashResult('');
+    setFlashProgress({ phase: 'erase', frac: 0 });
+    try {
+      await client.massErase(flm, { ramBase: parseHex(ramBase), ramSize: parseNum(ramSize), onProgress: (phase, frac) => setFlashProgress({ phase, frac }) });
+      setFlashResult('Done: the whole chip is erased.');
+    } finally {
+      setFlashProgress(null);
+      setTargetState(client.targetState);
+    }
+  });
+
+  const doNrfUnlock = () => guard('unlock', async () => {
+    if (!confirmAction('Unlock an nRF52 by ERASEALL through its CTRL-AP?\n\nThis wipes ALL flash, UICR and RAM of the chip. It is the only way into a read-protected nRF52.')) return;
+    await client.nrf52Unlock();
+    setTargetState(client.targetState);
+    setFlashResult('Done: nRF52 erased through the CTRL-AP and reset.');
+  });
+
+  const addBpSymbol = () => guard('bp', async () => { await client.breakAtSymbol(bpSymbol.trim()); setUnits(await client.ensureDebugUnits()); setBpTick((t) => t + 1); });
 
   const initUnits = () => guard('bp', async () => setUnits(await client.ensureDebugUnits()));
   const addBp = () => guard('bp', async () => { await client.setBreakpoint(parseHex(bpAddr)); setUnits(await client.ensureDebugUnits()); setBpTick((t) => t + 1); });
@@ -348,6 +407,12 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => algoInput.current?.click()} className={btn}><Upload className="w-3.5 h-3.5" /> OPEN .PACK / .FLM</button>
             <input ref={algoInput} type="file" accept=".pack,.zip,.flm,.FLM" className="hidden" onChange={onAlgoFile} />
+            {savedAlgos.length > 0 && (
+              <select value="" onChange={(e) => loadSavedAlgo(e.target.value)} className={input}>
+                <option value="">saved in this browser ({savedAlgos.length})</option>
+                {savedAlgos.map((a) => <option key={`${a.kind}:${a.name}`} value={`${a.kind}:${a.name}`}>{a.name}</option>)}
+              </select>
+            )}
             {pack && pack.devices.length > 0 && (
               <select value={packDevice} onChange={(e) => onPackDevice(e.target.value)} className={input}>
                 <option value="">choose device ({pack.devices.length})</option>
@@ -390,6 +455,12 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
             <button onClick={doFlash} disabled={!flm || !image || !!flashProgress} className="flex items-center gap-1 px-3 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 font-bold disabled:opacity-40">
               <HardDrive className="w-3.5 h-3.5" /> PROGRAM FLASH
             </button>
+            <button onClick={doMassErase} disabled={!flm || !!flashProgress} title="Run the loaded algorithm's EraseChip() and nothing else" className="flex items-center gap-1 px-3 py-1 rounded bg-rose-500/20 text-rose-300 border border-rose-500/50 font-bold disabled:opacity-40">
+              MASS ERASE
+            </button>
+            <button onClick={doNrfUnlock} disabled={!!flashProgress} title="nRF52 only: ERASEALL through the CTRL-AP (access port 1)" className="px-3 py-1 rounded bg-slate-900 text-rose-300 border border-rose-500/40 font-bold disabled:opacity-40">
+              UNLOCK nRF52
+            </button>
           </div>
           {flashProgress && (
             <div className="flex items-center gap-2">
@@ -413,9 +484,13 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
                 <span className="text-slate-500 font-bold">BREAK AT</span>
                 <input value={bpAddr} onChange={(e) => setBpAddr(e.target.value)} className={`${input} w-28`} />
                 <button onClick={addBp} className={btn}>ADD</button>
+                <span className="text-slate-500">or symbol</span>
+                <input value={bpSymbol} onChange={(e) => setBpSymbol(e.target.value)} list="elf-symbols" placeholder={client.symbols ? 'main' : 'load an ELF first'} disabled={!client.symbols} className={`${input} w-32`} />
+                <datalist id="elf-symbols">{(client.symbols || []).filter((x) => x.func).slice(0, 5000).map((x) => <option key={x.name + x.addr} value={x.name} />)}</datalist>
+                <button onClick={addBpSymbol} disabled={!client.symbols || !bpSymbol.trim()} className={btn}>BREAK AT SYMBOL</button>
                 {client.breakpoints?.active.map((a) => (
                   <span key={a} className="flex items-center gap-1 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/40 text-rose-300">
-                    {h8(a)} <button onClick={() => removeBp(a)} title="Remove"><Trash2 className="w-3 h-3" /></button>
+                    {h8(a)}{client.symbolFor(a) ? ` ${client.symbolFor(a)}` : ''} <button onClick={() => removeBp(a)} title="Remove"><Trash2 className="w-3 h-3" /></button>
                   </span>
                 ))}
               </div>
@@ -440,6 +515,8 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
           )}
         </div>
       )}
+
+      {tab === 'periph' && <PeripheralsPanel client={client} guard={guard} setError={setError} pack={pack} />}
 
       {tab === 'dump' && (
         <div className="flex flex-col gap-2">

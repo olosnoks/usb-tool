@@ -361,3 +361,46 @@ describe('JTAG over CMSIS-DAP', () => {
     await expect(runSvf(new JtagEngine(probe), 'BOGUS 1;')).rejects.toThrow(/unknown SVF command/);
   });
 });
+
+describe('connect under reset', () => {
+  // Wrap the fake transport to record the SWJ_Pins / SWJ_Sequence / Transfer order.
+  function traced(opts) {
+    const fake = fakeProbe(opts);
+    const events = [];
+    const inner = fake.transport.transfer.bind(fake.transport);
+    fake.transport.transfer = async (bytes) => {
+      if (bytes[0] === 0x10) events.push(`pins:${bytes[1].toString(16)}/${bytes[2].toString(16)}`);
+      else if (bytes[0] === 0x12) events.push('seq');
+      return inner(bytes);
+    };
+    return { ...fake, events };
+  }
+
+  it('asserts nRST, attaches, halts with vector catch, then releases nRST', async () => {
+    const fake = traced();
+    const probe = await new DapProbe(fake.transport).open();
+    const client = new CmsisDapClient(() => {});
+    const info = await client.connectHardware({ probe, underReset: true });
+    expect(info.underReset).toBe(true);
+    expect(fake.events[0]).toBe('pins:0/80'); // nRESET (0x80) driven low
+    expect(fake.events.indexOf('pins:80/80')).toBeGreaterThan(fake.events.lastIndexOf('seq')); // released after the line reset
+    expect(fake.events.filter((e) => e.startsWith('pins:'))).toEqual(['pins:0/80', 'pins:80/80']);
+    expect(fake.core.halted).toBe(true);
+    expect(fake.core.demcr & 1).toBe(0); // vector catch cleared again
+    expect(client.targetState).toBe('halted');
+  });
+
+  it('releases nRST when the target never answers', async () => {
+    const fake = traced({ swdAlive: false });
+    const probe = await new DapProbe(fake.transport).open();
+    await expect(new CmsisDapClient(() => {}).connectHardware({ probe, underReset: true })).rejects.toThrow(/no answer from the target/);
+    expect(fake.events.filter((e) => e.startsWith('pins:'))).toEqual(['pins:0/80', 'pins:80/80']);
+  });
+
+  it('does not touch the pins on a normal connect', async () => {
+    const fake = traced();
+    const probe = await new DapProbe(fake.transport).open();
+    await new CmsisDapClient(() => {}).connectHardware({ probe });
+    expect(fake.events.some((e) => e.startsWith('pins:'))).toBe(false);
+  });
+});

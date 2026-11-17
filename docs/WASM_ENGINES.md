@@ -4,9 +4,9 @@ Some security workbenches can use a native engine compiled to WebAssembly, becau
 the task cannot be done from a browser page alone (no raw TCP sockets, and
 cross-origin reads are blocked by CORS).
 
-Engines are loaded from `public/wasm/` at runtime (`src/utils/wasmLoader.js`). Only
-`aircrack.wasm` ships today; `portscanner.wasm` and `zap.wasm` are interfaces for
-engines that are not built. When a binary is absent the tool falls back to what it can
+Engines are loaded from `public/wasm/` at runtime (`src/utils/wasmLoader.js`). No engine
+ships today; `portscanner.wasm` and `zap.wasm` are interfaces for engines that are not
+built. When a binary is absent the tool falls back to what it can
 do in the browser or reports that the engine is missing; it never fabricates results.
 
 The `emsdk/`, `aircrack-js/` and `aircrack-ng/` directories at the repo root are
@@ -70,23 +70,8 @@ scan(urlPtr:i32, urlLen:i32) -> resultPtr:i32
 
 Adapter: `src/utils/zapWrapper.js` (`loadZapEngine()`).
 
-## WPA PMKID accelerator — `public/wasm/aircrack.wasm` (optional)
+## WPA PMKID cracker — no WASM
 
-The WPA PMKID Cracker works today in pure Web Crypto (`src/utils/aircrackWrapper.js`),
-so no WASM is required. The present `public/wasm/aircrack.wasm` (from the `aircrack-js`
-checkout) is an optional SIMD accelerator.
-
-Its real exports are **not** the generic `malloc`/`scan` ABI:
-
-```
-memory : WebAssembly.Memory
-pbkdf2_pmkid(pass1Len:i32, pass2Len:i32) -> matchLane:i32   // dual-lane SIMD
-pbkdf1_eapol(...)
-// fixed global buffer pointers written before each call:
-SSID_BUF1, SSID_BUF2, PMK_NAME_BUF, EXPECTED_PMKID, password1, password2
-```
-
-To wire it as an accelerator, follow `aircrack-js/cpu/wasm-simd.js`: precompute the
-ESSID SHA-1 block buffers and the "PMK Name"+MAC buffer, write them into the
-exported globals, then call `pbkdf2_pmkid` with two candidate lengths. This is a
-future optimization; correctness is already provided by the Web Crypto path.
+The WPA PMKID Cracker runs in pure Web Crypto (`src/utils/aircrackWrapper.js`). The SIMD
+`pbkdf2_eapol.wasm` from the `aircrack-js` checkout is not shipped: that repository has no
+license, so redistributing its binary is not permitted.

@@ -1,155 +1,123 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Gauge, 
   Activity, 
   Compass, 
   RotateCcw, 
-  Play, 
-  Square, 
-  TrendingUp, 
-  Sliders, 
-  Cpu, 
-  Layers, 
-  Zap
+  Download
 } from 'lucide-react';
+import { useSerial } from '../context/SerialContext';
+import { createLineAssembler, parseTelemetryLine } from '../utils/rxLines';
+import {
+  HISTORY_OPTIONS,
+  samplePairs,
+  applySamples,
+  trimHistory,
+  resetChannelStats,
+  buildTelemetryCsv
+} from '../utils/telemetryModel';
 
-export default function TelemetryDashboard({
-  latestTextStream = '',
-  isConnected = false,
-  boards = [],
-  activeBoardId = 'board-1',
-  onSelectBoard
-}) {
-  // Parsed Telemetry Channels: { [key: string]: { value: number, min: number, max: number, history: number[], unit: string } }
-  const [telemetryData, setTelemetryData] = useState({
-    pitch: { value: 0, min: -15, max: 25, history: [0], unit: '°' },
-    roll: { value: 0, min: -30, max: 30, history: [0], unit: '°' },
-    temp: { value: 24.5, min: 20, max: 35, history: [24.5], unit: '°C' },
-    volts: { value: 12.1, min: 11.5, max: 12.6, history: [12.1], unit: 'V' },
-    rpm: { value: 2400, min: 0, max: 6000, history: [2400], unit: 'RPM' },
-    altitude: { value: 145, min: 100, max: 200, history: [145], unit: 'm' }
-  });
+const SAMPLE_LOG_LIMIT = 5000;
 
-  const [activeGaugeChannel, setActiveGaugeChannel] = useState('rpm');
-  const lastParsedTextRef = useRef('');
-  const demoIntervalRef = useRef(null);
+function Sparkline({ history }) {
+  if (!history || history.length < 2) return null;
+  const min = Math.min(...history);
+  const max = Math.max(...history);
+  const span = max - min || 1;
+  const pts = history.map((v, i) => `${(i / (history.length - 1)) * 100},${20 - ((v - min) / span) * 18 - 1}`).join(' ');
+  return (
+    <svg viewBox="0 0 100 20" className="w-full h-5 mt-1" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points={pts} fill="none" stroke="#22d3ee" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
 
-  // Helper to ingest and update telemetry channels
-  const updateChannelValues = (newValues) => {
-    setTelemetryData(prev => {
-      const next = { ...prev };
-      Object.entries(newValues).forEach(([key, val]) => {
-        const num = Number(val);
-        if (isNaN(num)) return;
+export default function TelemetryDashboard() {
+  const { subscribeRx } = useSerial();
 
-        const cleanKey = key.toLowerCase().replace(/[^a-z0-9_]/g, '');
-        if (!cleanKey) return;
+  // Channels appear only when data arrives: { [key]: { value, min, max, history: number[] } }
+  const [telemetryData, setTelemetryData] = useState({});
+  // User config per channel: { [key]: { label, unit, min, max } } (min/max are gauge range overrides)
+  const [channelConfig, setChannelConfig] = useState({});
+  const [historyLen, setHistoryLen] = useState(20);
+  const [activeGaugeChannel, setActiveGaugeChannel] = useState('');
+  const historyLenRef = useRef(20);
+  const samplesRef = useRef([]); // [{ t, pairs }] for CSV export
 
-        if (!next[cleanKey]) {
-          next[cleanKey] = {
-            value: num,
-            min: num,
-            max: num,
-            history: [num],
-            unit: cleanKey.includes('temp') ? '°C' : cleanKey.includes('volt') ? 'V' : cleanKey.includes('rpm') ? 'RPM' : cleanKey.includes('alt') ? 'm' : ''
-          };
-        } else {
-          const current = next[cleanKey];
-          next[cleanKey] = {
-            ...current,
-            value: num,
-            min: Math.min(current.min, num),
-            max: Math.max(current.max, num),
-            history: [...current.history.slice(-19), num]
-          };
-        }
-      });
-      return next;
-    });
-  };
-
-  // Parse incoming text stream
+  // Every received chunk: bytes -> lines -> samples, applied as one batch per chunk.
   useEffect(() => {
-    if (!latestTextStream || latestTextStream === lastParsedTextRef.current) return;
-    const newText = latestTextStream.slice(lastParsedTextRef.current.length);
-    lastParsedTextRef.current = latestTextStream;
-
-    const lines = newText.split(/[\r\n]+/).filter(l => l.trim().length > 0);
-    lines.forEach(line => {
-      const trimmed = line.trim();
-
-      // 1. Try JSON parsing: {"temp": 24.5, "rpm": 3200}
-      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          updateChannelValues(parsed);
-          return;
-        } catch {
-          // not valid json
-        }
+    if (!subscribeRx) return undefined;
+    const assembler = createLineAssembler();
+    return subscribeRx((bytes) => {
+      const batch = [];
+      for (const { text, t } of assembler.push(bytes, Date.now())) {
+        const pairs = samplePairs(parseTelemetryLine(text));
+        if (pairs.length) batch.push({ t, pairs });
       }
-
-      // 2. Try Key-Value: temp=24.5, rpm=3200 or temp:24.5 rpm:3200
-      if (trimmed.includes('=') || trimmed.includes(':')) {
-        const kvPairs = trimmed.match(/([a-zA-Z0-9_]+)[=:]\s*([+-]?\d+(?:\.\d+)?)/g);
-        if (kvPairs && kvPairs.length > 0) {
-          const extracted = {};
-          kvPairs.forEach(pair => {
-            const [k, v] = pair.split(/[=:]/);
-            if (k && v) extracted[k.trim()] = parseFloat(v.trim());
-          });
-          updateChannelValues(extracted);
-          return;
-        }
-      }
-
-      // 3. Try CSV / Telemetry sentence: $DATA,12.5,-4.2,24.5,12.1,2400
-      if (trimmed.startsWith('$') || trimmed.includes(',')) {
-        const parts = trimmed.replace(/^\$[A-Z0-9_]+,/, '').split(',');
-        const nums = parts.map(p => parseFloat(p.trim())).filter(n => !isNaN(n));
-        if (nums.length >= 2) {
-          const extracted = {};
-          const standardKeys = ['pitch', 'roll', 'temp', 'volts', 'rpm', 'altitude'];
-          nums.forEach((val, idx) => {
-            const key = standardKeys[idx] || `ch_${idx + 1}`;
-            extracted[key] = val;
-          });
-          updateChannelValues(extracted);
-        }
-      }
+      if (!batch.length) return;
+      samplesRef.current = [...samplesRef.current, ...batch].slice(-SAMPLE_LOG_LIMIT);
+      setTelemetryData((prev) => applySamples(prev, batch.map((b) => b.pairs), historyLenRef.current));
     });
-  }, [latestTextStream]);
+  }, [subscribeRx]);
 
-  // Demo Telemetry Generator
-  const handleResetStats = () => {
-    setTelemetryData(prev => {
-      const reset = {};
-      Object.entries(prev).forEach(([k, v]) => {
-        reset[k] = { ...v, min: v.value, max: v.value, history: [v.value] };
-      });
-      return reset;
-    });
+  // Select the first channel that appears.
+  useEffect(() => {
+    const keys = Object.keys(telemetryData);
+    if (keys.length && !telemetryData[activeGaugeChannel]) setActiveGaugeChannel(keys[0]);
+  }, [telemetryData, activeGaugeChannel]);
+
+  const handleHistoryLen = (n) => {
+    historyLenRef.current = n;
+    setHistoryLen(n);
+    setTelemetryData((prev) => trimHistory(prev, n));
   };
+
+  const handleResetStats = () => setTelemetryData((prev) => resetChannelStats(prev));
+
+  const updateConfig = useCallback((key, patch) => {
+    setChannelConfig((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  }, []);
+
+  const handleExportCsv = () => {
+    if (!samplesRef.current.length) return;
+    const csv = buildTelemetryCsv(samplesRef.current, channelConfig);
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `telemetry-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const channelKeys = Object.keys(telemetryData);
+  const hasData = channelKeys.length > 0;
+  const labelOf = (k) => channelConfig[k]?.label || k;
+  const unitOf = (k) => channelConfig[k]?.unit || '';
 
   const activeChannelData = telemetryData[activeGaugeChannel] || {
     value: 0,
     min: 0,
     max: 100,
-    unit: ''
+    history: []
   };
+  const activeCfg = channelConfig[activeGaugeChannel] || {};
 
-  // Radial Gauge Calculations
-  const gaugeMin = activeChannelData.min !== activeChannelData.max ? activeChannelData.min : 0;
-  const gaugeMax = activeChannelData.min !== activeChannelData.max ? activeChannelData.max : 100;
+  // Radial gauge: user range if set, otherwise the observed min/max (0-100 until a span exists)
+  const observedSpan = activeChannelData.min !== activeChannelData.max;
+  const gaugeMin = Number.isFinite(activeCfg.min) ? activeCfg.min : observedSpan ? activeChannelData.min : 0;
+  const gaugeMax = Number.isFinite(activeCfg.max) ? activeCfg.max : observedSpan ? activeChannelData.max : 100;
   const range = gaugeMax - gaugeMin || 1;
   const clampedVal = Math.min(Math.max(activeChannelData.value, gaugeMin), gaugeMax);
-  const normalized = (clampedVal - gaugeMin) / range;
+  const normalized = hasData ? (clampedVal - gaugeMin) / range : 0;
   // Arc from -135deg to +135deg (total 270deg)
   const needleAngle = -135 + normalized * 270;
 
-  // Attitude Gyro values
-  const currentPitch = telemetryData.pitch?.value || 0;
-  const currentRoll = telemetryData.roll?.value || 0;
+  // Attitude gyro binds to channels named pitch / roll (absent until they arrive)
+  const hasPitch = telemetryData.pitch !== undefined;
+  const hasRoll = telemetryData.roll !== undefined;
+  const currentPitch = telemetryData.pitch?.value ?? 0;
+  const currentRoll = telemetryData.roll?.value ?? 0;
+  const fmt = (v, has) => (has ? `${v.toFixed(1)}°` : '--');
 
   return (
     <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-slate-200 text-xs font-mono space-y-4">
@@ -165,12 +133,29 @@ export default function TelemetryDashboard({
               </span>
             </h2>
             <p className="text-[11px] text-slate-400">
-              Real-time circular speedometers, pitch/roll artificial horizon, and min/max metric cards.
+              Gauges, pitch/roll horizon and min/max cards for any JSON, key=value or CSV line the device prints.
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          <select
+            value={historyLen}
+            onChange={(e) => handleHistoryLen(Number(e.target.value))}
+            aria-label="History length"
+            className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-300"
+          >
+            {HISTORY_OPTIONS.map((n) => <option key={n} value={n}>{n} samples</option>)}
+          </select>
+          <button
+            onClick={handleExportCsv}
+            disabled={!hasData}
+            title="Export every sample received as CSV"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs disabled:opacity-40"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>CSV</span>
+          </button>
           <button
             onClick={handleResetStats}
             title="Reset min/max peak statistics"
@@ -191,8 +176,8 @@ export default function TelemetryDashboard({
               ATTITUDE HORIZON // 3D GYRO
             </span>
             <div className="flex items-center gap-2 text-[10px]">
-              <span className="text-cyan-400">PITCH: <strong>{currentPitch.toFixed(1)}°</strong></span>
-              <span className="text-amber-400">ROLL: <strong>{currentRoll.toFixed(1)}°</strong></span>
+              <span className="text-cyan-400">PITCH: <strong>{fmt(currentPitch, hasPitch)}</strong></span>
+              <span className="text-amber-400">ROLL: <strong>{fmt(currentRoll, hasRoll)}</strong></span>
             </div>
           </div>
 
@@ -267,7 +252,9 @@ export default function TelemetryDashboard({
           </div>
 
           <div className="w-full text-center text-[10px] text-slate-500 pt-3">
-            Coordinates bind to channels: <code className="text-cyan-400">pitch</code> and <code className="text-amber-400">roll</code>
+            {hasPitch || hasRoll
+              ? <>Bound to channels <code className="text-cyan-400">pitch</code> and <code className="text-amber-400">roll</code></>
+              : <>Waiting for channels named <code className="text-cyan-400">pitch</code> and <code className="text-amber-400">roll</code></>}
           </div>
         </div>
 
@@ -283,8 +270,9 @@ export default function TelemetryDashboard({
               onChange={e => setActiveGaugeChannel(e.target.value)}
               className="bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-cyber-cyan font-bold text-[11px]"
             >
-              {Object.keys(telemetryData).map(k => (
-                <option key={k} value={k}>{k.toUpperCase()}</option>
+              {!hasData && <option value="">NO DATA</option>}
+              {channelKeys.map(k => (
+                <option key={k} value={k}>{labelOf(k).toUpperCase()}</option>
               ))}
             </select>
           </div>
@@ -341,17 +329,17 @@ export default function TelemetryDashboard({
             {/* Digital Readout Center Badge */}
             <div className="absolute bottom-2 flex flex-col items-center">
               <span className="text-xl font-extrabold text-white font-mono tracking-tight">
-                {activeChannelData.value}
+                {hasData ? activeChannelData.value : '--'}
               </span>
               <span className="text-[10px] text-cyan-400 font-bold uppercase">
-                {activeGaugeChannel} {activeChannelData.unit}
+                {hasData ? `${labelOf(activeGaugeChannel)} ${unitOf(activeGaugeChannel)}` : 'waiting for data'}
               </span>
             </div>
           </div>
 
           <div className="w-full flex items-center justify-between text-[10px] text-slate-500 pt-1">
-            <span>MIN: <strong className="text-slate-300">{activeChannelData.min}</strong></span>
-            <span>MAX: <strong className="text-slate-300">{activeChannelData.max}</strong></span>
+            <span>MIN: <strong className="text-slate-300">{hasData ? activeChannelData.min : '--'}</strong></span>
+            <span>MAX: <strong className="text-slate-300">{hasData ? activeChannelData.max : '--'}</strong></span>
           </div>
         </div>
 
@@ -360,36 +348,79 @@ export default function TelemetryDashboard({
           <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
             <span className="font-bold text-slate-200 flex items-center gap-1.5">
               <Activity className="w-4 h-4 text-emerald-400" />
-              LIVE TELEMETRY FEEDS ({Object.keys(telemetryData).length})
+              LIVE TELEMETRY FEEDS ({channelKeys.length})
             </span>
             <span className="text-[10px] text-slate-500">FORMAT: JSON / CSV / K-V</span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
-            {Object.entries(telemetryData).map(([name, data]) => (
-              <div 
-                key={name} 
-                onClick={() => setActiveGaugeChannel(name)}
-                className={`p-2 rounded-lg border cursor-pointer transition-all ${
-                  activeGaugeChannel === name 
-                    ? 'bg-slate-800 border-cyan-500/60 shadow-cyan-glow/20' 
-                    : 'bg-slate-950 border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase font-bold">
-                  <span>{name}</span>
-                  <span className="text-slate-500">{data.unit}</span>
-                </div>
-                <div className="text-base font-extrabold text-slate-100 font-mono mt-0.5">
-                  {data.value}
-                </div>
-                <div className="flex items-center justify-between text-[9px] text-slate-500 mt-1">
-                  <span>↓ {data.min}</span>
-                  <span>↑ {data.max}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+          {!hasData ? (
+            <div className="text-center text-slate-600 py-6 text-[11px]">
+              Waiting for data. Print lines such as <code>temp=24.5 rpm=3200</code>, a JSON object, or <code>$TAG,1,2,3</code> over serial.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+              {channelKeys.map((name) => {
+                const data = telemetryData[name];
+                const cfg = channelConfig[name] || {};
+                return (
+                  <div
+                    key={name}
+                    onClick={() => setActiveGaugeChannel(name)}
+                    className={`p-2 rounded-lg border cursor-pointer transition-all ${
+                      activeGaugeChannel === name
+                        ? 'bg-slate-800 border-cyan-500/60 shadow-cyan-glow/20'
+                        : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase font-bold">
+                      <span>{labelOf(name)}</span>
+                      <span className="text-slate-500">{cfg.unit || ''}</span>
+                    </div>
+                    <div className="text-base font-extrabold text-slate-100 font-mono mt-0.5">
+                      {data.value}
+                    </div>
+                    <Sparkline history={data.history} />
+                    <div className="flex items-center justify-between text-[9px] text-slate-500 mt-1">
+                      <span>↓ {data.min}</span>
+                      <span>↑ {data.max}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 mt-1.5" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        value={cfg.label || ''}
+                        onChange={(e) => updateConfig(name, { label: e.target.value })}
+                        placeholder="name"
+                        aria-label={`Name for ${name}`}
+                        className="bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 min-w-0"
+                      />
+                      <input
+                        value={cfg.unit || ''}
+                        onChange={(e) => updateConfig(name, { unit: e.target.value })}
+                        placeholder="unit"
+                        aria-label={`Unit for ${name}`}
+                        className="bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 min-w-0"
+                      />
+                      <input
+                        type="number"
+                        value={Number.isFinite(cfg.min) ? cfg.min : ''}
+                        onChange={(e) => updateConfig(name, { min: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        placeholder="gauge min"
+                        aria-label={`Gauge minimum for ${name}`}
+                        className="bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 min-w-0"
+                      />
+                      <input
+                        type="number"
+                        value={Number.isFinite(cfg.max) ? cfg.max : ''}
+                        onChange={(e) => updateConfig(name, { max: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        placeholder="gauge max"
+                        aria-label={`Gauge maximum for ${name}`}
+                        className="bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 min-w-0"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -23,6 +23,7 @@ import {
   Upload
 } from 'lucide-react';
 import { parseNmeaSentence, parseWardriveLine, parseWigleCsvFile } from '../utils/nmeaParser';
+import { exportWigleCsvDetailed, isValidFix } from '../utils/wardrivingExporter';
 import {
   connectAlfaDevice,
   startMonitorMode,
@@ -32,6 +33,22 @@ import {
 import { parse80211Frame } from '../utils/wifiParser';
 
 const WARDRIVE_CHANNELS_DUALBAND = [1, 6, 11, 36, 40, 44, 48, 149, 153, 157, 161];
+
+// Merge a fresh observation into the stored AP: keep the real first-seen time
+// and a real position if the new line carries none.
+function mergeAp(old, next) {
+  if (!old) return next;
+  const hasNewFix = isValidFix(next.lat, next.lon);
+  return {
+    ...old,
+    ...next,
+    firstSeenTimestamp: old.firstSeenTimestamp ?? next.firstSeenTimestamp,
+    lat: hasNewFix ? next.lat : old.lat,
+    lon: hasNewFix ? next.lon : old.lon,
+    altitude: hasNewFix ? next.altitude : old.altitude,
+    accuracy: hasNewFix ? next.accuracy : old.accuracy
+  };
+}
 
 export default function GpsWardriverDeck({
   latestTextStream = '',
@@ -52,6 +69,22 @@ export default function GpsWardriverDeck({
     time: ''
   });
 
+  // Latest GPS state for use inside long-lived callbacks. Only a live fix
+  // (valid === true) may be stamped onto an AP; the initial placeholder
+  // position is never exported.
+  const gpsRef = useRef(null);
+  gpsRef.current = gpsData;
+  const stampFix = (ap) => {
+    const g = gpsRef.current;
+    const out = { firstSeenTimestamp: Date.now(), ...ap };
+    if (!isValidFix(out.lat, out.lon) && g?.valid && isValidFix(g.lat, g.lon)) {
+      out.lat = g.lat;
+      out.lon = g.lon;
+      out.altitude = g.altitude ?? null;
+      out.accuracy = g.accuracy ?? null;
+    }
+    return out;
+  };
   const [trackHistory, setTrackHistory] = useState([]); // Array of { lat, lon }
   const [capturedAps, setCapturedAps] = useState([]); // Array of { bssid, ssid, rssi, channel, auth, seenTime }
   const [apSearch, setApSearch] = useState('');
@@ -97,7 +130,7 @@ export default function GpsWardriverDeck({
         const parsedGps = parseNmeaSentence(line);
         if (parsedGps) {
           setGpsData(prev => {
-            const next = { ...prev, ...parsedGps };
+            const next = { ...prev, ...parsedGps, accuracy: null };
             if (parsedGps.lat && parsedGps.lon) {
               setTrackHistory(track => {
                 const last = track[track.length - 1];
@@ -115,9 +148,10 @@ export default function GpsWardriverDeck({
       // Check WiFi / BLE Wardriving lines (Warhog CYD, Piglet, WiGLE CSV v1.6/v1.4, Marauder)
       const parsedAp = parseWardriveLine(line);
       if (parsedAp) {
+        const stamped = stampFix(parsedAp);
         setCapturedAps(prev => {
           const map = new Map(prev.map(ap => [ap.bssid, ap]));
-          map.set(parsedAp.bssid, parsedAp);
+          map.set(stamped.bssid, mergeAp(map.get(stamped.bssid), stamped));
           return Array.from(map.values()).slice(-200);
         });
         // If Warhog CYD or Piglet line includes embedded GPS coordinates, update GPS & radar trail
@@ -251,7 +285,7 @@ export default function GpsWardriverDeck({
       if (aps.length > 0) {
         setCapturedAps(prev => {
           const map = new Map(prev.map(ap => [ap.bssid, ap]));
-          for (const ap of aps) map.set(ap.bssid, ap);
+          for (const ap of aps) map.set(ap.bssid, mergeAp(map.get(ap.bssid), ap));
           return Array.from(map.values()).slice(-500);
         });
       }
@@ -349,14 +383,15 @@ export default function GpsWardriverDeck({
                   const apEntry = {
                     bssid,
                     ssid: parsed.ssid || '<Hidden SSID>',
-                    rssi: f.rssi ?? parsed.signalDbm ?? -65,
+                    rssi: f.rssi ?? parsed.signalDbm ?? null,
                     channel: f.channel || parsed.channel || scanChannel,
-                    auth: parsed.security || 'WPA2',
+                    auth: parsed.security || null,
                     seenTime: new Date().toLocaleTimeString()
                   };
+                  const stampedEntry = stampFix(apEntry);
                   setCapturedAps(prev => {
                     const map = new Map(prev.map(ap => [ap.bssid, ap]));
-                    map.set(apEntry.bssid, apEntry);
+                    map.set(stampedEntry.bssid, mergeAp(map.get(stampedEntry.bssid), stampedEntry));
                     return Array.from(map.values()).slice(-200);
                   });
                 }
@@ -382,7 +417,7 @@ export default function GpsWardriverDeck({
     if (!isBrowserGps || typeof navigator === 'undefined' || !navigator.geolocation) return;
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        const { latitude, longitude, altitude, speed, heading } = pos.coords;
+        const { latitude, longitude, altitude, speed, heading, accuracy } = pos.coords;
         const speedKmh = speed != null ? Number((speed * 3.6).toFixed(1)) : 0;
         const speedMph = speed != null ? Number((speed * 2.23694).toFixed(1)) : 0;
         setGpsData(prev => ({
@@ -390,6 +425,7 @@ export default function GpsWardriverDeck({
           lat: latitude,
           lon: longitude,
           altitude: altitude != null ? Number(altitude.toFixed(1)) : prev.altitude,
+          accuracy: Number.isFinite(accuracy) ? accuracy : null,
           speedKmh,
           speedMph,
           heading: heading != null && !Number.isNaN(heading) ? Math.round(heading) : prev.heading,
@@ -540,19 +576,13 @@ export default function GpsWardriverDeck({
         : wardriveSource === 'pau09'
         ? 'Panda-PAU09-RT5572'
         : 'Skons-Wardriver';
-    const preHeader = `WigleWifi-1.6,appRelease=1.0,model=ESP32,release=1.0,device=${deviceTag},display=TFT,board=ESP32,brand=Skons\n`;
-    const header = 'MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type\n';
-    const rows = capturedAps.map(ap => {
-      const ch = Number(ap.channel) || 6;
-      const freq = ap.frequency || (ch > 14 ? 5000 + ch * 5 : 2407 + ch * 5);
-      const lat = ap.lat ?? gpsData.lat ?? 0;
-      const lon = ap.lon ?? gpsData.lon ?? 0;
-      const alt = ap.altitude ?? gpsData.altitude ?? 0;
-      const type = ap.deviceType || 'WIFI';
-      return `${ap.bssid},"${ap.ssid}",${ap.auth},${new Date().toISOString()},${ch},${freq},${ap.rssi},${lat},${lon},${alt},4.5,,,${type}`;
-    }).join('\n');
-
-    const csv = preHeader + header + rows;
+    // Shared writer: UTC first-seen, real accuracy only, no 0,0 positions,
+    // APs without a GPS fix are skipped and reported.
+    const { csv, written, skippedNoFix } = exportWigleCsvDetailed(capturedAps, { device: deviceTag });
+    if (written === 0) {
+      setStatusNotice(`Nothing exported: ${skippedNoFix} skipped, no GPS fix. Connect GPS and capture again.`);
+      return;
+    }
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -560,6 +590,10 @@ export default function GpsWardriverDeck({
     link.download = `${deviceTag.toLowerCase()}-${Date.now()}.wigle.csv`;
     link.click();
     URL.revokeObjectURL(url);
+    setStatusNotice(
+      `Exported ${written} network${written === 1 ? '' : 's'}` +
+      (skippedNoFix > 0 ? `, ${skippedNoFix} skipped, no GPS fix` : '')
+    );
   };
 
   const wardriveStats = useMemo(() => {
@@ -943,11 +977,12 @@ export default function GpsWardriverDeck({
                 </tr>
               ) : (
                 filteredAps.map((ap, i) => {
-                  const rssiColor = ap.rssi >= -65 ? 'text-cyber-emerald' : ap.rssi >= -78 ? 'text-cyber-amber' : 'text-rose-400';
+                  const hasRssi = typeof ap.rssi === 'number';
+                  const rssiColor = !hasRssi ? 'text-slate-500' : ap.rssi >= -65 ? 'text-cyber-emerald' : ap.rssi >= -78 ? 'text-cyber-amber' : 'text-rose-400';
                   return (
                     <tr key={i} className="hover:bg-slate-900/50 font-mono">
                       <td className={`py-1 px-2.5 font-bold ${rssiColor}`}>
-                        {ap.rssi} dBm
+                        {hasRssi ? `${ap.rssi} dBm` : '-'}
                       </td>
                       <td className="py-1 px-2.5 text-slate-100 font-semibold">
                         {ap.ssid}
@@ -956,13 +991,13 @@ export default function GpsWardriverDeck({
                         {ap.bssid}
                       </td>
                       <td className="py-1 px-2.5 text-cyber-cyan">
-                        CH {ap.channel}
+                        CH {ap.channel ?? '-'}
                       </td>
                       <td className="py-1 px-2.5">
                         <span className={`px-1 rounded text-[10px] font-bold ${
-                          ap.auth.includes('OPEN') ? 'bg-rose-950 text-rose-400 border border-rose-800' : 'bg-slate-800 text-slate-300'
+                          (ap.auth || '').includes('OPEN') ? 'bg-rose-950 text-rose-400 border border-rose-800' : 'bg-slate-800 text-slate-300'
                         }`}>
-                          {ap.auth}
+                          {ap.auth || 'unknown'}
                         </span>
                       </td>
                       <td className="py-1 px-2.5 text-slate-500 text-right">

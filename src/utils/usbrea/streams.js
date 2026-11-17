@@ -601,7 +601,7 @@ export function _region_tries(hl) {
     const part = [];
     for (let o = 0; o < hl - 1; o++) for (const e of [LE, BE]) part.push([layout, o, e]);
     part.sort((a, b) => (a[1] % 2) - (b[1] % 2) || Number(a[2] !== LE) - Number(b[2] !== LE) || a[1] - b[1]);
-    tries.push(...part);
+    for (const _x of part) tries.push(_x);
   }
   return tries;
 }

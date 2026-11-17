@@ -1,11 +1,17 @@
 /**
  * Hashing Operations
- * MD5, SHA-1, SHA-256, SHA-3, BLAKE2b, CRC-32, Adler-32
+ * MD5, SHA-1, SHA-256, SHA-3, BLAKE2b, CRC-32, Adler-32, plus SHA-2 variants,
+ * RIPEMD-160, MD4, NTLM, HMAC, CRC-8/16/64/custom, Fletcher and BLAKE2s.
  */
 
 import CryptoJS from 'crypto-js';
 import { Operation } from '../core/Operation.js';
 import { Dish } from '../core/Dish.js';
+import { defineOp, bytesToHex, parseBytesArg, BYTE_FORMATS, intArg } from './opHelpers.js';
+import {
+  sha224, sha384Bytes, sha512Bytes, sha512_256Bytes, ripemd160, md4, ntlm,
+  hmac, HASH_FUNCTIONS, crcHex, CRC_PRESETS, fletcher16, fletcher32, blake2s
+} from '../algorithms.js';
 
 // RFC 7693 BLAKE2b constants & algorithm
 const BLAKE2B_IV = [
@@ -278,6 +284,192 @@ export class Adler32Operation extends Operation {
   }
 }
 
+// ============================================================================
+// DAT-5: additional hashes, checksums and HMAC
+// ============================================================================
+
+async function webCryptoDigest(name, bytes, fallback) {
+  try {
+    const subtle = globalThis.crypto && globalThis.crypto.subtle;
+    if (subtle) return new Uint8Array(await subtle.digest(name, bytes));
+  } catch {
+    // fall through to the in-house implementation
+  }
+  return fallback(bytes);
+}
+
+const toBytes = (dish) => (dish instanceof Dish ? dish : new Dish(dish)).toUint8Array();
+
+const hashOp = (name, id, description, keywords, fn) =>
+  defineOp(
+    { name, id, module: 'Hashing', description, keywords, inputType: 'Dish', outputType: 'string', args: [] },
+    async (dish) => bytesToHex(await fn(toBytes(dish)))
+  );
+
+export const sha512Operation = hashOp('SHA-512', 'sha512', 'Calculates the 512-bit SHA-2 digest of the input bytes.', ['sha2', 'sha-2', '512'],
+  (b) => webCryptoDigest('SHA-512', b, sha512Bytes));
+export const sha384Operation = hashOp('SHA-384', 'sha384', 'Calculates the 384-bit SHA-2 digest of the input bytes.', ['sha2', 'sha-2', '384'],
+  (b) => webCryptoDigest('SHA-384', b, sha384Bytes));
+export const sha224Operation = hashOp('SHA-224', 'sha224', 'Calculates the 224-bit SHA-2 digest of the input bytes.', ['sha2', 'sha-2', '224'], sha224);
+export const sha512t256Operation = hashOp('SHA-512/256', 'sha512_256', 'Calculates the SHA-512/256 digest (SHA-512 with a distinct IV, truncated to 256 bits).', ['sha2', 'sha-2', 'sha512t256', 'truncated'], sha512_256Bytes);
+export const ripemd160Operation = hashOp('RIPEMD-160', 'ripemd160', 'Calculates the 160-bit RIPEMD-160 digest (used for Bitcoin addresses).', ['ripemd', 'rmd160', 'bitcoin'], ripemd160);
+export const md4Operation = hashOp('MD4', 'md4', 'Calculates the legacy 128-bit MD4 digest.', ['md4', 'legacy', 'ntlm'], md4);
+
+export const ntlmOperation = defineOp(
+  {
+    name: 'NTLM Hash',
+    id: 'ntlm_hash',
+    module: 'Hashing',
+    description: 'Calculates the Windows NT hash: MD4 of the UTF-16LE encoded input (hex, upper case).',
+    keywords: ['nt hash', 'ntlm', 'windows', 'md4', 'utf-16le', 'password'],
+    inputType: 'string',
+    outputType: 'string',
+    args: []
+  },
+  async (input) => bytesToHex(ntlm(input)).toUpperCase()
+);
+
+const HMAC_HASHES = Object.keys(HASH_FUNCTIONS).filter((n) => n !== 'MD4');
+
+export const hmacOperation = defineOp(
+  {
+    name: 'HMAC',
+    id: 'hmac',
+    module: 'Hashing',
+    description: 'Keyed-hash message authentication code (RFC 2104). The key may be given as text, hex or Base64.',
+    keywords: ['hmac', 'mac', 'keyed hash', 'rfc 2104', 'rfc 4231', 'authentication'],
+    inputType: 'Dish',
+    outputType: 'string',
+    args: [
+      { name: 'key', label: 'Key', type: 'text', default: '' },
+      { name: 'keyFormat', label: 'Key Format', type: 'select', options: BYTE_FORMATS, default: 'UTF8' },
+      { name: 'hash', label: 'Hash Function', type: 'select', options: HMAC_HASHES, default: 'SHA-256' }
+    ]
+  },
+  async (dish, { key = '', keyFormat = 'UTF8', hash = 'SHA-256' } = {}) => {
+    if (!HMAC_HASHES.includes(hash)) throw new Error(`Unsupported HMAC hash "${hash}". Choose one of: ${HMAC_HASHES.join(', ')}.`);
+    const keyBytes = parseBytesArg(key, keyFormat, 'HMAC key');
+    return bytesToHex(hmac(hash, keyBytes, toBytes(dish)));
+  }
+);
+
+const crcPresetOp = (width, name, id, keywords) => {
+  const presets = CRC_PRESETS[width];
+  const names = Object.keys(presets);
+  return defineOp(
+    {
+      name,
+      id,
+      module: 'Hashing',
+      description: `Calculates a ${width}-bit CRC using a named, published parameter set.`,
+      keywords: ['crc', 'checksum', 'cyclic redundancy', ...keywords],
+      inputType: 'Dish',
+      outputType: 'string',
+      args: [{ name: 'variant', label: 'Variant', type: 'select', options: names, default: names[0] }]
+    },
+    async (dish, { variant = names[0] } = {}) => {
+      const p = presets[variant];
+      if (!p) throw new Error(`Unknown ${name} variant "${variant}". Choose one of: ${names.join(', ')}.`);
+      return crcHex(toBytes(dish), p);
+    }
+  );
+};
+
+export const crc8Operation = crcPresetOp(8, 'CRC-8', 'crc8', ['crc8', 'maxim', 'dallas', 'rohc']);
+export const crc16Operation = crcPresetOp(16, 'CRC-16', 'crc16', ['crc16', 'modbus', 'ccitt', 'xmodem', 'kermit', 'x25', 'usb']);
+export const crc64Operation = crcPresetOp(64, 'CRC-64', 'crc64', ['crc64', 'ecma', 'xz', 'go-iso']);
+
+function parseHexBig(text, label) {
+  const t = String(text ?? '').trim().replace(/^0x/i, '');
+  if (!/^[0-9a-fA-F]+$/.test(t)) throw new Error(`${label} must be a hexadecimal number (for example 1021).`);
+  return BigInt('0x' + t);
+}
+
+export const crcCustomOperation = defineOp(
+  {
+    name: 'CRC (custom)',
+    id: 'crc_custom',
+    module: 'Hashing',
+    description: 'Generic CRC (Rocksoft model) with width 1-64, polynomial, initial value, XOR-out and reflection flags. Parameters are hexadecimal.',
+    keywords: ['crc', 'checksum', 'polynomial', 'generic', 'custom', 'rocksoft', 'init', 'xorout'],
+    inputType: 'Dish',
+    outputType: 'string',
+    args: [
+      { name: 'width', label: 'Width (bits, 1-64)', type: 'number', default: 16 },
+      { name: 'poly', label: 'Polynomial (hex)', type: 'text', default: '1021' },
+      { name: 'init', label: 'Initial value (hex)', type: 'text', default: 'FFFF' },
+      { name: 'xorout', label: 'XOR out (hex)', type: 'text', default: '0000' },
+      { name: 'refin', label: 'Reflect input', type: 'select', options: ['No', 'Yes'], default: 'No' },
+      { name: 'refout', label: 'Reflect output', type: 'select', options: ['No', 'Yes'], default: 'No' }
+    ]
+  },
+  async (dish, { width = 16, poly = '1021', init = 'FFFF', xorout = '0000', refin = 'No', refout = 'No' } = {}) => {
+    const w = intArg(width, 'CRC width', 1, 64);
+    const params = {
+      width: w,
+      poly: parseHexBig(poly, 'Polynomial'),
+      init: parseHexBig(init, 'Initial value'),
+      xorout: parseHexBig(xorout, 'XOR out'),
+      refin: refin === 'Yes' || refin === true,
+      refout: refout === 'Yes' || refout === true
+    };
+    return crcHex(toBytes(dish), params);
+  }
+);
+
+export const fletcher16Operation = defineOp(
+  {
+    name: 'Fletcher-16',
+    id: 'fletcher16',
+    module: 'Hashing',
+    description: 'Calculates the Fletcher-16 checksum (modulo 255 over bytes).',
+    keywords: ['fletcher', 'checksum', 'fletcher16'],
+    inputType: 'Dish',
+    outputType: 'string',
+    args: []
+  },
+  async (dish) => fletcher16(toBytes(dish)).toString(16).padStart(4, '0')
+);
+
+export const fletcher32Operation = defineOp(
+  {
+    name: 'Fletcher-32',
+    id: 'fletcher32',
+    module: 'Hashing',
+    description: 'Calculates the Fletcher-32 checksum (modulo 65535 over 16-bit little-endian words, zero-padded).',
+    keywords: ['fletcher', 'checksum', 'fletcher32'],
+    inputType: 'Dish',
+    outputType: 'string',
+    args: []
+  },
+  async (dish) => fletcher32(toBytes(dish)).toString(16).padStart(8, '0')
+);
+
+export const blake2sOperation = defineOp(
+  {
+    name: 'BLAKE2s',
+    id: 'blake2s',
+    module: 'Hashing',
+    description: 'Calculates the unkeyed BLAKE2s digest per RFC 7693 (32-bit variant of BLAKE2).',
+    keywords: ['blake', 'blake2', 'rfc 7693'],
+    inputType: 'Dish',
+    outputType: 'string',
+    args: [{ name: 'length', label: 'Digest Length (bits)', type: 'select', options: ['256', '224', '160', '128'], default: '256' }]
+  },
+  async (dish, { length = '256' } = {}) => {
+    const bits = Number(length);
+    if (![256, 224, 160, 128].includes(bits)) throw new Error('BLAKE2s digest length must be 256, 224, 160 or 128 bits.');
+    return bytesToHex(blake2s(toBytes(dish), bits / 8));
+  }
+);
+
+export const extraHashingOperations = [
+  sha512Operation, sha384Operation, sha224Operation, sha512t256Operation,
+  ripemd160Operation, md4Operation, ntlmOperation, hmacOperation,
+  crc8Operation, crc16Operation, crc64Operation, crcCustomOperation,
+  fletcher16Operation, fletcher32Operation, blake2sOperation
+];
+
 export const hashingOperations = [
   new Md5Operation(),
   new Sha1Operation(),
@@ -285,5 +477,6 @@ export const hashingOperations = [
   new Sha3Operation(),
   new Blake2bOperation(),
   new Crc32Operation(),
-  new Adler32Operation()
+  new Adler32Operation(),
+  ...extraHashingOperations
 ];

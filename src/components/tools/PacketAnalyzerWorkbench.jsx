@@ -1,26 +1,23 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Activity, 
   Layers, 
   Search, 
   Upload, 
   Download, 
-  Play, 
-  Square, 
-  Filter, 
   Trash2, 
   Radio, 
-  Wifi, 
-  Compass, 
-  Cpu, 
-  CheckCircle2, 
   AlertTriangle,
-  Info,
   Sparkles
 } from 'lucide-react';
 import { useSerial } from '../../context/SerialContext';
+import { readPcapFile } from '../../utils/pcapReader';
+import { recordToFrame, serialToFrame, framesToCsv, framesToPcap } from '../../utils/packetFrames';
 
-// Sample captured 802.11 & Serial frames for demonstration & offline analysis
+const MAX_ROWS = 1000;
+const LIVE_WINDOW_MS = 5000;
+
+// Built-in SAMPLE frames (not captured from anything). Only shown after the user clicks "Load demo frames".
 const SAMPLE_FRAMES = [
   {
     id: 1,
@@ -99,45 +96,133 @@ const SAMPLE_FRAMES = [
   }
 ];
 
+const DEMO_FRAMES = SAMPLE_FRAMES.map((f) => ({ ...f, origin: 'demo', demo: true }));
+
+function downloadBlob(name, data, type) {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export default function PacketAnalyzerWorkbench() {
   const { isConnected, hexByteStream } = useSerial();
-  const [frames, setFrames] = useState(SAMPLE_FRAMES);
-  const [selectedFrame, setSelectedFrame] = useState(SAMPLE_FRAMES[0]);
+  const [frames, setFrames] = useState([]);
+  const [selectedFrame, setSelectedFrame] = useState(null);
   const [filterType, setFilterType] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [isSniffing, setIsSniffing] = useState(true);
+  const [error, setError] = useState(null);
+  const [followSerial, setFollowSerial] = useState(false);
+  const [lastRxAt, setLastRxAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const nextOffset = useRef(0);
+  const pending = useRef([]);
+  const nextId = useRef(1);
+  const serialT0 = useRef(0);
+  const streamRef = useRef(hexByteStream);
+  streamRef.current = hexByteStream;
+
+  const isDemo = frames.some((f) => f.demo);
+  const isLive = followSerial && isConnected && lastRxAt > 0 && now - lastRxAt < LIVE_WINDOW_MS;
 
   const filteredFrames = useMemo(() => {
-    return frames.filter(f => {
-      const q = searchQuery.toLowerCase();
-      const matchesSearch = !q || 
+    const q = searchQuery.toLowerCase();
+    return frames.filter((f) => {
+      const matchesSearch = !q ||
         f.protocol.toLowerCase().includes(q) ||
         f.source.toLowerCase().includes(q) ||
         f.dest.toLowerCase().includes(q) ||
         f.ssid.toLowerCase().includes(q);
-
       const matchesType = filterType === 'ALL' || f.type.toLowerCase().includes(filterType.toLowerCase());
       return matchesSearch && matchesType;
     });
   }, [frames, searchQuery, filterType]);
+  const visibleFrames = filteredFrames.slice(0, MAX_ROWS);
+
+  // Re-evaluate the LIVE window while following.
+  useEffect(() => {
+    if (!followSerial) return undefined;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [followSerial]);
+
+  // Ingest serial bytes only while "Follow serial stream" is on; split into lines.
+  useEffect(() => {
+    if (!followSerial || !isConnected) return;
+    const fresh = hexByteStream.filter((h) => h.offset >= nextOffset.current);
+    if (!fresh.length) return;
+    nextOffset.current = fresh[fresh.length - 1].offset + 1;
+    const t = Date.now();
+    const lines = [];
+    for (const h of fresh) {
+      pending.current.push(h.byte);
+      if (h.byte === 0x0a || pending.current.length >= 512) {
+        lines.push(Uint8Array.from(pending.current));
+        pending.current = [];
+      }
+    }
+    setLastRxAt(t);
+    setNow(t);
+    if (lines.length) {
+      if (!serialT0.current) serialT0.current = t;
+      setFrames((prev) => [...prev, ...lines.map((l) => serialToFrame(l, nextId.current++, t, serialT0.current))]);
+    }
+  }, [hexByteStream, followSerial, isConnected]);
+
+  const dropDemo = (list) => list.filter((f) => !f.demo);
+
+  const toggleFollow = (on) => {
+    if (on) {
+      const s = streamRef.current;
+      nextOffset.current = s.length ? s[s.length - 1].offset + 1 : 0; // do not ingest the backlog
+      pending.current = [];
+      serialT0.current = 0;
+      setLastRxAt(0);
+      setFrames(dropDemo);
+    }
+    setFollowSerial(on);
+  };
 
   const clearFrames = () => {
     setFrames([]);
     setSelectedFrame(null);
+    setError(null);
   };
 
   const loadSamples = () => {
-    setFrames(SAMPLE_FRAMES);
-    setSelectedFrame(SAMPLE_FRAMES[0]);
+    setFrames(DEMO_FRAMES);
+    setSelectedFrame(DEMO_FRAMES[0]);
+    setError(null);
   };
 
-  const exportPcapJson = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(frames, null, 2));
-    const dlAnchor = document.createElement('a');
-    dlAnchor.setAttribute("href", dataStr);
-    dlAnchor.setAttribute("download", "skons_packet_capture.json");
-    dlAnchor.click();
+  const handleOpen = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const { packetRecords } = await readPcapFile(file);
+      const t0 = packetRecords[0]?.timestamp.timeMs ?? 0;
+      const list = packetRecords.map((r, i) => recordToFrame(r, i + 1, t0));
+      nextId.current = list.length + 1;
+      serialT0.current = 0;
+      setFrames(list);
+      setSelectedFrame(null);
+      setError(null);
+    } catch (err) {
+      setError(`Could not open ${file.name}: ${err.message}`);
+    }
   };
+
+  const exportCsv = () => downloadBlob('skons_packet_capture.csv', framesToCsv(frames), 'text/csv');
+  const exportPcap = () => {
+    const { bytes, count } = framesToPcap(frames);
+    if (count) downloadBlob('skons_packet_capture.pcap', bytes, 'application/vnd.tcpdump.pcap');
+  };
+  const pcapCount = frames.filter((f) => f.origin === 'pcap').length;
 
   return (
     <div className="flex flex-col gap-4 font-mono">
@@ -149,12 +234,18 @@ export default function PacketAnalyzerWorkbench() {
           </div>
           <div>
             <p className="text-xs text-slate-400">
-              Inspect 802.11 management frames, EAPOL handshakes, NMEA sentences, and binary serial packets.
+              Open a radiotap .pcap to inspect 802.11 frames and EAPOL handshakes, or follow a serial stream. Starts empty.
             </p>
+            {error && <p role="alert" className="text-xs text-rose-400 mt-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{error}</p>}
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          <label className="px-3 py-1.5 bg-[#1e212b] hover:bg-[#282d3b] text-slate-300 border border-[#2b303c] rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer">
+            <Upload className="w-3.5 h-3.5" />
+            <span>Open capture</span>
+            <input type="file" accept=".pcap,.cap" onChange={handleOpen} className="hidden" aria-label="Open capture" />
+          </label>
           <button
             onClick={clearFrames}
             className="px-3 py-1.5 bg-[#1e212b] hover:bg-[#282d3b] text-slate-300 border border-[#2b303c] rounded-xl text-xs transition flex items-center gap-1.5"
@@ -167,14 +258,23 @@ export default function PacketAnalyzerWorkbench() {
             className="px-3 py-1.5 bg-[#1e212b] hover:bg-[#282d3b] text-slate-300 border border-[#2b303c] rounded-xl text-xs transition flex items-center gap-1.5"
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>Samples</span>
+            <span>Load demo frames</span>
           </button>
           <button
-            onClick={exportPcapJson}
+            onClick={exportCsv}
+            disabled={!frames.length}
             className="px-3 py-1.5 bg-[#1e212b] hover:bg-[#282d3b] text-slate-300 border border-[#2b303c] rounded-xl text-xs transition flex items-center gap-1.5"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Export Capture</span>
+            <span>Export CSV</span>
+          </button>
+          <button
+            onClick={exportPcap}
+            disabled={!pcapCount}
+            className="px-3 py-1.5 bg-[#1e212b] hover:bg-[#282d3b] text-slate-300 border border-[#2b303c] rounded-xl text-xs transition flex items-center gap-1.5 disabled:opacity-40"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export .pcap</span>
           </button>
         </div>
       </div>
@@ -212,7 +312,12 @@ export default function PacketAnalyzerWorkbench() {
 
         <div className="flex items-center gap-3 text-[11px] text-slate-400">
           <span>Frames: <strong className="text-purple-300">{filteredFrames.length}</strong></span>
-          <span>Status: <strong className="text-emerald-400">{isConnected ? 'LIVE MONITORING' : 'IDLE'}</strong></span>
+          {isDemo && <strong className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">DEMO DATA</strong>}
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" checked={followSerial} onChange={(e) => toggleFollow(e.target.checked)} />
+            <span>Follow serial stream</span>
+          </label>
+          <span>Status: <strong className={isLive ? 'text-emerald-400' : 'text-slate-500'}>{isLive ? 'LIVE' : 'IDLE'}</strong></span>
         </div>
       </div>
 
@@ -237,7 +342,7 @@ export default function PacketAnalyzerWorkbench() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1e212b]">
-                {filteredFrames.map(f => {
+                {visibleFrames.map(f => {
                   const isSelected = selectedFrame?.id === f.id;
                   return (
                     <tr
@@ -270,6 +375,12 @@ export default function PacketAnalyzerWorkbench() {
                 })}
               </tbody>
             </table>
+            {frames.length === 0 && (
+              <div className="py-10 text-center text-slate-500 text-xs">No frames loaded. Open a capture, follow a serial stream, or load demo frames.</div>
+            )}
+            {filteredFrames.length > MAX_ROWS && (
+              <div className="py-2 text-center text-amber-400 text-[11px]">Showing first {MAX_ROWS} of {filteredFrames.length} frames. Use the filter to narrow down.</div>
+            )}
           </div>
         </div>
 
@@ -291,7 +402,7 @@ export default function PacketAnalyzerWorkbench() {
                 <div className="p-2.5 bg-[#12141a] rounded-xl border border-[#232733] space-y-0.5">
                   <span className="text-[10px] text-slate-500 uppercase font-bold">CHANNEL / FREQ</span>
                   <div className="text-slate-200 font-bold">
-                    {selectedFrame.channel ? `Ch ${selectedFrame.channel} (2.4 GHz)` : 'Serial UART'}
+                    {selectedFrame.channel ? `Ch ${selectedFrame.channel} (${selectedFrame.channel > 14 ? '5' : '2.4'} GHz)` : selectedFrame.type === 'Serial' ? 'Serial UART' : 'n/a'}
                   </div>
                 </div>
               </div>
@@ -306,6 +417,23 @@ export default function PacketAnalyzerWorkbench() {
                   <span>Destination:</span>
                   <span className="text-slate-200 font-bold">{selectedFrame.dest}</span>
                 </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Type / Subtype:</span>
+                  <span className="text-slate-200 font-bold">{selectedFrame.type} / {selectedFrame.subtype}</span>
+                </div>
+                {selectedFrame.addr1 && (
+                  <>
+                    <div className="flex justify-between text-slate-400"><span>Addr1 (RA/DA):</span><span className="text-slate-200 font-bold">{selectedFrame.addr1}</span></div>
+                    <div className="flex justify-between text-slate-400"><span>Addr2 (TA/SA):</span><span className="text-slate-200 font-bold">{selectedFrame.addr2}</span></div>
+                    <div className="flex justify-between text-slate-400"><span>Addr3:</span><span className="text-slate-200 font-bold">{selectedFrame.addr3}</span></div>
+                  </>
+                )}
+                {selectedFrame.ssid && selectedFrame.type !== 'Serial' && (
+                  <div className="flex justify-between text-slate-400">
+                    <span>SSID / Info:</span>
+                    <span className="text-slate-200 font-bold">{selectedFrame.ssid}</span>
+                  </div>
+                )}
                 {selectedFrame.bssid !== 'N/A' && (
                   <div className="flex justify-between text-slate-400">
                     <span>BSSID:</span>

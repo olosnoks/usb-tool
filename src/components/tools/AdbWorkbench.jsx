@@ -1,12 +1,13 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Usb, Smartphone, TerminalSquare, Upload, Download, Wifi, Power, ShieldAlert, Sparkles, Loader2, Play, Folder, FileText,
-  ChevronRight, Package, ScrollText, Monitor, Square, Trash2, RefreshCw, Info
+  ChevronRight, Package, ScrollText, Monitor, Square, Trash2, RefreshCw, Info, FolderDown, X
 } from 'lucide-react';
-import { AdbConnection, requestAdbDevice } from '../../utils/adbDriver';
+import { AdbConnection, requestAdbDevice, defaultKeyStore } from '../../utils/adbDriver';
 import {
-  parseGetprop, deviceSummary, parseBattery, parseWmSize, LogcatPoller, LOG_LEVELS, parsePackages, installApk, uninstallPackage,
-  packagePaths, packageVersion, KEYCODES, tapCommand, inputTextCommand
+  parseGetprop, deviceSummary, parseBattery, parseWmSize, LogcatPoller, LOG_LEVELS, parsePackages, installApk, installMultiple, uninstallPackage,
+  packagePaths, packageVersion, KEYCODES, tapCommand, inputTextCommand, TerminalText, apkSetFromArchive, deviceInstallProfile,
+  pullDirectory, directoryHandleSink, createZipSink, runBugreport
 } from '../../utils/adbTools';
 import StatusBadge from '../common/StatusBadge';
 
@@ -24,7 +25,7 @@ const TABS = [
 const LEVEL_COLORS = { V: 'text-slate-500', D: 'text-sky-300', I: 'text-emerald-300', W: 'text-amber-300', E: 'text-rose-400', F: 'text-rose-500 font-bold' };
 const MAX_LOGCAT = 5000;
 
-const fmtBytes = (n) => { const u = ['B', 'KB', 'MB', 'GB']; let i = 0; let v = n; while (v >= 1024 && i < 3) { v /= 1024; i++; } return `${v.toFixed(i ? 1 : 0)} ${u[i]}`; };
+const fmtBytes = (n) => { const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n; while (v >= 1024 && i < 4) { v /= 1024; i++; } return `${v.toFixed(i ? 1 : 0)} ${u[i]}`; };
 const saveBytes = (data, name, type = 'application/octet-stream') => {
   const url = URL.createObjectURL(new Blob([data], { type }));
   const a = document.createElement('a');
@@ -32,6 +33,18 @@ const saveBytes = (data, name, type = 'application/octet-stream') => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 const quote = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
+const isArchive = (f) => /\.(apks|xapk|apkm)$/i.test(f.name);
+
+/** A writable for a streamed pull: a real file when the browser can save one, else Blob chunks saved at the end. */
+async function openSaveTarget(name) {
+  if (typeof window !== 'undefined' && window.showSaveFilePicker) {
+    const handle = await window.showSaveFilePicker({ suggestedName: name });
+    const w = await handle.createWritable();
+    return { writable: w, finish: () => w.close(), abort: () => w.abort?.(), streamed: true };
+  }
+  const parts = [];
+  return { writable: { write: (c) => { parts.push(c.slice()); } }, finish: () => saveBytes(new Blob(parts), name), abort: () => {}, streamed: false };
+}
 
 export default function AdbWorkbench({ initialTab = 'device' }) {
   const [adb, setAdb] = useState(null);
@@ -41,6 +54,8 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   const [busy, setBusy] = useState('');
   const [log, setLog] = useState([]);
   const [tab, setTab] = useState(initialTab);
+  const adbRef = useRef(null);
+  const cancelRef = useRef(null); // AbortController of the transfer in progress
 
   // Device
   const [props, setProps] = useState(null);
@@ -52,11 +67,18 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   const [cmd, setCmd] = useState('getprop ro.product.model');
   const [shellOut, setShellOut] = useState('');
   const [history, setHistory] = useState([]);
+  const [term, setTerm] = useState(''); // interactive shell output
+  const [termOn, setTermOn] = useState(false);
+  const [termLine, setTermLine] = useState('');
+  const sessionRef = useRef(null);
+  const termRef = useRef(new TerminalText());
+  const termBoxRef = useRef(null);
+  const termHistory = useRef({ items: [], idx: -1 });
 
   // Files
   const [cwd, setCwd] = useState('/sdcard/');
   const [entries, setEntries] = useState(null);
-  const [progress, setProgress] = useState(null);
+  const [progress, setProgress] = useState(null); // { pct, label }
   const uploadRef = useRef(null);
 
   // Apps
@@ -97,8 +119,14 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   const guard = async (label, fn) => {
     if (!adb) return;
     setBusy(label);
-    try { await serial(fn); } catch (err) { addLog(`${label} failed: ${err.message}`, 'err'); } finally { setBusy(''); setProgress(null); }
+    try { await serial(fn); } catch (err) { addLog(`${label} failed: ${err.message}`, 'err'); } finally { setBusy(''); setProgress(null); cancelRef.current = null; }
   };
+
+  const showProgress = (verb) => (frac, bytes, total) => setProgress({
+    pct: frac == null ? null : Math.round(frac * 100),
+    label: `${verb} ${fmtBytes(bytes)}${total ? ` / ${fmtBytes(total)}` : ''}`
+  });
+  const newCancel = () => { cancelRef.current = new AbortController(); return cancelRef.current.signal; };
 
   const loadDeviceInfo = async (conn) => {
     setProps(parseGetprop(await conn.shell('getprop')));
@@ -111,6 +139,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
     try {
       const transport = await requestAdbDevice();
       const conn = new AdbConnection(transport, { logger: addLog });
+      adbRef.current = conn;
       const { banner: b } = await conn.connect({ onPrompt: () => addLog('Tap "Allow USB debugging" on the device (and "always allow" to remember this computer).', 'info') });
       queue.current = Promise.resolve();
       setAdb(conn);
@@ -119,9 +148,12 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
       setStatusMsg('Connected');
       await serial(() => loadDeviceInfo(conn)).catch((e) => addLog(`Device info: ${e.message}`, 'err'));
     } catch (err) {
+      const msg = err?.name === 'NotFoundError' ? 'No device was selected.' : err.message;
+      adbRef.current?.close?.().catch?.(() => {});
+      adbRef.current = null;
       setStatus('warning');
-      setStatusMsg(err.message);
-      addLog(`Connect failed: ${err.message}`, 'err');
+      setStatusMsg(msg);
+      addLog(`Connect failed: ${msg}`, 'err');
     } finally {
       setBusy('');
     }
@@ -130,12 +162,86 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   const disconnect = async () => {
     setLogcatOn(false);
     setAutoScreen(false);
-    try { await adb?.close(); } catch (e) { /* ignore */ }
+    cancelRef.current?.abort();
+    try { await sessionRef.current?.close(); } catch (e) { /* ignore */ }
+    sessionRef.current = null; setTermOn(false);
+    try { await adbRef.current?.close(); } catch (e) { /* ignore */ }
+    adbRef.current = null;
     setAdb(null); setBanner(''); setStatus('offline'); setStatusMsg('No ADB device connected');
     setProps(null); setBattery(null); setEntries(null); setPackages(null); setLogcat([]); setScreen(null); setPkgInfo({});
   };
 
+  // Release the WebUSB claim when the tool is closed or switched away (AndroidWorkbench swaps ADB/Fastboot).
+  useEffect(() => () => {
+    cancelRef.current?.abort();
+    sessionRef.current?.close?.().catch?.(() => {});
+    adbRef.current?.close?.().catch?.(() => {});
+  }, []);
+
+  // Unplugging the phone: drop the stale connection instead of failing on the next click.
+  useEffect(() => {
+    if (!adb || typeof navigator === 'undefined' || !navigator.usb?.addEventListener) return undefined;
+    const onGone = (ev) => {
+      if (ev.device && ev.device === adb.transport?.device) {
+        addLog('The device was unplugged.', 'err');
+        disconnect();
+      }
+    };
+    navigator.usb.addEventListener('disconnect', onGone);
+    return () => navigator.usb.removeEventListener('disconnect', onGone);
+  }, [adb]);
+
   // --- Shell ------------------------------------------------------------------
+
+  const shellV2 = !!adb?.hasFeature?.('shell_v2');
+
+  const startShell = async () => {
+    if (sessionRef.current) return;
+    termRef.current.clear(); setTerm('');
+    try {
+      const session = await adb.openShell({
+        rows: 24, cols: 100,
+        onData: (text) => { setTerm(termRef.current.append(text)); }
+      });
+      sessionRef.current = session;
+      setTermOn(true);
+      addLog('Interactive shell started (shell_v2, pty).', 'ok');
+      session.done.then((res) => {
+        if (sessionRef.current === session) { sessionRef.current = null; setTermOn(false); }
+        addLog(res.error ? `Shell ended: ${res.error.message}` : `Shell exited${res.exitCode != null ? ` (status ${res.exitCode})` : ''}.`, res.error ? 'err' : 'info');
+      });
+    } catch (err) {
+      addLog(`Shell failed: ${err.message}`, 'err');
+    }
+  };
+
+  const stopShell = async () => {
+    const s = sessionRef.current;
+    sessionRef.current = null; setTermOn(false);
+    try { await s?.close(); } catch (e) { /* ignore */ }
+  };
+
+  const sendLine = async (line) => {
+    const s = sessionRef.current;
+    if (!s) return;
+    const h = termHistory.current;
+    if (line.trim()) { h.items = [line, ...h.items.filter((x) => x !== line)].slice(0, 50); }
+    h.idx = -1;
+    setTermLine('');
+    try { await s.write(`${line}`); } catch (err) { addLog(`Shell write failed: ${err.message}`, 'err'); }
+  };
+
+  const onTermKey = (e) => {
+    const s = sessionRef.current;
+    if (e.key === 'Enter') { e.preventDefault(); sendLine(termLine); return; }
+    if (e.ctrlKey && e.key.toLowerCase() === 'c' && !window.getSelection?.()?.toString()) { e.preventDefault(); setTermLine(''); s?.interrupt(); return; }
+    if (e.ctrlKey && e.key.toLowerCase() === 'd' && !termLine) { e.preventDefault(); s?.sendEof(); return; }
+    const h = termHistory.current;
+    if (e.key === 'ArrowUp' && h.items.length) { e.preventDefault(); h.idx = Math.min(h.idx + 1, h.items.length - 1); setTermLine(h.items[h.idx]); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); h.idx = Math.max(h.idx - 1, -1); setTermLine(h.idx < 0 ? '' : h.items[h.idx]); }
+  };
+
+  useEffect(() => { if (termBoxRef.current) termBoxRef.current.scrollTop = termBoxRef.current.scrollHeight; }, [term]);
 
   const runShell = (command = cmd) => guard('shell', async () => {
     addLog(`$ ${command}`, 'info');
@@ -152,17 +258,42 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   });
 
   const pullFile = (e) => guard('pull', async () => {
-    const data = await adb.pull(cwd + e.name, { onProgress: () => {} });
-    saveBytes(data, e.name);
-    addLog(`Pulled ${cwd}${e.name} (${fmtBytes(data.length)}).`, 'ok');
+    const signal = newCancel();
+    const target = await openSaveTarget(e.name);
+    try {
+      const n = await adb.pullTo(cwd + e.name, target.writable, { signal, total: e.size, onProgress: showProgress('pulled') });
+      await target.finish();
+      addLog(`Pulled ${cwd}${e.name} (${fmtBytes(n)})${target.streamed ? '' : ' — this browser cannot stream to disk, so the file was assembled in memory first'}.`, 'ok');
+    } catch (err) { await target.abort(); throw err; }
+  });
+
+  const pullFolder = (e) => guard('pull folder', async () => {
+    const signal = newCancel();
+    const remote = `${cwd}${e.name}/`;
+    let sink; let zip = null;
+    if (typeof window !== 'undefined' && window.showDirectoryPicker) {
+      sink = directoryHandleSink(await window.showDirectoryPicker({ mode: 'readwrite' }));
+    } else {
+      addLog('This browser cannot write to a chosen folder; collecting a zip instead (held in memory, so keep it small).', 'info');
+      zip = await createZipSink(); sink = zip;
+    }
+    const res = await pullDirectory(adb, remote, sink, {
+      signal,
+      onProgress: (p) => setProgress({ pct: Math.round(p.fraction * 100), label: `${fmtBytes(p.bytes)} / ${fmtBytes(p.total)} · ${p.file}` })
+    });
+    if (zip) saveBytes(await zip.generate(), `${e.name}.zip`, 'application/zip');
+    addLog(`Pulled ${remote}: ${res.files} file(s), ${fmtBytes(res.bytes)}${res.skipped.length ? `, ${res.skipped.length} skipped (symlinks/unreadable)` : ''}${res.failed.length ? `, ${res.failed.length} failed` : ''}.`, res.failed.length ? 'err' : 'ok');
+    res.failed.slice(0, 5).forEach((f) => addLog(`  ${f.path}: ${f.error}`, 'err'));
   });
 
   const uploadFile = () => guard('push', async () => {
-    const file = uploadRef.current?.files?.[0];
-    if (!file) throw new Error('Choose a file to push.');
-    const data = new Uint8Array(await file.arrayBuffer());
-    await adb.push(cwd + file.name, data, { onProgress: (p) => setProgress(Math.round(p * 100)) });
-    addLog(`Pushed ${file.name} → ${cwd}${file.name} (${fmtBytes(data.length)}).`, 'ok');
+    const files = [...(uploadRef.current?.files || [])];
+    if (!files.length) throw new Error('Choose a file to push.');
+    const signal = newCancel();
+    for (const file of files) {
+      await adb.pushFrom(file, cwd + file.name, { signal, onProgress: showProgress(`${file.name}:`) });
+      addLog(`Pushed ${file.name} → ${cwd}${file.name} (${fmtBytes(file.size)}).`, 'ok');
+    }
     uploadRef.current.value = '';
     setEntries(await adb.list(cwd));
   });
@@ -191,8 +322,9 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
     const paths = await packagePaths(adb, name);
     if (!paths.length) throw new Error(`No APK path for ${name}.`);
     for (const path of paths) {
-      const data = await adb.pull(path);
-      saveBytes(data, paths.length > 1 ? `${name}-${path.split('/').pop()}` : `${name}.apk`, 'application/vnd.android.package-archive');
+      const fileName = paths.length > 1 ? `${name}-${path.split('/').pop()}` : `${name}.apk`;
+      const target = await openSaveTarget(fileName);
+      try { await adb.pullTo(path, target.writable, { onProgress: showProgress(`${fileName}:`) }); await target.finish(); } catch (err) { await target.abort(); throw err; }
     }
     addLog(`Saved ${paths.length} APK file(s) of ${name}${paths.length > 1 ? ' (split APK: install them together)' : ''}.`, 'ok');
   });
@@ -212,14 +344,47 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   };
 
   const installFromFile = () => guard('install', async () => {
-    const file = apkRef.current?.files?.[0];
-    if (!file) throw new Error('Choose an .apk file.');
-    addLog(`Installing ${file.name}...`, 'info');
-    const out = await installApk(adb, new Uint8Array(await file.arrayBuffer()), { onProgress: (p) => setProgress(Math.round(p * 100)) });
-    addLog(`${file.name}: ${out.split('\n').pop()}`, 'ok');
+    const files = [...(apkRef.current?.files || [])];
+    if (!files.length) throw new Error('Choose .apk file(s), or one .apks / .xapk / .apkm bundle.');
+    const signal = newCancel();
+    const onProgress = showProgress('installing');
+    let out;
+    if (files.length === 1 && !isArchive(files[0])) {
+      addLog(`Installing ${files[0].name}...`, 'info');
+      out = await installApk(adb, files[0], { onProgress: (f) => onProgress(f, Math.round(f * files[0].size), files[0].size) });
+    } else {
+      let apks;
+      if (files.some(isArchive)) {
+        if (files.length > 1) throw new Error('Pick either one bundle (.apks/.xapk/.apkm) or several .apk files, not both.');
+        addLog(`Reading ${files[0].name}...`, 'info');
+        const bundle = await apkSetFromArchive(files[0], await deviceInstallProfile(adb));
+        apks = bundle.apks;
+        bundle.notes.forEach((n) => addLog(n, 'info'));
+      } else {
+        apks = files.map((f) => ({ name: f.name, blob: f }));
+      }
+      addLog(`Installing ${apks.length} APK(s) as one package: ${apks.map((a) => a.name).join(', ')}`, 'info');
+      out = await installMultiple(adb, apks, { signal, onProgress });
+    }
+    addLog(`Install: ${out.split('\n').pop()}`, 'ok');
     apkRef.current.value = '';
     if (packages) setPackages(parsePackages(await adb.shell(`pm list packages -f${showSystem ? '' : ' -3'}`)));
   });
+
+  const bugreport = () => guard('bugreport', async () => {
+    const signal = newCancel();
+    addLog('Collecting a bugreport on the device (this takes a minute or two)...', 'info');
+    const path = await runBugreport(adb, { signal, onProgress: (f) => setProgress({ pct: Math.round(f * 100), label: 'bugreport' }) });
+    const target = await openSaveTarget(path.split('/').pop() || 'bugreport.zip');
+    try { await adb.pullTo(path, target.writable, { signal, onProgress: showProgress('saving') }); await target.finish(); } catch (err) { await target.abort(); throw err; }
+    addLog(`Bugreport saved (device copy left at ${path}).`, 'ok');
+  });
+
+  const forgetKey = () => {
+    if (!confirmAction("Delete this browser's ADB key? The phone will ask \"Allow USB debugging?\" again next time (it keeps listing the old key until you use Developer options > Revoke USB debugging authorizations).")) return;
+    defaultKeyStore().clear();
+    addLog('Host key deleted from this browser.', 'ok');
+  };
 
   // --- Logcat -----------------------------------------------------------------
 
@@ -316,8 +481,9 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
           <div>
             <p className="text-[11px] text-slate-400 max-w-3xl">
-              Connect to an Android device with <b>USB debugging</b> enabled (Settings → Developer options): device info, shell,
-              file browser, app install/uninstall and APK backup, live logcat, screenshots with tap control, wireless ADB and reboot.
+              Connect to an Android device with <b>USB debugging</b> enabled (Settings → Developer options): device info, an interactive shell,
+              streaming file transfer (folders and files over 4 GiB included), app install (single APK, split APKs, .apks/.xapk bundles) and APK backup,
+              live logcat, screenshots with tap control, wireless ADB, bugreport and reboot.
               The phone asks "Allow USB debugging?" the first time; tap <b>Always allow</b> so it remembers this browser&apos;s key.
             </p>
           </div>
@@ -340,7 +506,8 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
               <Power className="w-3.5 h-3.5" /> DISCONNECT
             </button>
           )}
-          {busy && busy !== 'connect' && <span className="text-slate-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {busy}{progress != null ? ` ${progress}%` : ''}</span>}
+          {busy && busy !== 'connect' && <span className="text-slate-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {busy}{progress?.pct != null ? ` ${progress.pct}%` : ''}{progress?.label ? ` · ${progress.label}` : ''}</span>}
+          {busy && busy !== 'connect' && cancelRef.current && <button onClick={() => cancelRef.current?.abort()} className={btnSm}><X className="w-3 h-3 inline" /> CANCEL</button>}
         </div>
         <p className="mt-2 text-[11px] text-slate-500">{statusMsg}{banner ? ` — ${banner}` : ''}</p>
       </div>
@@ -389,6 +556,8 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
               )}
               <div className="flex flex-wrap items-center gap-2">
                 <button onClick={() => guard('info', () => loadDeviceInfo(adb))} disabled={!!busy} className={btn}><RefreshCw className="w-3.5 h-3.5" /> REFRESH</button>
+                <button onClick={bugreport} disabled={!!busy} className={btn}><Download className="w-3.5 h-3.5" /> BUGREPORT</button>
+                <button onClick={forgetKey} disabled={!!busy} className={btn} title="Delete this browser's ADB key"><Trash2 className="w-3.5 h-3.5" /> FORGET KEY</button>
                 {props && <button onClick={() => saveBytes(Object.entries(props).map(([k, v]) => `[${k}]: [${v}]`).join('\n'), 'getprop.txt', 'text/plain')} className={btn}><Download className="w-3.5 h-3.5" /> ALL PROPERTIES</button>}
               </div>
               <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
@@ -407,19 +576,52 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
           )}
 
           {tab === 'shell' && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-emerald-400">$</span>
-                <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runShell()} list="adb-history" className={`${inp} flex-1`} />
-                <datalist id="adb-history">{history.map((h) => <option key={h} value={h} />)}</datalist>
-                <button onClick={() => runShell()} disabled={!!busy} className="flex items-center gap-1 px-3 py-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold disabled:opacity-40"><Play className="w-3.5 h-3.5" /> RUN</button>
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-slate-200">INTERACTIVE SHELL</span>
+                  {!termOn ? (
+                    <button onClick={startShell} disabled={!shellV2} className={btn}><Play className="w-3.5 h-3.5" /> START</button>
+                  ) : (
+                    <>
+                      <button onClick={stopShell} className={btn}><Square className="w-3.5 h-3.5" /> CLOSE</button>
+                      <button onClick={() => sessionRef.current?.interrupt()} className={btn} title="Send Ctrl-C to the foreground process">CTRL-C</button>
+                      <button onClick={() => sessionRef.current?.sendEof()} className={btn} title="Send Ctrl-D (end of input)">CTRL-D</button>
+                    </>
+                  )}
+                  <button onClick={() => { termRef.current.clear(); setTerm(''); }} className={btn}><Trash2 className="w-3.5 h-3.5" /> CLEAR</button>
+                  {!shellV2 && <span className="text-amber-300">This device does not advertise shell_v2 (it needs Android 7+); use the one-shot box below.</span>}
+                </div>
+                <pre ref={termBoxRef} className="bg-black border border-slate-800 rounded p-2 h-72 overflow-auto text-slate-200 whitespace-pre-wrap break-all">{term || (termOn ? '' : 'Press START for a shell on the device (pty, stdout/stderr, exit status).')}</pre>
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400">&gt;</span>
+                  <input
+                    value={termLine}
+                    onChange={(e) => setTermLine(e.target.value)}
+                    onKeyDown={onTermKey}
+                    disabled={!termOn}
+                    placeholder={termOn ? 'type a command, Enter to send (Up/Down history, Ctrl-C interrupts)' : 'start the shell first'}
+                    className={`${inp} flex-1`}
+                  />
+                  <button onClick={() => sendLine(termLine)} disabled={!termOn} className="flex items-center gap-1 px-3 py-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold disabled:opacity-40">SEND</button>
+                </div>
+                <p className="text-[10px] text-slate-500">Line-based terminal: full-screen programs (vi, top) will not render. Press Ctrl-C to leave them.</p>
               </div>
-              <div className="flex flex-wrap gap-1">
-                {['ps -A', 'df -h', 'ip addr', 'dumpsys wifi | grep mWifiInfo', 'settings list global', 'cat /proc/cpuinfo', 'dumpsys activity top | head -40', 'id'].map((c) => (
-                  <button key={c} onClick={() => { setCmd(c); runShell(c); }} disabled={!!busy} className={btnSm}>{c}</button>
-                ))}
+              <div className="space-y-2 pt-2 border-t border-slate-800">
+                <span className="font-bold text-slate-200">ONE-SHOT COMMAND</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400">$</span>
+                  <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runShell()} list="adb-history" className={`${inp} flex-1`} />
+                  <datalist id="adb-history">{history.map((h) => <option key={h} value={h} />)}</datalist>
+                  <button onClick={() => runShell()} disabled={!!busy} className="flex items-center gap-1 px-3 py-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold disabled:opacity-40"><Play className="w-3.5 h-3.5" /> RUN</button>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {['ps -A', 'df -h', 'ip addr', 'dumpsys wifi | grep mWifiInfo', 'settings list global', 'cat /proc/cpuinfo', 'dumpsys activity top | head -40', 'id'].map((c) => (
+                    <button key={c} onClick={() => { setCmd(c); runShell(c); }} disabled={!!busy} className={btnSm}>{c}</button>
+                  ))}
+                </div>
+                {shellOut !== '' && <pre className="bg-slate-950 border border-slate-800 rounded p-2 max-h-80 overflow-auto text-slate-300 whitespace-pre-wrap">{shellOut}</pre>}
               </div>
-              {shellOut !== '' && <pre className="bg-slate-950 border border-slate-800 rounded p-2 max-h-80 overflow-auto text-slate-300 whitespace-pre-wrap">{shellOut}</pre>}
             </div>
           )}
 
@@ -437,9 +639,9 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
                 <button onClick={() => openDir(cwd)} disabled={!!busy} className={btnSm}><RefreshCw className="w-3 h-3" /></button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <input type="file" ref={uploadRef} className="text-slate-400 text-[11px]" />
+                <input type="file" multiple ref={uploadRef} className="text-slate-400 text-[11px]" />
                 <button onClick={uploadFile} disabled={!!busy} className={btn}><Upload className="w-3.5 h-3.5" /> PUSH HERE</button>
-                {progress != null && <div className="w-40 h-2 bg-slate-900 rounded-full overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${progress}%` }} /></div>}
+                {progress?.pct != null && <div className="w-40 h-2 bg-slate-900 rounded-full overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${progress.pct}%` }} /></div>}
               </div>
               <div className="max-h-96 overflow-y-auto border border-slate-800 rounded">
                 <table className="w-full text-[11px]">
@@ -459,7 +661,8 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
                         <td className="text-slate-400">{e.isDir ? '' : fmtBytes(e.size)}</td>
                         <td className="text-slate-500">{e.mtime ? new Date(e.mtime * 1000).toISOString().replace('T', ' ').slice(0, 16) : ''}</td>
                         <td className="text-right px-2 whitespace-nowrap">
-                          {!e.isDir && <button onClick={() => pullFile(e)} disabled={!!busy} className={`${btnSm} mr-1`}>PULL</button>}
+                          {!e.isDir && !e.isLink && <button onClick={() => pullFile(e)} disabled={!!busy} className={`${btnSm} mr-1`}>PULL</button>}
+                          {e.isDir && <button onClick={() => pullFolder(e)} disabled={!!busy} className={`${btnSm} mr-1`} title="Download this folder recursively"><FolderDown className="w-3 h-3 inline" /> PULL FOLDER</button>}
                           <button onClick={() => deleteFile(e)} disabled={!!busy} className={btnSm}><Trash2 className="w-3 h-3" /></button>
                         </td>
                       </tr>
@@ -478,8 +681,8 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
                 <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={showSystem} onChange={(e) => { setShowSystem(e.target.checked); loadPackages(e.target.checked); }} className="accent-emerald-500" /> include system apps</label>
                 <input value={pkgFilter} onChange={(e) => setPkgFilter(e.target.value)} placeholder="filter" className={`${inp} w-48`} />
                 <span className="ml-auto flex items-center gap-2">
-                  <input type="file" accept=".apk" ref={apkRef} className="text-slate-400 text-[11px]" />
-                  <button onClick={installFromFile} disabled={!!busy} className={btn}><Upload className="w-3.5 h-3.5" /> INSTALL APK</button>
+                  <input type="file" multiple accept=".apk,.apks,.xapk,.apkm" ref={apkRef} className="text-slate-400 text-[11px]" title="One .apk, several .apk files of one app (split APKs), or one .apks/.xapk/.apkm bundle" />
+                  <button onClick={installFromFile} disabled={!!busy} className={btn}><Upload className="w-3.5 h-3.5" /> INSTALL</button>
                 </span>
               </div>
               <div className="text-slate-500">{packages ? `${pkgShown.length} of ${packages.length} packages` : 'Loading...'}</div>

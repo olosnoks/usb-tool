@@ -13,7 +13,7 @@ import { commands_of } from './actions.js';
 import { compute } from './checksums.js';
 import { split_values } from './model.js';
 import { fmtg, mark_command_ids, py_round_n, table_get, table_items, table_truthy } from './infer.js';
-import { readInt } from './bytes.js';
+import { readInt, minOf } from './bytes.js';
 
 export const STALE = 5.0; // seconds: a status reply older than this does not tell the state a command was sent in
 
@@ -210,7 +210,7 @@ export function find_switches(actions, commands) {
       nw.notes.push(`the app switched ${s.name} to ${fmt(enter[0])} inside this action (${mine.length}x, `
         + `frames ${sw.enter_frames.slice(0, 8).join(', ')}) ${back_txt}; the driver does `
         + 'the same around these packets');
-      nw.confidence = py_round_n(Math.min(...inner.map((p) => p.confidence)), 2);
+      nw.confidence = py_round_n(minOf(inner.map((p) => p.confidence)), 2);
       nw.samples = inner[0].samples;
       _rename(nw, c.name);
       commands[commands.indexOf(c)] = nw;

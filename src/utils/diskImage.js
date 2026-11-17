@@ -68,6 +68,25 @@ export const memoryReader = (bytes) => async (offset, length) => {
   return out;
 };
 
+/**
+ * A `read(offset, length)` over a File / Blob (an opened disk image). Only the
+ * requested range is sliced and read, so a multi-GB image is never loaded whole.
+ * Like memoryReader, bytes past the end of the file read as zeros.
+ */
+export const fileReader = (file) => async (offset, length) => {
+  const out = new Uint8Array(length);
+  const end = Math.min(file.size, offset + length);
+  if (offset < 0 || offset >= end) return out;
+  out.set(new Uint8Array(await file.slice(offset, end).arrayBuffer()));
+  return out;
+};
+
+/** `readSectors(lba, count)` over a File, for DiskReader (adds chunk caching) or imaging. */
+export const fileSectorReader = (file, blockSize = 512) => {
+  const read = fileReader(file);
+  return (lba, count) => read(lba * blockSize, count * blockSize);
+};
+
 // ---------------------------------------------------------------------------
 // Partition tables
 // ---------------------------------------------------------------------------
@@ -319,6 +338,29 @@ export class FatVolume {
 
   clusterOffset(c) { return this.boot.dataOffset + (c - 2) * this.boot.clusterSize; }
 
+  /**
+   * Unallocated data space as merged byte ranges [{ start, length }] relative to
+   * the volume start (clusters the FAT marks free). Deleted files live here, so
+   * this is where carving is most productive.
+   */
+  async freeRanges() {
+    const out = [];
+    let runStart = -1;
+    const last = this.boot.clusters + 1;
+    const flush = (end) => {
+      if (runStart < 0) return;
+      out.push({ start: this.clusterOffset(runStart), length: (end - runStart) * this.boot.clusterSize });
+      runStart = -1;
+    };
+    for (let c = 2; c <= last; c++) {
+      const free = (await this.nextCluster(c)) === 0;
+      if (free && runStart < 0) runStart = c;
+      else if (!free) flush(c);
+    }
+    flush(last + 1);
+    return out;
+  }
+
   async _readClusters(clusters, length) {
     const cs = this.boot.clusterSize;
     const out = new Uint8Array(length ?? clusters.length * cs);
@@ -518,7 +560,7 @@ export class Sha256 {
       const s1 = ((c >>> 17) | (c << 15)) ^ ((c >>> 19) | (c << 13)) ^ (c >>> 10);
       w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
     }
-    let [a, bb, c, d, e, f, g, h] = this.h;
+    const H0 = this.h; let a = H0[0], bb = H0[1], c = H0[2], d = H0[3], e = H0[4], f = H0[5], g = H0[6], h = H0[7];
     for (let i = 0; i < 64; i++) {
       const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
       const t1 = (h + S1 + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;

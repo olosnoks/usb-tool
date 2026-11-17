@@ -1,290 +1,282 @@
-# Skon's USB Tool // Hardware Hacker Workbench & Serial Tool
+# Skon's USB Tool
 
-![Cloudflare Workers Deployment](https://img.shields.io/badge/deployment-Cloudflare%20Workers-success?style=for-the-badge&logo=cloudflare)
-![Web Serial API](https://img.shields.io/badge/Web%20Serial%20API-Native%20W3C-cyan?style=for-the-badge&logo=w3c)
-![License](https://img.shields.io/badge/license-MIT-amber?style=for-the-badge)
+A browser-based toolkit for working with USB, serial and other hardware devices, plus a set of network, crypto and data utilities. It is a static single-page app: serial I/O, firmware flashing, packet parsing and cryptography run in the browser tab using WebSerial, WebUSB, WebHID, Web Bluetooth, Web Workers and WASM. Nothing needs to be installed.
 
-**Skon's USB Tool** is a client-side hardware workbench and serial tool built with Vite, React, and Tailwind CSS, designed for static hosting on **Cloudflare Workers** (static assets plus a tiny `/api/*` Shodan relay Worker), live at https://usb-tool.olosnoks.com.
+Live site: https://usb-tool.olosnoks.com
 
-It turns a Chromium browser into a serial bench: Web Serial terminal and logging, in-browser ESP32 / ESP8266 ROM bootloader flashing with MD5 verification, a multi-channel serial plotter, live hex inspection, U-Boot autoboot interruption and `md.b` memory dumps, and long-running disk logging.
+## Contents
 
-Beyond serial it covers 802.11 monitor-mode capture for Alfa / RTL8812AU and Panda PAU09 adapters, protocol tools (CAN / OBD-II, Modbus RTU), companions for the Flipper Zero, Proxmark3, PortaPack / HackRF and WarHog / Piglet wardrivers, a CH341A SPI flash programmer, a DuckyScript studio, an in-browser CyberChef workbench, USB inspectors (descriptors, HID, mass storage, PTP/MTP, FIDO2), and USB Protocol RE (turn a USB capture into a protocol report, driver scaffold and Wireshark dissector), all running client-side; the only server-side code is the small Shodan relay. A few PortaPack/HackRF panels (HAM digital decoders, rtl_433 sensor hub) are interface-only until they work over USB; they carry a demo banner in the app.
+- [Using the app](#using-the-app)
+- [Tools](#tools)
+- [Browser requirements](#browser-requirements)
+- [Privacy and network access](#privacy-and-network-access)
+- [Optional local backend](#optional-local-backend)
+- [Development](#development)
+- [Project layout](#project-layout)
+- [Releases](#releases)
+- [Contributing](#contributing)
+- [Acknowledgments](#acknowledgments)
+- [License](#license)
 
----
+## Using the app
 
-## 🧰 Complete Tool Suite
+The interface is a windowed desktop (`src/components/layout/Desktop.jsx`).
 
-Sections match the app's sidebar.
+- Tools open in their own windows. Windows can be moved, resized, minimized, maximized, tiled and cascaded. A taskbar at the bottom has a Start button, one button per open window, and tile / cascade / close-all controls.
+- The Start menu (`src/components/layout/StartMenu.jsx`) is a cascading category menu. Typing in its search field replaces the cascade with a ranked flat list of matching tools. The category tree is defined in `src/components/layout/toolCategories.js`; tool names and descriptions come from `SIDEBAR_SECTIONS` in `src/components/layout/Sidebar.jsx`.
+- A tool can also be opened from a `?tool=` or `#tool=` URL parameter.
+- A header holds the global serial connection controls, themes and a dockable terminal drawer. Serial connections are owned by one shared provider (`src/context/SerialContext.jsx`), so the Terminal and other tools use the same port.
+- A standalone documentation site is served at `/wiki/` (`wiki/index.html`, `src/wiki/`).
 
-**Core Operations** — Terminal & Console (serial monitor + baud hunter) · Firmware Flasher (ESP32 / ESP8266 ROM bootloader) · Hardware Controls (DTR/RTS strapping, U-Boot interrupter)
+## Tools
 
-**Analysis & Protocol Lab** — Packet & Protocol Lab (802.11 dissector, PCAP, hex stream, packet framer, Kismet Studio) · 24 MHz Logic Analyzer (SUMP / fx2lafw, with I²C, UART, SPI, 1-Wire, CAN, WS2812, IR and SWD decoders) · CAN Bus & OBD-II Scanner (DBC decoding, replay, UDS) · I²C & SPI Bus Explorer (Bus Pirate) · Modbus RTU & RS-485 · Oscilloscope Plotter · MitM Serial Bridge · USBTMC Instrument (SCPI) · CyberChef Workbench (Web Worker pipeline)
+Grouped as in the Start menu. Descriptions are taken from the app's tool registry.
 
-**RF, Wireless & Badges** — Wi-Fi Monitor (Alfa RTL8812AU / Panda PAU09 over WebUSB) · Flipper Zero Suite · Proxmark3 / PM5 Suite · PortaPack Mayhem SDR (HackRF receiver plus a Flash & First-Time Setup tab: Mayhem or stock firmware over WebUSB, DFU rescue, SD-card files) · GPS & Wardrive Suite · Warhog CYD & Piglet Suite (SD explorer, wardriver.cfg editor, device control, serial console, live Core monitor dashboard, and a screen mirror with remote touch over the WT protocol) · Demo Wardrive Generator (synthetic map data, on purpose) · Bluetooth LE Explorer (Web Bluetooth GATT client, Nordic DFU) · Hash Cracker (dictionary, rule and mask attacks; MD5/SHA/NTLM/MySQL/salted modes; optional WebGPU for MD5 masks) · WPA PMKID Cracker (offline, Web Crypto) · PCAP Viewer
+### Serial & Console
 
-**Web App Testing** — HTTP Workbench (Repeater, Intruder with four attack types, Comparer diff, Decoder with JWT/hashing, plus an OpenAPI/Swagger API client with auto-generated forms, variables, auth and schema fuzzing) · Web Analyzer (URL links/resources/forms + security headers, OWASP-PTK-style tech fingerprinting, passive header/cookie/CORS/TLS scan, cookie-security analysis, sensitive-path probing from SecLists wordlists, and a bounded same-origin crawler) · HTTP Basic Auth Tester · Port Scanner (browser connect-timing; toggleable profiles + custom ports, nmap-style timing templates, concurrency, export) · DNS Toolkit (DoH records + SPF/DMARC/DKIM/DNSBL email auth + subdomain brute-force) · Certificate Inspector (X.509 from URL via crt.sh, file or PEM; SAN, usages, constraints, key size/curve, OCSP/CRL, fingerprints) · Pwned Passwords (HIBP k-anonymity) · Lite DB Browser (a DB Browser for SQLite-style studio on sql.js: create/open, design tables, browse and edit, pragmas, Execute SQL, import/export, combine databases, write back to the file; plus an HTTP database/REST endpoint query tab: PostgREST, CouchDB, Elasticsearch, Datasette) · Regex Tester · JWT Inspector (decode claims, verify HS/RS/ES/PS signatures via Web Crypto) · crt.sh Subdomain Finder (passive Certificate-Transparency enumeration) · IP / CIDR Calculator (IPv4 & IPv6, offline) · Hash & HMAC Calculator (MD5/SHA + HMAC for text & files, offline) · OSINT API Clients (Shodan query builder with filters, facets, host, DNS & exploits modes; urlscan; HackerTarget; bring your own key). These are client-side; a configurable proxy reaches non-CORS hosts (the optional local Docker services in `backend/` cover raw sockets, nmap and live TLS), Shodan goes through the site's own `/api/shodan` relay, and wordlists load from SecLists via the jsDelivr CDN.
-
-**Hardware & Payloads** — BadUSB & Payload Studio (DuckyScript) · Hardware Programmers (CH341A SPI flash, CMSIS-DAP debugger with RTT/SWO/flash, JTAG / SVF, AVR ISP) · USB-PD Power Delivery (STUSB4500) · WebUSB DFU Flasher (USB DFU 1.1 and ST DfuSe: STM32, nRF and more) · Android (ADB & Fastboot in one tool: shell, files, apps, logcat, screen, wireless ADB; bootloader unlock, sparse flashing, A/B slots, factory zips)
-
-**Device Utilities** — MicroPython Files · Improv Wi-Fi · Telemetry Gauges · Crash & Panic Alerts · Test Runner & Scripts · USB Explorer & Autopsy (mystery-chip recon, baud hunting, `lsusb -v`-style descriptor explorer) · **USB Protocol RE** (in-browser port of [usb-rea](https://github.com/emirmrkaljevic/usb-rea): load a usbmon/USBPcap capture plus action markers and get a protocol report, a Python driver scaffold and a Wireshark Lua dissector, with an offline VID:PID lookup; everything stays local) · HID Inspector (WebHID) · Mass Storage Inspector (read-only partitions, FAT/exFAT, deleted-file recovery, SHA-256 imaging) · PTP / MTP Camera · FIDO2 Security Key (read-only)
-
-**Setup & Reference** — In-app Knowledge Base Wiki · Session Log & Report (everything the hardware tools did this session, exported as Markdown / JSON) · Linux Setup & Drivers (udev, USB-UART drivers) · Silicon Memory Dump · Pinouts Reference · Chip Intelligence (VID/PID database) · app-wide colour themes (Dracula, One Dark Pro, GitHub Dark, Monokai Pro, Night Owl, Tokyo Night, Nord, Solarized, Palenight, Ayu, SynthWave '84, Catppuccin) from the header
-
-**Windowed workspace** — every tool opens in its own draggable, resizable window (minimize, maximize, tile, cascade); drag a window to a desktop edge or corner to snap-tile it (half, quarter, or maximize, with a live preview), or Ctrl+Alt+Arrow the focused window; open several at once to work with multiple devices side by side, including more than one instance of the same tool (the window title bar's duplicate button, or Alt-click a sidebar tool) so two of the same tool can each drive a different device. Each window has its own content zoom (−/+, Ctrl+wheel, or FIT to scale the tool to the window width) that never touches the browser's page zoom, and tools use container-query breakpoints so their layout follows the window, not the screen. The layout is remembered between visits.
-
-### Hardware support status
-
-| Status | Tools |
+| Tool | Description |
 |---|---|
-| Real hardware | Terminal, ESP flasher, Hardware Controls, U-Boot deck, Plotter, Serial Bridge, Modbus RTU, CAN / OBD-II (SLCAN adapters), Wi-Fi Monitor, Flipper Zero, Proxmark3, PortaPack (serial console and HackRF WebUSB), GPS & Wardrive, Warhog & Piglet, CH341A, BLE Explorer, WebUSB DFU, MicroPython, Improv, USB Explorer (descriptors), HID Inspector, USBTMC Instrument, Mass Storage Inspector, PTP/MTP Camera, FIDO2 Security Key |
-| No hardware needed | USB Protocol RE (analyzes a capture file you load), CyberChef, Regex / JWT / Hash / IP calculators, PCAP Viewer, Lite DB Browser (SQLite files), WPA PMKID Cracker, Hash Cracker |
-| Real hardware, with limits | Silicon Memory Dump: chip ID and MAC on ESP32 / S3 / C3; flash reads only on ESP32 and ESP8266 (newer ROMs need the esptool stub). Kismet Studio: live devices and alerts from a Kismet server's REST API; the server must allow requests from this page (CORS), and from the hosted https page it must be on localhost. PortaPack / HackRF: the receiver (spectrum, audio, sweep, ADS-B, IQ recording) is real; transmit, HAM digital decoders and the rtl_433 sensor hub are hidden until they work over USB. The Mayhem Flash & First-Time Setup tab: SPI flash write + verify and DFU rescue are implemented against the libhackrf / LPC43xx DFU protocols and tested against a simulated board, not yet on hardware. |
-| Real hardware, new and not yet tried on devices | AVR ISP (Arduino running the ArduinoISP sketch, STK500v1 at 19200 baud) · I²C / SPI Bus Explorer (Bus Pirate v3/v4 binary mode) · Logic Analyzer (SUMP devices over serial; FX2 boards over WebUSB with user-supplied fx2lafw firmware, WinUSB driver needed on Windows) · CMSIS-DAP debugger (SWD halt/step/reset, registers and memory through a CMSIS-DAP v2 WebUSB or v1 WebHID probe) · JTAG (chain scan, SVF with TDO checking and boundary-scan SAMPLE through a CMSIS-DAP probe with JTAG) · USB-PD (STUSB4500 sink controller over a Bus Pirate: fixed 5-20 V requests and contract readout; no PPS or VBUS metering) · Android (ADB & Fastboot), over WebUSB (Fastboot: read variables, unlock your own bootloader, flash/erase partitions, boot an image, reboot; ADB: shell, file push/pull, wireless ADB and reboot, with the RSA auth handshake). Their protocol logic is implemented to spec and exercised in development, but has not yet been confirmed against physical hardware. |
+| Terminal & Console | Real-time serial log and baud rate hunter |
+| Hardware Controls | Strapping timers, DTR/RTS, U-Boot |
+| MitM Serial Bridge | Dual-port pass-through sniffer |
+| Test Runner & Scripts | Automated JS test routines |
+| Crash & Panic Alerts | Auto-detect kernel panics |
+| Oscilloscope Plotter | Multi-channel live waveforms |
+| Telemetry Gauges | Speedometer-style sensor dials |
+| Modbus RTU & RS-485 | Industrial holding registers and inverter telemetry |
+| MicroPython Files | On-chip filesystem explorer |
+| Improv Wi-Fi | Standard serial Wi-Fi provisioner |
 
-The app shows only real data: there are no simulated device modes. Hardware tools display data from a connected device (or an empty state until one is connected), and the Web App Testing tools run real requests client-side. The exception kept by design is the clearly-named **Demo Wardrive Generator**, which produces synthetic map data on purpose.
+### Flash & Program
 
----
+| Tool | Description |
+|---|---|
+| Firmware Flasher | Multi-binary partition flashing (ESP32 / ESP8266 ROM bootloader) |
+| WebUSB DFU Flasher | USB DFU 1.1 and ST DfuSe firmware download: STM32, nRF and others |
+| Hardware Programmers | CH341A SPI flash, CMSIS-DAP debugger (RTT, SWO, flash), JTAG / SVF and AVR ISP |
+| Silicon Memory Dump | Direct eFuse and flash reader |
 
-## ⚡ Power Features & Tool Suite
+### USB Devices
 
-### 1. ⚡ ESP32 / ESP8266 ROM Bootloader Flashing
-The flasher speaks the SLIP-framed ESP ROM bootloader protocol directly (ROM mode, like `esptool.py --no-stub`) and checks every reply:
-- **Reset into the bootloader**: classic DTR/RTS auto-reset, or the USB-Serial/JTAG sequence on native-USB chips (303A:1001).
-- **Sync and chip detection**: retries SYNC until the ROM answers (and fails clearly if it never does), then identifies the chip from its magic register.
-- **Erase and write**: SPI attach, `FLASH_BEGIN` with an erase timeout scaled to the image, and status-checked 1 KB `FLASH_DATA` blocks with sequence numbers and checksums.
-- **Verify**: each image is checked with the ROM's `SPI_FLASH_MD5` (the ESP8266 ROM has no MD5 command, so its writes are reported as unverified).
-- **Reboot**: hard-resets the chip into the new firmware.
+| Tool | Description |
+|---|---|
+| USB Explorer & Autopsy | Mystery-chip recon, baud hunting, and an `lsusb -v`-style descriptor explorer |
+| USB Protocol RE | Turns a labeled usbmon/USBPcap capture into a protocol report, Python driver scaffold and Wireshark dissector (port of [usb-rea](https://github.com/emirmrkaljevic/usb-rea)) |
+| HID Inspector | Decode live reports, report rate, record/playback, output and feature reports (WebHID) |
+| USB-PD Trigger (STUSB4500) | STUSB4500 sink: contract readout, voltage requests and verified NVM |
+| Chip Intelligence | VID/PID device identification |
+| Mass Storage Inspector | Read-only: partitions, FAT/exFAT browsing, deleted-file recovery, imaging with SHA-256 |
+| Android (ADB & Fastboot) | ADB (device info, shell, files, apps, logcat, screen, wireless) and Fastboot (unlock, sparse flashing, A/B slots, factory zips, reboot) over WebUSB |
+| PTP / MTP Camera | Storage, thumbnails, bulk download, delete and remote capture over WebUSB |
+| FIDO2 Security Key | Read a security key: versions, AAGUID, options (WebHID, read-only) |
+| BadUSB & Payload Studio | DuckyScript keystroke compiler, syntax validator and live simulator |
 
-ROM mode is uncompressed and runs at the console baud rate, so large images take a while. ESP32-C5 boards are best flashed with the WarHog web flasher, which carries the C5-specific fixes.
+### Buses & Instruments
 
-### 2. 📈 Real-Time Multi-Channel Serial Plotter
-- **Auto-Telemetry Parser**: Detects comma, space, colon, or key-value delimited numbers (e.g. `12.4, 45.1, 88.0` or `temp:24.5 volt:3.31 pid:42.0`).
-- **Rolling Canvas Waveforms**: `requestAnimationFrame`-driven 2D canvas with a 50 to 500 sample window.
-- **Telemetry Statistics**: Displays instantaneous, Min, Max, and Average values per channel.
-- **CSV Data Export**: One-click download of plotted session datasets for Excel, Python, or MATLAB.
+| Tool | Description |
+|---|---|
+| 24MHz Logic Analyzer | 8-channel capture (SUMP, fx2lafw, VCD/.sr) with I2C, UART, SPI, 1-Wire, CAN, WS2812, IR and SWD decoders |
+| I2C & SPI Bus Explorer | I2C scan, registers, live sensor readouts, OLED test and SPI flash dumps via Bus Pirate |
+| CAN Bus & OBD-II Scanner | Sniffer with DBC decoding, replay, OBD-II and UDS diagnostics |
+| USBTMC Instrument | SCPI console, scope waveforms and screenshots, DMM logging and scripts over WebUSB |
 
-### 3. 🛡️ U-Boot Console & Memory Dump Deck
-- **Autoboot Interrupter**: Sends Spacebar bursts and stops as soon as a shell prompt (`=>`, `U-Boot>`, `# `) appears.
-- **Single-user boot helper**: Injects `setenv bootargs "${bootargs} init=/bin/sh"; boot` to boot Linux straight to a shell on devices you own or are authorized to test.
-- **Environment Parser**: Executes `printenv` and parses flash offsets, boot scripts, and IP configs into a searchable table.
-- **Memory Dumper**: Sends `md.b` in 256-byte chunks, parses the returned bytes by address, and saves a `.bin` only when every byte was received.
+### Radio & Wireless
 
-### 4. 🔬 USB-UART Chip Identification & Bench Guide
-- Automatically queries USB Vendor ID (VID) and Product ID (PID) from `port.getInfo()`.
-- Fingerprints the physical USB bridge chip:
-  - `10C4:EA60` $\rightarrow$ Silicon Labs CP2102 / CP2104
-  - `0403:6001` $\rightarrow$ FTDI FT232R
-  - `1A86:7523` $\rightarrow$ WCH CH340G / CH340C
-  - `2E8A:000A` $\rightarrow$ Raspberry Pi Pico (RP2040)
-  - `303A:1001` $\rightarrow$ Espressif ESP32-S3 Native USB Serial/JTAG
-- Displays operating logic voltage levels (3.3V vs 5V warning), auto-reset strapping capability, and engineer notes.
+| Tool | Description |
+|---|---|
+| Wi-Fi Monitor (Alfa / Panda PAU09) | WebUSB monitor mode and 802.11 frame capture for Alfa RTL8812AU and Panda PAU09 (RT5572) |
+| WPA PMKID Cracker | Offline WPA/WPA2 PMKID dictionary attack |
+| GPS & Wardrive Suite | Warhog CYD, Piglet, Panda PAU09, NMEA tracker and u-blox UBX |
+| Warhog CYD & Piglet Suite | Warhog CYD (ESP32-2432S028R) and Piglet ESP32-C5/S3 wardriver deck |
+| Demo Wardrive Generator | Synthetic wardriving vector art for Kepler.gl and WiGLE (generates synthetic data on purpose) |
+| PortaPack Mayhem SDR | HackRF receiver: spectrum and waterfall, audio, sweep, ADS-B, IQ recorder, firmware flasher and first-time setup |
+| Proxmark3 / PM5 Suite | 13.56 MHz and 125 kHz RFID cloner, raw NG framing, WebFlash |
+| Flipper Zero Suite | qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC and SD |
+| Bluetooth LE Explorer | Web Bluetooth GATT client: services, notify, typed writes, Nordic DFU updates |
 
-### 5. 💾 Overnight Zero-Drop Disk Logging (File System Access API)
-- Connects directly to the native browser File System Access API (`window.showSaveFilePicker`).
-- Streams high-frequency serial streams directly to a local `.log` or `.txt` file on your hard drive with zero memory accumulation—preventing browser crashes during 24-hour hardware burn-in tests.
+### Network & Web
 
-### 6. 🔍 Synchronized Dual-View Hex Inspection Grid
-- Standard hardware hex memory layout: `Offset (8 hex digits) | Hex bytes (8-byte / 16-byte grid) | ASCII decode`.
-- Directional color-coding: RX bytes in Cyan/Emerald, TX bytes in Amber/Gold.
-- Byte-by-byte telemetry tooltips (Decimal, Hex, Binary, ASCII, Offset, Direction).
-- Copy as Raw Hex, C Array (`const uint8_t[]`), or ASCII text.
+| Tool | Description |
+|---|---|
+| HTTP Workbench | Repeater, Intruder, Comparer and Decoder, plus an OpenAPI/Swagger API client with schema fuzzing |
+| Web Analyzer | Analyze a URL: links, resources, forms, security headers, passive header/cookie/CORS/TLS scan, sensitive-path probing |
+| HTTP Basic Auth Tester | Try credential lists against HTTP Basic auth |
+| Port Scanner | Connect-timing TCP scan with port profiles, custom ports, timing templates, concurrency and export |
+| DNS Toolkit | All records plus email auth (SPF/DMARC/DKIM/DNSBL), subdomain brute-force, Markdown export |
+| crt.sh Subdomain Finder | Passive subdomain enumeration from Certificate Transparency logs (via proxy) |
+| OSINT API Clients | Shodan, urlscan.io and HackerTarget clients; bring your own API key |
+| IP / CIDR Calculator | IPv4 and IPv6 subnet math, offline |
+| Packet & Protocol Lab | Wi-Fi 802.11, PCAP, hex stream and packet framer |
+| PCAP Viewer | Parse and filter `.pcap` captures in the browser |
 
-### 7. 🎯 Reverse-Engineering Diagnostics
-- **Automated Baud Rate Hunter**: Scans standard baud rates (9600 to 921600 bps), computes Shannon Entropy ($H(X)$) and printable ASCII ratios, and rates candidate confidence.
-- **250ms Sustained UART Break**: Drives TX line to space level (0V) for breaking into boot roms and Magic SysRq triggers.
-- **ESP32 Strapping State Machine**: Step-by-step visual sequencer with polarity inversion toggle.
+### Crypto & Data
 
-### 8. 📦 In-Line Hex Frame Injector with Checksum Engine
-- Craft custom frames with automatic live checksum calculation:
-  - Modbus CRC-16 (Little Endian & Big Endian)
-  - Sum8 (Additive modulo 256) & Two's Complement Sum8
-  - Bitwise XOR Checksum (LRC)
-  - CRC-16 CCITT (XMODEM)
-- Preset library for Modbus RTU, ESP sync, and saved user commands.
+| Tool | Description |
+|---|---|
+| Hash & HMAC Calculator | MD5 / SHA-1 / SHA-256/384/512 and HMAC for text and files via Web Crypto, offline |
+| Hash Cracker | Dictionary, rule-based and mask attacks; MD5/SHA/NTLM/MySQL/salted modes; multi-hash potfile; optional WebGPU for MD5 masks |
+| Pwned Passwords | Check passwords (k-anonymity) and emails for known breaches; search the breach catalog |
+| JWT Inspector | Decode JWT header and claims; verify HS/RS/ES/PS signatures with Web Crypto, offline |
+| Certificate Inspector | Inspect X.509 certificates from a URL (crt.sh), file or pasted PEM |
+| CyberChef Workbench | 200+ crypto, encoding, compression and parsing operations |
+| Regex Tester | Live match highlighting, capture groups and replace preview, offline |
+| DB Browser (SQLite) | SQLite studio (browse, edit, query, import/export, combine) plus DB/REST endpoints (PostgREST, CouchDB, Elasticsearch, Datasette) |
 
-### 9. 🕹️ MicroPython REPL & AT Command Decks
-- Quick control buttons for `Ctrl+A`, `Ctrl+B`, `Ctrl+C`, `Ctrl+D`, `Ctrl+E`.
-- One-click Hayes AT command triggers (`AT`, `AT+GMR`, `AT+CSQ`, `AT+CWLAP`, `AT+CIFSR`, `AT+RESTORE`).
-- 8 customizable programmable macro buttons.
+### Reference & Setup
 
----
+| Tool | Description |
+|---|---|
+| Linux Setup & Drivers | udev rules and USB-UART drivers |
+| Pinouts Reference | ESP32 and USB wiring diagrams |
+| Knowledge Base Wiki | Standalone documentation and firmware manual |
+| Session Log & Report | Devices, actions and errors from the current session; export as Markdown or JSON |
 
-## 🏗️ Architecture & How It Works
+## Browser requirements
 
-Skon's USB Tool is a **client-side single-page app** — no telemetry and no build
-step on the user's side. Everything (serial I/O, firmware flashing, 802.11 parsing,
-crypto) runs in the browser tab. The only server-side code is `worker/index.js`, a
-small Cloudflare Worker that relays the Shodan API (see *Build & Deploy*); the
-optional Docker services in `backend/` run on your own machine. That choice drives
-the whole design: it installs nothing, leaks nothing to a backend, and deploys as
-static files to Cloudflare Workers (static assets).
+Use a Chromium-based desktop browser (Chrome, Edge, Opera). Firefox and Safari do not implement WebSerial, WebUSB, WebHID or Web Bluetooth, so the hardware tools will not connect there; the offline utilities (hash, regex, JWT, CyberChef, IP calculator and similar) do not depend on those APIs. The serial connection layer has a WebUSB fallback for Android/Chrome where WebSerial is unavailable. WebUSB, WebHID, WebSerial and Web Bluetooth require a secure context (HTTPS or `localhost`).
 
-### Stack & Entry Points
-- **Vite + React + Tailwind CSS.** Vite bundles two HTML entry points —
-  `index.html` (the app) and `wiki/index.html` (the standalone docs) — with
-  `base: './'` so the whole thing works from any static subpath.
-- `src/main.jsx` mounts `src/App.jsx`, which renders the shell: a persistent
-  `Header`, a collapsible `Sidebar`, the `Desktop` that hosts the tool windows, a
-  dockable `TerminalDrawer`, and global modals (command palette, pinouts, chip intel).
+API used by tool, as described in the tool registry:
 
-### Tool Routing & Memory Discipline
-- Every tool is a window on the `Desktop`; a tool can also be opened from a `?tool=`
-  or `#tool=` URL param. `renderTool()` in `src/components/ToolRegistry.jsx` maps a
-  tool id to its workbench, and each workbench is a **`React.lazy(() => import(...))`**.
-  The sidebar list is `SIDEBAR_SECTIONS` in `src/components/layout/Sidebar.jsx`.
-- The practical effect: a tool's code isn't even downloaded until you open it,
-  and closing its window **unmounts** it — tearing down its effects, timers, and
-  (for hardware tools) releasing the device. Nothing sits idle eating memory at
-  launch. Capture-heavy tools additionally cap their in-memory state and age out
-  stale entries.
+| API | Tools |
+|---|---|
+| WebSerial | Terminal, Flasher, Hardware Controls, Plotter, Bridge, Modbus RTU, CAN (SLCAN), MicroPython, Improv, Flipper, Proxmark3, PortaPack console, Bus Pirate based tools, SUMP logic analyzers |
+| WebUSB | DFU Flasher, Wi-Fi Monitor, Android (ADB/Fastboot), PTP/MTP Camera, USBTMC, HackRF (PortaPack), FX2 logic analyzers, CMSIS-DAP v2, USB Explorer |
+| WebHID | HID Inspector, FIDO2 Security Key, CMSIS-DAP v1 |
+| Web Bluetooth | Bluetooth LE Explorer, BLE serial in the header |
+| File System Access API | Streaming serial logs and PCAP to disk (Chromium only) |
+| WebGPU (optional) | Hash Cracker, MD5 masks |
 
-### The Shared Transport Layer (`SerialContext`)
-`src/context/SerialContext.jsx` is the heart of the app — one provider that owns
-every serial connection so all tools behave consistently:
-- Opens ports via the **Web Serial API**, with a **WebUSB OTG fallback** for
-  Android/Chrome where Web Serial is unavailable.
-- Also opens **Bluetooth LE serial devices** (Nordic UART, HM-10/JDY, Microchip
-  Transparent UART, Flipper Zero) through `src/utils/bleSerial.js`, from the
-  header's BLE button or the BLE Explorer's "Use as serial port". Writes go out
-  in 20-byte packets; baud rate and signal lines don't apply over BLE.
-- Runs a continuous RX read loop, tracks byte/packet stats, and exposes
-  `sendString` / `sendRawBytes`, DTR/RTS signal control, UART BREAK, and an
-  automated baud-scan.
-- Provides a **`transceive(bytes, {expectedLength, timeoutMs})`** request/response
-  primitive and `reconfigureActivePort()` so protocol decks (e.g. Modbus RTU) can
-  do synchronous polling over the same connection the Terminal uses.
+## Privacy and network access
 
-### The Driver + Workbench Pattern
-Every tool is two pieces:
-1. A **pure driver/parser module** in `src/utils/` (e.g. `modbusDriver.js`,
-   `wifiParser.js`, `canBusDriver.js`) — framing, CRCs, decoders, no UI. These
-   are unit-tested in isolation with Vitest.
-2. A **React workbench** in `src/components/` that wires the driver to the shared
-   transport and renders the UI.
+- Device I/O, parsing, flashing, hashing, cracking and decoding run locally in the browser. Capture snapshots go to IndexedDB, UI preferences to localStorage, and logs to files you choose through the File System Access API.
+- Tools that query a third party (crt.sh, DoH resolvers, Shodan, HIBP, urlscan.io, HackerTarget, jsDelivr for SecLists wordlists) send requests to those services.
+- The only server-side code is the Cloudflare Worker in `worker/index.js`. It runs only for `/api/*`; all other paths are served directly from the static asset store. It is read-only (GET, HEAD, OPTIONS), forwards no cookies, sends `cache-control: no-store`, refuses `sec-fetch-site: cross-site` and `same-site` requests, and has no storage bindings (see `wrangler.jsonc`). Routes:
 
-This separation is what makes the tool list long without the app becoming
-unmaintainable, and it's documented end-to-end in
-[`docs/FEATURE_TOOL_HANDOFF.md`](docs/FEATURE_TOOL_HANDOFF.md).
+| Route | Upstream |
+|---|---|
+| `/api/shodan/*` | `https://api.shodan.io` |
+| `/api/shodan-exploits/*` | `https://exploits.shodan.io/api` |
+| `/api/hibp/breachedaccount/:email` | `https://haveibeenpwned.com/api/v3/breachedaccount/:email` |
+| `/api/hibp/pasteaccount/:email` | `https://haveibeenpwned.com/api/v3/pasteaccount/:email` |
+| `/api/health` | Answered by the Worker; lists the relay prefixes |
 
-### Offloading Heavy Work: Web Workers & WASM
-- **Web Workers** (`src/workers/`) keep the UI at 60 FPS under load. The 802.11
-  parser worker digests raw frames off the main thread and batches results every
-  ~200 ms; the CyberChef worker runs recipe pipelines without stuttering the DOM; the HackRF
-  DSP worker does spectrum and demodulation for the PortaPack receiver.
-- **WASM** is loaded on demand: `@openipc-rs/web` (a Rust driver) powers raw
-  Realtek RTL8812AU monitor-mode capture over WebUSB, and CyberChef operations
-  use native/WASM crypto. `sql.js` (SQLite) loads `public/sql/sql-wasm.wasm` for the
-  DB Browser. WASM assets are resolved through Vite so they're served with the
-  correct MIME type and hashed URLs. Optional engines under `public/wasm/` are
-  described in [`docs/WASM_ENGINES.md`](docs/WASM_ENGINES.md).
+- Shodan: the caller's own API key is sent in the query string, as the client built it. The Worker holds no keys.
+- HIBP: only the two paths above, a fixed query-parameter allowlist and a validated email are accepted; the caller's `hibp-api-key` header is forwarded and nothing else. Passwords are checked with the k-anonymity range API, not through the Worker.
+- Other cross-origin tools use a configurable proxy; the local `cors-proxy` service below can serve that role.
 
-### Data Flow Example — the Alfa Wi-Fi Capture Pipeline
-A good illustration of how the pieces fit:
+## Optional local backend
 
-```
-WebUSB  →  @openipc-rs/web WASM  →  readRxTransfer()  →  unpackRealtekUsbTransfer()
-(raw RTL8812AU bulk transfer)      (Realtek rx_desc)     (→ Radiotap + 802.11 frames)
-   →  fastFilterPacket()  →  parserWorker (wifiParser)  →  ~200ms batched flush
-   →  throttled React state (APs/clients, capped + LRU-aged)  →  tables / map / WIDS
-```
+`backend/` contains Docker services that run on your own machine for things a browser cannot do (raw sockets, `nmap`, live TLS, arbitrary DNS, cross-origin fetch). See `backend/README.md`.
 
-### Persistence (all local)
-- **IndexedDB** stores capture/session snapshots.
-- The **File System Access API** streams high-rate serial logs and live PCAP
-  straight to disk with zero memory growth (overnight burn-in friendly).
-- **localStorage** holds per-viewer UI preferences. None of it leaves the device.
-
-### Build & Deploy
-`npm run build` (Vite → `dist/`) is a static bundle of HTML/JS/WASM assets, served by
-**Cloudflare Workers** (static assets + a tiny `/api/*` Worker) at https://usb-tool.olosnoks.com.
-The Worker (`worker/index.js`, configured in `wrangler.jsonc`) answers only `/api/*`:
-`/api/shodan` and `/api/shodan-exploits` relay to Shodan and `/api/health` reports
-status; `npm run dev` proxies the same two Shodan paths from Vite. It is built on a developer PC and
-pushed with wrangler, not built by GitHub Actions or Cloudflare — see *Releasing from
-your PC* below.
-
-### Releasing from your PC (nothing runs on GitHub)
-Hosted CI is **opt-in**: `.github/workflows/ci.yml` and `deploy.yml` only run while the
-repo variable `CI_BUILDS_ENABLED` is `true`. Until then every push shows as *skipped*
-in the Actions tab and bills nothing. The normal path is `scripts/release-local.py`
-(Python 3, no dependencies):
+| Service | Port | Purpose |
+|---|---|---|
+| `cors-proxy` | 47101 | HTTP(S) forwarder with permissive CORS |
+| `nmap` | 47102 | Real `nmap` scans |
+| `tls-inspector` | 47103 | Live TLS handshake and certificate chain |
+| `dns` | 47104 | DNS queries against any nameserver |
+| `zap` | 47105 | OWASP ZAP daemon |
+| `hydra` | 47106 | THC-Hydra; only under the `offensive` Compose profile and requires `I_HAVE_AUTHORIZATION=yes` |
 
 ```bash
-python scripts/release-local.py                     # npm ci (if stale) + test + build -> dist/
-python scripts/release-local.py --assemble          # ... and build the site into _site/ to inspect it
-python scripts/release-local.py --deploy            # ... and publish it to Cloudflare
-python scripts/release-local.py --deploy --skip-build --skip-tests   # republish the existing dist/
-python scripts/release-local.py --install           # force npm ci even if node_modules looks current
+cd backend
+docker compose up -d                       # default services
+docker compose --profile offensive up -d   # also Hydra
 ```
 
-On Windows, run it as `python -X utf8 scripts/release-local.py ...`. Its subprocess
-output is otherwise decoded as cp1252, which can fail on non-ASCII output from npm or
-wrangler.
+Use these only against systems you own or are authorized to assess.
 
-1. Runs the Vitest suite and `npm run build`, exactly what CI did. Any failure stops
-   before anything is published.
-2. `--deploy` assembles `_site/` (`dist/` minus the GitHub-Pages-only `CNAME`, with the
-   `__VERSION__` placeholder in both HTML entry points stamped `<branch>+<sha7>`) and
-   runs `npx --yes wrangler deploy` with `wrangler.jsonc`: `_site/` becomes the static
-   assets of the Worker `usb-tool`, and `worker/index.js` is uploaded with it. That
-   Worker runs only for `/api/*` (`run_worker_first`), where it relays the Shodan API
-   for the OSINT client so the browser is not blocked by CORS; every other path is
-   served straight from the asset store. No build anywhere, and the repo stays private.
+## Development
 
-Needs Node (npx runs wrangler) and Cloudflare credentials, one of: `npx wrangler login`
-once (browser sign-in that wrangler keeps for you, nothing stored in the repo), or
-`CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` in a `.env` at the repo root
-(git-ignored; copy `.env.example`; a value exported in the shell wins). GitHub secrets
-can't be read back, so a token for `.env` means a new one from the Cloudflare dashboard
-(My Profile → API Tokens, "Edit Cloudflare Workers" template). Run it from a
-clean checkout of `main`; it warns and stamps `+dirty` otherwise. `_site/` is
-git-ignored. The deployed stamp is the `<meta name="build-version">` tag in the page
-source (`curl -s https://usb-tool.olosnoks.com | grep build-version`).
+Requirements: Node.js 20 (the version the CI workflows use; `package.json` has no `engines` field and there is no `.nvmrc`).
 
-**First deploy / moving the domain.** After the first `--deploy`, open Cloudflare →
-Workers & Pages → `usb-tool` → *Custom domains* and add `usb-tool.olosnoks.com`; the zone's
-DNS is already on Cloudflare, so it rewrites the CNAME for you. Then disable GitHub
-Pages on the repo (Settings → Pages). `public/CNAME` stays in the repo only so the
-gated GitHub Pages workflow still works as a fallback.
-
-To use hosted CI again: `gh variable set CI_BUILDS_ENABLED --body true --repo
-olosnoks/usb-tool` (and `gh variable delete CI_BUILDS_ENABLED --repo olosnoks/usb-tool`
-to turn it off). `deploy.yml` still targets GitHub Pages; it is the fallback, not the
-normal path.
-
----
-
-## 🚀 Quick Start
-
-### Online Web App
-Open directly in any Chromium browser (Chrome, Edge, Opera):  
-👉 **[https://usb-tool.olosnoks.com](https://usb-tool.olosnoks.com)**
-
-### Local Development
 ```bash
-git clone https://github.com/olosnoks/usb-tool.git
-cd usb-tool
 npm install
 npm run dev        # Vite dev server on http://localhost:3000
-npm run test       # Vitest
-npm run build      # production build to dist/
-npm run typecheck  # tsc --noEmit
 ```
 
-Node 20 is what CI uses. Web Serial, WebUSB, WebHID and Web Bluetooth need a Chromium
-browser (Chrome, Edge, Opera).
+The dev server proxies `/api/hibp`, `/api/shodan-exploits` and `/api/shodan` to the same upstreams as the Worker (`vite.config.js`).
 
----
+| Script | Command |
+|---|---|
+| `npm run dev` | `vite` |
+| `npm run build` | `vite build` (output in `dist/`) |
+| `npm run preview` | `vite preview` |
+| `npm run test` | `vitest run` |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run build:mayhem` | esbuild bundles of `src/mayhem-mobile/src/main.ts` and `dsp.worker.ts` into `public/mayhem/build/` |
 
-## 🤝 Contributing & Community
+Stack: Vite, React 18, Tailwind CSS 3, Vitest, with `sql.js`, `@openipc-rs/web` (WASM), CodeMirror, Leaflet and others (see `package.json`).
 
-- **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** — dev setup, project layout, the driver + workbench pattern for adding tools, and the PR process.
-- **[CODE_OF_CONDUCT.md](docs/CODE_OF_CONDUCT.md)** — community standards.
-- **[SECURITY.md](docs/SECURITY.md)** — responsible-disclosure policy and responsible-use notice.
-- **[ACKNOWLEDGMENTS.md](docs/ACKNOWLEDGMENTS.md)** — third-party dependencies, the projects ported or modeled on (usb-rea, Mayhem Mobile, CyberChef, the WarHog web flasher), and the external firmware/hardware it integrates.
-- **[docs/FEATURE_TOOL_HANDOFF.md](docs/FEATURE_TOOL_HANDOFF.md)** — exhaustive blueprint for dropping a brand-new workbench into the app.
+Conventions: run `npm run test` and `npm run build` before opening a PR; do not push to `main` directly.
 
----
+## Project layout
 
-## 📄 License
-MIT License. Open-source hardware hacking, firmware flashing, and serial analysis workbench. The Mayhem Mobile code under `src/mayhem-mobile/` and `public/mayhem/` is GPL-3.0 (derived from PortaPack Mayhem); see [ACKNOWLEDGMENTS.md](docs/ACKNOWLEDGMENTS.md).
+| Path | Contents |
+|---|---|
+| `index.html`, `wiki/index.html` | The two Vite entry points (app and standalone wiki) |
+| `src/main.jsx`, `src/App.jsx` | App entry and shell (header, desktop, terminal drawer, modals) |
+| `src/components/` | Tool workbenches, `ToolRegistry.jsx` (lazy-loaded tool map), and `layout/` (Header, Desktop, StartMenu, Sidebar registry, `toolCategories.js`) |
+| `src/context/` | Shared providers, including `SerialContext.jsx` |
+| `src/utils/` | Drivers, parsers and helpers (framing, CRCs, decoders) with no UI |
+| `src/devices/`, `src/protocols/`, `src/services/`, `src/flasher/` | Device-specific and protocol code |
+| `src/workers/` | Web Workers (802.11 parser, CyberChef, HackRF DSP) |
+| `src/mayhem-mobile/` | PortaPack Mayhem receiver bundle (GPL-3.0) |
+| `src/wiki/` | Wiki app and articles |
+| `public/` | Static assets: manifest, icons, service worker, `sql/` and `wasm/` engines, `mayhem/` |
+| `worker/index.js` | Cloudflare Worker for `/api/*` |
+| `backend/` | Optional local Docker services |
+| `tests/` | Vitest suites |
+| `scripts/release-local.py` | Local test, build and deploy script |
+| `docs/` | Contributing, acknowledgments, security, code of conduct, WASM engine notes, tool handoff blueprint |
+| `wrangler.jsonc` | Cloudflare Worker and static assets configuration |
+| `.github/workflows/` | `ci.yml` and `deploy.yml` (disabled by default) |
+
+Each tool is a pure driver or parser module in `src/utils/` (unit-tested) plus a React workbench in `src/components/` that wires it to the shared transport. Workbenches are loaded with `React.lazy` and unmounted when their window closes. See `docs/FEATURE_TOOL_HANDOFF.md`.
+
+## Releases
+
+Builds do not run on GitHub by default. `.github/workflows/ci.yml` and `deploy.yml` run only when the repository variable `CI_BUILDS_ENABLED` is `true`; otherwise they show as skipped. To enable them:
+
+```bash
+gh variable set CI_BUILDS_ENABLED --body true --repo olosnoks/usb-tool
+```
+
+The normal path is `scripts/release-local.py` (Python 3, no dependencies), run from a PC:
+
+```bash
+python scripts/release-local.py                     # npm ci (if stale), tests, build into dist/
+python scripts/release-local.py --assemble          # also assemble _site/ without deploying
+python scripts/release-local.py --deploy            # also publish to Cloudflare
+python scripts/release-local.py --deploy --skip-build --skip-tests
+python scripts/release-local.py --install           # force npm ci
+```
+
+| Flag | Effect |
+|---|---|
+| `--skip-build` | Reuse the existing `dist/` |
+| `--skip-tests` | Do not run the Vitest suite |
+| `--install` | Force `npm ci` even if `node_modules` looks current |
+| `--assemble` | Assemble the site into `_site/` but do not deploy |
+| `--deploy` | Publish with `npx --yes wrangler deploy` |
+
+On Windows, run it as `python -X utf8 scripts/release-local.py ...` to avoid cp1252 decoding errors on npm/wrangler output.
+
+With `--deploy`, `_site/` is assembled from `dist/` with the `__VERSION__` placeholder in both HTML files stamped as `<branch>+<sha7>`, and `wrangler.jsonc` publishes it as the static assets of the Worker `usb-tool`, together with `worker/index.js` (run first only for `/api/*`). The deployed version is the `build-version` meta tag in the page source. Credentials come from `npx wrangler login` or from `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in a git-ignored `.env` (template: `.env.example`). `dist/` and `_site/` are git-ignored.
+
+## Contributing
+
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for setup, conventions and the pull request process. Related documents: [docs/CODE_OF_CONDUCT.md](docs/CODE_OF_CONDUCT.md), [docs/SECURITY.md](docs/SECURITY.md), [docs/FEATURE_TOOL_HANDOFF.md](docs/FEATURE_TOOL_HANDOFF.md).
+
+Several tools can perform security testing or send keystrokes and credentials to real targets. Use them only on devices and systems you own or are authorized to test.
+
+## Acknowledgments
+
+Third-party dependencies, projects ported or modeled on (usb-rea, Mayhem Mobile, CyberChef, the WarHog web flasher) and the firmware and hardware the app integrates with are listed in [docs/ACKNOWLEDGMENTS.md](docs/ACKNOWLEDGMENTS.md).
+
+## License
+
+MIT; see [LICENSE](LICENSE). Exceptions:
+
+- `src/mayhem-mobile/` and the bundle built from it (`public/mayhem/`) are GPL-3.0, built from PortaPack Mayhem. The site serves its source at `/mayhem/mayhem-mobile-source.zip` and the license at `/mayhem/LICENSE.txt`; see [src/mayhem-mobile/LICENSE](src/mayhem-mobile/LICENSE).
+- `src/utils/usbrea/` is a port of [usb-rea](https://github.com/emirmrkaljevic/usb-rea) (MIT, Emir Mrkaljević); see [src/utils/usbrea/LICENSE](src/utils/usbrea/LICENSE).
+- Bundled third-party packages keep their own licenses. `npm run build` writes their notices to `dist/THIRD_PARTY_NOTICES.txt`, served at `/THIRD_PARTY_NOTICES.txt`.

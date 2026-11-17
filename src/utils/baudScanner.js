@@ -16,6 +16,47 @@ export const CANDIDATE_BAUD_RATES = [
 ];
 
 /**
+ * Run a baud hunt over `candidates` with abort support.
+ *  scan(baud, signal)  -> Promise<Uint8Array>   (reconfigures the port itself)
+ *  restore()           -> Promise                (always called once at the end,
+ *                         also on abort/error: reopens the original baud and
+ *                         restarts the console read loop)
+ *  onResult(entry, all) is called after each candidate; `signal` is { aborted }.
+ * Returns { results, aborted, restoreError }.
+ */
+export async function runBaudHunt({ candidates = CANDIDATE_BAUD_RATES, scan, restore, signal, onProgress, onResult, onError }) {
+  const results = [];
+  let aborted = false;
+  let restoreError = null;
+  try {
+    for (const baud of candidates) {
+      if (signal?.aborted) { aborted = true; break; }
+      if (onProgress) onProgress(baud);
+      try {
+        const sampleBytes = await scan(baud, signal);
+        if (signal?.aborted) { aborted = true; break; }
+        const ev = evaluateSample(sampleBytes);
+        results.push({
+          baud,
+          byteCount: sampleBytes ? sampleBytes.length : 0,
+          printableRatio: ev.printableRatio,
+          entropy: ev.entropy,
+          confidence: ev.confidence,
+          verdict: ev.verdict,
+          previewText: ev.previewText
+        });
+        if (onResult) onResult(results[results.length - 1], [...results]);
+      } catch (err) {
+        if (onError) onError(baud, err);
+      }
+    }
+  } finally {
+    try { if (restore) await restore(); } catch (err) { restoreError = err; }
+  }
+  return { results, aborted, restoreError };
+}
+
+/**
  * Calculates Shannon Entropy of a byte buffer
  * H(X) = -sum(p(x) * log2(p(x)))
  * Output range: 0.0 (all identical bytes) to 8.0 (completely random noise)

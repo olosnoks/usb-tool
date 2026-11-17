@@ -386,33 +386,65 @@ export class SwdTarget {
     this.cswValid = false;
   }
 
-  async connect({ clockHz = 1_000_000 } = {}) {
+  /**
+   * Attach over SWD. With `underReset`, nRESET is held low through the whole
+   * attach (SWJ_Pins), the core is halted with vector catch on reset, and
+   * nRESET is released afterwards: this reaches chips that sleep, remap the
+   * SWD pins or run code that locks the debug port straight after reset.
+   * nRESET is released on every error path.
+   */
+  async connect({ clockHz = 1_000_000, underReset = false } = {}) {
     const p = this.probe;
     await p.connect(DAP.PORT_SWD);
     await p.setClock(clockHz);
     await p.configureTransfer(0, 128, 0);
     await p.configureSwd(0);
-    // Line reset, JTAG-to-SWD switch (0xE79E), line reset, idle.
-    const ones = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
-    await p.swjSequence(51, ones);
-    await p.swjSequence(16, [0x9e, 0xe7]);
-    await p.swjSequence(51, ones);
-    await p.swjSequence(8, [0x00]);
-    const [dpidr] = await p.transfer([{ ap: false, read: true, reg: DP.IDCODE }]);
-    this.dpidr = dpidr;
-    // Clear sticky errors, then power up the debug and system domains.
-    await p.transfer([{ ap: false, read: false, reg: DP.ABORT, value: 0x1e }]);
-    await this._selectRaw(0);
-    await p.transfer([{ ap: false, read: false, reg: DP.CTRL_STAT, value: 0x50000000 }]);
-    for (let i = 0; ; i++) {
-      const [cs] = await p.transfer([{ ap: false, read: true, reg: DP.CTRL_STAT }]);
-      if (((cs & 0xa0000000) >>> 0) === 0xa0000000) break; // CDBGPWRUPACK + CSYSPWRUPACK
-      if (i > 50) throw new DapError('Target did not power up its debug domain (CTRL/STAT ACKs never set).');
-      await sleep(10);
+    const releaseReset = () => p.swjPins(PIN.nRESET, PIN.nRESET, 0);
+    let savedDemcr = 0;
+    try {
+      if (underReset) {
+        await p.swjPins(0, PIN.nRESET, 0); // drive nRESET low
+        await sleep(20);
+      }
+      // Line reset, JTAG-to-SWD switch (0xE79E), line reset, idle.
+      const ones = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+      await p.swjSequence(51, ones);
+      await p.swjSequence(16, [0x9e, 0xe7]);
+      await p.swjSequence(51, ones);
+      await p.swjSequence(8, [0x00]);
+      const [dpidr] = await p.transfer([{ ap: false, read: true, reg: DP.IDCODE }]);
+      this.dpidr = dpidr;
+      // Clear sticky errors, then power up the debug and system domains.
+      await p.transfer([{ ap: false, read: false, reg: DP.ABORT, value: 0x1e }]);
+      await this._selectRaw(0);
+      await p.transfer([{ ap: false, read: false, reg: DP.CTRL_STAT, value: 0x50000000 }]);
+      for (let i = 0; ; i++) {
+        const [cs] = await p.transfer([{ ap: false, read: true, reg: DP.CTRL_STAT }]);
+        if (((cs & 0xa0000000) >>> 0) === 0xa0000000) break; // CDBGPWRUPACK + CSYSPWRUPACK
+        if (i > 50) throw new DapError('Target did not power up its debug domain (CTRL/STAT ACKs never set).');
+        await sleep(10);
+      }
+      this.apIdr = await this.readApRegister(0, AP.IDR);
+      this.cswValid = false;
+      if (underReset) {
+        // Halt now and catch the reset vector so the core stops before its first instruction.
+        await this.writeWord(CORTEX.DHCSR, CORTEX.DBGKEY | CORTEX.C_DEBUGEN | CORTEX.C_HALT);
+        savedDemcr = await this.readWord(CORTEX.DEMCR);
+        await this.writeWord(CORTEX.DEMCR, savedDemcr | CORTEX.VC_CORERESET);
+      }
+    } catch (e) {
+      if (underReset) { try { await releaseReset(); } catch (x) { /* probe gone */ } }
+      throw e;
     }
-    this.apIdr = await this.readApRegister(0, AP.IDR);
-    this.cswValid = false;
-    return { dpidr, apIdr: this.apIdr };
+    if (underReset) {
+      await releaseReset();
+      try {
+        await this._waitHalt('releasing reset');
+      } finally {
+        try { await this.writeWord(CORTEX.DEMCR, savedDemcr & ~CORTEX.VC_CORERESET); } catch (x) { /* ignore */ }
+      }
+    }
+    return { dpidr: this.dpidr, apIdr: this.apIdr };
   }
 
   async _selectRaw(value) {
@@ -425,6 +457,11 @@ export class SwdTarget {
     await this._selectRaw(((apsel & 0xff) << 24) | (addr & 0xf0));
     const [v] = await this.probe.transfer([{ ap: true, read: true, reg: addr & 0x0c }]);
     return v;
+  }
+
+  async writeApRegister(apsel, addr, value) {
+    await this._selectRaw(((apsel & 0xff) << 24) | (addr & 0xf0));
+    await this.probe.transfer([{ ap: true, read: false, reg: addr & 0x0c, value: value >>> 0 }]);
   }
 
   async _memAp() {

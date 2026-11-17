@@ -51,9 +51,11 @@ export function observations(marks, t0 = 0.0) {
   return out;
 }
 
-export function assign(transfers, marks) {
+/** `offset` (seconds) is added to every marker time, to correct a clock skew between the marker PC and the capture. */
+export function assign(transfers, marks, offset = 0) {
+  const off = Number(offset) || 0;
   const acts = marks.filter((m) => !is_observation(m.label))
-    .map((m) => new Action({ label: m.label, start: m.start, end: m.end }));
+    .map((m) => new Action({ label: m.label, start: m.start + off, end: m.end + off }));
   for (const t of transfers) {
     for (const a of acts) {
       if (a.start <= t.ts && t.ts <= a.end) {
@@ -83,7 +85,14 @@ export function _periodic(ts, outs) {
   const mine = new Set(ts);
   const others = outs.filter((t) => !mine.has(t)).map((t) => t.ts);
   let alone = 0;
-  for (const t of ts) if (!others.some((o) => Math.abs(o - t.ts) <= window)) alone += 1;
+  // `outs` is sorted by time, so `others` is too: binary-search the nearest neighbours (was O(n*m))
+  for (const t of ts) {
+    let lo = 0;
+    let hi = others.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (others[mid] < t.ts) lo = mid + 1; else hi = mid; }
+    const near = (lo < others.length && Math.abs(others[lo] - t.ts) <= window) || (lo > 0 && Math.abs(others[lo - 1] - t.ts) <= window);
+    if (!near) alone += 1;
+  }
   return alone >= 0.5 * ts.length ? period : null;
 }
 

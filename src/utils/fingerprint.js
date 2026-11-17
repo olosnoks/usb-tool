@@ -24,7 +24,7 @@ const RULES = [
   { name: 'Express', category: 'Framework', test: (c) => /express/i.test(H(c, 'x-powered-by')) && `X-Powered-By: ${H(c, 'x-powered-by')}` },
   { name: 'Ruby on Rails', category: 'Framework', test: (c) => cookieHas(c, /^_.*_session$/i) && /rails|ruby/i.test(H(c, 'x-powered-by') + H(c, 'server')) && 'session cookie + header' },
   { name: 'Django', category: 'Framework', test: (c) => cookieHas(c, /^csrftoken$/i) && cookieHas(c, /^sessionid$/i) && 'cookies csrftoken + sessionid' },
-  { name: 'Laravel', category: 'Framework', test: (c) => (cookieHas(c, /^laravel_session$/i) && 'cookie laravel_session') || (cookieHas(c, /^XSRF-TOKEN$/i) && 'cookie XSRF-TOKEN') },
+  { name: 'Laravel', category: 'Framework', test: (c) => cookieHas(c, /^laravel_session$/i) && 'cookie laravel_session' },
   // CMS / platforms
   { name: 'WordPress', category: 'CMS', test: (c) => (htmlHas(c, /wp-(content|includes)\//i) && 'wp-content/ path') || (cookieHas(c, /^wordpress/i) && 'wordpress cookie') },
   { name: 'Drupal', category: 'CMS', test: (c) => (htmlHas(c, /Drupal\.settings|sites\/(all|default)\/|drupal\.js/i) && 'Drupal markers') || (/drupal/i.test(H(c, 'x-generator')) && `X-Generator: ${H(c, 'x-generator')}`) },
@@ -40,8 +40,8 @@ const RULES = [
   { name: 'Svelte', category: 'JS framework', test: (c) => htmlHas(c, /svelte-[0-9a-z]+/i) && 'svelte class' },
   { name: 'Gatsby', category: 'JS framework', test: (c) => htmlHas(c, /id=["']___gatsby|\/page-data\//i) && '___gatsby' },
   // Libraries
-  { name: 'jQuery', category: 'Library', test: (c) => scriptHas(c, /jquery(-|\.|@)/i) && 'jquery script' },
-  { name: 'Bootstrap', category: 'Library', test: (c) => scriptHas(c, /bootstrap(\.|\.min|@)/i) || htmlHas(c, /class=["'][^"']*\b(container|row|col-(xs|sm|md|lg))\b/i) ? 'bootstrap markers' : false },
+  { name: 'jQuery', category: 'Library', test: (c) => { const s = (c.scripts || []).find((u) => /jquery([.@-]|$)/i.test(u)); if (!s) return false; const v = s.match(/jquery[-@/](\d+\.\d+(?:\.\d+)?)/i); return `jquery script${v ? ` v${v[1]}` : ''}`; } },
+  { name: 'Bootstrap', category: 'Library', test: (c) => { const s = (c.scripts || []).find((u) => /bootstrap([.@/-]|$)/i.test(u)); const l = (c.html || '').match(/<link\b[^>]*bootstrap[^>]*>/i); const asset = s || (l && l[0]); if (!asset) return false; const v = asset.match(/bootstrap(?:@|\/|-)v?(\d+\.\d+(?:\.\d+)?)/i); return `bootstrap asset${v ? ` v${v[1]}` : ''}`; } },
   // Analytics / tags
   { name: 'Google Analytics', category: 'Analytics', test: (c) => scriptHas(c, /google-analytics\.com|googletagmanager\.com|gtag\/js/i) && 'GA/GTM script' },
   // CDN / WAF / edge
@@ -51,7 +51,7 @@ const RULES = [
   { name: 'Akamai', category: 'CDN / WAF', test: (c) => (H(c, 'x-akamai-transformed') && 'x-akamai-transformed') || /akamai/i.test(H(c, 'server')) && 'Server: akamai' },
   { name: 'Fastly', category: 'CDN / WAF', test: (c) => /fastly/i.test(H(c, 'x-served-by') + H(c, 'via') + H(c, 'server')) && 'fastly header' },
   { name: 'Varnish', category: 'CDN / WAF', test: (c) => (H(c, 'x-varnish') && 'x-varnish header') || /varnish/i.test(H(c, 'via')) && 'Via: varnish' },
-  { name: 'AWS', category: 'Hosting', test: (c) => /awselb|amazons3|aws/i.test(H(c, 'server') + H(c, 'x-amz-cf-id') + (c.headers?.['x-amz-request-id'] ? 'aws' : '')) && 'AWS header' },
+  { name: 'AWS', category: 'Hosting', test: (c) => (/^(amazons3|awselb\/|cloudfront)/i.test(H(c, 'server')) && `Server: ${H(c, 'server')}`) || (H(c, 'x-amz-cf-id') && 'x-amz-cf-id header') || (H(c, 'x-amz-request-id') && 'x-amz-request-id header') || (H(c, 'x-amzn-requestid') && 'x-amzn-requestid header') },
   { name: 'Vercel', category: 'Hosting', test: (c) => /vercel/i.test(H(c, 'server') + H(c, 'x-vercel-id')) && 'Vercel header' },
   { name: 'Netlify', category: 'Hosting', test: (c) => /netlify/i.test(H(c, 'server') + H(c, 'x-nf-request-id')) && 'Netlify header' },
   { name: 'GitHub Pages', category: 'Hosting', test: (c) => /github\.com|github pages/i.test(H(c, 'server')) && `Server: ${H(c, 'server')}` },

@@ -154,7 +154,7 @@ export default function ProxmarkWorkbench() {
 
       const manifest = BUILTIN_FLASH_MANIFESTS[selectedTarget];
       const expectedArtifact = manifest.artifacts.find((a) => a.name === artifactName);
-      const isValid = expectedArtifact
+      const isValid = expectedArtifact && expectedArtifact.expectedSha256
         ? expectedArtifact.expectedSha256.toLowerCase() === calculatedHash.toLowerCase()
         : false;
 
@@ -486,7 +486,7 @@ export default function ProxmarkWorkbench() {
                       )}
                     </div>
                     <p className="font-mono text-[11px] text-slate-500 truncate max-w-md">
-                      Expected SHA-256: {art.expectedSha256}
+                      Expected SHA-256: {art.expectedSha256 || 'none published yet (flashing disabled)'}
                     </p>
                   </div>
 

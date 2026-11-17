@@ -70,6 +70,13 @@ import CyberChefCommandPalette from '../workbenches/CyberChefCommandPalette.jsx'
 import CyberChefRecipeTestModal from '../workbenches/CyberChefRecipeTestModal.jsx';
 import { downloadStandaloneHtml } from '../../utils/cyberchef/exportStandalone.js';
 import sessionHistory from '../../utils/cyberchef/history.js';
+import {
+  parseCyberChefRecipe,
+  formatCyberChefRecipe,
+  encodeRecipeHash,
+  decodeRecipeHash,
+  normalizeSteps
+} from '../../utils/cyberchef/recipeUrl.js';
 
 
 
@@ -201,6 +208,15 @@ function SortableRecipeItem({
           {op?.module && (
             <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#14161d] text-slate-400 border border-[#2b303c] hidden @sm:inline">
               {op.module}
+            </span>
+          )}
+
+          {step.disabled && (
+            <span
+              className="text-[9px] px-1.5 py-0.2 rounded bg-slate-500/20 text-slate-300 font-bold border border-slate-500/40"
+              title="Imported as disabled; skipped when baking"
+            >
+              disabled
             </span>
           )}
 
@@ -358,6 +374,12 @@ export default function CyberChefWorkbench() {
   const fileInputRef = useRef(null);
   const recipeFileInputRef = useRef(null);
   const [copiedRecipe, setCopiedRecipe] = useState(false);
+  const [copiedCcRecipe, setCopiedCcRecipe] = useState(false);
+  const [ccExportNote, setCcExportNote] = useState('');
+  const [showCcImportModal, setShowCcImportModal] = useState(false);
+  const [ccImportText, setCcImportText] = useState('');
+  const [ccImportError, setCcImportError] = useState('');
+  const [ccImportReport, setCcImportReport] = useState(null);
 
   // Command Palette & Time Machine History
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -433,8 +455,8 @@ export default function CyberChefWorkbench() {
       try {
         const parsed = JSON.parse(reader.result);
         if (Array.isArray(parsed)) {
-          const newRecipe = parsed.map((s, idx) => ({
-            op: s.op || s.name || s.id,
+          const newRecipe = normalizeSteps(parsed).map((s, idx) => ({
+            op: s.op,
             args: s.args || {},
             uniqueId: `imported-step-${Date.now()}-${idx}`,
             breakpoint: false
@@ -448,6 +470,65 @@ export default function CyberChefWorkbench() {
     reader.readAsText(file);
     e.target.value = '';
   }, [updateActiveTab]);
+
+  // Copy the recipe in real CyberChef's recipe-string format (shared operations only)
+  const copyCyberChefRecipe = useCallback(() => {
+    const { text, skipped } = formatCyberChefRecipe(activeTab.activeRecipe);
+    navigator.clipboard.writeText(text);
+    setCcExportNote(
+      skipped.length ? `Not included (no CyberChef equivalent): ${skipped.map((s) => s.name).join(', ')}` : ''
+    );
+    setCopiedCcRecipe(true);
+    setTimeout(() => setCopiedCcRecipe(false), 2000);
+  }, [activeTab.activeRecipe]);
+
+  // Import a CyberChef recipe string, a CyberChef URL, or a #recipe=... fragment
+  const applyCyberChefImport = useCallback(() => {
+    setCcImportError('');
+    setCcImportReport(null);
+    const raw = ccImportText.trim();
+    if (!raw) {
+      setCcImportError('Paste a recipe such as To_Base64(\'A-Za-z0-9+/=\') or a CyberChef link first.');
+      return;
+    }
+    try {
+      let result;
+      const hashAt = raw.indexOf('#');
+      if (/^https?:\/\//i.test(raw) && hashAt >= 0) result = decodeRecipeHash(raw.slice(hashAt));
+      else if (/^#?recipe=/.test(raw)) result = decodeRecipeHash(raw);
+      else result = parseCyberChefRecipe(raw);
+      const steps = result.steps || [];
+      if (steps.length === 0 && result.unsupported.length === 0) {
+        setCcImportError('No operations were found in that text.');
+        return;
+      }
+      if (steps.length > 0) {
+        recipeUndoStackRef.current.push([...activeTab.activeRecipe]);
+        const stamp = Date.now();
+        const updates = {
+          activeRecipe: steps.map((s, idx) => ({
+            op: s.op,
+            args: s.args || {},
+            uniqueId: `cc-step-${stamp}-${idx}`,
+            breakpoint: !!s.breakpoint,
+            disabled: !!s.disabled
+          })),
+          paused: false,
+          pausedStepIndex: null
+        };
+        if (typeof result.input === 'string') updates.inputText = result.input;
+        updateActiveTab(updates);
+      }
+      if (result.unsupported.length > 0) {
+        setCcImportReport({ imported: steps.length, unsupported: result.unsupported });
+      } else {
+        setShowCcImportModal(false);
+        setCcImportText('');
+      }
+    } catch (err) {
+      setCcImportError(err.message || 'Could not read that recipe.');
+    }
+  }, [ccImportText, activeTab.activeRecipe, updateActiveTab]);
 
 
   // Append incoming hardware stream bytes into rolling buffer & active tab input
@@ -580,7 +661,13 @@ export default function CyberChefWorkbench() {
     try {
       const stored = localStorage.getItem('cyberchef_saved_recipes');
       if (stored) {
-        setSavedUserPresets(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        // Normalize saved steps by op id/name so renamed or id-only entries still load
+        setSavedUserPresets(
+          Array.isArray(parsed)
+            ? parsed.map((p) => ({ ...p, steps: normalizeSteps(p && p.steps) }))
+            : []
+        );
       }
     } catch {}
   }, []);
@@ -609,7 +696,7 @@ export default function CyberChefWorkbench() {
   };
 
   const loadPreset = (preset) => {
-    const newSteps = preset.steps.map((s, idx) => ({
+    const newSteps = normalizeSteps(preset.steps).map((s, idx) => ({
       op: s.op,
       args: s.args || {},
       uniqueId: `preset-${Date.now()}-${idx}`,
@@ -679,29 +766,31 @@ export default function CyberChefWorkbench() {
   useEffect(() => {
     if (typeof window === 'undefined' || !window.location.hash) return;
     try {
-      const hash = window.location.hash.slice(1);
-      const params = new URLSearchParams(hash);
+      const decoded = decodeRecipeHash(window.location.hash);
 
-      if (params.has('recipe')) {
-        const parsed = JSON.parse(decodeURIComponent(params.get('recipe')));
-        if (Array.isArray(parsed)) {
-          updateActiveTab({
-            activeRecipe: parsed.map((step, idx) => ({
-              op: step.op || step.name || step.id,
-              args: step.args || {},
-              uniqueId: `hash-step-${idx}-${Date.now()}`,
-              breakpoint: false
-            }))
-          });
-        }
-      }
-
-      if (params.has('input')) {
+      if (decoded.steps) {
         updateActiveTab({
-          inputText: decodeURIComponent(params.get('input'))
+          activeRecipe: decoded.steps.map((step, idx) => ({
+            op: step.op,
+            args: step.args || {},
+            uniqueId: `hash-step-${idx}-${Date.now()}`,
+            breakpoint: false
+          }))
         });
       }
-    } catch {}
+
+      if (typeof decoded.input === 'string') {
+        updateActiveTab({ inputText: decoded.input });
+      }
+
+      if (decoded.unsupported.length > 0) {
+        setCcImportReport({ imported: (decoded.steps || []).length, unsupported: decoded.unsupported });
+        setShowCcImportModal(true);
+      }
+    } catch (err) {
+      setCcImportError(`The link could not be restored: ${err.message}`);
+      setShowCcImportModal(true);
+    }
   }, [updateActiveTab]);
 
   // Deep Link Hash Sync (debounced)
@@ -709,13 +798,12 @@ export default function CyberChefWorkbench() {
     if (typeof window === 'undefined') return;
     const timer = setTimeout(() => {
       try {
-        const minified = activeTab.activeRecipe.map((s) => ({ op: s.op, args: s.args }));
-        const hashParams = new URLSearchParams();
-        hashParams.set('recipe', JSON.stringify(minified));
-        if (activeTab.inputText && !activeTab.fileMeta && activeTab.inputText.length < 500) {
-          hashParams.set('input', activeTab.inputText);
-        }
-        window.history.replaceState(null, '', `#${hashParams.toString()}`);
+        // CyberChef-style recipe string (own ops use their id); input is base64, omitted when long
+        const hash = encodeRecipeHash({
+          steps: activeTab.activeRecipe,
+          input: !activeTab.fileMeta ? activeTab.inputText || '' : ''
+        });
+        window.history.replaceState(null, '', `#${hash}`);
       } catch {}
     }, 400);
 
@@ -731,6 +819,7 @@ export default function CyberChefWorkbench() {
       op: s.op,
       args: s.args,
       breakpoint: s.breakpoint,
+      disabled: s.disabled,
       uniqueId: s.uniqueId
     }));
 
@@ -1035,7 +1124,9 @@ export default function CyberChefWorkbench() {
       const matchQuery =
         !q ||
         op.name.toLowerCase().includes(q) ||
+        (op.id && op.id.toLowerCase().includes(q)) ||
         (op.description && op.description.toLowerCase().includes(q)) ||
+        (op.keywords && op.keywords.some((k) => k.toLowerCase().includes(q))) ||
         (op.module && op.module.toLowerCase().includes(q));
       return matchCat && matchQuery;
     });
@@ -1150,7 +1241,7 @@ export default function CyberChefWorkbench() {
           </div>
           <div>
             <p className="text-xs text-slate-400">
-              Web Worker data pipeline with 80+ operations, Breakpoints, Auto-Bake, Presets, and Magic v2 Chaining.
+              Web Worker data pipeline with {allOps.length} operations, Breakpoints, Auto-Bake, Presets, and Magic v2 Chaining.
             </p>
           </div>
         </div>
@@ -1336,7 +1427,7 @@ export default function CyberChefWorkbench() {
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
                   <input
                     type="text"
-                    placeholder="Search 80+ operations..."
+                    placeholder={`Search ${allOps.length} operations...`}
                     value={searchOp}
                     onChange={(e) => setSearchOp(e.target.value)}
                     className="w-full bg-[#1e212b] border border-[#2b303c] rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition"
@@ -1345,7 +1436,7 @@ export default function CyberChefWorkbench() {
 
                 {/* Category pills */}
                 <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none text-[10px]">
-                  {categories.slice(0, 8).map((cat) => (
+                  {categories.map((cat) => (
                     <button
                       key={cat}
                       onClick={() => setSelectedCategory(cat)}
@@ -1501,6 +1592,28 @@ export default function CyberChefWorkbench() {
               >
                 {copiedRecipe ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5 text-slate-400" />}
                 <span>{copiedRecipe ? 'Copied' : 'Copy'}</span>
+              </button>
+              <button
+                onClick={copyCyberChefRecipe}
+                className="text-slate-400 hover:text-cyan-300 px-1.5 py-0.5 rounded bg-[#14161f] border border-[#2b303c] transition flex items-center gap-1"
+                title="Copy as a CyberChef recipe string, e.g. To_Base64('A-Za-z0-9+/='). Operations CyberChef lacks are skipped."
+                type="button"
+              >
+                {copiedCcRecipe ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Share2 className="w-2.5 h-2.5 text-slate-400" />}
+                <span>{copiedCcRecipe ? 'Copied' : 'CyberChef'}</span>
+              </button>
+              <button
+                onClick={() => {
+                  setCcImportError('');
+                  setCcImportReport(null);
+                  setShowCcImportModal(true);
+                }}
+                className="text-slate-400 hover:text-cyan-300 px-1.5 py-0.5 rounded bg-[#14161f] border border-[#2b303c] transition flex items-center gap-1"
+                title="Import a recipe string or link from CyberChef"
+                type="button"
+              >
+                <Upload className="w-2.5 h-2.5 text-slate-400" />
+                <span>Import CC</span>
               </button>
               <button
                 onClick={exportRecipeFile}
@@ -1974,6 +2087,87 @@ export default function CyberChefWorkbench() {
       )}
 
       {/* Presets Management Modal */}
+      {showCcImportModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div
+            className="bg-[#171920] border border-[#2b303c] rounded-2xl max-w-lg w-full p-5 space-y-3 shadow-2xl"
+            role="dialog"
+            aria-label="Import CyberChef recipe"
+          >
+            <div className="flex items-center justify-between border-b border-[#2b303c] pb-3">
+              <div className="flex items-center gap-2">
+                <Upload className="w-4 h-4 text-cyan-400" />
+                <h3 className="text-sm font-bold text-slate-100">IMPORT CYBERCHEF RECIPE</h3>
+              </div>
+              <button
+                onClick={() => setShowCcImportModal(false)}
+                className="text-slate-400 hover:text-slate-200"
+                type="button"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-400">
+              Paste a recipe string such as <span className="font-mono text-slate-300">{"From_Hex('Auto')To_Base64('A-Za-z0-9+/=')"}</span>,
+              or a full CyberChef link. Operations or options this tool does not support are listed below instead of being dropped silently.
+            </p>
+
+            <textarea
+              value={ccImportText}
+              onChange={(e) => setCcImportText(e.target.value)}
+              rows={4}
+              spellCheck={false}
+              className="w-full bg-[#1a1d26] border border-[#2b303c] rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-400 font-mono"
+              placeholder="To_Base64('A-Za-z0-9+/=')"
+            />
+
+            {ccImportError && (
+              <div className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">
+                {ccImportError}
+              </div>
+            )}
+
+            {ccImportReport && (
+              <div className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 space-y-1">
+                <div className="font-bold">
+                  {ccImportReport.imported} operation(s) loaded; {ccImportReport.unsupported.length} not supported:
+                </div>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  {ccImportReport.unsupported.map((u, i) => (
+                    <li key={`${u.name}-${i}`}>
+                      <span className="font-mono">{u.name}</span> (step {u.index + 1}): {u.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {ccExportNote && (
+              <div className="text-[11px] text-slate-400">Last CyberChef copy: {ccExportNote}</div>
+            )}
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setShowCcImportModal(false)}
+                className="px-3 py-1.5 bg-[#14161d] hover:bg-[#1e212b] text-slate-300 border border-[#2b303c] rounded-lg text-xs transition"
+                type="button"
+              >
+                Close
+              </button>
+              <button
+                onClick={applyCyberChefImport}
+                className="px-3 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg text-xs transition"
+                type="button"
+              >
+                Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showPresetsModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#171920] border border-[#2b303c] rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl">

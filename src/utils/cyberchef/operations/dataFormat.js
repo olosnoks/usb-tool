@@ -5,6 +5,20 @@
 
 import { Operation } from '../core/Operation.js';
 import { Dish } from '../core/Dish.js';
+import { expandAlphabet } from './opHelpers.js';
+
+const STD_B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const DEFAULT_B64_ALPHABET = 'A-Za-z0-9+/=';
+
+/** Resolve a CyberChef-style alphabet ("A-Za-z0-9-_") to { chars, pad } (pad may be null). */
+function resolveB64Alphabet(spec) {
+  const chars = expandAlphabet(spec || DEFAULT_B64_ALPHABET);
+  if (chars.length !== 64 && chars.length !== 65) {
+    throw new Error('Base64 alphabet must define 64 characters, plus an optional padding character (65 total).');
+  }
+  if (new Set(chars).size !== chars.length) throw new Error('Base64 alphabet must not repeat characters.');
+  return { chars: chars.slice(0, 64), pad: chars[64] ?? null };
+}
 
 // Base32 RFC 4648 Constants
 const B32_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -450,16 +464,23 @@ export class ToBase64Operation extends Operation {
       name: 'To Base64',
       id: 'to_base64',
       module: 'Data Format',
-      description: 'Encodes raw text or binary bytes into standard RFC 4648 Base64 format.',
+      description: 'Encodes raw text or binary bytes into RFC 4648 Base64. Use the alphabet "A-Za-z0-9-_" for URL-safe Base64, with an optional 65th padding character (default "A-Za-z0-9+/=").',
       inputType: 'Dish',
       outputType: 'string',
-      args: []
+      args: [
+        { name: 'alphabet', label: 'Alphabet', type: 'text', default: DEFAULT_B64_ALPHABET }
+      ]
     });
   }
 
-  async run(dish) {
+  async run(dish, { alphabet = DEFAULT_B64_ALPHABET } = {}) {
     const inputDish = dish instanceof Dish ? dish : new Dish(dish);
-    return inputDish.toBase64();
+    const std = inputDish.toBase64();
+    if (alphabet === DEFAULT_B64_ALPHABET) return std;
+    const { chars, pad } = resolveB64Alphabet(alphabet);
+    let out = '';
+    for (const c of std) out += c === '=' ? (pad ?? '') : chars[STD_B64.indexOf(c)];
+    return out;
   }
 }
 
@@ -469,15 +490,26 @@ export class FromBase64Operation extends Operation {
       name: 'From Base64',
       id: 'from_base64',
       module: 'Data Format',
-      description: 'Decodes Base64 string into bytes or UTF-8 text.',
+      description: 'Decodes Base64 string into bytes or UTF-8 text. Set the alphabet to "A-Za-z0-9-_" for URL-safe Base64.',
       inputType: 'string',
       outputType: 'Dish',
-      args: []
+      args: [
+        { name: 'alphabet', label: 'Alphabet', type: 'text', default: DEFAULT_B64_ALPHABET }
+      ]
     });
   }
 
-  async run(input) {
-    return Dish.fromBase64(input);
+  async run(input, { alphabet = DEFAULT_B64_ALPHABET } = {}) {
+    if (alphabet === DEFAULT_B64_ALPHABET) return Dish.fromBase64(input);
+    const { chars, pad } = resolveB64Alphabet(alphabet);
+    let std = '';
+    for (const c of String(input).replace(/\s+/g, '')) {
+      if (pad !== null && c === pad) continue;
+      const idx = chars.indexOf(c);
+      if (idx < 0) throw new Error(`Character "${c}" is not in the Base64 alphabet.`);
+      std += STD_B64[idx];
+    }
+    return Dish.fromBase64(std);
   }
 }
 

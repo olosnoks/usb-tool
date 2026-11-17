@@ -70,3 +70,23 @@ export function describeNetworkError(err) {
   }
   return err?.message || String(err);
 }
+
+function parseProxyJson(resp, name) {
+  const raw = resp?.headers?.get?.(name);
+  if (!raw) return null;
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v : null; } catch { return null; }
+}
+
+/**
+ * Set-Cookie strings forwarded by the bundled proxy in x-proxy-set-cookie
+ * (JSON array). Returns null when the header is absent (browsers hide the real
+ * Set-Cookie), so callers can tell "no cookies" from "cannot see cookies".
+ */
+export function getSetCookie(resp) {
+  return parseProxyJson(resp, 'x-proxy-set-cookie');
+}
+
+/** Redirect chain [{ status, url }] from x-proxy-redirects, or null when absent. */
+export function getRedirectChain(resp) {
+  return parseProxyJson(resp, 'x-proxy-redirects');
+}

@@ -17,6 +17,14 @@ import { createHackRfAudioPlayer } from '../../../utils/hackrfAudioPlayer';
 import { WATERFALL_THEMES, buildLut, getTheme, themeGradient, loadThemeId, saveThemeId } from '../../../utils/waterfallThemes';
 import { RecordControls, CaptureResultStrip } from '../portapack/IqRecorder';
 
+// CSV of the sweep peak list exactly as shown in the table (start_hz,end_hz of the
+// swept band, the peak frequency and level, and when the pass finished).
+export function peaksToCsv(peaks, band, timestampIso) {
+  const rows = ['start_hz,end_hz,peak_hz,dbfs,timestamp'];
+  for (const p of peaks) rows.push([band.startHz, band.endHz, p.freqHz, p.powerDb, timestampIso || ''].join(','));
+  return rows.join('\n') + '\n';
+}
+
 export const SWEEP_PRESETS = [
   { name: 'HF (1-30 MHz)', startHz: 1000000, endHz: 30000000 },
   { name: 'FM Broadcast (88-108)', startHz: 88000000, endHz: 108000000 },
@@ -111,6 +119,7 @@ export default function ReceiverDeck({ driver, state }) {
   const [thresholdDb, setThresholdDb] = useState(-55);
   const [peaks, setPeaks] = useState([]);
   const [sweepPass, setSweepPass] = useState(0);
+  const [peaksMeta, setPeaksMeta] = useState(null);   // { band, ts } of the pass the peak list came from
   const thresholdRef = useRef(thresholdDb);
   useEffect(() => { thresholdRef.current = thresholdDb; }, [thresholdDb]);
   const band = (() => {
@@ -242,6 +251,7 @@ export default function ReceiverDeck({ driver, state }) {
       }
       found.sort((a, b) => b.powerDb - a.powerDb);
       setPeaks(found.slice(0, 24));
+      setPeaksMeta({ band: { startHz, endHz }, ts: new Date().toISOString() });
     };
 
     const run = async () => {
@@ -717,6 +727,16 @@ export default function ReceiverDeck({ driver, state }) {
         <div className="shrink-0 bg-slate-950/90 border border-slate-800 rounded-xl p-3 space-y-1.5">
           <div className="flex items-center justify-between text-slate-400 pb-1 border-b border-slate-800">
             <span className="font-bold text-slate-200 flex items-center gap-2"><Sliders className="w-3.5 h-3.5" /> PEAKS ABOVE THRESHOLD ({peaks.length})</span>
+            <button type="button" disabled={!peaks.length || !peaksMeta}
+              onClick={() => {
+                const blob = new Blob([peaksToCsv(peaks, peaksMeta.band, peaksMeta.ts)], { type: 'text/csv' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `sweep-peaks-${peaksMeta.ts.replace(/[:.]/g, '-')}.csv`;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+              }}
+              className="px-2 py-0.5 bg-emerald-600/20 hover:bg-emerald-600/30 disabled:opacity-40 border border-emerald-500/30 text-emerald-300 rounded">Export peaks CSV</button>
             <span className="text-[10px] text-slate-500">{band.name}: {(band.startHz / 1e6).toFixed(1)} – {(band.endHz / 1e6).toFixed(1)} MHz · from the last complete pass</span>
           </div>
           {peaks.length === 0 ? (

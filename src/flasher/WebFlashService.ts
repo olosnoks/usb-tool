@@ -9,7 +9,7 @@ import {
 } from './types';
 import { resolveManifest } from './manifest';
 // Pure DFU protocol driver (device-agnostic, see src/utils/dfuDriver.js).
-import { DfuDevice, discoverDfuInterface } from '../utils/dfuDriver';
+import { DfuDevice, discoverDfuInterface, listDfuAlternates } from '../utils/dfuDriver';
 
 export interface PrepareFlashOptions {
   target: FlashTarget;
@@ -64,6 +64,12 @@ export class WebFlashService {
     const validatedArtifacts: PreparedFlashSession['artifacts'] = [];
 
     for (const expectedArtifact of manifest.artifacts) {
+      if (!expectedArtifact.expectedSha256) {
+        throw new FlashValidationError(
+          `No verified SHA-256 is published for "${expectedArtifact.name}" (${manifest.target}), ` +
+          `so flashing it is disabled. Load a manifest with the real hash of the release file.`
+        );
+      }
       const rawBlob = options.artifactBlobs[expectedArtifact.name];
       if (!rawBlob) {
         throw new FlashValidationError(
@@ -256,10 +262,18 @@ export class WebFlashService {
 
       if (dfuse && typeof targetAddress === 'number') {
         log(`DfuSe: ${artifact.name} -> 0x${targetAddress.toString(16)} (${artifact.byteSize} B)`);
+        // Erase only the sectors the image covers, using the flash layout the bootloader
+        // advertises in its alt-setting string. Without a layout an explicit page size is
+        // required; the driver refuses to guess (it never mass-erases implicitly).
+        const region = listDfuAlternates(context.usbDevice)
+          .map((alt: { interfaceNumber: number; region: { start: number; end: number; sectors: unknown[] } | null }) =>
+            alt.interfaceNumber === interfaceNumber ? alt.region : null)
+          .find((r: { start: number; end: number } | null) =>
+            r && targetAddress >= r.start && targetAddress + artifact.byteSize <= r.end);
         await driver.dfuseDownloadElement(
           targetAddress,
           artifact.blob,
-          { erasePageSize: context.erasePageSize ?? 0 },
+          region ? { layout: region.sectors } : { erasePageSize: context.erasePageSize ?? 0 },
           onProgress
         );
       } else {

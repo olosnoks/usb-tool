@@ -2,8 +2,8 @@
  * logicDecoders.js — protocol decoders, triggers, measurements and capture
  * file formats for the Logic Analyzer.
  *
- * Every decoder takes an 8-channel sample buffer (one byte per sample, bit N =
- * channel DN) and returns annotation items:
+ * Every decoder takes a sample buffer (Uint8Array for up to 8 channels, Uint16Array
+ * / Uint32Array for wider captures; bit N = channel DN) and returns annotation items:
  *   { type, start, end, label, kind: 'data' | 'control' | 'error', ...fields }
  * where start/end are sample indexes, so the UI can draw them under the waveforms.
  */
@@ -11,6 +11,7 @@
 import JSZip from 'jszip';
 import { I2C_CHIP_DATABASE } from './busExplorerDriver';
 import { canCrc15, dallasCrc8 } from './logicSynth';
+import { STACKS } from './logicStacks';
 
 export { canCrc15, dallasCrc8 };
 
@@ -596,15 +597,15 @@ export function decodeSwd(buf, { swclk = 0, swdio = 1 } = {}) {
 
 export const DECODERS = {
   i2c: {
-    label: 'I2C', channels: { scl: 0, sda: 1 }, params: {},
+    label: 'I2C', channels: { scl: 0, sda: 1 }, params: {}, stack: STACKS.i2c,
     run: (buf, ch) => decodeI2cBus(buf, ch)
   },
   uart: {
-    label: 'UART', channels: { rx: 2 }, params: { baud: 115200, dataBits: 8, parity: 'none', stopBits: 1, inverted: false },
+    label: 'UART', channels: { rx: 2 }, params: { baud: 115200, dataBits: 8, parity: 'none', stopBits: 1, inverted: false }, stack: STACKS.uart,
     run: (buf, ch, p, sampleRate) => decodeUartFrames(buf, { channel: ch.rx, sampleRate, ...p })
   },
   spi: {
-    label: 'SPI', channels: { cs: 4, clk: 7, mosi: 5, miso: 6 }, params: { mode: 0, wordSize: 8, msbFirst: true, csActiveLow: true },
+    label: 'SPI', channels: { cs: 4, clk: 7, mosi: 5, miso: 6 }, params: { mode: 0, wordSize: 8, msbFirst: true, csActiveLow: true }, stack: STACKS.spi,
     run: (buf, ch, p) => decodeSpi(buf, { ...ch, ...p })
   },
   onewire: {
@@ -612,7 +613,7 @@ export const DECODERS = {
     run: (buf, ch, p, sampleRate) => decodeOneWire(buf, { channel: ch.dq, sampleRate })
   },
   can: {
-    label: 'CAN', channels: { rx: 3 }, params: { bitrate: 500000 },
+    label: 'CAN', channels: { rx: 3 }, params: { bitrate: 500000 }, stack: STACKS.can,
     run: (buf, ch, p, sampleRate) => decodeCan(buf, { channel: ch.rx, sampleRate, ...p })
   },
   ws2812: {
@@ -685,9 +686,9 @@ export function measureChannel(buf, ch, sampleRate) {
 // Capture files: VCD and sigrok .sr
 // ---------------------------------------------------------------------------
 
-const VCD_IDS = '!"#$%&\'(';
+const vcdId = (c) => String.fromCharCode(33 + c);
 
-export function exportVcd(buf, sampleRate, names = []) {
+export function exportVcd(buf, sampleRate, names = [], channelCount = 8) {
   const psPerSample = 1e12 / sampleRate;
   const scale = Number.isInteger(psPerSample / 1000) ? 'ns' : 'ps';
   const unit = scale === 'ns' ? psPerSample / 1000 : psPerSample;
@@ -698,16 +699,16 @@ export function exportVcd(buf, sampleRate, names = []) {
     `$timescale 1 ${scale} $end`,
     '$scope module logic $end'
   ];
-  for (let c = 0; c < 8; c++) lines.push(`$var wire 1 ${VCD_IDS[c]} ${(names[c] || `D${c}`).replace(/\s+/g, '_')} $end`);
+  for (let c = 0; c < channelCount; c++) lines.push(`$var wire 1 ${vcdId(c)} ${(names[c] || `D${c}`).replace(/\s+/g, '_')} $end`);
   lines.push('$upscope $end', '$enddefinitions $end');
   let prev = -1;
   for (let i = 0; i < buf.length; i++) {
     const s = buf[i];
     if (s === prev) continue;
     const changes = [];
-    for (let c = 0; c < 8; c++) {
+    for (let c = 0; c < channelCount; c++) {
       const v = (s >> c) & 1;
-      if (prev < 0 || ((prev >> c) & 1) !== v) changes.push(`${v}${VCD_IDS[c]}`);
+      if (prev < 0 || ((prev >> c) & 1) !== v) changes.push(`${v}${vcdId(c)}`);
     }
     lines.push(`#${Math.round(i * unit)}`, ...changes);
     prev = s;
@@ -725,7 +726,7 @@ export function importVcd(text, { maxSamples = 4_000_000, sampleRate } = {}) {
   const tscale = tsMatch ? Number(tsMatch[1]) * TIMESCALE[tsMatch[2]] : 1e-9;
   const vars = [];
   for (const m of text.matchAll(/\$var\s+\w+\s+(\d+)\s+(\S+)\s+(\S+)(?:\s+\[[^\]]*\])?\s+\$end/g)) {
-    if (m[1] === '1' && vars.length < 8) vars.push({ id: m[2], name: m[3] });
+    if (m[1] === '1' && vars.length < 32) vars.push({ id: m[2], name: m[3] });
   }
   if (!vars.length) throw new Error('No one-bit signals found in this VCD.');
   const chOf = new Map(vars.map((v, i) => [v.id, i]));
@@ -748,7 +749,7 @@ export function importVcd(text, { maxSamples = 4_000_000, sampleRate } = {}) {
   if (sampleRate) step = 1 / (sampleRate * tscale);
   const last = times[times.length - 1];
   const count = Math.min(maxSamples, Math.floor((last - times[0]) / step) + 1);
-  const samples = new Uint8Array(count);
+  const samples = vars.length <= 8 ? new Uint8Array(count) : vars.length <= 16 ? new Uint16Array(count) : new Uint32Array(count);
   let state = 0;
   let e = 0;
   for (let i = 0; i < count; i++) {
@@ -759,7 +760,7 @@ export function importVcd(text, { maxSamples = 4_000_000, sampleRate } = {}) {
     }
     samples[i] = state;
   }
-  return { samples, sampleRate: Math.round(1 / (step * tscale)), names: vars.map((v) => v.name) };
+  return { samples, sampleRate: Math.round(1 / (step * tscale)), names: vars.map((v) => v.name), channelCount: vars.length };
 }
 
 /** Like importVcd, but uses the sample rate our own exporter writes in a $comment. */
@@ -782,15 +783,21 @@ function parseSigrokRate(text) {
 }
 
 /** A sigrok/PulseView session file (.sr) as a Uint8Array. */
-export async function exportSigrok(buf, sampleRate, names = []) {
+export async function exportSigrok(buf, sampleRate, names = [], channelCount = 8) {
   const zip = new JSZip();
   zip.file('version', '2');
-  const probes = Array.from({ length: 8 }, (_, c) => `probe${c + 1}=${(names[c] || `D${c}`).replace(/[=\n]/g, ' ')}`);
+  const unit = Math.ceil(channelCount / 8);
+  const probes = Array.from({ length: channelCount }, (_, c) => `probe${c + 1}=${(names[c] || `D${c}`).replace(/[=\n]/g, ' ')}`);
   zip.file('metadata', [
-    '[global]', 'sigrok version=0.5.2', '', '[device 1]', 'capturefile=logic-1', 'total probes=8',
-    `samplerate=${sigrokRate(sampleRate)}`, 'total analog=0', ...probes, 'unitsize=1', ''
+    '[global]', 'sigrok version=0.5.2', '', '[device 1]', 'capturefile=logic-1', `total probes=${channelCount}`,
+    `samplerate=${sigrokRate(sampleRate)}`, 'total analog=0', ...probes, `unitsize=${unit}`, ''
   ].join('\n'));
-  zip.file('logic-1-1', buf);
+  let raw = buf;
+  if (unit > 1) {
+    raw = new Uint8Array(buf.length * unit);
+    for (let i = 0; i < buf.length; i++) for (let b = 0; b < unit; b++) raw[i * unit + b] = (buf[i] >>> (8 * b)) & 0xff;
+  }
+  zip.file('logic-1-1', raw);
   return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }
 
@@ -803,15 +810,76 @@ export async function importSigrok(bytes) {
   const unitsize = Number(get('unitsize') || 1);
   const capture = get('capturefile') || 'logic-1';
   const names = [];
-  for (let c = 1; c <= 8; c++) names.push(get(`probe${c}`) || `D${c - 1}`);
+  const probeCount = Math.min(32, Number(get('total probes')) || 8);
+  for (let c = 1; c <= probeCount; c++) names.push(get(`probe${c}`) || `D${c - 1}`);
   const parts = Object.keys(zip.files)
     .filter((n) => n === capture || n.startsWith(`${capture}-`))
     .sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
   if (!parts.length) throw new Error('The session has no logic data.');
   const chunks = await Promise.all(parts.map((p) => zip.file(p).async('uint8array')));
   const total = chunks.reduce((n, c) => n + c.length, 0) / unitsize;
-  const samples = new Uint8Array(total);
+  const samples = unitsize === 1 ? new Uint8Array(total) : unitsize === 2 ? new Uint16Array(total) : new Uint32Array(total);
   let o = 0;
-  for (const chunk of chunks) for (let i = 0; i < chunk.length; i += unitsize) samples[o++] = chunk[i];
-  return { samples, sampleRate: sampleRate || 1e6, names };
+  for (const chunk of chunks) {
+    for (let i = 0; i + unitsize <= chunk.length; i += unitsize) {
+      let v = 0;
+      for (let b = 0; b < unitsize; b++) v += chunk[i + b] * 2 ** (8 * b);
+      samples[o++] = v;
+    }
+  }
+  return { samples, sampleRate: sampleRate || 1e6, names, channelCount: probeCount };
+}
+
+// ---------------------------------------------------------------------------
+// Stacked decoders and session files
+// ---------------------------------------------------------------------------
+
+/** Run the stack `stackId` declared on DECODERS[decoderId] over that decoder's items. */
+export function runStack(decoderId, stackId, items, params) {
+  const st = DECODERS[decoderId]?.stack?.find((x) => x.id === stackId);
+  if (!st) return [];
+  return st.run(items, { ...st.params, ...params });
+}
+
+export const LOGIC_SESSION_FORMAT = 'skons-logic-session';
+
+const bytesPerSampleOf = (buf) => (buf instanceof Uint32Array ? 4 : buf instanceof Uint16Array ? 2 : 1);
+
+function toBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/** Capture plus configuration as JSON text: samples (base64, little-endian), rate, names, decoder setup, cursors. */
+export function serializeLogicSession({ samples, sampleRate, channelNames = [], channelCount = 8, decoderId = null, decoderConfig = null, stackId = '', cursors = null, triggerIndex = null }) {
+  const width = bytesPerSampleOf(samples);
+  const raw = new Uint8Array(samples.length * width);
+  for (let i = 0; i < samples.length; i++) for (let b = 0; b < width; b++) raw[i * width + b] = (samples[i] >>> (8 * b)) & 0xff;
+  return JSON.stringify({
+    format: LOGIC_SESSION_FORMAT, version: 1, sampleRate, channelCount, bytesPerSample: width, sampleCount: samples.length,
+    channelNames, decoderId, decoderConfig, stackId, cursors, triggerIndex, samples: toBase64(raw)
+  });
+}
+
+export function parseLogicSession(text) {
+  let j;
+  try { j = JSON.parse(text); } catch (e) { throw new Error('Not a JSON file.'); }
+  if (j?.format !== LOGIC_SESSION_FORMAT) throw new Error('Not a logic analyzer session file.');
+  if (j.version !== 1) throw new Error(`Unsupported session version ${j.version}.`);
+  if (!(j.sampleRate > 0)) throw new Error('The session has no valid sample rate.');
+  const width = j.bytesPerSample;
+  if (![1, 2, 4].includes(width) || typeof j.samples !== 'string') throw new Error('The session sample data is malformed.');
+  const bin = atob(j.samples);
+  if (bin.length !== j.sampleCount * width) throw new Error('The session sample data is truncated.');
+  const samples = width === 1 ? new Uint8Array(j.sampleCount) : width === 2 ? new Uint16Array(j.sampleCount) : new Uint32Array(j.sampleCount);
+  for (let i = 0; i < j.sampleCount; i++) {
+    let v = 0;
+    for (let b = 0; b < width; b++) v += bin.charCodeAt(i * width + b) * 2 ** (8 * b);
+    samples[i] = v;
+  }
+  return {
+    samples, sampleRate: j.sampleRate, channelCount: j.channelCount || width * 8, channelNames: j.channelNames || [],
+    decoderId: j.decoderId ?? null, decoderConfig: j.decoderConfig ?? null, stackId: j.stackId || '', cursors: j.cursors ?? null, triggerIndex: j.triggerIndex ?? null
+  };
 }

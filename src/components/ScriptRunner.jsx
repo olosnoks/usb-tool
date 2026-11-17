@@ -1,20 +1,26 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Play, 
-  Square, 
-  RotateCcw, 
-  CheckCircle2, 
-  XCircle, 
-  Clock, 
-  Plus, 
-  Trash2, 
-  Download, 
-  Sparkles,
-  Bot
+import {
+  Play,
+  Square,
+  CheckCircle2,
+  XCircle,
+  Plus,
+  Trash2,
+  Download,
+  Bot,
+  ArrowUp,
+  ArrowDown,
+  Copy,
+  Save,
+  Upload
 } from 'lucide-react';
 import { alertSynth } from '../utils/audioAlert';
 import { useSerial } from '../context/SerialContext';
-import { createRxBuffer, waitForExpect } from '../utils/serialExpect';
+import { createRxBuffer } from '../utils/serialExpect';
+import {
+  runScript, normalizeStep, buildJUnit, buildCsv, loadSuites, saveSuite, deleteSuite,
+  exportSuiteJson, parseSuiteJson, moveStep, duplicateStep,
+} from '../utils/scriptModel';
 
 const TEMPLATE_SUITES = [
   {
@@ -41,6 +47,21 @@ const TEMPLATE_SUITES = [
   }
 ];
 
+const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-xs text-slate-100 font-mono outline-none focus:border-cyan-500';
+const selectCls = 'bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-[11px] text-slate-200 font-mono outline-none';
+
+const download = (text, name, type) => {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+const getStorage = () => { try { return window.localStorage; } catch { return null; } };
+
 export default function ScriptRunner({
   isConnected,
   onSendString,
@@ -48,15 +69,19 @@ export default function ScriptRunner({
   onLogMessage
 }) {
   const [suiteName, setSuiteName] = useState('Custom Test Suite');
-  const [steps, setSteps] = useState(TEMPLATE_SUITES[0].steps);
+  const [steps, setSteps] = useState(TEMPLATE_SUITES[0].steps.map(normalizeStep));
   const [isRunning, setIsRunning] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(-1);
-  const [results, setResults] = useState({}); // { [stepId]: { status: 'pass'|'fail'|'timeout', timeMs } }
+  // { [stepId]: { status: 'running'|'pass'|'fail'|'aborted', timeMs, iterations, output, error } }
+  const [results, setResults] = useState({});
+  const [savedSuites, setSavedSuites] = useState(() => loadSuites(getStorage()));
+  const [expandedId, setExpandedId] = useState(null);
 
   const isRunningRef = useRef(false);
   const rxBufferRef = useRef(null);
   if (!rxBufferRef.current) rxBufferRef.current = createRxBuffer();
-  const { subscribeRx } = useSerial();
+  const importRef = useRef(null);
+  const { subscribeRx, sendRawBytes, setSignals, reconfigureActivePort } = useSerial();
 
   // Accumulate every received chunk (unbatched) for assertions; the buffer is
   // cleared at the start of each step.
@@ -80,48 +105,41 @@ export default function ScriptRunner({
     setResults({});
     onLogMessage?.(`[TEST RUNNER] Starting test suite: "${suiteName}" (${steps.length} steps)...`, 'sys');
 
-    let allPassed = true;
+    const io = {
+      // Exact bytes (escapes already resolved); fall back to the text path.
+      send: async (bytes) => {
+        if (sendRawBytes) await sendRawBytes(bytes);
+        else await onSendString?.(new TextDecoder().decode(bytes), '');
+      },
+      setSignals: async (sig) => { await setSignals?.(sig); },
+      setBaud: async (baud) => {
+        if (!reconfigureActivePort) throw new Error('baud change not available');
+        await reconfigureActivePort({ baudRate: baud });
+      },
+      buffer: rxBufferRef.current,
+      isActive: () => isRunningRef.current,
+      onUpdate: (id, r) => {
+        setResults((prev) => ({ ...prev, [id]: r }));
+        setCurrentStepIndex(steps.findIndex((s) => s.id === id));
+        if (r.status === 'pass') onLogMessage?.(`[TEST PASS] Step ${steps.findIndex((s) => s.id === id) + 1} (+${r.timeMs}ms)`, 'sys');
+        if (r.status === 'fail') onLogMessage?.(`[TEST FAIL] Step ${steps.findIndex((s) => s.id === id) + 1}: ${r.error || 'failed'}`, 'sys');
+      },
+    };
 
-    for (let i = 0; i < steps.length; i++) {
-      if (!isRunningRef.current) break;
-
-      const step = steps[i];
-      setCurrentStepIndex(i);
-      setResults(prev => ({ ...prev, [step.id]: { status: 'running', timeMs: 0 } }));
-
-      rxBufferRef.current.clear();
-      const startTime = Date.now();
-
-      // Transmit test step command
-      await onSendString(step.send, '');
-
-      // Wait (up to the step timeout) for the expected text to arrive
-      const passed = await waitForExpect(
-        rxBufferRef.current, step.expect, step.timeoutMs,
-        { isActive: () => isRunningRef.current }
-      );
-
-      const elapsed = Date.now() - startTime;
-      if (passed) {
-        setResults(prev => ({ ...prev, [step.id]: { status: 'pass', timeMs: elapsed } }));
-        onLogMessage?.(`[TEST PASS] Step ${i + 1}: Found "${step.expect}" (+${elapsed}ms)`, 'sys');
-      } else {
-        allPassed = false;
-        setResults(prev => ({ ...prev, [step.id]: { status: 'fail', timeMs: elapsed } }));
-        onLogMessage?.(`[TEST FAIL] Step ${i + 1}: Expected "${step.expect}" timed out (${step.timeoutMs}ms)`, 'sys');
-      }
-
-      // Small delay between steps
-      await new Promise(r => setTimeout(r, 200));
+    let outcome;
+    try {
+      outcome = await runScript(steps, io);
+    } finally {
+      setIsRunning(false);
+      isRunningRef.current = false;
+      setCurrentStepIndex(-1);
     }
 
-    setIsRunning(false);
-    isRunningRef.current = false;
-    setCurrentStepIndex(-1);
-
-    if (allPassed) {
+    if (outcome.aborted) {
+      onLogMessage?.(`[TEST RUNNER] Test suite aborted.`, 'sys');
+    } else if (outcome.passed) {
       alertSynth.playSuccessChime();
-      onLogMessage?.(`[TEST RUNNER] SUITE PASSED! All ${steps.length} assertions succeeded.`, 'sys');
+      onLogMessage?.(`[TEST RUNNER] SUITE PASSED! All ${steps.length} steps succeeded.`, 'sys');
     } else {
       alertSynth.playWarningChirp();
       onLogMessage?.(`[TEST RUNNER] SUITE COMPLETED WITH FAILURES.`, 'sys');
@@ -129,6 +147,7 @@ export default function ScriptRunner({
   };
 
   const abortSuite = () => {
+    // The engine sees isActive() flip and marks the in-flight step "aborted".
     isRunningRef.current = false;
     setIsRunning(false);
     setCurrentStepIndex(-1);
@@ -137,7 +156,7 @@ export default function ScriptRunner({
 
   const addStep = () => {
     const newId = String(Date.now());
-    setSteps(prev => [...prev, { id: newId, send: 'AT\r\n', expect: 'OK', timeoutMs: 1000 }]);
+    setSteps(prev => [...prev, normalizeStep({ id: newId, send: 'AT\\r\\n', expect: 'OK', timeoutMs: 1000 })]);
   };
 
   const removeStep = (id) => {
@@ -150,7 +169,7 @@ export default function ScriptRunner({
 
   const loadTemplate = (tmpl) => {
     setSuiteName(tmpl.name);
-    setSteps(tmpl.steps);
+    setSteps(tmpl.steps.map(normalizeStep));
     setResults({});
   };
 
@@ -163,13 +182,56 @@ export default function ScriptRunner({
         result: results[s.id] || { status: 'untested' }
       }))
     };
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `test_report_${Date.now()}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    download(JSON.stringify(report, null, 2), `test_report_${Date.now()}.json`, 'application/json');
+  };
+
+  const exportJUnit = () => download(buildJUnit(suiteName, steps, results), `test_report_${Date.now()}.xml`, 'application/xml');
+  const exportCsv = () => download(buildCsv(steps, results), `test_report_${Date.now()}.csv`, 'text/csv');
+
+  const handleSaveSuite = () => setSavedSuites(saveSuite(getStorage(), suiteName, steps));
+  const handleLoadSaved = (name) => {
+    if (!name || !savedSuites[name]) return;
+    setSuiteName(name);
+    setSteps(savedSuites[name].map(normalizeStep));
+    setResults({});
+  };
+  const handleDeleteSaved = (name) => { if (name) setSavedSuites(deleteSuite(getStorage(), name)); };
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const parsed = parseSuiteJson(await file.text());
+      setSuiteName(parsed.name);
+      setSteps(parsed.steps);
+      setResults({});
+    } catch (err) {
+      alert(`Could not import suite: ${err.message}`);
+    } finally {
+      if (importRef.current) importRef.current.value = '';
+    }
+  };
+
+  const statusBadge = (res) => {
+    if (!res) return null;
+    if (res.status === 'running') return <span className="text-[10px] text-cyber-cyan animate-pulse font-bold">EXECUTING...</span>;
+    if (res.status === 'pass') return (
+      <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/40">
+        <CheckCircle2 className="w-3 h-3" />
+        <span>PASSED ({res.timeMs}ms{res.iterations?.length > 1 ? `, x${res.iterations.length}` : ''})</span>
+      </span>
+    );
+    if (res.status === 'fail') return (
+      <span className="flex items-center gap-1 text-[10px] font-bold text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-500/40">
+        <XCircle className="w-3 h-3" />
+        <span>FAILED ({res.timeMs}ms)</span>
+      </span>
+    );
+    if (res.status === 'aborted') return (
+      <span className="flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-500/40">
+        <span>ABORTED</span>
+      </span>
+    );
+    return null;
   };
 
   return (
@@ -203,8 +265,8 @@ export default function ScriptRunner({
             onClick={isRunning ? abortSuite : runSuite}
             disabled={!isConnected && !isRunning}
             className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg font-bold text-xs transition-all shadow-md ${
-              isRunning 
-                ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse' 
+              isRunning
+                ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse'
                 : 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-slate-950 hover:brightness-110 shadow-emerald-glow'
             } disabled:opacity-40`}
           >
@@ -222,25 +284,65 @@ export default function ScriptRunner({
           </button>
         </div>
 
-        <button
-          onClick={exportReport}
-          className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs"
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>Export Audit Report</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button onClick={exportReport} className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs">
+            <Download className="w-3.5 h-3.5" />
+            <span>JSON</span>
+          </button>
+          <button onClick={exportJUnit} className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs">JUnit XML</button>
+          <button onClick={exportCsv} className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs">CSV</button>
+        </div>
       </div>
 
+      {/* Suite name + saved suites */}
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="text-[10px] text-slate-500 uppercase font-bold">Suite:</span>
+        <input type="text" value={suiteName} onChange={(e) => setSuiteName(e.target.value)} disabled={isRunning} className={`${inputCls} w-44`} />
+        <button onClick={handleSaveSuite} disabled={isRunning || !suiteName.trim()} className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800">
+          <Save className="w-3 h-3" /><span>Save</span>
+        </button>
+        <select
+          aria-label="Saved suites"
+          value=""
+          onChange={(e) => handleLoadSaved(e.target.value)}
+          className={selectCls}
+        >
+          <option value="">Load saved...</option>
+          {Object.keys(savedSuites).map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <button
+          onClick={() => handleDeleteSaved(suiteName)}
+          disabled={isRunning || !savedSuites[suiteName]}
+          className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 border border-slate-800 disabled:opacity-40"
+        >
+          Delete saved
+        </button>
+        <button
+          onClick={() => download(exportSuiteJson(suiteName, steps), `${suiteName.replace(/[^\w.-]+/g, '_') || 'suite'}.json`, 'application/json')}
+          className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
+        >
+          Export suite
+        </button>
+        <button onClick={() => importRef.current?.click()} disabled={isRunning} className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800">
+          <Upload className="w-3 h-3" /><span>Import</span>
+        </button>
+        <input ref={importRef} type="file" accept="application/json,.json" onChange={handleImport} className="hidden" />
+      </div>
+      <p className="text-[10px] text-slate-500">
+        Send accepts <code>\r \n \t \0 \e \xNN \\</code> and <code>${'{var}'}</code>. Regex Expect stores capture groups as <code>${'{1}'}</code>, <code>${'{2}'}</code>...; "any of" separates patterns with <code>||</code>.
+      </p>
+
       {/* Step Sequence Table */}
-      <div className="flex flex-col gap-2 max-h-72 overflow-y-auto">
+      <div className="flex flex-col gap-2 max-h-96 overflow-y-auto">
         {steps.map((step, idx) => {
           const res = results[step.id];
           const isCurrent = currentStepIndex === idx;
+          const type = step.type || 'send';
 
           return (
             <div
               key={step.id}
-              className={`flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg border transition-all ${
+              className={`flex flex-col gap-1.5 p-2.5 rounded-lg border transition-all ${
                 isCurrent
                   ? 'bg-cyan-950/30 border-cyan-500 shadow-cyan-glow'
                   : res?.status === 'pass'
@@ -250,74 +352,146 @@ export default function ScriptRunner({
                   : 'bg-slate-950 border-slate-800 text-slate-300'
               }`}
             >
-              <div className="flex items-center gap-2 text-xs">
-                <span className="font-bold text-slate-500 w-6">#{idx + 1}</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-bold text-slate-500 w-6">#{idx + 1}</span>
 
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500 uppercase">Send:</span>
-                  <input
-                    type="text"
-                    value={step.send}
-                    onChange={(e) => updateStep(step.id, 'send', e.target.value)}
-                    disabled={isRunning}
-                    className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-xs text-slate-100 font-mono w-36 outline-none focus:border-cyan-500"
-                  />
+                  <select value={type} onChange={(e) => updateStep(step.id, 'type', e.target.value)} disabled={isRunning} className={selectCls} aria-label="Step type">
+                    <option value="send">send/expect</option>
+                    <option value="delay">delay</option>
+                    <option value="dtr">set DTR</option>
+                    <option value="rts">set RTS</option>
+                    <option value="baud">set baud</option>
+                  </select>
+
+                  {type === 'send' && (
+                    <>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-slate-500 uppercase">Send:</span>
+                        <input
+                          type="text"
+                          value={step.send}
+                          onChange={(e) => updateStep(step.id, 'send', e.target.value)}
+                          disabled={isRunning}
+                          className={`${inputCls} w-36`}
+                        />
+                        <select value={step.lineEnding || 'none'} onChange={(e) => updateStep(step.id, 'lineEnding', e.target.value)} disabled={isRunning} className={selectCls} aria-label="Line ending">
+                          <option value="none">no EOL</option>
+                          <option value="cr">CR</option>
+                          <option value="lf">LF</option>
+                          <option value="crlf">CRLF</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-slate-500 uppercase">Expect:</span>
+                        <input
+                          type="text"
+                          value={step.expect}
+                          onChange={(e) => updateStep(step.id, 'expect', e.target.value)}
+                          disabled={isRunning}
+                          className={`${inputCls} text-cyber-amber w-32 focus:border-amber-500`}
+                        />
+                        <select value={step.expectMode || 'plain'} onChange={(e) => updateStep(step.id, 'expectMode', e.target.value)} disabled={isRunning} className={selectCls} aria-label="Expect mode">
+                          <option value="plain">text</option>
+                          <option value="regex">regex</option>
+                          <option value="any">any of (||)</option>
+                          <option value="not">must NOT appear</option>
+                        </select>
+                        <label className="flex items-center gap-1 text-[10px] text-slate-500">
+                          <input type="checkbox" checked={step.caseSensitive !== false} onChange={(e) => updateStep(step.id, 'caseSensitive', e.target.checked)} disabled={isRunning} />
+                          case
+                        </label>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-slate-500 uppercase">Timeout:</span>
+                        <input
+                          type="number"
+                          value={step.timeoutMs}
+                          onChange={(e) => updateStep(step.id, 'timeoutMs', Number(e.target.value))}
+                          disabled={isRunning}
+                          className={`${inputCls} w-16 text-center`}
+                        />
+                        <span className="text-[10px] text-slate-500">ms</span>
+                      </div>
+                    </>
+                  )}
+
+                  {type !== 'send' && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-slate-500 uppercase">
+                        {type === 'delay' ? 'Delay (ms):' : type === 'baud' ? 'Baud:' : '1 = high, 0 = low:'}
+                      </span>
+                      <input
+                        type="text"
+                        value={step.value ?? ''}
+                        onChange={(e) => updateStep(step.id, 'value', e.target.value)}
+                        disabled={isRunning}
+                        className={`${inputCls} w-24`}
+                      />
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500 uppercase">Expect:</span>
-                  <input
-                    type="text"
-                    value={step.expect}
-                    onChange={(e) => updateStep(step.id, 'expect', e.target.value)}
-                    disabled={isRunning}
-                    className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-xs text-cyber-amber font-mono w-32 outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] text-slate-500 uppercase">Timeout:</span>
-                  <input
-                    type="number"
-                    value={step.timeoutMs}
-                    onChange={(e) => updateStep(step.id, 'timeoutMs', Number(e.target.value))}
-                    disabled={isRunning}
-                    className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-xs text-slate-100 font-mono w-16 outline-none text-center"
-                  />
-                  <span className="text-[10px] text-slate-500">ms</span>
+                {/* Status Indicator + row actions */}
+                <div className="flex items-center gap-1.5">
+                  {statusBadge(res)}
+                  <button onClick={() => setSteps((p) => moveStep(p, idx, -1))} disabled={isRunning || idx === 0} aria-label="Move up" className="text-slate-500 hover:text-slate-200 p-1 disabled:opacity-30"><ArrowUp className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => setSteps((p) => moveStep(p, idx, 1))} disabled={isRunning || idx === steps.length - 1} aria-label="Move down" className="text-slate-500 hover:text-slate-200 p-1 disabled:opacity-30"><ArrowDown className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => setSteps((p) => duplicateStep(p, idx))} disabled={isRunning} aria-label="Duplicate step" className="text-slate-500 hover:text-slate-200 p-1"><Copy className="w-3.5 h-3.5" /></button>
+                  {steps.length > 1 && (
+                    <button
+                      onClick={() => removeStep(step.id)}
+                      disabled={isRunning}
+                      aria-label="Remove step"
+                      className="text-slate-600 hover:text-rose-400 p-1 rounded"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* Status Indicator */}
-              <div className="flex items-center gap-2">
-                {res?.status === 'running' && (
-                  <span className="text-[10px] text-cyber-cyan animate-pulse font-bold">
-                    EXECUTING...
-                  </span>
+              {/* Flow control */}
+              <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500 pl-8">
+                <label className="flex items-center gap-1">
+                  repeat
+                  <select value={step.loopMode || 'count'} onChange={(e) => updateStep(step.id, 'loopMode', e.target.value)} disabled={isRunning} className={selectCls} aria-label="Loop mode">
+                    <option value="count">N times</option>
+                    <option value="until">until matched (max)</option>
+                  </select>
+                  <input type="number" min="1" value={step.loopCount ?? 1} onChange={(e) => updateStep(step.id, 'loopCount', Number(e.target.value))} disabled={isRunning} className={`${inputCls} w-12 text-center`} aria-label="Loop count" />
+                </label>
+                <label className="flex items-center gap-1">
+                  retries
+                  <input type="number" min="0" value={step.retries ?? 0} onChange={(e) => updateStep(step.id, 'retries', Number(e.target.value))} disabled={isRunning} className={`${inputCls} w-12 text-center`} aria-label="Retries" />
+                </label>
+                <label className="flex items-center gap-1">
+                  on fail
+                  <select value={step.onFail || 'stop'} onChange={(e) => updateStep(step.id, 'onFail', e.target.value)} disabled={isRunning} className={selectCls} aria-label="On fail">
+                    <option value="stop">stop</option>
+                    <option value="continue">continue</option>
+                    <option value="goto">goto step</option>
+                  </select>
+                </label>
+                {step.onFail === 'goto' && (
+                  <select value={step.gotoId || ''} onChange={(e) => updateStep(step.id, 'gotoId', e.target.value)} disabled={isRunning} className={selectCls} aria-label="Goto target">
+                    <option value="">(choose)</option>
+                    {steps.map((s, j) => <option key={s.id} value={s.id}>#{j + 1}</option>)}
+                  </select>
                 )}
-                {res?.status === 'pass' && (
-                  <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/40">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>PASSED ({res.timeMs}ms)</span>
-                  </span>
-                )}
-                {res?.status === 'fail' && (
-                  <span className="flex items-center gap-1 text-[10px] font-bold text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-500/40">
-                    <XCircle className="w-3 h-3" />
-                    <span>FAILED ({res.timeMs}ms)</span>
-                  </span>
-                )}
-
-                {steps.length > 1 && (
-                  <button
-                    onClick={() => removeStep(step.id)}
-                    disabled={isRunning}
-                    className="text-slate-600 hover:text-rose-400 p-1 rounded"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
+                {res && res.status !== 'running' && (res.output || res.error) && (
+                  <button onClick={() => setExpandedId(expandedId === step.id ? null : step.id)} className="text-cyan-400 hover:text-cyan-300 underline">
+                    {expandedId === step.id ? 'hide output' : 'show output'}
                   </button>
                 )}
               </div>
+              {expandedId === step.id && res && (
+                <pre className="ml-8 p-2 bg-black/40 border border-slate-800 rounded text-[10px] text-slate-300 whitespace-pre-wrap max-h-32 overflow-auto">
+                  {res.error ? `${res.error}\n` : ''}{res.output || '(no output captured)'}
+                </pre>
+              )}
             </div>
           );
         })}

@@ -36,6 +36,9 @@ export default function CmsisDapDebugger() {
   const [writeVal, setWriteVal] = useState('0x12345678');
 
   const [info, setInfo] = useState(null);
+  const [underReset, setUnderReset] = useState(false);
+  const [symbolInfo, setSymbolInfo] = useState(null); // { name, count } of the loaded ELF
+  const elfRef = useRef(null);
   const [error, setError] = useSessionError('CMSIS-DAP');
   const [busy, setBusy] = useState('');
   const busyRef = useRef(false);
@@ -64,7 +67,7 @@ export default function CmsisDapDebugger() {
   };
 
   const handleConnectHardware = (kind) => guard('connect', async () => {
-    const i = await client.connectHardware({ kind });
+    const i = await client.connectHardware({ kind, underReset });
     setInfo(i);
     setIsConnected(true);
     setTargetState(client.targetState);
@@ -73,6 +76,25 @@ export default function CmsisDapDebugger() {
     if (client.targetState === 'halted') setRegisters(await client.readRegisters());
     try { await readMemoryNow(); } catch (e) { setError(`Connected, but reading ${memAddress} failed: ${e.message}`); }
   });
+
+  const loadSymbols = (bytes, name) => {
+    const count = client.loadSymbols(bytes, name);
+    setSymbolInfo({ name, count });
+    return count;
+  };
+
+  const onElfFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setError('');
+    try {
+      const count = loadSymbols(new Uint8Array(await file.arrayBuffer()), file.name);
+      if (!count) setError(`${file.name} has no function or object symbols (stripped?). Addresses stay numeric.`);
+    } catch (err) {
+      setError(`Could not read symbols from ${file.name}: ${err.message}`);
+    }
+  };
 
   const handleDisconnect = async () => {
     await client.disconnect();
@@ -176,6 +198,10 @@ export default function CmsisDapDebugger() {
           <div className="flex items-center gap-2">
             {!isConnected ? (
               <>
+                <label className="flex items-center gap-1 text-[10px] text-slate-400" title="Hold nRESET low while attaching, then halt at the reset vector: reaches chips that sleep or remap their SWD pins">
+                  <input type="checkbox" checked={underReset} onChange={(e) => setUnderReset(e.target.checked)} className="accent-cyan-500" />
+                  connect under reset
+                </label>
                 <button
                   onClick={() => handleConnectHardware('usb')}
                   disabled={!!busy}
@@ -196,12 +222,22 @@ export default function CmsisDapDebugger() {
                 </button>
               </>
             ) : (
+              <>
+              <input ref={elfRef} type="file" accept=".elf,.axf,.out" className="hidden" onChange={onElfFile} />
+              <button
+                onClick={() => elfRef.current?.click()}
+                title="Load function and variable names from an ELF so addresses show as main+0x12"
+                className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 text-xs font-bold"
+              >
+                {symbolInfo ? `ELF: ${symbolInfo.name} (${symbolInfo.count} symbols)` : 'LOAD ELF SYMBOLS'}
+              </button>
               <button
                 onClick={handleDisconnect}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold"
               >
                 <span>DISCONNECT</span>
               </button>
+              </>
             )}
           </div>
         </div>
@@ -307,6 +343,9 @@ export default function CmsisDapDebugger() {
                     <span className="text-[10px] text-slate-500 font-bold">{name}:</span>
                     <span className={`font-bold ${name.startsWith('PC') ? 'text-cyan-400' : name.startsWith('SP') ? 'text-purple-400' : ''}`}>
                       0x{(val >>> 0).toString(16).padStart(8, '0').toUpperCase()}
+                      {(name.startsWith('PC') || name.startsWith('LR')) && client.symbolFor(val) && (
+                        <span className="block text-[10px] text-emerald-300 text-right">{client.symbolFor(val)}</span>
+                      )}
                     </span>
                   </div>
                 );
@@ -426,6 +465,7 @@ export default function CmsisDapDebugger() {
           targetState={targetState}
           setTargetState={setTargetState}
           setError={setError}
+          onSymbols={loadSymbols}
         />
       )}
     </div>

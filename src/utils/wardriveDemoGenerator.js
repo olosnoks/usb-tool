@@ -10,6 +10,7 @@ export {
   extractAllSvgStrokes,
   SVG_PRESETS
 } from './svgPathParser.js';
+import { escapeCsv } from './wardrivingExporter.js';
 
 export const VECTOR_FONTS = {
   "A": [
@@ -946,22 +947,34 @@ export function channelToFrequency(channel) {
   return ch > 14 ? 5000 + ch * 5 : 2407 + ch * 5;
 }
 
-export const WIGLE_PREHEADER = "WigleWifi-1.6,appRelease=1.0.22 (Beta 3),model=Biscuit Pro,release=v1.6.2,device=Biscuit Pro,display=Biscuit Pro,board=Biscuit Pro,brand=Biscuit Shop,star=Sol,body=3,subBody=0\n";
+// Data integrity: everything this module exports is generated, not surveyed.
+// The marker is deliberately NOT optional and the header does not imitate a
+// real app or device (no real model/brand strings).
+export const SYNTHETIC_LABEL = 'SYNTHETIC';
+export const SYNTHETIC_NOTICE =
+  'SYNTHETIC DEMO DATA: generated, not a real survey. Do not upload it to WiGLE.net or any shared wardriving database.';
+export const WIGLE_PREHEADER = "WigleWifi-1.6,appRelease=SYNTHETIC-DEMO-DATA,model=SYNTHETIC,release=SYNTHETIC,device=SYNTHETIC-DEMO-GENERATOR,display=SYNTHETIC,board=SYNTHETIC,brand=SYNTHETIC-NOT-REAL-SURVEY-DATA\n";
 export const WIGLE_HEADER = "MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type\n";
+export const KEPLER_HEADER = "mac,ssid,auth,first_seen,channel,rssi,lat,lon,synthetic\n";
+
+const wigleRow = (ap) =>
+  `${ap.mac},${escapeCsv(ap.ssid, { neutralize: true })},${ap.auth},${ap.first_seen},${ap.channel},${ap.frequency || channelToFrequency(ap.channel)},${ap.rssi},${ap.lat},${ap.lon},${ap.alt},${ap.accuracy},,,WIFI\n`;
+const keplerRow = (ap) =>
+  `${ap.mac},${escapeCsv(ap.ssid, { neutralize: true })},${ap.auth},${ap.first_seen},${ap.channel},${ap.rssi},${ap.lat},${ap.lon},${SYNTHETIC_LABEL}\n`;
 
 /**
  * Generate standard WiGLE Wifi 1.6 CSV format.
  * High-performance chunked generation handles 500k+ rows easily.
  */
-export function generateWigleCsv(aps, includePreheader = true) {
+export function generateWigleCsv(aps, _includePreheader = true) {
+  // The pre-header carries the SYNTHETIC marker, so it is always written
+  // (the parameter is kept only for call compatibility).
   const chunks = [];
-  let buffer = includePreheader ? WIGLE_PREHEADER : "";
-  buffer += WIGLE_HEADER;
+  let buffer = WIGLE_PREHEADER + WIGLE_HEADER;
 
   for (let i = 0; i < aps.length; i++) {
     const ap = aps[i];
-    const freq = ap.frequency || channelToFrequency(ap.channel);
-    buffer += `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${freq},${ap.rssi},${ap.lat},${ap.lon},${ap.alt},${ap.accuracy},,,WIFI\n`;
+    buffer += wigleRow(ap);
     if (buffer.length > 131072) {
       chunks.push(buffer);
       buffer = '';
@@ -976,11 +989,11 @@ export function generateWigleCsv(aps, includePreheader = true) {
  */
 export function generateTestCsv(aps) {
   const chunks = [];
-  let buffer = "mac,ssid,auth,first_seen,channel,rssi,lat,lon\n";
+  let buffer = KEPLER_HEADER;
 
   for (let i = 0; i < aps.length; i++) {
     const ap = aps[i];
-    buffer += `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.rssi},${ap.lat},${ap.lon}\n`;
+    buffer += keplerRow(ap);
     if (buffer.length > 131072) {
       chunks.push(buffer);
       buffer = '';
@@ -998,21 +1011,21 @@ export function generateTestCsv(aps) {
  * @param {Array} aps
  * @param {Object} options
  * @param {'wigle'|'kepler'} [options.format='wigle']
- * @param {boolean} [options.includePreheader=true]
+ * @param {boolean} [options.includePreheader=true] ignored: the WiGLE pre-header carries the SYNTHETIC marker and is always written
  * @param {number} [options.maxSizeBytes=0] Max file size in bytes (e.g. 10 * 1024 * 1024 for 10MB)
  * @param {string} [options.baseName='demo']
  * @returns {Array<{ filename: string, content: string, byteSize: number, apCount: number, part: number, totalParts: number }>}
  */
 export function splitApsIntoFileChunks(aps, {
   format = 'wigle',
-  includePreheader = true,
+  includePreheader: _includePreheader = true,
   maxSizeBytes = 0,
   baseName = 'demo'
 } = {}) {
   if (!Array.isArray(aps) || aps.length === 0) {
     const emptyHeader = format === 'wigle'
-      ? (includePreheader ? WIGLE_PREHEADER : "") + WIGLE_HEADER
-      : "mac,ssid,auth,first_seen,channel,rssi,lat,lon\n";
+      ? WIGLE_PREHEADER + WIGLE_HEADER
+      : KEPLER_HEADER;
     return [{
       filename: `${baseName}_${format}.csv`,
       content: emptyHeader,
@@ -1024,17 +1037,12 @@ export function splitApsIntoFileChunks(aps, {
   }
 
   const isWigle = format === 'wigle';
-  const header = isWigle
-    ? (includePreheader ? WIGLE_PREHEADER : "") + WIGLE_HEADER
-    : "mac,ssid,auth,first_seen,channel,rssi,lat,lon\n";
-
-  const formatRow = isWigle
-    ? (ap) => `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.frequency || channelToFrequency(ap.channel)},${ap.rssi},${ap.lat},${ap.lon},${ap.alt},${ap.accuracy},,,WIFI\n`
-    : (ap) => `${ap.mac},${ap.ssid},${ap.auth},${ap.first_seen},${ap.channel},${ap.rssi},${ap.lat},${ap.lon}\n`;
+  const header = isWigle ? WIGLE_PREHEADER + WIGLE_HEADER : KEPLER_HEADER;
+  const formatRow = isWigle ? wigleRow : keplerRow;
 
   // If no size limit, return single file
   if (!maxSizeBytes || maxSizeBytes <= 0) {
-    const content = isWigle ? generateWigleCsv(aps, includePreheader) : generateTestCsv(aps);
+    const content = isWigle ? generateWigleCsv(aps) : generateTestCsv(aps);
     return [{
       filename: `${baseName}_${format}.csv`,
       content,
@@ -1137,6 +1145,8 @@ from datetime import datetime, timedelta
 
 # ==============================================================================
 # WARDRIVING VECTOR ART & ROAD ROUTE GENERATOR
+# *** SYNTHETIC DEMO DATA ***  Every file this script writes is generated, not a
+# real survey. Do NOT upload it to WiGLE.net or any shared wardriving database.
 # Inspired by OSINTI4L
 # Creates words, road routes, or SVG art made from generated APs to test or visualize on wardriving maps
 # View your results here: https://kepler.gl/demo
@@ -1498,10 +1508,10 @@ def generate_aps(text):
 
 def write_wigle(aps, path):
     with open(path, "w", newline="", encoding="utf-8") as f:
-        if INCLUDE_PREHEADER:
-            f.write("WigleWifi-1.6,appRelease=1.0.22 (Beta 3),model=Biscuit Pro,release=v1.6.2,"
-                    "device=Biscuit Pro,display=Biscuit Pro,board=Biscuit Pro,brand=Biscuit Shop,"
-                    "star=Sol,body=3,subBody=0\\n")
+        if True:  # the SYNTHETIC marker lives in the pre-header: always written
+            f.write("WigleWifi-1.6,appRelease=SYNTHETIC-DEMO-DATA,model=SYNTHETIC,release=SYNTHETIC,"
+                    "device=SYNTHETIC-DEMO-GENERATOR,display=SYNTHETIC,board=SYNTHETIC,"
+                    "brand=SYNTHETIC-NOT-REAL-SURVEY-DATA\\n")
         w = csv.writer(f)
         w.writerow(["MAC", "SSID", "AuthMode", "FirstSeen", "Channel", "Frequency", "RSSI",
                     "CurrentLatitude", "CurrentLongitude", "AltitudeMeters",
@@ -1516,9 +1526,9 @@ def write_test(aps, path):
     cols = ["mac", "ssid", "auth", "first_seen", "channel", "rssi", "lat", "lon"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(cols)
+        w.writerow(cols + ["synthetic"])
         for ap in aps:
-            w.writerow([ap[c] for c in cols])
+            w.writerow([ap[c] for c in cols] + ["SYNTHETIC"])
 
 if __name__ == "__main__":
     user_text = ${JSON.stringify(text)}
@@ -1528,6 +1538,7 @@ if __name__ == "__main__":
     filename_base = "".join(c if c.isalnum() else "_" for c in user_text).lower()
     wigle_filename = f"{filename_base}_wigle.csv"
     test_filename = f"{filename_base}_test.csv"
+    print("NOTE: output is SYNTHETIC demo data. Do not upload it to WiGLE.net.")
     
     write_wigle(aps, wigle_filename)
     write_test(aps, test_filename)

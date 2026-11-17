@@ -4,6 +4,8 @@
  * and Chip Intelligence / Silicon Identification.
  */
 
+import { UDEV_RULES_TEXT, UDEV_RULES_PATH, UDEV_SETUP_COMMAND } from '../../data/udevRules.js';
+
 export const REFERENCE_ARTICLES = [
   {
     id: 'setup',
@@ -18,7 +20,7 @@ export const REFERENCE_ARTICLES = [
 
 This guide details the physical and operating system level setup required to establish low-latency, uninterrupted WebSerial communication across **Linux, Windows, and macOS**.
 
-The app's own **Linux Setup & Drivers** tab (tool id \`setup\`) is a set of three collapsed panels you click to expand: **How to configure Linux USB permissions & udev rules** (two copy buttons: \`sudo usermod -a -G dialout $USER\`, and a one-line wildcard rule written to \`/etc/udev/rules.d/99-serial.rules\` that sets \`MODE="0666"\` on every tty followed by \`sudo udevadm control --reload-rules\`), **How to identify & install USB-to-UART bridge drivers** (cards for CH340/CH341/CH9102, CP210x, FTDI, Prolific PL2303, Espressif native USB and RP2040, each with VID/PID, notes and a driver download link), and **How to troubleshoot serial connectivity & flasher errors** (access denied, packet header timeout, garbage characters, browser compatibility). The sections below go further than the in-app cards: per-chip udev rules that also tell ModemManager to ignore the device, and Windows and macOS notes.
+The app's own **Linux Setup & Drivers** tab (tool id \`setup\`) is a set of three collapsed panels you click to expand: **How to configure Linux USB permissions & udev rules** (two copy buttons: \`sudo usermod -a -G dialout $USER\`, and a per-vendor rule file written to \`${UDEV_RULES_PATH}\` that uses \`TAG+="uaccess"\` plus \`GROUP="dialout", MODE="0660"\`, followed by a udev reload and trigger; the text shown on screen is exactly the text copied), **How to identify & install USB-to-UART bridge drivers** (cards for CH340/CH341/CH9102, CP210x, FTDI, Prolific PL2303, Espressif native USB and RP2040, each with VID/PID, notes and a driver download link), and **How to troubleshoot serial connectivity & flasher errors** (access denied, packet header timeout, garbage characters, browser compatibility). The sections below go further than the in-app cards: per-chip udev rules that also tell ModemManager to ignore the device, and Windows and macOS notes.
 
 ---
 
@@ -41,35 +43,25 @@ sudo usermod -aG dialout $USER
 sudo usermod -aG uucp $USER
 \`\`\`
 
-#### Step 2: Install Universal udev Rule
-Create \`/etc/udev/rules.d/99-usb-serial-workbench.rules\` with root privileges:
+#### Step 2: Install a per-vendor udev rule
+Create \`${UDEV_RULES_PATH}\` with root privileges. This is the same text the in-app Setup tab shows and copies:
 \`\`\`text
-# WCH CH340 / CH341
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="5523", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+${UDEV_RULES_TEXT}
+\`\`\`
+Each rule matches one USB vendor, not every tty. \`TAG+="uaccess"\` lets the user logged in at the machine open the port through a systemd ACL, and \`GROUP="dialout"\` with \`MODE="0660"\` covers ssh and headless sessions for members of that group (use \`uucp\` on Arch). Avoid world-writable modes (the 0666 style) and wildcard vendor matches: they make every serial device on the machine writable by every local user.
 
-# Silicon Labs CP2102 / CP2104
-SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# FTDI FT232R / FT2232H
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6010", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# Espressif ESP32-S2 / S3 / C3 / C6 Native USB CDC
-SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# Flipper Zero CDC (STM32 virtual COM port)
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
-
-# Proxmark3 RDV4 / Easy
-SUBSYSTEM=="tty", ATTRS{idVendor}=="9ac4", ATTRS{idProduct}=="4b8f", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+To write the file and reload in one paste:
+\`\`\`bash
+${UDEV_SETUP_COMMAND}
 \`\`\`
 
-#### Step 3: Reload udev Rules
+#### Step 3: Reload udev Rules (already included in the paste above)
 \`\`\`bash
 sudo udevadm control --reload-rules && sudo udevadm trigger
 \`\`\`
 Setting \`ENV{ID_MM_DEVICE_IGNORE}="1"\` permanently prevents ModemManager from interfering with your hardware workbench ports!
+
+If a CH340 port disappears right after plug-in on Ubuntu or Debian, \`brltty\` (the Braille display daemon) may be claiming it: \`sudo apt remove brltty\`.
 </details>
 
 ---
@@ -95,6 +87,13 @@ Modern Windows includes a native Microsoft USB CDC ACM driver (\`usbser.sys\`) t
 On macOS, WebSerial displays devices with paths like \`/dev/cu.usbserial-*\` and \`/dev/tty.usbserial-*\`:
 - **Always select the \`/dev/cu.*\` (Call-Up) node**: The \`cu\` node opens immediately without waiting for Carrier Detect (CD) line assertions.
 - The \`tty.*\` node can block indefinitely if modem control signals are not asserted by the target device!
+- macOS has no udev: ports appear as \`/dev/cu.usbserial-*\` and \`/dev/cu.usbmodem*\`. For example: \`cu -l /dev/cu.usbserial-0001 -s 115200\`.
+
+---
+
+### 3b. Browser support
+
+Web Serial works in Chromium-based browsers (Chrome, Edge, Opera) on https or localhost only. Firefox and Safari do not support it, so the serial tools cannot open ports there.
 
 ---
 
@@ -175,7 +174,7 @@ Before plugging an unknown or custom-soldered microcontroller development board 
     toolId: 'pinouts-modal',
     category: 'reference',
     title: 'Pinouts Reference — ESP32, ESP32-S3, Pico, FTDI & USB-C Wiring',
-    summary: 'The in-app pinout cheat sheet (ESP32, ESP32-S3, Raspberry Pi Pico, 6-pin FTDI header, 5V to 3.3V divider) plus an ESP32 DevKit pin map and USB Type-C CC resistor rules.',
+    summary: 'The in-app pinout cheat sheet (ESP32 family, ESP8266, ESP32-CAM, Pico, Arduino, Blue Pill, SWD/JTAG, flash clip, USB connectors, FTDI header, 5V to 3.3V divider) plus an ESP32 DevKit pin map and USB Type-C CC resistor rules.',
     tags: ['Pinouts', 'Wiring', 'ESP32', 'ESP32-S3', 'RP2040', 'FTDI', 'USB-C', 'Hardware'],
     readTime: '20 min read',
     content: `
@@ -183,14 +182,20 @@ Before plugging an unknown or custom-soldered microcontroller development board 
 
 This reference compiles physical pinout maps, bus assignments, hardware strapping pins, and USB wiring standards across the most common embedded hardware targets.
 
-The app's **Hardware Pinout & Safety Cheat Sheet** (opened from the pinouts button) has five tabs:
-- **ESP32-WROOM**: UART0 flashing pins (TXD0 GPIO1, RXD0 GPIO3, common GND), boot strapping pins (EN, GPIO0 held low on boot for ROM download, GPIO2), and a note that many boards wire DTR to IO0 and RTS to EN through two NPN transistors.
-- **ESP32-S3**: native USB Serial/JTAG on D+ GPIO20 / D- GPIO19 (no bridge chip) and hardware UART0 on TX GPIO43 / RX GPIO44 (used on dual-USB devkits).
-- **Raspberry Pi Pico**: UART0 default TX GP0 (pin 1) / RX GP1 (pin 2), UART1 default TX GP4 (pin 6) / RX GP5 (pin 7), and the 1200-baud touch that reboots into BOOTSEL.
-- **FTDI / CP2102 6-Pin**: header order GND, CTS, VCC, TXD, RXD, DTR, with a warning to set VCC to 3.3V, not 5V, for ESP32 and modern ARM chips.
-- **5V → 3.3V Divider**: a 1 kΩ / 2 kΩ divider (5V × 2000/3000 = 3.33V) for a 5V TX into a 3.3V RX.
+The app's **Hardware Pinout & Safety Cheat Sheet** (opened from the pinouts button) is generated from one data file, so every board shows pin, name and function in the same layout. A search box at the top finds a GPIO number, pin name or function (for example \`21\`, \`SDA\`, \`MOSI\`, \`boot\`) across all boards. Press Esc (or the **Close Cheat Sheet** button) to close it; focus returns to the button that opened it. Each board is a tab; pins are grouped (for example UART, strapping, buses, JTAG, reserved), risky pins are shown in red with warnings beneath, and a "Related tools" line names the app tools that use that board. Boards and connectors:
+- **ESP32-WROOM**: UART0 (GPIO1 / GPIO3), EN, strapping pins (GPIO0, GPIO2, GPIO5, GPIO12, GPIO15), default I2C / SPI pins, JTAG pins, the flash pins GPIO6-11 and the input-only GPIO34-39.
+- **ESP32-S3**: native USB on D- GPIO19 / D+ GPIO20, UART0 on GPIO43 / GPIO44, strapping pins, JTAG pins and the flash/PSRAM pins.
+- **ESP32-C3**: native USB on D- GPIO18 / D+ GPIO19, UART0 on GPIO21 / GPIO20, strapping pins GPIO2, GPIO8, GPIO9, JTAG pins GPIO4-7.
+- **ESP8266**: UART0 and UART1, the GPIO0 / GPIO2 / GPIO15 boot pins, HSPI, the deep-sleep wake pin and the ADC range.
+- **ESP32-CAM**: the programming header (no USB bridge, IO0 to GND to flash), the AI-Thinker camera bus and the LED / microSD pins.
+- **Raspberry Pi Pico / Pico 2**: the full 40-pin header with default UART, I2C, SPI and ADC functions, and the power pins.
+- **Arduino Uno / Nano**: serial, SPI and I2C pins, and the 6-pin ICSP header.
+- **STM32 Blue Pill**: USART, USB and SWD pins and the BOOT0 / BOOT1 modes.
+- **SWD 10-pin**, **ARM 20-pin JTAG**, **SOIC-8 flash clip**, **USB-A**, **USB Micro-B**, **USB-C** connector pinouts.
+- **FTDI / CP2102 6-Pin**: header order GND, CTS, VCC, TXD, RXD, DTR (RTS# on the FTDI TTL-232R cable), with a warning to set VCC to 3.3V for ESP32 and modern ARM chips.
+- **5V to 3.3V Divider**: a 1 kOhm / 2 kOhm divider (5V x 2000/3000 = 3.33V) for a 5V TX into a 3.3V RX, one-way signals only.
 
-There are no ESP32-C3 or ESP32-C6 pages in the app; the sections below are background material.
+The sections below are background material and include maps the app does not draw.
 
 ---
 
@@ -261,13 +266,20 @@ Many beginner designs tie CC1 and CC2 together to a single shared 5.1kΩ resisto
     toolId: 'intel-modal',
     category: 'reference',
     title: 'Chip Intelligence — VID/PID Hardware Identification Database',
-    summary: 'Lookup USB Vendor IDs (VID) and Product IDs (PID) to identify mystery boards, USB-UART bridge ICs, and development hardware.',
+    summary: 'Look up any USB Vendor ID / Product ID (curated hardware notes plus the full usb.ids list) to identify mystery boards, USB-UART bridge ICs, and development hardware, or look up a USB class code.',
     tags: ['Chip Intel', 'VID/PID', 'USB IDs', 'WCH', 'Silicon Labs', 'FTDI', 'Espressif', 'Identification'],
     readTime: '16 min read',
     content: `
 # Chip Intelligence — USB Hardware Identification
 
-Every USB device announces a 16-bit **Vendor ID (VID)** and 16-bit **Product ID (PID)** during USB enumeration. The **Hardware Intelligence** window (*USB Chip & VID:PID Specifications*) looks these identifiers up in an embedded table of **41 entries** (USB-UART bridges, native-USB microcontrollers, bootloader/DFU modes, SDR hardware and Wi-Fi adapters). When a serial port is connected, a **Currently connected USB hardware** banner shows the match with its operating logic voltage, auto-reset / strapping behaviour and engineer notes; if only the vendor ID matches, the vendor's first entry is used as a fallback. Below it a search box filters the whole table by VID:PID, chip name, manufacturer or notes, and each card shows voltage, notes and auto-reset support. The same lookup powers the chip analysis in USB Recon & Autopsy.
+Every USB device announces a 16-bit **Vendor ID (VID)** and 16-bit **Product ID (PID)** during USB enumeration. The **Hardware Intelligence** window (*USB Chip & VID:PID Specifications*) looks these identifiers up in two layers: a curated table of **41 entries** (USB-UART bridges, native-USB microcontrollers, bootloader/DFU modes, SDR hardware and Wi-Fi adapters) that carries operating voltage, auto-reset / strapping behaviour and engineer notes, and the bundled **usb.ids** list, which names any vendor and product. The usb.ids data loads lazily the first time the window opens.
+
+When a serial port is connected, a **Currently connected USB hardware** banner shows the match. If only the vendor ID is known (the product is not curated), the vendor name is shown but voltage, auto-reset and driver notes are reported as **unknown**: the tool does not borrow another product's data from the same vendor. Below it a search box accepts:
+- a **VID:PID** in any common form (\`1d6b:0002\`, \`0x10C4\`, \`ID 10c4:ea60\`), which works for any device in usb.ids, not just the curated 41. A **LOOKUP [VID:PID ...]** card shows vendor / product, whether the entry is "curated entry + usb.ids", "usb.ids only" or "not found", voltage and auto-reset, plus copy buttons: **Copy VID:PID**, **Copy hardware ID** (\`USB\\VID_xxxx&PID_xxxx\` as shown in Device Manager) and **Copy udev rule**, and links to Device Hunt and the-sz.com;
+- a chip or vendor name (\`CP2102\`, \`ftdi\`, \`ch340\`), which filters the curated cards (VID:PID, chip, manufacturer or notes) and lists **usb.ids matches** (up to 40; click one to look it up);
+- a class code such as \`class 02:02:01\`, which shows the USB class / subclass / protocol names.
+
+The footer shows the usb.ids version in use ("Names: usb.ids <version> (BSD-3-Clause)"). The same lookup powers the chip analysis in USB Recon & Autopsy.
 
 ---
 
@@ -333,16 +345,21 @@ Repeats of the same line from the same tool within 2 seconds fold into one entry
 
 | Control | Purpose |
 | :--- | :--- |
-| **REPORT (.MD)** | Downloads a Markdown report. |
-| **JSON** | Downloads the log as JSON. |
+| **REPORT (.MD)** | Downloads a Markdown report (redacted unless you tick the box below). |
+| **JSON** | Downloads the log as JSON (same redaction rule). |
 | **COPY REPORT** | Copies the Markdown report to the clipboard. |
+| **Include unredacted text in exports** | Off by default. Turn it on only when you need the raw text. |
+| **Preview export** / **Hide export preview** | Shows exactly what the report will contain, so you can check it before sharing. |
 | **OPEN JSON LOG** | Loads a previously exported JSON log for read-only viewing; **BACK TO THIS SESSION** returns. |
 | **CLEAR** | Empties the log after a confirmation (hidden while viewing an imported log). |
 | Tool selector, level buttons (\`info\`, \`ok\`, \`warn\`, \`error\`, \`action\`, \`device\`), **search** | Filter the table. Exports contain only the entries matching the current filters. |
 | Note box + **ADD** | Appends a note (for example "swapped to the 3.3 V supply"). |
 
+#### Redaction
+Exports mask secret-shaped text: \`Bearer\` / \`Basic\` credentials, \`api_key=\`, \`token=\`, \`password=\`-style values, JWTs, private-key blocks, and long hex (32+ characters) or base64 (40+) strings. Ordinary text such as VID:PID pairs and hostnames is left alone. The report and JSON record whether redaction was on. MAC addresses and SSIDs are **not** masked by the panel's exports, so check the preview before sending a log taken during wireless work. Redaction is pattern-based and can miss unusual secrets; it is not a guarantee.
+
 #### Markdown report (\`.md\`)
-A title, a summary (time span, tools used, entry counts, browser user agent), a **Devices** list, an **Actions and errors** list, and a full **Timeline** code block with one line per entry.
+A title, a summary (time span, tools used, entry counts, browser, Web Serial / WebUSB / WebHID support, redaction state), a **Devices** list, an **Actions and errors** list, and a full **Timeline** code block with one line per entry.
 
 #### JSON (\`.json\`)
 \`\`\`json
@@ -350,7 +367,8 @@ A title, a summary (time span, tools used, entry counts, browser user agent), a 
   "format": "skon-session-log",
   "version": 1,
   "exported": "2026-11-06T09:30:00.000Z",
-  "userAgent": "...",
+  "environment": { "userAgent": "...", "webSerial": true, "webUsb": true, "webHid": true },
+  "redacted": true,
   "entries": [
     { "seq": 1, "t": 1793957400000, "tool": "app", "level": "device", "text": "Selected USB CP2102 (10c4:ea60)", "data": { "kind": "usb", "vid": "10c4", "pid": "ea60" } }
   ]

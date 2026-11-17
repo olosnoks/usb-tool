@@ -1,12 +1,5 @@
 /**
- * USB-PD (Power Delivery) Protocol Driver & VBUS Telemetry Engine
- * 
- * Supports:
- * - Standard fixed PDO (Power Data Object) contracts (5V, 9V, 12V, 15V, 20V)
- * - PPS (Programmable Power Supply) fine-grained voltage adjustments (3.3V - 21.0V in 20mV steps)
- * - E-Marker cable detection (3A vs 5A 100W/240W EPR, USB 2.0 / USB 3.2 / USB4)
- * - Real-time VBUS voltage, current, wattage, and energy (mAh, mWh) integration
- * - Simulated charger for trying the interface
+ * USB-PD driver for the STUSB4500 sink controller.
  *
  * Real hardware: an STUSB4500 USB-PD sink controller (e.g. the SparkFun Power
  * Delivery Board) on I2C, through a Bus Pirate v3/v4. The STUSB4500 negotiates
@@ -108,73 +101,14 @@ export class Stusb4500 {
   }
 }
 
-export const FIXED_PDO_PROFILES = [
-  { id: 1, voltageV: 5.0, maxCurrentA: 3.0, maxPowerW: 15.0, label: '5V @ 3.0A (15W Fixed)' },
-  { id: 2, voltageV: 9.0, maxCurrentA: 3.0, maxPowerW: 27.0, label: '9V @ 3.0A (27W Fixed)' },
-  { id: 3, voltageV: 12.0, maxCurrentA: 3.0, maxPowerW: 36.0, label: '12V @ 3.0A (36W Fixed)' },
-  { id: 4, voltageV: 15.0, maxCurrentA: 3.0, maxPowerW: 45.0, label: '15V @ 3.0A (45W Fixed)' },
-  { id: 5, voltageV: 20.0, maxCurrentA: 5.0, maxPowerW: 100.0, label: '20V @ 5.0A (100W Fixed EPR)' }
-];
-
-export const PPS_PROFILE = {
-  id: 6,
-  minVoltageV: 3.3,
-  maxVoltageV: 21.0,
-  maxCurrentA: 5.0,
-  stepVoltageV: 0.02, // 20mV
-  label: 'PPS 3.3V - 21V (5A Variable)'
-};
-
-export const SAMPLE_CABLE_EMARKERS = [
-  {
-    manufacturer: 'Apple Inc.',
-    type: 'USB-C to USB-C (Thunderbolt 4 / USB4)',
-    maxCurrent: '5A (240W EPR Supported)',
-    maxVoltage: '48V (EPR)',
-    speed: '40 Gbps (Thunderbolt 4 / USB4 Gen 3x2)',
-    vdo: '0x1A2B3C4D',
-    hwVersion: 'v2.1'
-  },
-  {
-    manufacturer: 'Anker Innovations',
-    type: 'USB-C to USB-C (High Power Braided)',
-    maxCurrent: '5A (100W Standard)',
-    maxVoltage: '20V (SPR)',
-    speed: '480 Mbps (USB 2.0 High-Speed)',
-    vdo: '0x21901104',
-    hwVersion: 'v1.4'
-  },
-  {
-    manufacturer: 'Generic Unmarked Cable',
-    type: 'Standard USB-C Charging Cable',
-    maxCurrent: '3A (60W Non-E-Marked)',
-    maxVoltage: '20V (SPR)',
-    speed: '480 Mbps (USB 2.0)',
-    vdo: '0x00000000',
-    hwVersion: 'v1.0'
-  }
-];
-
 export class UsbPdClient {
-  constructor(logger = console.log) {
+  constructor(logger = () => {}) {
     this.logger = logger;
     this.link = null;
     this.bp = null;
     this.pd = null;
     this._owner = { name: 'USB-PD', release: () => this.disconnect() };
     this.isConnected = false;
-    this.activeVoltageV = 5.0;
-    this.targetVoltageV = 5.0;
-    this.currentA = 0.45;
-    this.activePdoId = 1;
-    this.isPps = false;
-    this.ppsVoltageV = 5.0;
-    this.cableInfo = SAMPLE_CABLE_EMARKERS[0];
-
-    // Cumulative energy metrics
-    this.accumulatedMah = 0;
-    this.accumulatedMwh = 0;
-    this.lastTimestamp = Date.now();
   }
 
   /**
@@ -249,37 +183,7 @@ export class UsbPdClient {
   async disconnect() {
     await this._closeHardware();
     this.isConnected = false;
-    this.activeVoltageV = 0.0;
-    this.currentA = 0.0;
     this.logger('[USB-PD] Disconnected.');
-  }
-
-  // Request Fixed PDO Profile
-  requestFixedPdo(pdoId) {
-    const pdo = FIXED_PDO_PROFILES.find(p => p.id === pdoId);
-    if (!pdo) return;
-
-    this.activePdoId = pdoId;
-    this.isPps = false;
-    this.targetVoltageV = pdo.voltageV;
-    this.logger(`[USB-PD] Contract renegotiated: ${pdo.label}`);
-  }
-
-  // Request PPS Variable Voltage
-  requestPpsVoltage(voltageV) {
-    const clamped = Math.max(PPS_PROFILE.minVoltageV, Math.min(PPS_PROFILE.maxVoltageV, voltageV));
-    this.activePdoId = 6;
-    this.isPps = true;
-    this.ppsVoltageV = Number(clamped.toFixed(2));
-    this.targetVoltageV = this.ppsVoltageV;
-    this.logger(`[USB-PD] PPS Voltage set to ${this.ppsVoltageV}V`);
-  }
-
-  resetEnergyCounter() {
-    this.accumulatedMah = 0;
-    this.accumulatedMwh = 0;
-    this.lastTimestamp = Date.now();
-    this.logger('[USB-PD] Accumulated mAh / mWh counters reset to 0.');
   }
 }
 

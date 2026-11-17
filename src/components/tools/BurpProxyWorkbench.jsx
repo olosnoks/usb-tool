@@ -1,9 +1,11 @@
 import React, { useState, useRef } from 'react';
-import { proxiedFetch, isProxyEnabled, describeNetworkError } from '../../utils/netClient';
+import { isProxyEnabled, describeNetworkError } from '../../utils/netClient';
+import { sendHttp, hexDumpBytes, timeoutFromSeconds, downloadBlob, toCsv } from '../../utils/httpSend';
+import { historyToHar, harToRequests, loadHistory, saveHistory, clearHistory, HISTORY_CAP, redactHeaders } from '../../utils/httpHar';
 import { countMarkers, stripMarkers, applyMarkers, applyAllMarkers } from '../../utils/intruder';
 import { CODECS, jwtDecode } from '../../utils/codec';
 import { md5Hex } from '../../utils/md5';
-import { parseCurl, parseRawHttp, toCurl } from '../../utils/httpImport';
+import { parseCurl, parseRawHttp, toCurl, toFetch, toPowerShell, toPython } from '../../utils/httpImport';
 import { lineDiff, diffStats } from '../../utils/diff';
 import ProxyConfig from './common/ProxyConfig';
 import WordlistPicker from './common/WordlistPicker';
@@ -40,33 +42,14 @@ function parseHeaders(text) {
   return h;
 }
 
-async function sendRequest({ method, url, headers, body }) {
+async function sendRequest({ method, url, headers, body }, { signal, timeoutMs } = {}) {
   const opts = { method, headers: parseHeaders(headers), redirect: 'follow' };
   if (method !== 'GET' && method !== 'HEAD' && body) opts.body = body;
-  const start = performance.now();
-  const resp = await proxiedFetch(normalizeUrl(url), opts);
-  const text = await resp.text();
-  return {
-    status: resp.status,
-    statusText: resp.statusText,
-    headers: [...resp.headers.entries()],
-    body: text,
-    size: text.length,
-    timeMs: Math.round(performance.now() - start),
-  };
+  return sendHttp(normalizeUrl(url), opts, { signal, timeoutMs });
 }
 
-function hexDump(str, max = 8192) {
-  const bytes = new TextEncoder().encode(str).subarray(0, max);
-  const rows = [];
-  for (let i = 0; i < bytes.length; i += 16) {
-    const slice = bytes.subarray(i, i + 16);
-    const hex = Array.from(slice).map((b) => b.toString(16).padStart(2, '0')).join(' ');
-    const ascii = Array.from(slice).map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : '.')).join('');
-    rows.push(`${i.toString(16).padStart(8, '0')}  ${hex.padEnd(47)}  ${ascii}`);
-  }
-  return rows.join('\n') + (new TextEncoder().encode(str).length > max ? '\n… truncated …' : '');
-}
+const isCancel = (e) => e?.name === 'AbortError' || e?.name === 'TimeoutError';
+const errText = (e) => (isCancel(e) ? e.message : describeNetworkError(e));
 
 function prettyBody(body, headers) {
   const ct = (headers || []).find(([k]) => k.toLowerCase() === 'content-type')?.[1] || '';
@@ -102,9 +85,10 @@ export default function BurpProxyWorkbench({ onLogMessage, hideProxyConfig = fal
   const [body, setBody] = useState('');
   const [cmpA, setCmpA] = useState('');
   const [cmpB, setCmpB] = useState('');
+  const [timeoutSec, setTimeoutSec] = useState('30');
 
   const log = (msg) => onLogMessage?.(msg);
-  const req = { method, url, headers, body, setMethod, setUrl, setHeaders, setBody };
+  const req = { method, url, headers, body, setMethod, setUrl, setHeaders, setBody, timeoutMs: timeoutFromSeconds(timeoutSec), timeoutSec, setTimeoutSec };
   const toComparer = (text, slot) => { if (slot === 'b') setCmpB(text); else setCmpA(text); setTab('comparer'); };
 
   return (
@@ -178,29 +162,32 @@ function ResponseView({ response, toComparer }) {
   if (!response) return null;
   if (response.error) return <p className="text-red-400 text-sm mt-2">{response.error}</p>;
 
-  const pretty = prettyBody(response.body, response.headers);
-  const shown = view === 'pretty' ? pretty : view === 'hex' ? hexDump(response.body) : response.body;
+  const binary = !!response.isBinary;
+  const pretty = binary ? '' : prettyBody(response.body, response.headers);
+  const shown = binary || view === 'hex' ? hexDumpBytes(response.bytes || new TextEncoder().encode(response.body || '')) : view === 'pretty' ? pretty : response.body;
+  const save = () => downloadBlob(response.bytes, `response-${response.status}.bin`, response.contentType || 'application/octet-stream');
 
   return (
     <div className="mt-3 text-sm text-gray-200">
       <div className="flex flex-wrap items-center gap-2">
         <span>Status: <span className={response.status < 400 ? 'text-green-400' : 'text-red-400'}>{response.status} {response.statusText}</span></span>
-        <span className="text-gray-500 text-xs">{response.size} bytes · {response.timeMs}ms</span>
+        <span className="text-gray-500 text-xs">{response.size} bytes · {response.timeMs}ms{binary ? ' · binary' : ''}</span>
+        {binary && response.bytes && <button onClick={save} className="px-2 py-0.5 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Save response</button>}
         <div className="ml-auto flex gap-1">
-          {['pretty', 'raw', 'hex', 'render'].map((v) => (
+          {(binary ? ['hex'] : ['pretty', 'raw', 'hex', 'render']).map((v) => (
             <button key={v} onClick={() => setView(v)} className={`px-2 py-0.5 rounded text-xs capitalize ${view === v ? 'bg-slate-700 text-white' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>{v}</button>
           ))}
         </div>
       </div>
       <div className="mt-2 flex gap-2">
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="search response…" className="flex-1 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200" />
-        {toComparer && <button onClick={() => toComparer(response.body, 'a')} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">→ Comparer A</button>}
-        {toComparer && <button onClick={() => toComparer(response.body, 'b')} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">→ Comparer B</button>}
+        {toComparer && !binary && <button onClick={() => toComparer(response.body, 'a')} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">→ Comparer A</button>}
+        {toComparer && !binary && <button onClick={() => toComparer(response.body, 'b')} className="px-2 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">→ Comparer B</button>}
       </div>
       <div className="mt-2 text-xs text-gray-400">Response headers:</div>
       <pre className="bg-slate-800 p-2 rounded overflow-auto text-xs" style={{ maxHeight: '12vh' }}>{response.headers.map(([k, v]) => `${k}: ${v}`).join('\n')}</pre>
-      <div className="mt-2 text-xs text-gray-400">Body:</div>
-      {view === 'render' ? (
+      <div className="mt-2 text-xs text-gray-400">Body{binary ? ' (binary, shown as hex)' : ''}:</div>
+      {!binary && view === 'render' ? (
         <iframe title="response" sandbox="" srcDoc={response.body} className="w-full bg-white rounded" style={{ height: '32vh' }} />
       ) : (
         <pre className="bg-slate-800 p-2 rounded overflow-auto text-xs" style={{ maxHeight: '32vh' }}><Highlighted text={shown} term={search} /></pre>
@@ -209,58 +196,115 @@ function ResponseView({ response, toComparer }) {
   );
 }
 
+function CopyAsMenu({ request, log }) {
+  const [open, setOpen] = useState(false);
+  const FORMATS = [['curl', toCurl], ['fetch', toFetch], ['PowerShell', toPowerShell], ['Python requests', toPython]];
+  const pick = (name, fn) => { navigator.clipboard?.writeText(fn(request)); log(`Copied as ${name}`); setOpen(false); };
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} className="px-3 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Copy as ▾</button>
+      {open && (
+        <div role="menu" className="absolute z-10 mt-1 bg-slate-900 border border-slate-700 rounded shadow text-xs">
+          {FORMATS.map(([name, fn]) => (
+            <button key={name} role="menuitem" onClick={() => pick(name, fn)} className="block w-full text-left px-3 py-1 text-gray-200 hover:bg-slate-800">{name}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Repeater(props) {
-  const { method, url, headers, body, log, toComparer } = props;
+  const { method, url, headers, body, log, toComparer, timeoutMs, timeoutSec, setTimeoutSec } = props;
   const [response, setResponse] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState(() => loadHistory());
+  const abortRef = useRef(null);
+  const fileRef = useRef(null);
+
+  const commitHistory = (next) => { const capped = next.slice(0, HISTORY_CAP); saveHistory(capped); return capped; };
 
   const send = async () => {
     if (!url.trim()) return;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setBusy(true);
     setResponse(null);
     log(`${method} ${url}${isProxyEnabled() ? ' (via proxy)' : ' (direct)'}`);
     try {
-      const res = await sendRequest({ method, url, headers, body });
+      const res = await sendRequest({ method, url, headers, body }, { signal: ctrl.signal, timeoutMs });
       setResponse(res);
-      setHistory((h) => [{ method, url, status: res.status, size: res.size, timeMs: res.timeMs, req: { method, url, headers, body }, res }, ...h].slice(0, 25));
+      setHistory((h) => commitHistory([{ req: { method, url, headers, body }, res, status: res.status, statusText: res.statusText, size: res.size, timeMs: res.timeMs, startedAt: Date.now() }, ...h]));
       log(`Response ${res.status} ${res.statusText} — ${res.size} bytes, ${res.timeMs}ms`);
     } catch (e) {
-      setResponse({ error: describeNetworkError(e) });
-      log(`Error: ${describeNetworkError(e)}`);
+      setResponse({ error: errText(e) });
+      log(`${isCancel(e) ? '' : 'Error: '}${errText(e)}`);
     }
+    abortRef.current = null;
     setBusy(false);
   };
 
+  const cancel = () => abortRef.current?.abort();
+
   const restore = (h) => {
     props.setMethod(h.req.method); props.setUrl(h.req.url); props.setHeaders(h.req.headers); props.setBody(h.req.body);
-    setResponse(h.res);
+    setResponse(h.res || null);
   };
+
+  const exportHar = () => {
+    // credential headers (Authorization, Cookie, API keys) are redacted in exported files, as in saved history
+    const redacted = history.map((e) => ({ ...e, req: { ...e.req, headers: redactHeaders(e.req?.headers) } }));
+    downloadBlob(JSON.stringify(historyToHar(redacted), null, 2), `repeater-history-${new Date().toISOString().slice(0, 10)}.har`, 'application/json');
+    log(`Exported ${history.length} history entr${history.length === 1 ? 'y' : 'ies'} as HAR`);
+  };
+
+  const importHar = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const reqs = harToRequests(await file.text());
+      const entries = reqs.map((r) => ({ req: { method: r.method, url: r.url, headers: r.headers, body: r.body }, status: r.status, statusText: r.statusText, size: r.size, timeMs: r.timeMs, startedAt: Date.now() }));
+      setHistory((h) => commitHistory([...entries, ...h]));
+      log(`Imported ${entries.length} request(s) from HAR`);
+    } catch (err) { log(`HAR import failed: ${err.message}`); }
+  };
+
+  const clear = () => { clearHistory(); setHistory([]); log('History cleared'); };
 
   return (
     <div className="flex gap-3">
       <div className="flex-1 min-w-0">
         <ImportBar {...props} />
         <RequestEditor {...props} />
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button onClick={send} disabled={busy} className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-500 disabled:opacity-40">{busy ? 'Sending…' : 'Send'}</button>
-          <button onClick={() => { navigator.clipboard?.writeText(toCurl({ method, url, headers, body })); log('Copied as curl'); }} className="px-3 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Copy as curl</button>
+          {busy && <button onClick={cancel} className="px-3 py-1 bg-red-700 text-white rounded hover:bg-red-600">Cancel</button>}
+          <CopyAsMenu request={{ method, url, headers, body }} log={log} />
+          <label className="text-xs text-gray-400">Timeout <input aria-label="Timeout seconds" value={timeoutSec} onChange={(e) => setTimeoutSec(e.target.value)} className="w-12 bg-slate-900 border border-slate-800 rounded p-0.5 text-xs text-gray-200 text-center" /> s</label>
         </div>
         <ResponseView response={response} toComparer={toComparer} />
       </div>
-      {history.length > 0 && (
-        <div className="w-56 shrink-0">
-          <div className="text-xs text-gray-400 mb-1">History</div>
+      <div className="w-56 shrink-0">
+        <div className="flex items-center gap-1 mb-1 text-xs text-gray-400">
+          <span className="mr-auto">History ({history.length}/{HISTORY_CAP})</span>
+          <button onClick={exportHar} disabled={!history.length} className="text-cyan-300 hover:text-cyan-200 disabled:opacity-40">Export HAR</button>
+          <button onClick={() => fileRef.current?.click()} className="text-cyan-300 hover:text-cyan-200">Import</button>
+          <button onClick={clear} disabled={!history.length} className="text-red-300 hover:text-red-200 disabled:opacity-40">Clear</button>
+          <input ref={fileRef} type="file" accept=".har,application/json" onChange={importHar} className="hidden" />
+        </div>
+        {history.length > 0 && (
           <div className="space-y-1 overflow-auto" style={{ maxHeight: '60vh' }}>
             {history.map((h, i) => (
               <button key={i} onClick={() => restore(h)} className="block w-full text-left bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded p-1 text-[11px] text-gray-300">
-                <span className={h.status < 400 ? 'text-green-400' : 'text-red-400'}>{h.status}</span> {h.method} <span className="text-gray-500">{h.size}b</span>
-                <div className="truncate text-gray-500">{h.url}</div>
+                <span className={h.status < 400 ? 'text-green-400' : 'text-red-400'}>{h.status || '—'}</span> {h.req.method} <span className="text-gray-500">{h.size ?? 0}b</span>
+                <div className="truncate text-gray-500">{h.req.url}</div>
               </button>
             ))}
           </div>
-        </div>
-      )}
+        )}
+        <p className="mt-1 text-[10px] text-slate-500">Saved locally in this browser. Authorization/Cookie style header values are replaced with [redacted]; request bodies are stored as typed.</p>
+      </div>
     </div>
   );
 }
@@ -301,7 +345,7 @@ function buildJobs(attack, positions, sets) {
 }
 
 function Intruder(props) {
-  const { method, url, headers, body, log, toComparer } = props;
+  const { method, url, headers, body, log, toComparer, timeoutMs, timeoutSec, setTimeoutSec } = props;
   const [attack, setAttack] = useState('sniper');
   const [payloadText, setPayloadText] = useState('');
   const [perPos, setPerPos] = useState({}); // { posIndex: payloadText } for pitchfork/cluster
@@ -312,6 +356,7 @@ function Intruder(props) {
   const [sort, setSort] = useState({ key: 'idx', dir: 1 });
   const [filter, setFilter] = useState('');
   const cancelRef = useRef(false);
+  const abortRef = useRef(null);
 
   const positions = countMarkers([url, headers, body]);
   const multiSet = attack === 'pitchfork' || attack === 'clusterbomb';
@@ -330,6 +375,8 @@ function Intruder(props) {
     setRunning(true);
     setResults([]);
     cancelRef.current = false;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setProgress({ done: 0, total: jobs.length });
     log(`Intruder (${attack}): ${positions} position(s), ${jobs.length} request(s)`);
 
@@ -345,10 +392,11 @@ function Intruder(props) {
         const fields = applyAllMarkers({ url, headers, body }, job.values);
         let row;
         try {
-          const res = await sendRequest({ method, url: fields.url, headers: fields.headers, body: fields.body });
-          row = { idx: myIdx + 1, label: job.label, status: res.status, length: res.size, timeMs: res.timeMs, match: grep ? res.body.includes(grep) : null, body: res.body };
+          const res = await sendRequest({ method, url: fields.url, headers: fields.headers, body: fields.body }, { signal: ctrl.signal, timeoutMs });
+          row = { idx: myIdx + 1, label: job.label, status: res.status, length: res.size, timeMs: res.timeMs, match: grep ? (res.isBinary ? false : res.body.includes(grep)) : null, body: res.isBinary ? null : res.body };
         } catch (e) {
-          row = { idx: myIdx + 1, label: job.label, status: 'err', length: 0, timeMs: 0, match: null, error: describeNetworkError(e) };
+          if (isCancel(e) && cancelRef.current) return; // user cancelled: drop the aborted in-flight request
+          row = { idx: myIdx + 1, label: job.label, status: 'err', length: 0, timeMs: 0, match: null, error: errText(e) };
         }
         done += 1;
         collected.push(row);
@@ -358,6 +406,7 @@ function Intruder(props) {
     };
     await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, worker));
     log(cancelRef.current ? 'Intruder cancelled' : 'Intruder complete');
+    abortRef.current = null;
     setRunning(false);
   };
 
@@ -379,6 +428,7 @@ function Intruder(props) {
         <select value={attack} onChange={(e) => setAttack(e.target.value)} className="bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200">
           {ATTACKS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
         </select>
+        <label className="text-xs text-gray-400">Timeout <input aria-label="Timeout seconds" value={timeoutSec} onChange={(e) => setTimeoutSec(e.target.value)} className="w-12 bg-slate-900 border border-slate-800 rounded p-0.5 text-xs text-gray-200 text-center" /> s</label>
         <span className="text-xs text-gray-400">{positions} marker position(s) — mark with <code>{'{{value}}'}</code></span>
       </div>
       {multiSet ? (
@@ -397,7 +447,8 @@ function Intruder(props) {
         <button onClick={run} disabled={running} className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-500 disabled:opacity-40">
           {running ? `Attacking ${progress.done}/${progress.total}` : 'Start attack'}
         </button>
-        {running && <button onClick={() => { cancelRef.current = true; }} className="px-3 py-1 bg-slate-700 text-gray-200 rounded hover:bg-slate-600">Stop</button>}
+        {running && <button onClick={() => { cancelRef.current = true; abortRef.current?.abort(); }} className="px-3 py-1 bg-red-700 text-white rounded hover:bg-red-600">Cancel</button>}
+        {results.length > 0 && !running && <button onClick={() => downloadBlob(toCsv(['#', 'payload', 'status', 'length', 'time_ms', 'match'], results.map((r) => [r.idx, r.label, r.status, r.length, r.timeMs, r.match === null ? '' : r.match ? 'yes' : 'no'])), 'intruder-results.csv', 'text/csv')} className="px-3 py-1 bg-slate-700 text-gray-200 rounded text-xs hover:bg-slate-600">Export CSV</button>}
         {results.length > 0 && <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="filter payloads…" className="bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200" />}
       </div>
       {results.length > 0 && (

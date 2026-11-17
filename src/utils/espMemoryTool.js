@@ -86,6 +86,8 @@ export async function inspectEspSilicon(port, onLog) {
 
 /**
  * Read a flash range through the ROM and download it as a .bin.
+ * ROM-only and test-oriented: the UI dumps through the esptool-js stub
+ * (espFlashDump.js), which works on every chip and at higher baud rates.
  * Supported on the ESP8266 and original ESP32 (ROM READ_FLASH_SLOW); other
  * chips throw a clear error instead of returning invented data.
  */

@@ -107,7 +107,7 @@ For a 24Cxx EEPROM, put it in the programmer's 8-pin socket, choose the type and
 
 **CMSIS-DAP** is the official microcontroller debug access port standard defined by Arm Limited. With a CMSIS-DAP probe (Raspberry Pi Debug Probe, DAPLink / micro:bit, LPC-Link2, EDBG, or a Picoprobe), Skon's USB Tool talks directly to the ARM CoreSight debug infrastructure inside the target over **Serial Wire Debug (SWD)**. **ST-Link is not CMSIS-DAP** and is not supported by this tab.
 
-Two connect buttons: **CONNECT PROBE (WEBUSB)** for CMSIS-DAP v2 probes (bulk endpoints) and **HID PROBE** for v1 probes (older DAPLink firmware, micro:bit v1) over WebHID. SWD runs at 1 MHz by default.
+Two connect buttons: **CONNECT PROBE (WEBUSB)** for CMSIS-DAP v2 probes (bulk endpoints) and **HID PROBE** for v1 probes (older DAPLink firmware, micro:bit v1) over WebHID. SWD runs at 1 MHz by default. Next to them, the **connect under reset** checkbox holds nRESET low while attaching and then halts at the reset vector, which reaches chips that sleep or remap their SWD pins.
 
 #### Supported Microcontroller Architectures:
 The core is identified from its CPUID register: **Cortex-M0, M0+, M1, M3, M4, M7, M23, M33, M55 and M85** are recognised by name (anything else shows "unknown core"). Typical examples:
@@ -168,14 +168,16 @@ The **Memory Access Port (MEM-AP)** allows direct reading and writing of SRAM, f
 1. Connect your CMSIS-DAP probe (e.g. Raspberry Pi Debug Probe) to your PC via USB.
 2. Wire the probe's SWCLK, SWDIO, and GND pins to the target board's SWD header.
 3. In Skon's USB Tool, open the **Hardware Programmers Suite** and select the **CMSIS-DAP Debugger** tab.
-4. Click **CONNECT PROBE (WEBUSB)** (or **HID PROBE**). The tool performs the line reset and \`0xE79E\` JTAG-to-SWD switch, reads DPIDR and CPUID, and shows the probe, firmware, transport, DPIDR and core (for example "Cortex-M0+ r0p1").
-5. Use **TARGET STATE** and its buttons: **RESET + HALT** (system reset, halted at the first instruction), **HALT CPU**, **RESUME / RUN** and **STEP (1 INSTRUCTION)**. While the core runs, the tool polls and notices a self-halt (breakpoint or fault).
+4. Click **CONNECT PROBE (WEBUSB)** (or **HID PROBE**; tick **connect under reset** first if the chip will not attach). The tool performs the line reset and \`0xE79E\` JTAG-to-SWD switch, reads DPIDR and CPUID, and shows the probe, firmware, transport, DPIDR and core (for example "Cortex-M0+ r0p1").
+5. Use **TARGET STATE** and its buttons: **RESET + HALT** (system reset, halted at the first instruction), **RESET + RUN**, **HALT CPU**, **RESUME / RUN** and **STEP (1 INSTRUCTION)**. While the core runs, the tool polls and notices a self-halt (breakpoint or fault).
 6. **ARM CORE REGISTERS** lists R0-R12, SP, LR, PC, xPSR, MSP, PSP and PRIMASK.
 7. **MEMORY & PERIPHERAL INSPECTOR**: enter an address (default \`0x20000000\`, SRAM) to read words; the table shows address, hex, decimal and ASCII. **WRITE 32-BIT VALUE** writes one word to an address you give.
-8. Below these, tabs add more tools: **RTT CONSOLE** (search RAM for the SEGGER RTT control block or give its address, read and send on channels), **SWO / ITM** (set the core clock and SWO baud; ITM stimulus text per port), **FLASH**, **BREAK / WATCH** and **DUMP**.
-9. **FLASH** programs internal flash with the chip vendor's **CMSIS-Pack flash algorithm**: click **OPEN .PACK / .FLM**, choose the device and algorithm, set the RAM region used by the algorithm, then choose a firmware file (\`.bin\`, \`.hex\`, \`.elf\`; a plain \`.bin\` needs a "load at" address). Options: erase whole chip, verify, reset and run after. Click **PROGRAM FLASH**. Without a pack/FLM there is no flash programming; the tool has no built-in per-chip database.
-10. **BREAK / WATCH**: **ENABLE BREAKPOINT UNITS**, then add hardware breakpoints ("BREAK AT") and data watchpoints (1/2/4 bytes; on read, write or read/write).
+8. Below these, tabs add more tools: **RTT CONSOLE** (search RAM for the SEGGER RTT control block or give its address, read and send on channels), **SWO / ITM** (set the core clock and SWO baud; ITM stimulus text per port), **FLASH**, **BREAK / WATCH**, **DUMP** and **PERIPHERALS (SVD)**.
+9. **FLASH** programs internal flash with the chip vendor's **CMSIS-Pack flash algorithm**: click **OPEN .PACK / .FLM**, choose the device and algorithm, set the RAM region used by the algorithm, then choose a firmware file (\`.bin\`, \`.hex\`, \`.elf\`; a plain \`.bin\` needs a "load at" address). Options: erase whole chip, verify, reset and run after. Click **PROGRAM FLASH**. Without a pack/FLM there is no flash programming; the tool has no built-in per-chip database. **MASS ERASE** (confirmation required) resets and halts the core, then runs only the loaded algorithm's EraseChip(), so it needs a loaded algorithm too. **UNLOCK nRF52** does ERASEALL through the CTRL-AP (access port 1) to recover a read-protected nRF52; it wipes all flash, UICR and RAM and asks for confirmation first.
+10. **BREAK / WATCH**: **ENABLE BREAKPOINT UNITS**, then add hardware breakpoints ("BREAK AT", or **BREAK AT SYMBOL** once an ELF is loaded) and data watchpoints (1/2/4 bytes; on read, write or read/write).
 11. **DUMP**: save an address range (flash, RAM or peripherals) to a \`.bin\` with **DUMP TO FILE**. Read-protected chips return errors or zeros.
+12. **PERIPHERALS (SVD)**: click **OPEN .SVD** (a file of your own, or one from a loaded pack's "SVD from pack" list; files are kept in the browser and offered under "saved SVDs") to browse the chip's peripherals, with a filter box. Select a peripheral to list its registers (address, access, value, reset value). Reads happen on demand through the debug port (the per-register refresh button, or **READ ALL**); registers whose read has side effects are never read in bulk. Expand a register to see its decoded bit fields and write a field or the **WRITE WHOLE REGISTER** value.
+13. **LOAD ELF SYMBOLS** (shown once connected) reads function and variable names from an ELF so addresses display as \`main+0x12\`, and enables **BREAK AT SYMBOL**. The button then reads "ELF: <name> (<n> symbols)".
 
 ---
 
@@ -274,7 +276,7 @@ Every JTAG operation is governed by a 16-state finite state machine inside the t
 > **Hardware:** the tool does not drive SPI pins itself. It speaks **STK500v1 at 19200 baud over WebSerial** to an **Arduino running the ArduinoISP sketch** (or any STK500v1 programmer); that programmer does the ISP. Wire the programmer's pins 10 / 11 / 12 / 13 to the target's RESET / MOSI / MISO / SCK. USBasp and other non-serial programmers are not supported.
 
 #### Supported Silicon:
-The signature table covers: **ATmega328P**, **ATmega328PB**, **ATmega168**, **ATmega8**, **ATmega2560**, **ATmega1284P**, **ATmega32U4** and **ATtiny85**, **ATtiny45**, **ATtiny84**, **ATtiny13A**. Other chips report "Unknown AVR" and cannot be programmed (page size comes from the table).
+The chip database (\`src/utils/avrChipDatabase.js\`) lists 63 signatures across tinyAVR, ATmega and AT90USB parts, each with flash size, EEPROM size and flash page size (parts sharing a signature, such as the "A" / "PA" variants, appear once under a combined name). Fuse-guard bits, the EESAVE position and the Arduino default fuses are recorded only where known; without default fuses, **BURN AS BOOTLOADER** is disabled for that chip. A signature not in the list shows "Not in the chip list" and cannot be programmed.
 
 #### Physical Wiring (Standard 6-Pin AVR ISP Header):
 \`\`\`text
@@ -335,11 +337,17 @@ If an ATmega is configured for an external crystal but no crystal is connected, 
 #### Step-by-Step Tutorial: Burning Optiboot Bootloader onto a Raw ATmega328P
 1. Load the **ArduinoISP** sketch onto an Arduino and wire its pins 10 / 11 / 12 / 13 to the ATmega328P's RESET / MOSI / MISO / SCK (plus VCC and GND).
 2. In Skon's USB Tool, open **Hardware Programmers** and select the **AVR ISP & Bootloader** tab.
-3. Click **CONNECT ARDUINOISP (SERIAL)** and pick the programmer's port. After a 2-second boot delay the tool syncs with the STK500 programmer, then enters programming mode and reads the signature (validating \`0x1E 0x95 0x0F\` for ATmega328P). **RE-READ CHIP** repeats this. The chip card shows the target, signature, flash/EEPROM size and current fuses.
+3. The tab has two modes, **ISP PROGRAMMER (ARDUINOISP)** (this tutorial) and **ARDUINO BOOTLOADER UPLOAD** (see below). Click **CONNECT ARDUINOISP (SERIAL)** and pick the programmer's port. After a 2-second boot delay the tool syncs with the STK500 programmer, then enters programming mode and reads the signature (validating \`0x1E 0x95 0x0F\` for ATmega328P). **RE-READ CHIP** repeats this. The chip card shows the target, signature, flash/EEPROM size and current fuses.
 4. In **FUSES AND LOCK BITS**, click **use these** next to "Arduino defaults for ATmega328P" (L=\`0xFF\`, H=\`0xDE\`, E=\`0xFD\`), then **WRITE FUSES**. Writes that would disable ISP (SPIEN, RSTDISBL, DWEN) need a second confirmation, and values are read back afterwards.
 5. In **FLASH & BOOTLOADER**, click **LOAD .HEX FILE** and choose the bootloader hex from the Arduino IDE (for example \`hardware/arduino/avr/bootloaders/optiboot/optiboot_atmega328.hex\`). Nothing is built in.
 6. Click **BURN AS BOOTLOADER (FUSES + LOCK)**: it erases the chip, writes the chip's default fuses with a temporary lock of \`0x3F\`, writes and verifies the hex, then sets the lock byte to the chip default (\`0x0F\` for ATmega328P). The bootloader's address (\`0x7E00\` for Optiboot) comes from the hex file.
-7. For ordinary application code use **ERASE, WRITE & VERIFY HEX**, or **CHIP ERASE** to wipe flash and EEPROM.
+7. For ordinary application code use **ERASE, WRITE & VERIFY HEX**, or **CHIP ERASE**.
+
+**EEPROM and chip erase.** A chip erase wipes the EEPROM unless the EESAVE fuse is programmed. Before each erase the tool reads the high fuse and shows the consequence in the confirmation dialog; if the EEPROM would be lost the dialog starts with "WARNING". Tick **Keep EEPROM** to read the EEPROM before the erase and write it back afterwards (the success message then says "EEPROM restored").
+
+**Read, verify, EEPROM.** The **Read, verify, EEPROM** group has **READ FLASH**, **VERIFY AGAINST FILE** (\`.hex\`, \`.ihx\` or \`.bin\`), **READ EEPROM** and **WRITE EEPROM FILE** (\`.hex\`, \`.eep\`, \`.bin\`; only differing bytes are written, then read back, with a confirmation first). The **Save as Intel HEX (otherwise raw .bin)** checkbox sets the export format for the reads. EEPROM goes through ISP byte commands, so a large EEPROM is slow at 19200 baud.
+
+**ARDUINO BOOTLOADER UPLOAD mode.** For an Arduino that already has a bootloader (like \`avrdude -c arduino\`), no programmer, fuses or chip erase are involved. Pick the **Board** and **Baud rate** (115200, 57600, 38400 or 19200; the board choice sets a default), click **LOAD SKETCH .HEX FILE**, then **UPLOAD SKETCH**. The board is reset with DTR and talks STK500v1 (optiboot or ATmegaBOOT); pages are written and read back. The image must be the sketch (starting at 0) and fit below the bootloader. Boards with other bootloaders (Mega 2560 uses STK500v2, Leonardo/Micro use AVR109) are not supported.
 
 ---
 
@@ -560,7 +568,7 @@ Raw bulk RX transfers from the RTL8812AU arrive encapsulated in a **Radiotap Hea
 | Run TX Loopback Test | Button | In the hardware panel; disabled with "Transmit not supported by this chipset." on RX-only profiles. |
 | Wi-Fi 6 Badge | Badge | Blue pill for 802.11ax HE capability and BSS Color. |
 
-> **Export menu:** the **Export** dropdown next to **Session & Actions** offers **JSON**, **Wigle CSV**, **Executive Report** (HTML), **GeoJSON** and **KML**. It is disabled until at least one access point or client has been captured; GeoJSON and KML also need GPS-tagged devices. PCAP export stays in the buffer-full banner and the per-device panel, and there is no simulated RF mode: capture needs real hardware or a replayed PCAP.
+> **Export menu:** the **Export** dropdown next to **Session & Actions** offers **Export JSON**, **Export Wigle CSV**, **Export Executive Report** (HTML), **Export GeoJSON** and **Export KML**. It is disabled until at least one access point or client has been captured; GeoJSON and KML also need GPS-tagged devices. Next to it, **Import survey JSON** loads a JSON saved by **Export JSON** and merges it into the current session (see section 11), and a counter shows how many APs have **no GPS fix** (those are skipped by the Wigle, GeoJSON and KML exports). PCAP export stays in the buffer-full banner and the per-device panel, and there is no simulated RF mode: capture needs real hardware or a replayed PCAP.
 
 ### 4. Step-by-Step Engineering Walkthroughs
 #### Walkthrough A: Getting Hardware Access on Windows
@@ -627,7 +635,8 @@ The workbench actively monitors for Evil Twin attacks where an attacker broadcas
 ### 11. Browser Geolocation & Live Wardriving GPS Tagging
 The workbench features native browser geolocation logging using the W3C Geolocation API:
 - **Real-Time GPS Watcher**: When **GPS Tagging** is toggled on in the header, the engine registers an active listener via \`navigator.geolocation.watchPosition()\`, receiving continuous updates with high accuracy enabled.
-- **Zero-Latency In-Memory Tagging**: As 802.11 frames arrive over WebUSB, newly discovered Access Points and Client Stations are stamped with the operator's current \`latitude\`, \`longitude\`, \`accuracy\`, and \`altitude\`.
+- **Best-Signal Geotagging**: As 802.11 frames arrive over WebUSB, newly discovered Access Points and Client Stations are stamped with the operator's current \`latitude\`, \`longitude\`, \`accuracy\`, and \`altitude\`. After that the pin only moves when a later frame is at least **3 dB stronger** than the RSSI the stored position was taken at (\`bestRssi\`), so each AP ends up pinned where it was heard loudest rather than where it was last heard. Invalid fixes (out of range, or the 0,0 placeholder) are ignored.
+- **Survey JSON Round Trip**: **Export JSON** writes a versioned survey file (access points, client stations, monitor channel). **Import survey JSON** validates it (valid BSSID/MAC keys, sane RSSI/channel/coordinate ranges, at most 5,000 APs, 20,000 clients and 25 MB) and merges it: new devices are added, live data wins for existing ones, and an existing AP's position only improves when the imported best signal is stronger. A bad file changes nothing and the status line says why.
 - **Haversine Distance Estimation**: When GPS is active, the AP table calculates the approximate line-of-sight distance in meters between the operator and each discovered transmitter using the Haversine formula:
   $$\Delta\sigma = 2\arcsin\left(\sqrt{\sin^2\left(\frac{\Delta\phi}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\Delta\lambda}{2}\right)}\right)$$
   $$d = R \cdot \Delta\sigma \quad (R = 6,371,000\text{ m})$$
@@ -1168,7 +1177,7 @@ Every destructive action asks for confirmation first, and flashing/erasing is re
     toolId: 'adb',
     category: 'programmers',
     title: 'Android ADB over WebUSB — Shell, File Transfer & Wireless',
-    summary: 'Connect to an Android device with USB debugging enabled: device info, shell, file browser, app manager, logcat and screen control, restart ADB over Wi-Fi, and reboot — all in the browser, with the RSA "Allow USB debugging" handshake handled for you.',
+    summary: 'Connect to an Android device with USB debugging enabled: device info, an interactive shell, streaming file push/pull (including whole folders), app manager with split-APK install, logcat, screen control, bugreport, restart ADB over Wi-Fi, and reboot — all in the browser, with the RSA "Allow USB debugging" handshake handled for you.',
     tags: ['ADB', 'Android', 'Shell', 'Push', 'Pull', 'WebUSB', 'RSA', 'adbd', 'Wireless', 'Homelab', 'Termux'],
     readTime: '20 min read',
     content: `
@@ -1201,8 +1210,10 @@ After \`CNXN\`, everything happens on **streams**. The host \`OPEN\`s a service 
 
 | Service | What it does |
 | :--- | :--- |
-| \`shell:<cmd>\` | Runs a command; the output comes back as WRTE packets. |
-| \`sync:\` | The file-transfer sub-protocol: \`SEND\`/\`DATA\`/\`DONE\` to push, \`RECV\` to pull, each a 4-char id with a length (except \`DONE\`, whose second word is an mtime). |
+| \`shell:<cmd>\` | Runs a one-shot command; the output comes back as WRTE packets. |
+| \`shell,v2:\` | The interactive shell (Android 7+, feature \`shell_v2\`): a pty with 1-byte-id / 4-byte-length framed stdin, stdout, stderr, exit code and window-size packets. |
+| \`exec:<cmd>\` | A raw, unframed stream; used to pipe APK bytes into \`pm install-write\`. |
+| \`sync:\` | The file-transfer sub-protocol: \`SEND\`/\`DATA\`/\`DONE\` to push, \`RECV\` to pull, each a 4-char id with a length (except \`DONE\`, whose second word is an mtime). Files are streamed in chunks rather than held in memory. When the device advertises \`stat_v2\` the tool uses \`STA2\`/\`LIS2\`, so sizes above 4 GiB are reported correctly (the old \`STAT\`/\`LIST\` wrap at 4 GiB). |
 | \`tcpip:<port>\` | Restarts adbd listening on TCP so you can go wireless. |
 | \`reboot:<target>\` | Reboots to system / bootloader / recovery / fastbootd. |
 
@@ -1215,11 +1226,12 @@ ADB and Fastboot share the **Android** tool (tabs **ADB** / **Fastboot**; the si
 | UI Element | Purpose |
 | :--- | :--- |
 | **CONNECT ADB (WEBUSB)** | Opens the device and runs the auth handshake (approve the prompt on the phone); **DISCONNECT** afterwards. |
-| **DEVICE tab** | Device summary from \`getprop\` (model, Android version, etc.), battery and screen size; **REFRESH**, **ALL PROPERTIES** (saves \`getprop.txt\`). **WIRELESS: RESTART ADB OVER TCP/IP** (port field, default 5555); afterwards run \`adb connect <ip>:5555\` from any machine. **REBOOT**: System, Bootloader, Recovery, Fastbootd. |
-| **SHELL tab** | Command box with Enter-to-run, a history list, and quick buttons (\`ps -A\`, \`df -h\`, \`ip addr\`, \`dumpsys wifi\`, \`settings list global\`, \`cat /proc/cpuinfo\`, \`dumpsys activity top\`, \`id\`). Each run is a one-shot \`shell:\` command; there is no interactive TTY. |
-| **FILES tab** | Browsable directory listing (starts at \`/sdcard/\`, breadcrumb and path box), **PUSH HERE** to upload, **PULL** per file to download, and a delete (trash) button. |
-| **APPS tab** | Package list with a filter and a show-system-apps checkbox; **INSTALL APK**; per app **INFO**, **LAUNCH**, **STOP**, **SAVE APK**, **CLEAR DATA**, **UNINSTALL**. |
-| **LOGCAT tab** | **START** / **STOP** polling, level filter (V, D, I, W, E, F), text/tag/PID filter, **CLEAR**, **SAVE**. |
+| **CANCEL** | Appears next to the connect button while a transfer, install or bugreport is running; aborts it. |
+| **DEVICE tab** | Device summary from \`getprop\` (model, Android version, etc.), battery and screen size; **REFRESH**, **BUGREPORT**, **FORGET KEY**, **ALL PROPERTIES** (saves \`getprop.txt\`). **BUGREPORT** runs \`bugreportz -p\` on the device (Android 7+, a minute or two, with a progress bar), then saves the zip through your browser's save dialog; the device copy is left in place. **FORGET KEY** deletes this browser's ADB key after a confirmation, so the phone asks "Allow USB debugging?" again next time (the phone keeps listing the old key until you use Developer options > Revoke USB debugging authorizations). **WIRELESS: RESTART ADB OVER TCP/IP** (port field, default 5555); afterwards run \`adb connect <ip>:5555\` from any machine. **REBOOT**: System, Bootloader, Recovery, Fastbootd. |
+| **SHELL tab** | **INTERACTIVE SHELL**: **START** opens a real pty (\`shell,v2\`), then a prompt line with **SEND**, Enter to send, Up/Down for history, and **CTRL-C**, **CTRL-D**, **CLOSE** and **CLEAR** buttons. It is a line-based terminal: full-screen programs (\`vi\`, \`top\`) do not render, so press Ctrl-C to leave them. If the device lacks \`shell_v2\` (before Android 7) START is disabled and a notice points you to the box below. **ONE-SHOT COMMAND**: a box with **RUN**, a history list and quick buttons (\`ps -A\`, \`df -h\`, \`ip addr\`, \`dumpsys wifi | grep mWifiInfo\`, \`settings list global\`, \`cat /proc/cpuinfo\`, \`dumpsys activity top | head -40\`, \`id\`); each run is a separate \`shell:\` command. |
+| **FILES tab** | Browsable directory listing (starts at \`/sdcard/\`, breadcrumb and a path box you can type into), with size and modified time. **PUSH HERE** uploads the chosen file(s) by streaming them into the current folder; **PULL** downloads a file and **PULL FOLDER** downloads a directory recursively; the trash button deletes. Pulls stream straight to disk through the browser's save dialog where supported; otherwise the file is assembled in memory first and the log says so. For a folder, pick a destination directory (or, in browsers without that, get a zip built in memory, so keep it small); symlinks and unreadable files are skipped and a failing file is logged without stopping the rest. |
+| **APPS tab** | Package list with a filter and a show-system-apps checkbox; a file picker plus **INSTALL**; per app **INFO**, **LAUNCH**, **STOP**, **SAVE APK**, **CLEAR DATA**, **UNINSTALL**. **INSTALL** takes one \`.apk\`, several \`.apk\` files of one app (a base plus its splits, installed together as a single \`pm install\` session), or one \`.apks\` / \`.xapk\` / \`.apkm\` bundle (the tool picks the splits matching the device's ABI, screen density and language, or \`universal.apk\` if present). Mixing a bundle with loose APKs is refused; a failed or cancelled session is abandoned cleanly. |
+| **LOGCAT tab** | **START** / **STOP** polling (about once a second), level filter (V, D, I, W, E, F), text/tag/PID filter, **CLEAR**, **SAVE**. |
 | **SCREEN tab** | **CAPTURE** a screenshot (optionally refresh every 1.5 s), **SAVE PNG**; click the screenshot to tap there; key buttons (HOME, BACK, APPS, POWER, VOL +/-, WAKE, ENTER, ...) and a type-text box. |
 | **LOG** | Activity log of what the tool did. |
 
@@ -1229,8 +1241,8 @@ ADB and Fastboot share the **Android** tool (tabs **ADB** / **Fastboot**; the si
 
 1. Enable Developer options (tap Build number 7×), then turn on **USB debugging**.
 2. **CONNECT ADB (WEBUSB)** and tap **Always allow** on the phone.
-3. Install **Termux** (from F-Droid, via the **APPS** tab's **INSTALL APK**) and push any scripts or binaries your service needs from the **FILES** tab (**PUSH HERE**).
-4. In **SHELL**, start your service (or set it up to start on boot with Termux:Boot).
+3. Install **Termux** (from F-Droid, via the **APPS** tab's **INSTALL**) and push any scripts or binaries your service needs from the **FILES** tab (**PUSH HERE**).
+4. In **SHELL**, press **START** for an interactive shell and start your service (or set it up to start on boot with Termux:Boot).
 5. On the **DEVICE** tab, **RESTART ADB OVER TCP/IP**, note the phone's IP, and from then on manage it over Wi-Fi with no cable.
 
 ---
@@ -1238,10 +1250,10 @@ ADB and Fastboot share the **Android** tool (tabs **ADB** / **Fastboot**; the si
 ### 5. Implementation & Architecture
 
 - **Crypto:** [\`src/utils/adbCrypto.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbCrypto.js) — RSA key generation, \`android_pubkey\` encoding (modulus, Montgomery \`n0inv\` and \`rr\`), and PKCS#1 v1.5 token signing by BigInt modexp.
-- **Protocol:** [\`src/utils/adbDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbDriver.js) — message framing, the CNXN/AUTH handshake, the OPEN/OKAY/WRTE/CLSE stream with flow control, and the shell / sync / tcpip / reboot services.
-- **Device tools:** [\`src/utils/adbTools.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbTools.js) — \`getprop\`/battery/package parsing, APK install and uninstall, logcat polling, input commands and screenshot (\`screencap\`) decoding.
+- **Protocol:** [\`src/utils/adbDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbDriver.js) — message framing, the CNXN/AUTH handshake (the host advertises \`shell_v2\` and \`stat_v2\`), the OPEN/OKAY/WRTE/CLSE stream with flow control, and the shell / shell_v2 / sync (streaming push and pull, STA2/LIS2) / tcpip / reboot services.
+- **Device tools:** [\`src/utils/adbTools.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbTools.js) — \`getprop\`/battery/package parsing, single and split-APK install (\`pm install-create\` / \`install-write\` / \`install-commit\`), bundle split selection, uninstall, logcat polling, recursive folder pull, \`bugreportz\` runner, the line-based terminal model, input commands and screenshot (\`screencap\`) decoding.
 - **Workbench:** [\`src/components/tools/AdbWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/AdbWorkbench.jsx).
-- **Tests:** [\`tests/adbCrypto.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/adbCrypto.test.js) proves a signed token verifies as a valid PKCS#1 block and the public-key blob round-trips; [\`tests/adb.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/adb.test.js) runs the full handshake, shell, and file push/pull against a simulated adbd.
+- **Tests:** [\`tests/adbCrypto.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/adbCrypto.test.js) proves a signed token verifies as a valid PKCS#1 block and the public-key blob round-trips; [\`tests/adb.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/adb.test.js) runs the full handshake, shell, and file push/pull against a simulated adbd; \`tests/adbStreaming.test.js\` and \`tests/adbInstall.test.js\` cover shell_v2, streaming transfers, stat_v2, split-APK install and bugreport.
 
 ---
 
@@ -1259,7 +1271,7 @@ ADB and Fastboot share the **Android** tool (tabs **ADB** / **Fastboot**; the si
     toolId: 'dfu',
     category: 'programmers',
     title: 'WebUSB DFU Flasher — STM32 & DfuSe Firmware Download',
-    summary: 'Flash firmware onto microcontrollers with USB DFU 1.1 and ST DfuSe bootloaders directly from the browser: pick a target address and erase page size, check the DFU suffix, and program .bin or .dfu firmware files.',
+    summary: 'Flash firmware onto microcontrollers with USB DFU 1.1 and ST DfuSe bootloaders directly from the browser: layout-aware sector erase, DFU suffix check, .bin / .dfu / .hex files, read-back and verify, alt-setting selection, and detach to DFU mode.',
     tags: ['DFU', 'DfuSe', 'STM32', 'Firmware', 'WebUSB', 'Bootloader', 'Flasher', 'GD32', 'ARM'],
     readTime: '16 min read',
     content: `
@@ -1298,14 +1310,14 @@ USB DFU executes entirely over **Control Endpoint 0** using vendor/class request
 ST DfuSe multiplexes command transactions through \`DFU_DNLOAD\` with block number \`0\`:
 - **Set Address Pointer (\`0x21\`):** \`[0x21, addr_0, addr_1, addr_2, addr_3]\` (Little-endian 32-bit base address).
 - **Page Erase (\`0x41\`):** \`[0x41, addr_0, addr_1, addr_2, addr_3]\` (Triggers non-volatile flash page erase at target address).
-- **Mass Erase (\`0x41\` without address):** Erases all flash sectors.
+- **Mass Erase (\`0x41\` without address):** Erases all flash sectors. The tool only sends it when you explicitly tick **Mass erase** (see below); it never falls back to a mass erase on its own.
 
-#### DfuSe Memory Map (not parsed by the tool)
-DfuSe devices name their alternate interface settings with a structured string descriptor, for example:
+#### DfuSe Memory Map (parsed by the tool)
+DfuSe devices name each alternate interface setting with a structured string descriptor, for example:
 \`\`\`text
 @Internal Flash  /0x08000000/04*016Kg,01*064Kg,07*128Kg
 \`\`\`
-That means a base of \`0x08000000\` and sectors of 4 x 16 KB, 1 x 64 KB and 7 x 128 KB. **The tool does not read or parse this string.** You supply the **Target flash address** (default \`0x08000000\`) and an **Erase page size** yourself (see below), and it uses the first DFU interface it finds.
+That means a base of \`0x08000000\` and sectors of 4 x 16 KB, 1 x 64 KB and 7 x 128 KB; the trailing letter says whether a group is readable / erasable / writable. The tool reads this string for every alt setting, builds the sector table, and uses it to **erase only the sectors that overlap the image** (it refuses an image that falls outside the layout or into a non-erasable sector). If a string cannot be parsed, the **Memory / alt-setting** panel shows "Layout not understood" and you fall back to the manual page-size or mass-erase options below.
 
 ---
 
@@ -1314,23 +1326,27 @@ That means a base of \`0x08000000\` and sectors of 4 x 16 KB, 1 x 64 KB and 7 x 
 1. **Enter DFU Bootloader Mode:**
    - Pull **BOOT0** high (to 3.3V) and momentarily toggle **RESET / NRST**.
    - Plug the board directly into your computer via a data USB cable. On Windows an ST DFU device may need the WinUSB driver (Zadig).
+   - If the device is running its application and exposes only a DFU *runtime* interface (protocol 1), the tool reports that it cannot be flashed in that mode and shows **Detach to DFU mode**, which sends \`DFU_DETACH\`; wait for it to re-enumerate and select it again. Otherwise reboot it into its bootloader with the boot button or BOOT0.
 2. **Connect via WebUSB:**
    - Click **Select DFU Device** in the DFU Flasher and choose the device in the browser prompt (the chooser is filtered to USB class \`0xFE\` subclass \`0x01\`; an STM32 ROM bootloader is typically VID \`0x0483\` / PID \`0xDF11\`).
-   - The Device card shows the interface number, transfer size, DFU version and whether it is **DfuSe (ST)** (bcdDFU \`0x011A\`) or **DFU 1.1**.
+   - The Device panel shows **Interface**, **Transfer** size, **DFU ver** and **Mode** (**DfuSe (ST)** or **DFU 1.1**). If the device has several alternate settings (internal flash, option bytes, external flash...), pick one in **Memory / alt-setting**; the sector count and address range of the selected one are shown, and **Target flash address** and the read length default to its start and size.
 3. **Select Firmware File:**
-   - Click **Load .bin / .dfu** and choose a raw binary (\`.bin\`) or a structured ST DfuSe image (\`.dfu\` / \`.dfuse\`). If the file has a DFU suffix, its CRC and target VID:PID are shown; a mismatch with the connected device prompts a confirmation.
-   - For a \`.bin\` on a DfuSe device, set the **Target flash address** (defaults to \`0x08000000\`) and the **Erase page size (bytes, 0 = mass erase)**. A page size of \`0\` erases the **whole flash**; enter your part's page size (STM32F1: 1024 or 2048; F4 has variable sectors, so prefer a \`.dfu\` there) to erase only the pages the image covers. A \`.dfu\` file carries its own addresses.
+   - Click **Load .bin / .dfu / .hex** and choose a raw binary (\`.bin\`), an Intel HEX file (\`.hex\`, which supplies its own start address), or a structured ST DfuSe image (\`.dfu\` / \`.dfuse\`). If the file has a DFU suffix, its CRC and target VID:PID are shown; a mismatch with the connected device prompts a confirmation. **Clear** unloads the file.
+   - For a \`.bin\` on a DfuSe device, set the **Target flash address** (defaults to the start of the selected memory, \`0x08000000\` on STM32). Erasing then works in this order: the device's own sector layout if it reported one (the **Erase page size** box is hidden); otherwise the **Erase page size** you enter (STM32F1: 1024 or 2048); otherwise the explicit **Mass erase** option. If none applies the flash is refused rather than guessed. A \`.dfu\` file carries its own addresses and alternate-setting targets.
 4. **Flash:**
-   - Click **Flash Firmware**. The tool erases, then streams blocks of the interface's transfer size (read from the DFU functional descriptor, 1024 bytes if absent) with \`DFU_DNLOAD\`, polling \`DFU_GETSTATUS\` between blocks, and runs the manifestation phase. There is **no read-back / checksum verification** step.
-5. **Reboot to Application:**
-   - Most devices leave DFU and start the new firmware by themselves after manifestation. If yours does not, tie BOOT0 back to GND and press reset. There is no separate "Leave DFU" button; **Disconnect** just releases the device.
+   - Choose the options: **Verify after write (read back)** (on by default), **Jump to application after flash** (on by default), and **Mass erase (wipes the whole flash; asks to confirm)**, which wipes the whole flash after a confirmation and is only used when the device reported no sector layout.
+   - Click **Flash Firmware**. The tool erases, then streams blocks of the interface's transfer size (read from the DFU functional descriptor, 1024 bytes if absent) with \`DFU_DNLOAD\`, polling \`DFU_GETSTATUS\` between blocks, and runs the manifestation phase. On DfuSe, **Verify** then reads each written range back with \`DFU_UPLOAD\` and compares it, naming the first differing address on a mismatch. Plain DFU 1.1 downloads have no read-back verification.
+5. **Read back (optional):**
+   - **Read length (bytes)**, a **From address** field (DfuSe) and **Read device to .bin** dump the device with \`DFU_UPLOAD\` to a file named like \`dfu-read-<address>-<length>.bin\`. The read stops at the requested length or at the first short packet, so a protected device may return less than you asked for.
+6. **Reboot to Application:**
+   - With **Jump to application after flash** ticked, the tool sends the DfuSe leave sequence (set address plus a zero-length download) and the device starts the new firmware. Untick it to stay in DFU mode, for example to flash another alt setting. If a plain DFU device does not restart by itself, tie BOOT0 back to GND and press reset. **Disconnect** just releases the device.
 
 ---
 
 ### 4. Implementation & Architecture
 
-- **Driver:** [\`src/utils/dfuDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/dfuDriver.js) — USB DFU 1.1 / DfuSe driver: state machine polling, DFU interface and functional-descriptor discovery, DFU suffix and DfuSe image parsing, and block chunking.
-- **Workbench:** [\`src/components/tools/DfuFlasher.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/DfuFlasher.jsx) — device card, firmware loader with DFU-suffix check, address/page-size inputs, progress bar and session log.
+- **Driver:** [\`src/utils/dfuDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/dfuDriver.js) — USB DFU 1.1 / DfuSe driver: state machine polling, DFU interface and functional-descriptor discovery, DfuSe memory-layout parsing and sector-erase planning, DFU suffix and DfuSe image parsing, block chunking, upload, verify, leave and detach.
+- **Workbench:** [\`src/components/tools/DfuFlasher.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/DfuFlasher.jsx) — device panel with alt-setting picker, firmware loader (.bin / .dfu / .hex) with DFU-suffix check, address/page-size inputs, erase/verify/leave options, read-back, progress bar and session log.
 - **Tests:** [\`tests/dfuDriver.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/dfuDriver.test.js).
 `
   }

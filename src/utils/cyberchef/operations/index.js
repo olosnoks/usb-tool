@@ -1,6 +1,7 @@
 /**
  * Operations Index & Auto-Loader
- * Registers 80+ high-value operations into the global CyberChef OperationRegistry.
+ * Registers every operation into the global CyberChef OperationRegistry
+ * (the UI shows the live count from registry.getAll().length).
  */
 
 import registry from '../core/OperationRegistry.js';
@@ -21,6 +22,8 @@ import { customOperations, CustomScript } from './Custom.js';
 import { networkParserOperations } from './NetworkParsers.js';
 import { UntarOperation } from './compression.js';
 import { cryptanalysisOperations } from './Cryptanalysis.js';
+import { textOperations } from './textOps.js';
+import { encodingOperations } from './encodingOps.js';
 
 export const ALL_OPERATIONS = [
   ...dataFormatOperations,
@@ -38,6 +41,8 @@ export const ALL_OPERATIONS = [
   ...cipherOperations,
   ...obfuscationOperations,
   ...flowControlOperations,
+  ...textOperations,
+  ...encodingOperations,
   ...customOperations
 ];
 
@@ -63,7 +68,9 @@ export {
   CustomScript,
   networkParserOperations,
   UntarOperation,
-  cryptanalysisOperations
+  cryptanalysisOperations,
+  textOperations,
+  encodingOperations
 };
 
 export default ALL_OPERATIONS;

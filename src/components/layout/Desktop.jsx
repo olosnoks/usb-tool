@@ -5,6 +5,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState, useCallback } from
 import { LayoutGrid, Layers, X, AppWindow, BookOpen } from 'lucide-react';
 import ToolWindow from './ToolWindow';
 import CircuitBoardBackground from './CircuitBoardBackground';
+import StartButton from './StartMenu';
 import { displayTitle, snapZoneFor, snapGeometry } from '../../utils/windowManager';
 
 // Below this width (phones, narrow split screens) every window fills the desktop.
@@ -13,7 +14,8 @@ export const FORCE_MAXIMIZE_BELOW_PX = 768;
 export default function Desktop({
   state, viewport, onViewport, renderTool, metaFor,
   onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onTile, onCascade, onCloseAll,
-  onZoomStep, onToggleFit, onDuplicate, onSnap, onResetZoom
+  onZoomStep, onToggleFit, onDuplicate, onSnap, onResetZoom,
+  onLaunch, onOpenPinouts, onOpenHardwareIntel, activeTool
 }) {
   const ref = useRef(null);
   const rectRef = useRef({ left: 0, top: 0 });
@@ -66,7 +68,7 @@ export default function Desktop({
             <div className="max-w-md">
               {state.windows.length
                 ? 'Click a window in the taskbar below to bring it back.'
-                : 'Pick a tool from the sidebar. Open several at once, each in its own window, to watch different devices side by side.'}
+                : 'Open the Start menu (bottom left) and pick a tool. Open several at once, each in its own window, to watch different devices side by side.'}
             </div>
             {!state.windows.length && (
               <a
@@ -108,9 +110,10 @@ export default function Desktop({
         ))}
       </div>
 
-      {/* Taskbar */}
-      {state.windows.length > 0 && (
-        <div data-testid="taskbar" className="shrink-0 h-9 border-t border-slate-800 bg-slate-950/90 backdrop-blur flex items-center gap-1 px-2 font-mono text-[11px] overflow-x-auto">
+      {/* Taskbar: Start button, one button per window, then tile / cascade / close-all */}
+      <div data-testid="taskbar" className="shrink-0 h-9 border-t border-slate-800 bg-slate-950/90 backdrop-blur flex items-center gap-1 px-2 font-mono text-[11px]">
+        <StartButton onLaunch={onLaunch} onOpenPinouts={onOpenPinouts} onOpenHardwareIntel={onOpenHardwareIntel} activeTool={activeTool} />
+        <div className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto">
           {[...state.windows].sort((a, b) => (a.openedAt || 0) - (b.openedAt || 0)).map((w) => {
             const Icon = metaFor?.(w.toolId)?.icon;
             const active = state.focusedId === w.id && !w.minimized;
@@ -124,12 +127,11 @@ export default function Desktop({
               </button>
             );
           })}
-          <span className="flex-1" />
-          <button onClick={onTile} disabled={!anyOpen} title="Tile the open windows in a grid" className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"><LayoutGrid className="w-3.5 h-3.5" /></button>
-          <button onClick={onCascade} disabled={!anyOpen} title="Cascade the open windows" className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"><Layers className="w-3.5 h-3.5" /></button>
-          <button onClick={onCloseAll} title="Close every window" className="p-1.5 rounded text-slate-400 hover:text-rose-300 hover:bg-slate-800"><X className="w-3.5 h-3.5" /></button>
         </div>
-      )}
+        <button onClick={onTile} disabled={!anyOpen} title="Tile the open windows in a grid" className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"><LayoutGrid className="w-3.5 h-3.5" /></button>
+        <button onClick={onCascade} disabled={!anyOpen} title="Cascade the open windows" className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"><Layers className="w-3.5 h-3.5" /></button>
+        <button onClick={onCloseAll} title="Close every window" className="p-1.5 rounded text-slate-400 hover:text-rose-300 hover:bg-slate-800"><X className="w-3.5 h-3.5" /></button>
+      </div>
     </div>
   );
 }

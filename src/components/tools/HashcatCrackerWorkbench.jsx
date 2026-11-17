@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { Play, Square, Download, Zap, KeyRound, Cpu } from 'lucide-react';
 import WordlistPicker from './common/WordlistPicker';
-import { HASH_MODES, RULE_SETS, hashOne, normalizeHash, expandRules, ruleMultiplier, parseMask, maskKeyspace, maskCandidates } from '../../utils/hashCrack';
+import { HASH_MODES, RULE_SETS, hashOne, parseTargets, maskPassword, expandRules, ruleMultiplier, parseMask, maskKeyspace, maskCandidates } from '../../utils/hashCrack';
 import { gpuAvailable, GpuMd5Cracker } from '../../utils/gpuCrack';
 
 /**
@@ -24,6 +24,7 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
   const [running, setRunning] = useState(false);
   const [stats, setStats] = useState({ tried: 0, rate: 0, elapsed: 0, total: 0, found: 0 });
   const [pot, setPot] = useState([]); // [{ hash, password|null }]
+  const [targetError, setTargetError] = useState('');
   const [useGpu, setUseGpu] = useState(false);
   const [gpuNote, setGpuNote] = useState('');
   const cancelRef = useRef(false);
@@ -53,15 +54,27 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
   }
 
   const start = async () => {
-    const targets = targetsText.split('\n').map((l) => normalizeHash(l)).filter(Boolean);
-    if (targets.length === 0) { log('Enter at least one target hash'); return; }
+    const { targets: parsed, errors: badLines } = parseTargets(targetsText, modeId, salt);
+    if (badLines.length) {
+      const first = badLines[0];
+      setTargetError(`Line ${first.line}: ${first.error}${badLines.length > 1 ? ` (+${badLines.length - 1} more problem line(s))` : ''}`);
+      log(`Target hashes rejected: ${badLines.length} problem line(s)`);
+      return;
+    }
+    setTargetError('');
+    if (parsed.length === 0) { log('Enter at least one target hash'); return; }
+    const targets = parsed.map((t) => t.hash);
+    const keyOf = (t) => `${t.salt}\u0000${t.hash}`;
     if (attack !== 'mask' && words.length === 0) { log('Load a wordlist first'); return; }
     if (attack === 'mask' && maskSpace === 0) { log('Invalid mask'); return; }
 
     setRunning(true); cancelRef.current = false;
-    const remaining = new Map(targets.map((h) => [h, true]));
+    // Group targets by salt so each candidate is hashed once per distinct salt (once overall for unsalted modes).
+    const bySalt = new Map();
+    for (const t of parsed) { if (!bySalt.has(t.salt)) bySalt.set(t.salt, new Set()); bySalt.get(t.salt).add(t.hash); }
     const found = new Map();
-    setPot(targets.map((h) => ({ hash: h, password: null })));
+    let remainingCount = parsed.length;
+    setPot(parsed.map((t) => ({ hash: t.hash, salt: t.salt, password: null })));
     setStats({ tried: 0, rate: 0, elapsed: 0, total: estTotal, found: 0 });
 
     // --- GPU (WebGPU) path: MD5 + mask only, self-tested before trusting ---
@@ -72,7 +85,7 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
         const t0 = performance.now();
         await gpuRef.current.crackMask(maskSets, targets, {
           shouldStop: () => cancelRef.current,
-          onFound: (hit) => { found.set(hit.hex, hit.password); setPot((prev) => prev.map((row) => (row.hash === hit.hex ? { ...row, password: hit.password } : row))); log(`Cracked ${hit.hex.slice(0, 16)}… = "${hit.password}" (GPU)`); },
+          onFound: (hit) => { found.set(hit.hex, hit.password); setPot((prev) => prev.map((row) => (row.hash === hit.hex ? { ...row, password: hit.password } : row))); log(`Cracked ${hit.hex.slice(0, 16)}… ${maskPassword(hit.password)} (GPU)`); },
           onProgress: (done, total) => { const el = (performance.now() - t0) / 1000; setStats({ tried: done, rate: Math.round(done / Math.max(el, 0.001)), elapsed: Math.round(el * 10) / 10, total, found: found.size }); },
         });
         log(cancelRef.current ? `Stopped — ${found.size}/${targets.length} cracked (GPU)` : `Done — ${found.size}/${targets.length} cracked (GPU)`);
@@ -84,7 +97,7 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
       }
     }
 
-    log(`Cracking ${targets.length} ${mode.label} hash(es), attack=${attack}${attack === 'rules' ? `(${ruleSet})` : ''}${attack === 'mask' ? ` mask=${mask} (${maskSpace.toLocaleString()} candidates)` : ''}…`);
+    log(`Cracking ${targets.length} ${mode.label} hash(es), attack=${attack}${attack === 'rules' ? `(${ruleSet})` : ''}${attack === 'mask' ? ` mask of ${maskSets.length} position(s) (${maskSpace.toLocaleString()} candidates)` : ''}…`);
 
     const t0 = performance.now();
     let tried = 0;
@@ -95,15 +108,19 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
 
     for (const cand of candidateGen()) {
       if (cancelRef.current) { log(`Stopped after ${tried} candidate(s) — ${found.size} cracked`); break; }
-      const h = await hashOne(modeId, cand, salt);
       tried++;
-      if (remaining.has(h) && !found.has(h)) {
-        found.set(h, cand);
-        remaining.delete(h);
-        setPot((prev) => prev.map((row) => (row.hash === h ? { ...row, password: cand } : row)));
-        log(`Cracked ${h.slice(0, 16)}… = "${cand}"`);
-        if (remaining.size === 0) { flush(); break; }
+      for (const [sl, hashes] of bySalt) {
+        const h = await hashOne(modeId, cand, sl);
+        const key = `${sl}\u0000${h}`;
+        if (hashes.has(h) && !found.has(key)) {
+          found.set(key, cand);
+          remainingCount--;
+          setPot((prev) => prev.map((row) => (keyOf(row) === key ? { ...row, password: cand } : row)));
+          // The plaintext stays in the pot table / potfile only; the exportable session log gets a masked form.
+          log(`Cracked ${h.slice(0, 16)}… ${maskPassword(cand)}`);
+        }
       }
+      if (remainingCount === 0) { flush(); break; }
       if (tried % 400 === 0) { flush(); await new Promise((r) => setTimeout(r, 0)); }
     }
     flush();
@@ -116,7 +133,7 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
   const crackedRows = pot.filter((r) => r.password !== null);
 
   const exportPot = () => {
-    const txt = pot.map((r) => `${r.hash}:${r.password ?? ''}`).join('\n');
+    const txt = pot.map((r) => `${r.hash}:${r.salt ? `${r.salt}:` : ''}${r.password ?? ''}`).join('\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain' })); a.download = 'cracked.potfile'; a.click(); URL.revokeObjectURL(a.href);
   };
 
@@ -135,7 +152,7 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
         </label>
         {mode.salt && (
           <label className="text-xs text-slate-400">Salt
-            <input value={salt} onChange={(e) => setSalt(e.target.value)} className="block mt-1 w-40 bg-slate-900 border border-slate-800 rounded p-1.5 text-sm font-mono" placeholder="shared salt" />
+            <input value={salt} onChange={(e) => setSalt(e.target.value)} className="block mt-1 w-40 bg-slate-900 border border-slate-800 rounded p-1.5 text-sm font-mono" placeholder="shared salt (if no hash:salt)" />
           </label>
         )}
         <div className="flex rounded overflow-hidden border border-slate-800 text-xs">
@@ -145,8 +162,9 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
         </div>
       </div>
 
-      <label className="block text-xs text-slate-400 mb-1">Target hash(es) — one per line</label>
+      <label className="block text-xs text-slate-400 mb-1">Target hash(es) — one per line{mode.salt ? ' (hash:salt per line, or use the shared Salt box)' : ''}</label>
       <textarea value={targetsText} onChange={(e) => setTargetsText(e.target.value)} rows={3} spellCheck={false} className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-xs font-mono mb-3" placeholder={'5d41402abc4b2a76b9719d911017c592\n8846f7eaee8fb117ad06bdd830b7586c'} />
+      {targetError && <div className="text-xs text-red-300 mb-3 -mt-2">{targetError}</div>}
 
       {attack !== 'mask' ? (
         <div className="mb-3">
@@ -209,7 +227,7 @@ export default function HashcatCrackerWorkbench({ onLogMessage }) {
             <tbody>
               {pot.map((r, i) => (
                 <tr key={i} className="border-b border-slate-900 last:border-0">
-                  <td className="px-2 py-1 text-slate-400 break-all">{r.hash}</td>
+                  <td className="px-2 py-1 text-slate-400 break-all">{r.hash}{r.salt ? `:${r.salt}` : ''}</td>
                   <td className={`px-2 py-1 ${r.password !== null ? 'text-emerald-400' : 'text-slate-600'}`}>{r.password !== null ? r.password : (running ? '…' : 'not cracked')}</td>
                 </tr>
               ))}

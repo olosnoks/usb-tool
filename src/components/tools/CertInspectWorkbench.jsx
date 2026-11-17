@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Globe, FileUp, ClipboardPaste, Search, RefreshCw, ShieldCheck, ShieldAlert, Download } from 'lucide-react';
-import { parseCertificate, toDER, splitPemChain } from '../../utils/x509';
+import { parseCertificate, toDER, loadCertificateBundle, buildChain, matchHostname, spkiPin, fingerprintHex, pemFromDer, weaknessHints } from '../../utils/x509';
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
 import { isBackendConfigured, tlsCert } from '../../utils/backendClient';
 import ProxyConfig from './common/ProxyConfig';
@@ -15,16 +15,19 @@ import ProxyConfig from './common/ProxyConfig';
  * *issued* certificate, which may differ from the one a server currently serves.
  */
 
-async function fingerprint(der, alg) {
-  const buf = await crypto.subtle.digest(alg, der);
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':');
-}
-
 async function buildInfo(der) {
   const parsed = parseCertificate(der);
-  const fps = { sha256: await fingerprint(der, 'SHA-256'), sha1: await fingerprint(der, 'SHA-1'), size: der.length };
+  const fps = {
+    sha256: await fingerprintHex(der, 'SHA-256'),
+    sha1: await fingerprintHex(der, 'SHA-1'),
+    sha512: await fingerprintHex(der, 'SHA-512'),
+    pin: await spkiPin(parsed),
+    size: der.length,
+  };
   return { parsed, fps, der };
 }
+
+const clip = (h, n = 160) => (h.length > n ? `${h.slice(0, n)}… (${h.length / 2} bytes)` : h);
 
 function Row({ label, value, cls = '' }) {
   if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) return null;
@@ -37,10 +40,11 @@ function CertDetails({ parsed: i, fps, der }) {
   const pk = i.publicKey || {};
   const pkStr = `${pk.algorithm}${pk.bits ? ` ${pk.bits}-bit` : ''}${pk.curve ? ` ${pk.curve}` : ''}${pk.exponent ? ` (e=${pk.exponent})` : ''}`;
   const downloadPem = () => {
-    const b64 = btoa(String.fromCharCode(...der)).replace(/(.{64})/g, '$1\n');
-    const pem = `-----BEGIN CERTIFICATE-----\n${b64}\n-----END CERTIFICATE-----\n`;
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([pem], { type: 'application/x-pem-file' })); a.download = 'certificate.pem'; a.click(); URL.revokeObjectURL(a.href);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([pemFromDer(der)], { type: 'application/x-pem-file' })); a.download = 'certificate.pem'; a.click(); URL.revokeObjectURL(a.href);
   };
+  const hints = weaknessHints(i);
+  const policies = (i.certificatePolicies || []).map((p) => `${p.name ? `${p.name} ` : ''}(${p.oid})${p.cps.length ? ` CPS: ${p.cps.join(', ')}` : ''}${p.notices.length ? ` notice: ${p.notices.join(' ')}` : ''}`);
+  const nc = i.nameConstraints;
   return (
     <table className="w-full border-collapse text-sm">
       <tbody>
@@ -65,11 +69,56 @@ function CertDetails({ parsed: i, fps, der }) {
         <Row label="OCSP" value={i.ocsp} />
         <Row label="CA Issuers" value={i.caIssuers} />
         <Row label="Critical exts" value={i.criticalExtensions} />
+        <Row label="Policies" value={policies} />
+        {nc && <Row label="Name constraints" value={[nc.permitted.length ? `permitted: ${nc.permitted.join(', ')}` : '', nc.excluded.length ? `excluded: ${nc.excluded.join(', ')}` : ''].filter(Boolean).join(' | ') || '(empty)'} />}
+        {i.tlsFeatures && i.tlsFeatures.length > 0 && <Row label="TLS feature" value={`${i.tlsFeatures.join(', ')}${i.mustStaple ? ' (OCSP must-staple)' : ''}`} />}
+        {i.scts && <Row label="Embedded SCTs" value={i.scts.length ? i.scts.map((t) => `log ${t.logId.slice(0, 16)}… @ ${t.timestamp}`) : '(none decoded)'} />}
+        {(i.unknownExtensions || []).map((u) => <Row key={u.oid} label={`Ext ${u.name || u.oid}`} value={`${u.name ? `${u.oid} · ` : ''}${u.critical ? 'critical · ' : ''}${clip(u.hex)}`} />)}
+        {hints.length > 0 && <Row label="Weakness hints" value={<ul className="list-disc ml-4 font-sans">{hints.map((h) => <li key={h.text} className={h.level === 'bad' ? 'text-red-400' : 'text-amber-400'}>{h.text}</li>)}</ul>} />}
         <Row label="SHA-256" value={fps.sha256} />
         <Row label="SHA-1" value={fps.sha1} />
+        <Row label="SHA-512" value={fps.sha512} />
+        <Row label="SPKI pin (SHA-256, base64)" value={fps.pin} />
         <Row label="DER size" value={<span>{fps.size} bytes <button onClick={downloadPem} className="ml-2 inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300 font-sans"><Download size={11} /> PEM</button></span>} />
       </tbody>
     </table>
+  );
+}
+
+function ChainPanel({ bundle, selected, onSelect }) {
+  const { infos, chainInfo } = bundle;
+  const { chain, unused, problems, valid } = chainInfo;
+  const sigBadge = (e) => (e.sig == null ? '' : e.sig.ok === true ? 'signature OK' : e.sig.ok === false ? 'signature FAILED' : 'signature unchecked');
+  return (
+    <div className="mb-3 border border-slate-800 rounded bg-slate-950 p-2 text-xs">
+      <div className="mb-1 flex items-center gap-2 font-sans">
+        {valid
+          ? <span className="inline-flex items-center gap-1 text-green-400"><ShieldCheck size={14} /> Chain complete and every signature verifies ({chain.length} cert{chain.length === 1 ? '' : 's'}, leaf to root)</span>
+          : <span className="inline-flex items-center gap-1 text-red-400"><ShieldAlert size={14} /> Chain has problems</span>}
+      </div>
+      <p className="text-[10px] text-slate-500 mb-1">Signatures are checked with Web Crypto between the supplied certificates only; no trust store is consulted, so a self-signed root is reported but not trusted.</p>
+      <ol className="space-y-1">
+        {chain.map((e, n) => {
+          const info = infos[e.index];
+          return (
+            <li key={e.index}>
+              <button onClick={() => onSelect(info)} className={`w-full text-left px-2 py-1 rounded border font-mono ${selected === info.der ? 'border-cyan-700 bg-cyan-950/30' : 'border-slate-800 hover:bg-slate-800/60'}`}>
+                <span className="text-slate-500">{n === 0 ? 'leaf' : e.selfSigned ? 'root' : 'intermediate'} · cert {e.index}</span> <span className="text-slate-200 break-all">{e.parsed.subject}</span>
+                {sigBadge(e) && <span className={`ml-2 ${e.sig.ok === true ? 'text-green-400' : e.sig.ok === false ? 'text-red-400' : 'text-amber-400'}`}>{sigBadge(e)}</span>}
+                {e.notes.filter((x) => x.level !== 'info').map((x) => <span key={x.text} className={`ml-2 ${x.level === 'bad' ? 'text-red-400' : 'text-amber-400'}`}>[{x.text}]</span>)}
+                {e.selfSigned && <span className="ml-2 text-amber-400">[self-signed]</span>}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+      {unused.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1 items-center font-sans"><span className="text-slate-500">Not in the leaf's chain:</span>
+          {unused.map((i) => <button key={i} onClick={() => onSelect(infos[i])} className="px-2 py-0.5 text-[10px] bg-slate-800 border border-slate-700 rounded hover:bg-slate-700">cert {i}</button>)}
+        </div>
+      )}
+      {problems.length > 0 && <ul className="mt-1 list-disc ml-4 text-red-300 font-sans">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+    </div>
   );
 }
 
@@ -86,11 +135,31 @@ export default function CertInspectWorkbench({ onLogMessage }) {
 
   // paste
   const [pasteText, setPasteText] = useState('');
-  const [chain, setChain] = useState([]);
 
-  const show = async (der, note) => {
+  // bundle (file / paste): every cert, plus the verified chain
+  const [bundle, setBundle] = useState(null); // { infos: [info], chainInfo, selected }
+  const [expectHost, setExpectHost] = useState('');
+
+  const clearStale = () => { setCertList(null); setBundle(null); };
+
+  const show = async (der, note, { keepBundle = false } = {}) => {
     try { setResult(await buildInfo(der)); setError(''); if (note) log(note); }
-    catch (e) { setError(e.message); setResult(null); log(`Cert parse error: ${e.message}`); }
+    catch (e) { setError(e.message); setResult(null); clearStale(); log(`Cert parse error: ${e.message}`); }
+    if (!keepBundle) setBundle(null);
+  };
+
+  // Load every certificate of a PEM bundle / PKCS#7 / single DER, order and verify the chain.
+  const showBundle = async (ders, note) => {
+    try {
+      if (!ders.length) throw new Error('No certificates found in the input.');
+      const infos = [];
+      for (const d of ders) infos.push(await buildInfo(d));
+      const chainInfo = await buildChain(ders);
+      const first = chainInfo.chain[0]?.index ?? 0;
+      setBundle({ infos, chainInfo });
+      setResult(infos[first]); setError(''); setCertList(null);
+      log(`${note} (${infos.length} certificate${infos.length === 1 ? '' : 's'}; chain ${chainInfo.valid ? 'valid' : 'has problems'})`);
+    } catch (e) { setError(e.message); setResult(null); clearStale(); log(`Cert parse error: ${e.message}`); }
   };
 
   // --- URL mode ---
@@ -145,11 +214,12 @@ export default function CertInspectWorkbench({ onLogMessage }) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
+    reader.onerror = () => { setError('Could not read the file.'); setResult(null); clearStale(); };
     reader.onload = async (ev) => {
-      const bytes = new Uint8Array(ev.target.result);
-      const head = new TextDecoder('latin1').decode(bytes.subarray(0, 32));
-      const der = head.includes('-----BEGIN') ? toDER(new TextDecoder().decode(bytes)) : bytes;
-      await show(der, `Parsed ${file.name}`);
+      let ders;
+      try { ders = loadCertificateBundle(new Uint8Array(ev.target.result)); }
+      catch (err) { setError(err.message); setResult(null); clearStale(); log(`Cert parse error: ${err.message}`); return; }
+      await showBundle(ders, `Parsed ${file.name}`);
     };
     reader.readAsArrayBuffer(file);
     e.target.value = '';
@@ -157,11 +227,14 @@ export default function CertInspectWorkbench({ onLogMessage }) {
 
   // --- Paste mode ---
   const parsePaste = async () => {
-    const blocks = splitPemChain(pasteText);
-    if (blocks.length === 0) { if (pasteText.trim()) { await show(toDER(pasteText), 'Parsed pasted certificate'); setChain([]); } return; }
-    setChain(blocks);
-    await show(toDER(blocks[0]), `Parsed pasted certificate (chain of ${blocks.length})`);
+    if (!pasteText.trim()) return;
+    let ders;
+    try { ders = loadCertificateBundle(pasteText); }
+    catch (err) { setError(err.message); setResult(null); clearStale(); log(`Cert parse error: ${err.message}`); return; }
+    await showBundle(ders, 'Parsed pasted certificate(s)');
   };
+
+  const hostCheck = result && expectHost.trim() ? matchHostname(result.parsed, expectHost) : null;
 
   const TABS = [{ id: 'url', label: 'From URL', icon: Globe }, { id: 'file', label: 'From file', icon: FileUp }, { id: 'paste', label: 'Paste PEM', icon: ClipboardPaste }];
 
@@ -205,7 +278,8 @@ export default function CertInspectWorkbench({ onLogMessage }) {
 
       {mode === 'file' && (
         <div className="mb-3">
-          <input type="file" accept=".pem,.crt,.cer,.der" onChange={handleFile} className="bg-slate-900 border border-slate-800 rounded p-1 text-gray-200 text-xs" />
+          <p className="text-[10px] text-slate-500 mb-1">Every certificate in a PEM bundle or PKCS#7 (.p7b) file is loaded and the chain is verified.</p>
+          <input type="file" accept=".pem,.crt,.cer,.der,.p7b,.p7c,.pb7" onChange={handleFile} className="bg-slate-900 border border-slate-800 rounded p-1 text-gray-200 text-xs" />
         </div>
       )}
 
@@ -213,13 +287,10 @@ export default function CertInspectWorkbench({ onLogMessage }) {
         <div className="mb-3">
           <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={6} spellCheck={false} placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----" className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-[11px] font-mono resize-y" />
           <button onClick={parsePaste} className="mt-1 px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 inline-flex items-center gap-1"><ClipboardPaste size={14} /> Parse</button>
-          {chain.length > 1 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {chain.map((b, idx) => <button key={idx} onClick={() => show(toDER(b), `Chain cert ${idx}`)} className="px-2 py-0.5 text-[10px] bg-slate-800 border border-slate-700 rounded hover:bg-slate-700">cert {idx}{idx === 0 ? ' (leaf)' : ''}</button>)}
-            </div>
-          )}
         </div>
       )}
+
+      {bundle && <ChainPanel bundle={bundle} selected={result?.der} onSelect={(info) => { setResult(info); setError(''); }} />}
 
       {error && <p className="text-red-400 text-xs font-mono mb-2">Error: {error}</p>}
 
@@ -229,6 +300,14 @@ export default function CertInspectWorkbench({ onLogMessage }) {
             {result.parsed.expired || result.parsed.notYetValid
               ? <span className="inline-flex items-center gap-1 text-red-400"><ShieldAlert size={15} /> {result.parsed.expired ? 'Expired' : 'Not yet valid'}</span>
               : <span className="inline-flex items-center gap-1 text-green-400"><ShieldCheck size={15} /> Valid{result.parsed.daysUntilExpiry <= 30 ? ` — expires in ${result.parsed.daysUntilExpiry} day(s)` : ''}</span>}
+          </div>
+          <div className="mb-2 font-sans flex flex-wrap items-center gap-2">
+            <input value={expectHost} onChange={(e) => setExpectHost(e.target.value)} placeholder="check hostname or IP against this certificate" className="flex-1 min-w-[14rem] max-w-md bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono" />
+            {hostCheck && (
+              <span className={`text-xs ${hostCheck.match ? 'text-green-400' : 'text-red-400'}`}>
+                {hostCheck.match ? `Match: ${hostCheck.matchedName} (${hostCheck.via})` : `No match: ${hostCheck.reason}`}
+              </span>
+            )}
           </div>
           <CertDetails {...result} />
         </div>

@@ -154,23 +154,26 @@ describe('Wardrive Demo Generator', () => {
     expect(res.bounds).toBeNull();
   });
 
-  it('generates standard WiGLE Wifi 1.6 CSV with Biscuit Pro header', () => {
+  it('generates standard WiGLE Wifi 1.6 CSV with a SYNTHETIC header', () => {
     const res = generateDemoAps({ text: 'A', latCenter: 32.0, lonCenter: -90.0, seed: 1 });
     const csvWithPreheader = generateWigleCsv(res.aps, true);
     expect(csvWithPreheader).toContain('WigleWifi-1.6');
-    expect(csvWithPreheader).toContain('model=Biscuit Pro');
-    expect(csvWithPreheader).toContain('brand=Biscuit Shop');
+    expect(csvWithPreheader).toContain('appRelease=SYNTHETIC-DEMO-DATA');
+    expect(csvWithPreheader).toContain('brand=SYNTHETIC-NOT-REAL-SURVEY-DATA');
+    expect(csvWithPreheader).not.toContain('Biscuit');
     expect(csvWithPreheader).toContain('MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type');
     expect(csvWithPreheader).toContain(',,,WIFI');
 
+    // The SYNTHETIC marker lives in the pre-header, so it cannot be dropped.
     const csvWithoutPreheader = generateWigleCsv(res.aps, false);
-    expect(csvWithoutPreheader.startsWith('MAC,SSID,AuthMode,FirstSeen,Channel,Frequency')).toBe(true);
+    expect(csvWithoutPreheader.startsWith('WigleWifi-1.6,appRelease=SYNTHETIC-DEMO-DATA')).toBe(true);
   });
 
   it('generates Kepler / test CSV format', () => {
     const res = generateDemoAps({ text: 'TEST', latCenter: 32.0, lonCenter: -90.0, seed: 1 });
     const csv = generateTestCsv(res.aps);
-    expect(csv.startsWith('mac,ssid,auth,first_seen,channel,rssi,lat,lon')).toBe(true);
+    expect(csv.startsWith('mac,ssid,auth,first_seen,channel,rssi,lat,lon,synthetic')).toBe(true);
+    expect(csv.trim().split('\n').slice(1).every((l) => l.endsWith(',SYNTHETIC'))).toBe(true);
     const lines = csv.trim().split('\n');
     expect(lines.length).toBe(res.aps.length + 1);
   });
@@ -417,7 +420,7 @@ describe('Wardrive Demo Generator', () => {
     expect(noLimit[0].part).toBe(1);
     expect(noLimit[0].totalParts).toBe(1);
     expect(noLimit[0].content).toContain('WigleWifi-1.6');
-    expect(noLimit[0].content).toContain('model=Biscuit Pro');
+    expect(noLimit[0].content).toContain('model=SYNTHETIC');
 
     // 2. Small size limit -> breaks into multiple files, each under limit
     const smallLimit = 5000; // 5KB limit

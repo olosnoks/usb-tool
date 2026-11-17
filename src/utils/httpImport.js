@@ -3,6 +3,7 @@
 
 // Tokenize a shell-ish command line, respecting single/double quotes and
 // backslash-newline line continuations.
+const BS = String.fromCharCode(92);
 function tokenize(cmd) {
   const s = cmd.replace(/\\\r?\n/g, ' ');
   const tokens = [];
@@ -24,6 +25,8 @@ function tokenize(cmd) {
           else tok += s[i++];
         }
         i++;
+      } else if (c === BS && i + 1 < s.length) {
+        tok += s[i + 1]; i += 2; // unquoted backslash escapes the next character
       } else {
         tok += c; i++;
       }
@@ -98,12 +101,61 @@ export function parseRawHttp(input) {
   return { method, url, headers: headerLines.join('\n'), body: body.trim() };
 }
 
-// Build a copy-paste curl command from the request fields.
-export function toCurl({ method, url, headers, body }) {
-  const parts = [`curl -i -X ${method} ${JSON.stringify(url)}`];
+// POSIX single-quote escaping: the result is inert in sh/bash/zsh (no expansion).
+export function shQuote(str) {
+  return `'${String(str ?? '').replace(/'/g, "'\\''")}'`;
+}
+
+/** Header text ("Key: Value" per line) -> [[k, v]]. */
+export function headerPairs(headers) {
+  const out = [];
   (headers || '').split('\n').forEach((line) => {
-    if (line.trim()) parts.push(`-H ${JSON.stringify(line.trim())}`);
+    const i = line.indexOf(':');
+    if (i > 0 && line.slice(0, i).trim()) out.push([line.slice(0, i).trim(), line.slice(i + 1).trim()]);
   });
-  if (body && method !== 'GET' && method !== 'HEAD') parts.push(`--data ${JSON.stringify(body)}`);
+  return out;
+}
+
+const hasBody = (method, body) => !!body && method !== 'GET' && method !== 'HEAD';
+
+// Build a copy-paste curl command from the request fields. Every user-controlled
+// value is single-quoted with ' -> '\'' so shell metacharacters stay inert, and
+// --data-raw is used so a body starting with @ is never read as a file.
+export function toCurl({ method, url, headers, body }) {
+  const parts = [`curl -i -X ${shQuote(method)} --url ${shQuote(url)}`];
+  headerPairs(headers).forEach(([k, v]) => parts.push(`-H ${shQuote(`${k}: ${v}`)}`));
+  if (hasBody(method, body)) parts.push(`--data-raw ${shQuote(body)}`);
   return parts.join(' ');
+}
+
+/** Browser fetch() snippet. */
+export function toFetch({ method, url, headers, body }) {
+  const h = Object.fromEntries(headerPairs(headers));
+  const opts = { method, ...(Object.keys(h).length ? { headers: h } : {}), ...(hasBody(method, body) ? { body } : {}) };
+  return `fetch(${JSON.stringify(url)}, ${JSON.stringify(opts, null, 2)});`;
+}
+
+const psQuote = (v) => `'${String(v ?? '').replace(/'/g, "''")}'`;
+
+/** PowerShell Invoke-WebRequest command (single-quoted, so $ and backticks are inert). */
+export function toPowerShell({ method, url, headers, body }) {
+  const pairs = headerPairs(headers);
+  const ct = pairs.find(([k]) => k.toLowerCase() === 'content-type');
+  const rest = pairs.filter((p) => p !== ct);
+  const parts = [`Invoke-WebRequest -UseBasicParsing -Uri ${psQuote(url)} -Method ${psQuote(method)}`];
+  if (rest.length) parts.push(`-Headers @{ ${rest.map(([k, v]) => `${psQuote(k)} = ${psQuote(v)}`).join('; ')} }`);
+  if (ct) parts.push(`-ContentType ${psQuote(ct[1])}`);
+  if (hasBody(method, body)) parts.push(`-Body ${psQuote(body)}`);
+  return parts.join(' ');
+}
+
+/** Python requests snippet. */
+export function toPython({ method, url, headers, body }) {
+  const lit = (v) => JSON.stringify(String(v ?? ''));
+  const pairs = headerPairs(headers);
+  let call = `resp = requests.request(${lit(method)}, ${lit(url)}`;
+  if (pairs.length) call += `,\n    headers={${pairs.map(([k, v]) => `${lit(k)}: ${lit(v)}`).join(', ')}}`;
+  if (hasBody(method, body)) call += `,\n    data=${lit(body)}.encode("utf-8")`;
+  call += ')';
+  return ['import requests', '', call, 'print(resp.status_code)', 'print(resp.text)'].join('\n');
 }

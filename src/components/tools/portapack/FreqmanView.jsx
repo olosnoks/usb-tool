@@ -1,6 +1,7 @@
 // "freqman" view of the PortaPack workbench (PortapackWorkbench.jsx).
 // Extracted as-is; all state and handlers come in as props.
-import { Download, Trash2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Download, Trash2, Upload, RotateCcw } from 'lucide-react';
 
 export default function FreqmanView({
   customFreqInput,
@@ -12,21 +13,53 @@ export default function FreqmanView({
   handleTunePreset,
   setCustomFreqInput,
   setCustomLabel,
-  setCustomMod
+  setCustomMod,
+  onFreqmanChange
 }) {
+  const fileRef = useRef(null);
+  const [notice, setNotice] = useState('');
+  const [, setTick] = useState(0);
+  const changed = () => { setTick((t) => t + 1); if (onFreqmanChange) onFreqmanChange(); };
+  const onImportFile = async (file) => {
+    if (!file) return;
+    try {
+      const res = driver.importFreqmanTxt(await file.text());
+      setNotice(res.applied
+        ? `Imported ${res.imported} entr${res.imported === 1 ? 'y' : 'ies'} from ${file.name}; ${res.rejected} line${res.rejected === 1 ? '' : 's'} rejected, ${res.duplicates} duplicate${res.duplicates === 1 ? '' : 's'} skipped.`
+        : `Nothing imported from ${file.name}: no valid lines (${res.rejected} rejected). The list was not changed.`);
+      changed();
+    } catch (e) { setNotice(`Could not read ${file.name}: ${e.message}`); }
+  };
   return (
     <div className="space-y-4 flex-1 flex flex-col">
       <div className="flex items-center justify-between">
         <span className="text-xs font-mono text-slate-400">
           /FREQMAN/ DATABASE ({driver.freqList.length} FREQUENCIES)
         </span>
-        <button
-          onClick={handleExportFreqman}
-          className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded text-xs font-mono transition flex items-center gap-1.5"
-        >
-          <Download className="w-3.5 h-3.5" /> Export FREQMAN.TXT
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => fileRef.current && fileRef.current.click()}
+            className="px-2.5 py-1 bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/30 text-sky-300 rounded text-xs font-mono transition flex items-center gap-1.5"
+          >
+            <Upload className="w-3.5 h-3.5" /> Import FREQMAN.TXT
+          </button>
+          <input ref={fileRef} type="file" accept=".txt,text/plain" className="hidden" data-testid="freqman-import"
+            onChange={(e) => { onImportFile(e.target.files && e.target.files[0]); e.target.value = ''; }} />
+          <button
+            onClick={() => { driver.resetFreqmanToPresets(); setNotice('List reset to the built-in presets.'); changed(); }}
+            className="px-2.5 py-1 bg-slate-700/40 hover:bg-slate-700/60 border border-slate-600/50 text-slate-300 rounded text-xs font-mono transition flex items-center gap-1.5"
+          >
+            <RotateCcw className="w-3.5 h-3.5" /> Reset to presets
+          </button>
+          <button
+            onClick={handleExportFreqman}
+            className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded text-xs font-mono transition flex items-center gap-1.5"
+          >
+            <Download className="w-3.5 h-3.5" /> Export FREQMAN.TXT
+          </button>
+        </div>
       </div>
+      {notice && <div role="status" className="text-[11px] font-mono text-slate-300 bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5">{notice}</div>}
 
       {/* Frequency List Table */}
       <div className="flex-1 bg-slate-950 border border-slate-800 rounded-xl overflow-y-auto max-h-64 divide-y divide-slate-800/60 font-mono text-xs">
@@ -52,7 +85,7 @@ export default function FreqmanView({
                 TUNE
               </button>
               <button
-                onClick={() => driver.deleteFrequency(item.id)}
+                onClick={() => { driver.deleteFrequency(item.id); changed(); }}
                 className="p-1 hover:text-rose-400 text-slate-500 transition"
                 title="Delete"
               >

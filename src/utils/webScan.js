@@ -10,11 +10,11 @@
 // route the request through a proxy (netClient). Same-origin and CORS-enabled
 // targets work directly.
 
-import { proxiedFetch, isProxyEnabled, describeNetworkError } from './netClient';
+import { proxiedFetch, isProxyEnabled, describeNetworkError, getSetCookie } from './netClient';
 
 const SEVERITY_ORDER = { High: 0, Medium: 1, Low: 2, Info: 3 };
 
-function headerChecks(url, headers) {
+function headerChecks(url, headers, setCookies = null) {
   const findings = [];
   const has = (name) => headers.has(name);
   const get = (name) => headers.get(name) || '';
@@ -48,7 +48,7 @@ function headerChecks(url, headers) {
   else if (acao === '*') add('Low', '942', 'CORS allows any origin (*); review whether this endpoint should be public.');
 
   // Cookies (browsers usually strip Set-Cookie from fetch; visible via a proxy)
-  const setCookie = get('set-cookie');
+  const setCookie = setCookies ? setCookies.join('\n') : get('set-cookie');
   if (setCookie) {
     if (!/;\s*secure/i.test(setCookie)) add('Medium', '614', 'Set-Cookie without the Secure flag; cookie can be sent over HTTP.');
     if (!/;\s*httponly/i.test(setCookie)) add('Medium', '1004', 'Set-Cookie without HttpOnly; cookie is readable by JavaScript.');
@@ -59,7 +59,27 @@ function headerChecks(url, headers) {
 }
 
 /**
- * Run passive checks against a URL. Returns { ok, alerts, note } or { ok:false, error }.
+ * Pure: run passive checks on headers that were already fetched (a Headers
+ * object). `setCookies` is the cookie array from netClient.getSetCookie, or null.
+ * Returns { alerts, note }.
+ */
+export function scanHeaders(url, headers, { status, setCookies = null } = {}) {
+  const headerNames = [...headers.keys()];
+  const alerts = headerChecks(url, headers, setCookies);
+  alerts.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+  let note = `${status ? `HTTP ${status}. ` : ''}${headerNames.length} response header(s) readable.`;
+  if (!isProxyEnabled() && headerNames.length <= 3) {
+    note += ' Few headers are readable cross-origin without CORS; use a proxy for a complete passive scan.';
+  }
+  if (alerts.length === 0) {
+    alerts.push({ severity: 'Info', cwe: '', desc: 'No passive issues found in readable headers.' });
+  }
+  return { alerts, note };
+}
+
+/**
+ * Fetch a URL and run passive checks (thin wrapper for other callers).
+ * Returns { ok, alerts, note } or { ok:false, error }.
  */
 export async function runPassiveScan(url) {
   let resp;
@@ -68,16 +88,6 @@ export async function runPassiveScan(url) {
   } catch (e) {
     return { ok: false, error: describeNetworkError(e) };
   }
-  const headerNames = [...resp.headers.keys()];
-  const alerts = headerChecks(url, resp.headers);
-  alerts.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
-
-  let note = `HTTP ${resp.status}. ${headerNames.length} response header(s) readable.`;
-  if (!isProxyEnabled() && headerNames.length <= 3) {
-    note += ' Few headers are readable cross-origin without CORS — use a proxy for a complete passive scan.';
-  }
-  if (alerts.length === 0) {
-    alerts.push({ severity: 'Info', cwe: '', desc: 'No passive issues found in readable headers.' });
-  }
+  const { alerts, note } = scanHeaders(url, resp.headers, { status: resp.status, setCookies: getSetCookie(resp) });
   return { ok: true, alerts, note };
 }

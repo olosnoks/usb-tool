@@ -1,18 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Terminal as TerminalIcon, 
-  ChevronUp, 
-  ChevronDown, 
-  Send, 
-  Trash2, 
-  Maximize2, 
-  X, 
-  CornerDownLeft, 
-  Sparkles,
+import {
+  Terminal as TerminalIcon,
+  ChevronUp,
+  Send,
+  Trash2,
+  Maximize2,
+  CornerDownLeft,
   ArrowDown
 } from 'lucide-react';
 import { useSerial } from '../../context/SerialContext';
-import SerialControls from './SerialControls';
+
+// The serial terminal drawer drops down from just below the app header. Its toggle and the
+// connection controls live in the header (Header.jsx); this renders nothing while closed.
 
 export default function TerminalDrawer({
   isOpen,
@@ -24,9 +23,6 @@ export default function TerminalDrawer({
     entries,
     sendString,
     clearLogs,
-    rxActivity,
-    txActivity,
-    baudRate
   } = useSerial();
 
   const [inputVal, setInputVal] = useState('');
@@ -35,6 +31,7 @@ export default function TerminalDrawer({
   const [drawerHeight, setDrawerHeight] = useState(240); // px
   const [isResizing, setIsResizing] = useState(false);
 
+  const drawerRef = useRef(null);
   const logContainerRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -56,7 +53,9 @@ export default function TerminalDrawer({
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (!isResizing) return;
-      const newHeight = window.innerHeight - e.clientY;
+      // the drawer hangs from the header, so its height is the pointer's distance from the drawer top
+      const top = drawerRef.current?.getBoundingClientRect().top ?? 0;
+      const newHeight = e.clientY - top;
       if (newHeight >= 120 && newHeight <= window.innerHeight * 0.7) {
         setDrawerHeight(newHeight);
       }
@@ -76,101 +75,57 @@ export default function TerminalDrawer({
     };
   }, [isResizing]);
 
-  const latestEntry = entries[entries.length - 1];
+  if (!isOpen) return null;
 
   return (
-    <div className="border-t border-cyber-border bg-[#050a16] shadow-2xl transition-all duration-200 z-20 font-mono text-xs flex flex-col shrink-0">
-      {/* Drawer Resize Handle */}
-      {isOpen && (
-        <div
-          onMouseDown={() => setIsResizing(true)}
-          className="h-1.5 w-full bg-slate-900 hover:bg-cyan-500 cursor-ns-resize transition-colors"
-          title="Drag to resize terminal drawer"
-        />
-      )}
-
-      {/* Drawer Header Bar (Always visible) — now also hosts the serial controls */}
-      <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2 bg-slate-950 border-b border-slate-900 select-none flex-wrap">
-        {/* Left: Drawer title + serial connection controls */}
-        <div className="flex items-center gap-2.5 min-w-0">
-          <button
-            onClick={onToggleOpen}
-            className="flex items-center gap-1.5 text-cyan-400 font-bold hover:text-cyan-300 transition-colors shrink-0"
-            title={isOpen ? 'Collapse drawer' : 'Expand live terminal drawer'}
-          >
-            <TerminalIcon className="w-4 h-4" />
-            <span className="text-xs hidden sm:inline">SERIAL</span>
-            {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
-          </button>
-
-          {/* Serial connection controls (moved here from the app header) */}
-          <SerialControls />
-
-          {/* Collapsed live line preview */}
-          {!isOpen && latestEntry && (
-            <div className="hidden lg:flex items-center gap-2 text-[11px] text-slate-400 truncate min-w-0">
-              <span className="text-slate-600 text-[10px]">{latestEntry.timestamp}</span>
-              <span className={`truncate font-mono ${latestEntry.type === 'rx' ? 'text-cyan-300' : latestEntry.type === 'tx' ? 'text-amber-400' : 'text-slate-400'}`}>
-                {latestEntry.text}
-              </span>
-            </div>
-          )}
+    <div ref={drawerRef} className="border-b border-cyber-border bg-[#050a16] shadow-2xl z-20 font-mono text-xs flex flex-col shrink-0">
+      {/* Drawer action bar */}
+      <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-1.5 bg-slate-950 border-b border-slate-900 select-none">
+        <div className="flex items-center gap-1.5 text-cyan-400 font-bold">
+          <TerminalIcon className="w-3.5 h-3.5" />
+          <span className="text-[11px]">SERIAL TERMINAL</span>
         </div>
-
-        {/* Right: Quick Drawer Actions */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {isOpen && (
-            <>
-              {/* Auto scroll */}
-              <button
-                onClick={() => setAutoFollow(!autoFollow)}
-                title="Auto-scroll to bottom"
-                className={`p-1.5 rounded border text-xs transition-all ${
-                  autoFollow 
-                    ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300' 
-                    : 'bg-slate-900 border-slate-800 text-slate-400'
-                }`}
-              >
-                <ArrowDown className="w-3 h-3" />
-              </button>
-
-              {/* Clear */}
-              <button
-                onClick={clearLogs}
-                title="Clear drawer logs"
-                className="p-1.5 rounded bg-slate-900 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-500/40 text-slate-400 hover:text-rose-400"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
-
-              {/* Full screen terminal jump */}
-              {onNavigateToFullTerminal && (
-                <button
-                  onClick={onNavigateToFullTerminal}
-                  title="Switch to Full Terminal Workspace"
-                  className="flex items-center gap-1 px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-cyan-300 text-[10px] font-bold"
-                >
-                  <Maximize2 className="w-3 h-3" />
-                  <span className="hidden sm:inline">FULL VIEW</span>
-                </button>
-              )}
-            </>
+          <button
+            onClick={() => setAutoFollow(!autoFollow)}
+            title="Auto-scroll to the newest line"
+            className={`p-1.5 rounded border text-xs transition-all ${
+              autoFollow
+                ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300'
+                : 'bg-slate-900 border-slate-800 text-slate-400'
+            }`}
+          >
+            <ArrowDown className="w-3 h-3" />
+          </button>
+          <button
+            onClick={clearLogs}
+            title="Clear drawer logs"
+            className="p-1.5 rounded bg-slate-900 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-500/40 text-slate-400 hover:text-rose-400"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+          {onNavigateToFullTerminal && (
+            <button
+              onClick={onNavigateToFullTerminal}
+              title="Switch to Full Terminal Workspace"
+              className="flex items-center gap-1 px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-cyan-300 text-[10px] font-bold"
+            >
+              <Maximize2 className="w-3 h-3" />
+              <span className="hidden sm:inline">FULL VIEW</span>
+            </button>
           )}
-
-          {/* Toggle / Minimize button */}
           <button
             onClick={onToggleOpen}
             className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800"
-            title={isOpen ? "Collapse drawer" : "Expand live terminal drawer"}
+            title="Collapse drawer"
           >
-            {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+            <ChevronUp className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Expanded Content Area */}
-      {isOpen && (
-        <div 
+      {/* Log and send bar */}
+      <div 
           style={{ height: `${drawerHeight}px` }} 
           className="flex flex-col bg-[#020510] overflow-hidden"
         >
@@ -257,8 +212,14 @@ export default function TerminalDrawer({
               <span className="hidden sm:inline">SEND</span>
             </button>
           </form>
-        </div>
-      )}
+      </div>
+
+      {/* Resize handle: drag down to grow */}
+      <div
+        onMouseDown={() => setIsResizing(true)}
+        className="h-1.5 w-full bg-slate-900 hover:bg-cyan-500 cursor-ns-resize transition-colors"
+        title="Drag to resize terminal drawer"
+      />
     </div>
   );
 }

@@ -239,26 +239,16 @@ describe('UI Workbench Render Sanity Check', () => {
     expect(chefEl.type).not.toBe(duckyEl.type);
   });
 
-  it('renders Header with Workspace wiki link when activeTool is null', () => {
-    const html = renderToString(
-      <SerialProvider>
-        <Header activeTool={null} />
-      </SerialProvider>
-    );
-
-    expect(html).toContain('href="./wiki/?article=workspace"');
-    expect(html).toContain('(Workspace)');
-  });
-
-  it('renders Header with tool-specific wiki link when activeTool is provided', () => {
+  it('renders Header without a wiki link (each tool window has its own) and a swatch-only theme picker', () => {
     const html = renderToString(
       <SerialProvider>
         <Header activeTool="flasher" />
       </SerialProvider>
     );
 
-    expect(html).toContain('href="./wiki/?tool=flasher"');
-    expect(html).toContain('(Firmware Flasher)');
+    expect(html).not.toContain('./wiki/');
+    expect(html).toContain('aria-label="App colour theme"');
+    expect(html).toContain('App colour theme: ');
   });
 
   it('renders Desktop empty state with direct link to Workspace wiki article', () => {

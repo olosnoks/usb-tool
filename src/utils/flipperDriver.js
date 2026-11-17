@@ -180,21 +180,41 @@ export function formatFileSize(bytes) {
   return `${num} B`;
 }
 
-function isPrintableText(uint8Array) {
+/**
+ * True when the WHOLE buffer is valid UTF-8 without control bytes (other than
+ * tab/LF/VT/FF/CR/ESC). Scans every byte; no 512-byte sniff.
+ */
+export function isPrintableText(uint8Array) {
   if (!uint8Array || uint8Array.length === 0) return true;
-  const len = Math.min(uint8Array.length, 512);
-  let nullBytes = 0;
-  for (let i = 0; i < len; i++) {
+  for (let i = 0; i < uint8Array.length; i++) {
     const b = uint8Array[i];
-    if (b === 0) nullBytes++;
-    if (b < 9 || (b > 13 && b < 32)) {
-      if (b !== 27) nullBytes++;
-    }
+    if (b === 0) return false;
+    if ((b < 9 || (b > 13 && b < 32)) && b !== 27) return false;
   }
-  return nullBytes === 0;
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(uint8Array);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function formatHexDump(uint8Array, maxBytes = 2048) {
+const MIME_BY_EXT = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp',
+  svg: 'image/svg+xml', ico: 'image/x-icon', txt: 'text/plain', log: 'text/plain', md: 'text/markdown',
+  json: 'application/json', csv: 'text/csv', html: 'text/html', xml: 'application/xml',
+  zip: 'application/zip', gz: 'application/gzip', pdf: 'application/pdf', wav: 'audio/wav',
+  mp3: 'audio/mpeg', bin: 'application/octet-stream', fap: 'application/octet-stream'
+};
+
+/** MIME type for a file name by extension; text-like Flipper formats default to text/plain. */
+export function mimeForFileName(name = '', isText = false) {
+  const ext = String(name).split('.').pop().toLowerCase();
+  if (MIME_BY_EXT[ext]) return MIME_BY_EXT[ext];
+  return isText ? 'text/plain' : 'application/octet-stream';
+}
+
+export function formatHexDump(uint8Array, maxBytes = 2048) {
   const slice = uint8Array.subarray(0, maxBytes);
   let out = '';
   for (let i = 0; i < slice.length; i += 16) {
@@ -1073,17 +1093,23 @@ export class FlipperZeroDriver {
   /**
    * Read real file content from Flipper storage via RPC
    */
+  async readRealFileBytes(filePath) {
+    if (!this.isConnected) return new Uint8Array(0);
+    await this.ensureRpcSession();
+    this.log(`[Storage RPC] Reading file ${filePath}...`, 'info');
+
+    // Tag 9: .PB_Storage.ReadRequest with path
+    const pathBytes = encodeString(1, filePath);
+    const mergedBytes = await this.sendRpcRequest(9, pathBytes, false, 10000);
+    if (!mergedBytes || mergedBytes.length === 0) return new Uint8Array(0);
+    return mergedBytes instanceof Uint8Array ? mergedBytes : Uint8Array.from(mergedBytes);
+  }
+
   async readRealFile(filePath) {
     if (!this.isConnected) return '';
     try {
-      await this.ensureRpcSession();
-      this.log(`[Storage RPC] Reading file ${filePath}...`, 'info');
-
-      // Tag 9: .PB_Storage.ReadRequest with path
-      const pathBytes = encodeString(1, filePath);
-      const mergedBytes = await this.sendRpcRequest(9, pathBytes, false, 10000);
-
-      if (!mergedBytes || mergedBytes.length === 0) return '';
+      const mergedBytes = await this.readRealFileBytes(filePath);
+      if (mergedBytes.length === 0) return '';
 
       if (isPrintableText(mergedBytes)) {
         return new TextDecoder('utf-8').decode(mergedBytes);

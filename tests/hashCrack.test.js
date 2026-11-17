@@ -95,3 +95,73 @@ describe('mask', () => {
     expect(got[9]).toBe('pin9');
   });
 });
+
+import { parseTargetLine, parseTargets, maskPassword, HASH_HEX_LENGTH } from '../src/utils/hashCrack.js';
+
+describe('hash:salt target parsing (DAT-9)', () => {
+  const md5pw = '5f4dcc3b5aa765d61d8327deb882cf99';
+  it('accepts hash:salt for salted modes and keeps colons inside the salt', () => {
+    expect(parseTargetLine(`${md5pw}:NaCl`, 'md5ps')).toEqual({ ok: true, hash: md5pw, salt: 'NaCl' });
+    expect(parseTargetLine(`${md5pw}:a:b:c`, 'md5sp')).toEqual({ ok: true, hash: md5pw, salt: 'a:b:c' });
+  });
+  it('falls back to the shared salt and errors when there is none', () => {
+    expect(parseTargetLine(md5pw, 'md5ps', 'shared')).toMatchObject({ ok: true, salt: 'shared' });
+    // a trailing colon (empty salt part) also uses the shared salt
+    expect(parseTargetLine(`${md5pw}:`, 'md5ps', 'shared')).toMatchObject({ ok: true, salt: 'shared' });
+    expect(parseTargetLine(`${md5pw}:`, 'md5ps').ok).toBe(false);
+    expect(parseTargetLine(md5pw, 'md5ps').ok).toBe(false);
+  });
+  it('ignores a trailing colon / suffix for unsalted modes', () => {
+    expect(parseTargetLine(`${md5pw}:`, 'md5')).toEqual({ ok: true, hash: md5pw, salt: '' });
+  });
+  it('rejects bcrypt and $id$ strings with a clear message instead of treating them as hex', () => {
+    for (const s of ['$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '$1$salt$qJH7.N4xYta3aEG/dfqo/0', '$6$rounds=5000$salt$abc']) {
+      const r = parseTargetLine(s, 'md5');
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/Unsupported hash format/);
+    }
+  });
+  it('validates hex and length per mode', () => {
+    expect(parseTargetLine('zzzz', 'md5').error).toMatch(/hex/);
+    expect(parseTargetLine('abcd', 'sha1').error).toMatch(/needs 40/);
+    for (const m of HASH_MODES) expect(HASH_HEX_LENGTH[m.id], m.id).toBeGreaterThan(0);
+  });
+  it('de-duplicates and reports line numbers for bad lines', () => {
+    const { targets, errors } = parseTargets(`${md5pw}\n${md5pw.toUpperCase()}\n\nnope\n`, 'md5');
+    expect(targets).toHaveLength(1);
+    expect(errors).toEqual([{ line: 4, error: 'not a hex digest' }]);
+  });
+  it('same hash with different salts stays distinct', () => {
+    expect(parseTargets(`${md5pw}:a\n${md5pw}:b`, 'md5ps').targets).toHaveLength(2);
+  });
+  it('cracks a salted hash from a hash:salt line', async () => {
+    const h = await hashOne('md5ps', 'password', 'NaCl');
+    const t = parseTargetLine(`${h}:NaCl`, 'md5ps');
+    expect(await hashOne('md5ps', 'password', t.salt)).toBe(t.hash);
+  });
+});
+
+describe('maskPassword', () => {
+  it('shows length only, never characters', () => {
+    expect(maskPassword('hunter2')).toBe('******* (7 chars)');
+    expect(maskPassword('a')).toBe('* (1 char)');
+    expect(maskPassword('x'.repeat(20))).toBe('************… (20 chars)');
+    expect(maskPassword('hunter2')).not.toMatch(/hunter/);
+  });
+});
+
+import { readFileSync } from 'node:fs';
+
+describe('cracker never logs plaintext (DAT-9 source guard)', () => {
+  const src = readFileSync(new URL('../src/components/tools/HashcatCrackerWorkbench.jsx', import.meta.url), 'utf8');
+  const logCalls = src.split('\n').filter((l) => /\blog\(/.test(l));
+  it('no log() call interpolates a candidate, password or mask literal', () => {
+    expect(logCalls.length).toBeGreaterThan(3);
+    for (const l of logCalls) {
+      expect(l, l).not.toMatch(/\$\{\s*(cand|hit\.password|password|mask)\s*\}/);
+    }
+  });
+  it('cracked lines go through maskPassword', () => {
+    expect(logCalls.filter((l) => /Cracked/.test(l)).every((l) => /maskPassword\(/.test(l))).toBe(true);
+  });
+});

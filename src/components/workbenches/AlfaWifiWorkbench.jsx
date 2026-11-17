@@ -123,6 +123,7 @@ import { getDeviceProfile, hasCapability, CAPABILITIES } from '../../utils/hardw
 import { identifyOS, getOsPresentation } from '../../utils/deviceFingerprinter';
 import { getChannelRecommendations } from '../../utils/channelAdvisor';
 import GeospatialMap from './GeospatialMap';
+import { mergeFix, createPacketRing, buildSurveyExport, parseSurveyExport, mergeSurveyInto, countWithoutFix } from '../../utils/alfaSurvey';
 
 
 
@@ -370,7 +371,8 @@ export default function AlfaWifiWorkbench() {
   channelRef.current = channel;
 
   const pendingFramesRef = useRef([]);
-  const rawPacketsRef = useRef([]); // Rolling ring buffer for PCAP export (capped at 50,000)
+  const rawPacketsRef = useRef(null); // O(1) ring buffer for PCAP export (capped at PCAP_MAX_CAPACITY)
+  if (rawPacketsRef.current === null) rawPacketsRef.current = createPacketRing(PCAP_MAX_CAPACITY);
   const channelStatsRef = useRef({});
   const handshakeTrackerRef = useRef(new HandshakeTracker());
   const packetCountRef = useRef(0);
@@ -863,11 +865,7 @@ export default function AlfaWifiWorkbench() {
 
           // Accumulate in raw packets ref
           for (const buf of batch) {
-            if (rawPacketsRef.current.length >= PCAP_MAX_CAPACITY) {
-              rawPacketsRef.current.shift();
-              setPcapBufferFull(true);
-            }
-            rawPacketsRef.current.push(buf);
+            if (rawPacketsRef.current.push(buf)) setPcapBufferFull(true);
             packetCountRef.current += 1;
             byteCountRef.current += buf.byteLength || buf.length || 0;
           }
@@ -1122,10 +1120,7 @@ export default function AlfaWifiWorkbench() {
                 type: frame.type || existing.type,
                 hasHandshake: existing.hasHandshake || hasHs,
                 originalHidden: Boolean(existing.originalHidden || (isFrameHidden && !existing.unmaskedSsid)),
-                latitude: existing.latitude ?? currentGps?.latitude ?? null,
-                longitude: existing.longitude ?? currentGps?.longitude ?? null,
-                accuracy: existing.accuracy ?? currentGps?.accuracy ?? null,
-                altitude: existing.altitude ?? currentGps?.altitude ?? null,
+                ...mergeFix(existing, { rssi: frame.rssi, fix: currentGps }),
                 ipAddress: resolvedIp
               };
             } else {
@@ -1157,10 +1152,7 @@ export default function AlfaWifiWorkbench() {
                 type: frame.type || 'Management',
                 hasHandshake: hasHs,
                 originalHidden: isFrameHidden,
-                latitude: currentGps?.latitude ?? null,
-                longitude: currentGps?.longitude ?? null,
-                accuracy: currentGps?.accuracy ?? null,
-                altitude: currentGps?.altitude ?? null,
+                ...mergeFix(null, { rssi: frame.rssi, fix: currentGps }),
                 ipAddress: resolvedIp
               };
               evaluateAndExecuteRules(rulesRef.current, newAp, RULE_EVENT_TYPES.DEVICE_CONNECTED);
@@ -1247,9 +1239,7 @@ export default function AlfaWifiWorkbench() {
                 signature: frame.signature || existing.signature || null,
                 tagSequence: frame.tagSequence || existing.tagSequence || [],
                 isProbing,
-                latitude: existing.latitude ?? currentGps?.latitude ?? null,
-                longitude: existing.longitude ?? currentGps?.longitude ?? null,
-                accuracy: existing.accuracy ?? currentGps?.accuracy ?? null,
+                ...mergeFix(existing, { rssi: frame.rssi, fix: currentGps }),
                 ipAddress: clientIp,
                 dhcpHostname: clientHost
               };
@@ -1273,9 +1263,7 @@ export default function AlfaWifiWorkbench() {
                 signature: frame.signature || null,
                 tagSequence: frame.tagSequence || [],
                 isProbing,
-                latitude: currentGps?.latitude ?? null,
-                longitude: currentGps?.longitude ?? null,
-                accuracy: currentGps?.accuracy ?? null,
+                ...mergeFix(null, { rssi: frame.rssi, fix: currentGps }),
                 ipAddress: clientIp,
                 dhcpHostname: clientHost
               };
@@ -1810,11 +1798,7 @@ export default function AlfaWifiWorkbench() {
                 bytesWritten: livePcapWriterRef.current.bytesWritten
               });
             } else {
-              if (rawPacketsRef.current.length >= PCAP_MAX_CAPACITY) {
-                rawPacketsRef.current.shift(); // Strict ring buffer: overwrite oldest
-                setPcapBufferFull(true);
-              }
-              rawPacketsRef.current.push(buffer);
+              if (rawPacketsRef.current.push(buffer)) setPcapBufferFull(true); // ring overwrites oldest
             }
 
             // If worker is running, offload heavy parsing to worker thread
@@ -1980,7 +1964,7 @@ export default function AlfaWifiWorkbench() {
     setHandshakes({});
     setHandshakeAlert(null);
     setRogueSuspects([]);
-    rawPacketsRef.current = [];
+    rawPacketsRef.current.clear();
     pendingFramesRef.current = [];
     packetCountRef.current = 0;
     deviceCountRef.current = 0;
@@ -2002,12 +1986,7 @@ export default function AlfaWifiWorkbench() {
 
   // 14. Export JSON
   const handleExportJson = () => {
-    const exportData = {
-      exportTimestamp: new Date().toISOString(),
-      monitorChannel: channel,
-      accessPoints: devices,
-      clientStations: clients
-    };
+    const exportData = buildSurveyExport(devices, clients, { monitorChannel: channel });
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportData, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
@@ -2017,6 +1996,30 @@ export default function AlfaWifiWorkbench() {
     downloadAnchor.remove();
   };
 
+  // 14b. Import survey JSON (round trip of the export above)
+  const surveyImportInputRef = useRef(null);
+  const handleImportSurveyFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      if (file.size > 25 * 1024 * 1024) throw new Error('File is too large to import.');
+      const parsed = parseSurveyExport(await file.text());
+      if (!parsed.ok) throw new Error(parsed.error);
+      const apRes = mergeSurveyInto(devices, parsed.devices);
+      const clRes = mergeSurveyInto(clients, parsed.clients);
+      setDevices(apRes.merged);
+      setClients(clRes.merged);
+      deviceCountRef.current = Object.keys(apRes.merged).length;
+      setStatusLevel('success');
+      setStatusMessage(`Imported survey: ${apRes.added} new AP(s), ${apRes.updated} AP position(s) improved, ${clRes.added} new client(s).`);
+    } catch (err) {
+      setStatusLevel('error');
+      setStatusMessage(`Survey import failed, nothing changed: ${err?.message || err}`);
+    }
+  };
+  const apsWithoutFix = useMemo(() => countWithoutFix(devices), [devices]);
+
   // 15. Export PCAP (Wireshark)
   const handleExportPcap = () => {
     if (rawPacketsRef.current.length === 0) {
@@ -2024,7 +2027,7 @@ export default function AlfaWifiWorkbench() {
       setStatusMessage('No raw packets captured yet to export.');
       return;
     }
-    downloadPcap(rawPacketsRef.current, `alfa_wifi_capture_${new Date().toISOString().replace(/[:.]/g, '-')}.pcap`);
+    downloadPcap(rawPacketsRef.current.toArray(), `alfa_wifi_capture_${new Date().toISOString().replace(/[:.]/g, '-')}.pcap`);
     setStatusLevel('success');
     setStatusMessage(`Exported ${rawPacketsRef.current.length} packets to Wireshark PCAP file.`);
   };
@@ -2036,9 +2039,12 @@ export default function AlfaWifiWorkbench() {
       setStatusMessage('No access points captured yet to export to Wigle CSV.');
       return;
     }
-    downloadWigleCsv(devices, `alfa_wardrive_wigle_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`);
+    const wigle = downloadWigleCsv(devices, `alfa_wardrive_wigle_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`);
     setStatusLevel('success');
-    setStatusMessage(`Exported ${Object.keys(devices).length} APs to Wigle.net standard CSV.`);
+    // rows without a GPS fix are skipped by the shared writer, so report what was actually written
+    setStatusMessage(wigle && typeof wigle.written === 'number'
+      ? `Exported ${wigle.written} APs to WiGLE CSV${wigle.skippedNoFix ? ` (${wigle.skippedNoFix} skipped: no GPS fix)` : ''}.`
+      : `Exported ${Object.keys(devices).length} APs to WiGLE CSV.`);
   };
 
   // 17. Export Executive HTML Summary Report
@@ -2131,7 +2137,7 @@ export default function AlfaWifiWorkbench() {
   const handleSaveSession = async () => {
     setIsSavingSession(true);
     try {
-      const saved = await saveSessionData(devices, rawPacketsRef.current, {
+      const saved = await saveSessionData(devices, rawPacketsRef.current.toArray(), {
         clients,
         channelStats: channelStatsRef.current,
         packetCount: rawPacketsRef.current.length
@@ -2173,7 +2179,8 @@ export default function AlfaWifiWorkbench() {
         channelStatsRef.current = { ...session.channelStats };
       }
       if (session.rawBuffers && Array.isArray(session.rawBuffers)) {
-        rawPacketsRef.current = [...session.rawBuffers];
+        rawPacketsRef.current.clear();
+        for (const b of session.rawBuffers) rawPacketsRef.current.push(b);
       }
       deviceCountRef.current = Object.keys(session.devices || {}).length;
 
@@ -2749,7 +2756,7 @@ export default function AlfaWifiWorkbench() {
             </button>
             <button
               onClick={() => {
-                rawPacketsRef.current = [];
+                rawPacketsRef.current.clear();
                 setPcapBufferFull(false);
               }}
               className="px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-600/40 text-xs transition"
@@ -3740,6 +3747,21 @@ export default function AlfaWifiWorkbench() {
               </div>
             )}
           </div>
+
+          <input ref={surveyImportInputRef} type="file" accept=".json,application/json" className="hidden" onChange={handleImportSurveyFile} />
+          <button
+            type="button"
+            onClick={() => surveyImportInputRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs transition font-bold"
+            title="Import a survey JSON exported from this tool and merge it into the current session"
+          >
+            <span>Import survey JSON</span>
+          </button>
+          {Object.keys(devices).length > 0 && (
+            <span className="text-[11px] text-slate-400" title="Access points with no GPS fix are skipped by WiGLE, GeoJSON and KML exports">
+              {apsWithoutFix} AP{apsWithoutFix === 1 ? '' : 's'} without GPS fix
+            </span>
+          )}
 
           {/* Session & Forensics Actions Dropdown Menu */}
           <div className="relative">
@@ -5031,7 +5053,7 @@ export default function AlfaWifiWorkbench() {
                   onClick={() => {
                     const mac = (selectedItem.data.bssid || selectedItem.data.clientMac || '').toUpperCase();
                     if (!mac) return;
-                    const count = downloadTargetedPcap(rawPacketsRef.current, mac);
+                    const count = downloadTargetedPcap(rawPacketsRef.current.toArray(), mac);
                     if (count > 0) {
                       setStatusMessage(`Exported targeted PCAP (${count.toLocaleString()} frames) for ${mac}`);
                       setStatusLevel('success');

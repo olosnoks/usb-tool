@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Bluetooth,
   BluetoothConnected,
@@ -16,7 +16,9 @@ import {
   Plus,
   X,
   TerminalSquare,
-  KeyRound
+  KeyRound,
+  Download,
+  ChevronDown
 } from 'lucide-react';
 import {
   buildGattTree,
@@ -33,6 +35,28 @@ import { useSerial } from '../../context/SerialContext';
 import StatusBadge from '../common/StatusBadge';
 import { WriteComposer, DfuPanel } from './ble/BleWriteAndDfu';
 import { record } from '../../utils/sessionLog';
+import {
+  gattToJson,
+  gattToMarkdown,
+  notificationsToCsv,
+  numericValue,
+  pushBounded,
+  teardownSubscriptions,
+  releaseBleSession,
+  NOTIFY_HISTORY_CAP
+} from '../../utils/bleExport';
+import pkg from '../../../package.json';
+
+function downloadText(text, filename, mime) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 const PROP_LABELS = [
   ['read', 'Read'],
@@ -101,6 +125,17 @@ export default function BleExplorer() {
 
   // Live notify subscriptions: uuid -> { characteristic, handler }
   const notifyRefs = useRef({});
+  // Bounded per-characteristic notification history (uuid -> entries), shown via historyTick.
+  const historyRef = useRef({});
+  const [, setHistoryTick] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // The gattserverdisconnected listener, kept so it can be removed.
+  const disconnectListenerRef = useRef(null);
+  // Advertisement watching (Chromium only, behind a flag in some versions).
+  const [adv, setAdv] = useState(null);
+  const [advWatching, setAdvWatching] = useState(false);
+  const advRef = useRef(null); // { dev, handler, abort }
+  const serialLiveRef = useRef(false);
 
   const bleAvailable = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
 
@@ -110,13 +145,36 @@ export default function BleExplorer() {
     setLog((prev) => [...prev.slice(-199), { ts, msg, kind }]);
   }, []);
 
+  const stopAdvertisements = useCallback(() => {
+    const cur = advRef.current;
+    advRef.current = null;
+    if (!cur) return;
+    try { cur.dev.removeEventListener('advertisementreceived', cur.handler); } catch { /* ignore */ }
+    try { cur.abort.abort(); } catch { /* ignore */ }
+  }, []);
+
+  const teardownNotifications = useCallback(() => {
+    teardownSubscriptions(notifyRefs.current);
+    notifyRefs.current = {};
+  }, []);
+
   const resetState = () => {
+    teardownNotifications();
+    stopAdvertisements();
+    setAdv(null);
+    setAdvWatching(false);
+    if (disconnectListenerRef.current) {
+      const { dev, fn } = disconnectListenerRef.current;
+      try { dev.removeEventListener('gattserverdisconnected', fn); } catch { /* ignore */ }
+      disconnectListenerRef.current = null;
+    }
     setDevice(null);
     setServer(null);
     setTree([]);
     setValues({});
     setLastRead(null);
-    notifyRefs.current = {};
+    historyRef.current = {};
+    setHistoryTick((t) => t + 1);
     setStatus('offline');
     setStatusMsg('No BLE device connected');
   };
@@ -164,7 +222,11 @@ export default function BleExplorer() {
       lastDeviceRef.current = dev;
       setPairingHint(null);
       setValues({});
-      dev.addEventListener('gattserverdisconnected', () => {
+      if (disconnectListenerRef.current) {
+        const prev = disconnectListenerRef.current;
+        try { prev.dev.removeEventListener('gattserverdisconnected', prev.fn); } catch { /* ignore */ }
+      }
+      const onGattDisconnected = () => {
         if (lastDeviceRef.current !== dev) return; // user disconnected or picked another device
         // Dropping the link while values are being read is the usual sign the
         // device wants an encrypted (paired) connection.
@@ -175,7 +237,9 @@ export default function BleExplorer() {
         setServer(null);
         setStatus('offline');
         setStatusMsg(`${dev.name || 'Device'} disconnected. Values below are from the last read.`);
-      });
+      };
+      dev.addEventListener('gattserverdisconnected', onGattDisconnected);
+      disconnectListenerRef.current = { dev, fn: onGattDisconnected };
       await connectTo(dev);
     } catch (err) {
       setBusy(false);
@@ -251,6 +315,17 @@ export default function BleExplorer() {
       }
       const handler = (e) => {
         const parsed = parseCharacteristicValue(ch.uuid, e.target.value);
+        const now = Date.now();
+        const list = historyRef.current[ch.uuid] || (historyRef.current[ch.uuid] = []);
+        pushBounded(list, {
+          ts: now,
+          characteristic: ch.uuid,
+          name: ch.name,
+          hex: parsed.hex,
+          decoded: parsed.decoded ? `${parsed.decoded.label}: ${parsed.decoded.text}` : '',
+          numeric: numericValue(parsed)
+        }, NOTIFY_HISTORY_CAP);
+        setHistoryTick((t) => t + 1);
         setValues((v) => ({ ...v, [ch.uuid]: { ...parsed, ts: Date.now(), notifying: true } }));
       };
       await ch._ref.startNotifications();
@@ -299,6 +374,75 @@ export default function BleExplorer() {
     await connectBle(new BleSerialPort(device, { serviceUuid: service.uuid }));
   };
 
+  serialLiveRef.current = serialConnected && serialTransport === 'ble';
+
+  // Unmount: stop notifications, drop listeners and release the GATT link, so
+  // navigating to another tool never leaves the device connected.
+  useEffect(() => () => {
+    stopAdvertisements();
+    const dev = lastDeviceRef.current;
+    lastDeviceRef.current = null; // so the disconnect event is not reported as a drop
+    const subs = notifyRefs.current;
+    notifyRefs.current = {};
+    const listener = disconnectListenerRef.current;
+    disconnectListenerRef.current = null;
+    // A link handed to the Terminal as a serial port belongs to that session now.
+    releaseBleSession({ subs, device: dev, disconnectListener: listener, keepLink: serialLiveRef.current });
+  }, [teardownNotifications, stopAdvertisements]);
+
+  const advSupported = !!device && typeof device.watchAdvertisements === 'function';
+
+  const handleWatchAdvertisements = async () => {
+    if (!advSupported || advRef.current) return;
+    const abort = new AbortController();
+    const handler = (e) => {
+      const mfg = [];
+      if (e.manufacturerData && typeof e.manufacturerData.forEach === 'function') {
+        e.manufacturerData.forEach((dv, id) => mfg.push({ companyId: id, hex: bytesToHex(dv) }));
+      }
+      setAdv({
+        ts: Date.now(),
+        rssi: typeof e.rssi === 'number' ? e.rssi : null,
+        txPower: typeof e.txPower === 'number' ? e.txPower : null,
+        manufacturerData: mfg
+      });
+    };
+    advRef.current = { dev: device, handler, abort };
+    device.addEventListener('advertisementreceived', handler);
+    try {
+      await device.watchAdvertisements({ signal: abort.signal });
+      setAdvWatching(true);
+      addLog('Watching advertisements for the selected device.', 'ok');
+    } catch (err) {
+      stopAdvertisements();
+      addLog(`Advertisement watching failed: ${err.message}`, 'err');
+    }
+  };
+
+  const handleStopAdvertisements = () => {
+    stopAdvertisements();
+    setAdvWatching(false);
+  };
+
+  const handleExportGatt = (kind) => {
+    if (!tree.length) return;
+    const opts = { toolVersion: pkg.version };
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const base = `gatt_${(device?.name || 'device').replace(/[^\w-]+/g, '_')}_${stamp}`;
+    if (kind === 'json') {
+      downloadText(JSON.stringify(gattToJson(device, tree, values, opts), null, 2), `${base}.json`, 'application/json');
+    } else {
+      downloadText(gattToMarkdown(device, tree, values, opts), `${base}.md`, 'text/markdown');
+    }
+    addLog(`Exported GATT tree as ${kind === 'json' ? 'JSON' : 'Markdown'}.`, 'ok');
+  };
+
+  const historyTotal = Object.values(historyRef.current).reduce((a, l) => a + l.length, 0);
+  const handleDownloadCsv = () => {
+    if (!historyTotal) return;
+    downloadText(notificationsToCsv(historyRef.current), `ble_notifications_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`, 'text/csv');
+  };
+
   const totalChars = tree.reduce((a, s) => a + s.characteristics.length, 0);
   const totalDescs = tree.reduce((a, s) => a + s.characteristics.reduce((b, c) => b + (c.descriptors?.length || 0), 0), 0);
 
@@ -317,12 +461,28 @@ export default function BleExplorer() {
             </p>
           </div>
         </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleExportGatt('json')}
+            disabled={tree.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-xs text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3.5 h-3.5" /> Export JSON
+          </button>
+          <button
+            onClick={() => handleExportGatt('markdown')}
+            disabled={tree.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-xs text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3.5 h-3.5" /> Export Markdown
+          </button>
         <StatusBadge
           status={status}
           label={status === 'online' ? 'GATT' : status === 'connecting' ? 'LINK' : 'IDLE'}
           value={status === 'online' ? 'Connected' : 'Offline'}
           pulse={status === 'connecting'}
         />
+        </div>
       </div>
 
       {!bleAvailable && (
@@ -430,6 +590,76 @@ export default function BleExplorer() {
             <Field label="Services" value={tree.length} />
             <Field label="Characteristics" value={totalChars} />
             <Field label="Descriptors" value={totalDescs} />
+          </div>
+        )}
+        {device && (
+          <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800 text-xs space-y-1" data-testid="ble-adv">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase text-slate-500">Advertisements</span>
+              {advSupported && !advWatching && (
+                <button onClick={handleWatchAdvertisements} className="px-2 py-0.5 rounded border border-slate-600/40 bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200">
+                  Watch advertisements
+                </button>
+              )}
+              {advSupported && advWatching && (
+                <button onClick={handleStopAdvertisements} className="px-2 py-0.5 rounded border border-slate-600/40 bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200">
+                  Stop watching
+                </button>
+              )}
+            </div>
+            {!advSupported && (
+              <div className="text-slate-500">
+                Advertisement watching is not supported in this browser (watchAdvertisements is missing; in Chrome it may be behind
+                chrome://flags/#enable-experimental-web-platform-features).
+              </div>
+            )}
+            {advSupported && !adv && (
+              <div className="text-slate-500">{advWatching ? 'Waiting for the next advertisement from this device…' : 'Not watching.'}</div>
+            )}
+            {adv && (
+              <div className="font-mono text-slate-300 space-y-0.5">
+                <div>RSSI {adv.rssi ?? 'n/a'} dBm · TX power {adv.txPower ?? 'n/a'} dBm · {new Date(adv.ts).toLocaleTimeString()}</div>
+                {adv.manufacturerData.length === 0 && <div className="text-slate-500">No manufacturer data in this advertisement.</div>}
+                {adv.manufacturerData.map((m) => (
+                  <div key={m.companyId} className="break-all">
+                    manufacturer 0x{m.companyId.toString(16).padStart(4, '0')}: {m.hex || '(empty)'}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {historyTotal > 0 && (
+          <div className="rounded-lg bg-slate-950/60 border border-slate-800 text-xs" data-testid="ble-history">
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <button onClick={() => setHistoryOpen((o) => !o)} className="flex items-center gap-1 text-slate-300 font-semibold">
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${historyOpen ? '' : '-rotate-90'}`} />
+                Notification history ({historyTotal})
+              </button>
+              <button onClick={handleDownloadCsv} className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded border border-slate-600/40 bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200">
+                <Download className="w-3 h-3" /> Download CSV
+              </button>
+            </div>
+            {historyOpen && (
+              <div className="px-2 pb-2 space-y-2">
+                {Object.entries(historyRef.current).map(([uuid, list]) => {
+                  const nums = list.map((r) => r.numeric).filter((n) => n != null);
+                  return (
+                    <div key={uuid} className="space-y-0.5">
+                      <div className="font-mono text-[11px] text-slate-400 break-all">{list[0]?.name} · {uuid} · {list.length} entries</div>
+                      {nums.length > 1 && <NumericSparkline values={nums.slice(-60)} />}
+                      <div className="font-mono text-[11px] max-h-32 overflow-y-auto">
+                        {list.slice(-20).reverse().map((r, i) => (
+                          <div key={`${r.ts}-${i}`} className="text-slate-300 break-all">
+                            <span className="text-slate-600">{new Date(r.ts).toLocaleTimeString()}</span> {r.hex || '(empty)'}{r.decoded ? ` · ${r.decoded}` : ''}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -578,6 +808,22 @@ export default function BleExplorer() {
         </div>
       </div>
     </div>
+  );
+}
+
+function NumericSparkline({ values }) {
+  const w = 160;
+  const h = 24;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const pts = values
+    .map((v, i) => `${((i / (values.length - 1)) * w).toFixed(1)},${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`)
+    .join(' ');
+  return (
+    <svg width={w} height={h} role="img" aria-label={`sparkline ${min} to ${max}`} className="text-blue-400">
+      <polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
   );
 }
 

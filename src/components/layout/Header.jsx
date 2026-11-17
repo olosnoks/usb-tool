@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Usb, 
   Unplug, 
   Sliders, 
   Activity, 
@@ -11,16 +10,17 @@ import {
   Cpu, 
   RefreshCw,
   Search,
-  BookOpen,
   Download,
   Smartphone,
-  PanelBottom,
-  Bluetooth
+  Bluetooth,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { useSerial } from '../../context/SerialContext';
 import { identifyUsbChip } from '../../utils/usbDatabase';
 import { APP_THEMES, applyAppTheme, loadAppThemeId, saveAppThemeId, themeSwatch } from '../../utils/appThemes';
-import { toolMeta } from '../ToolRegistry';
+import SerialControls from './SerialControls';
+import skonLogo from '../../assets/skon-logo.svg';
 
 export default function Header({
   activeTool = 'flasher',
@@ -32,7 +32,8 @@ export default function Header({
   onOpenHardwareIntel,
   onOpenPinouts
 }) {
-  const { isConnected, portInfo } = useSerial();
+  const { isConnected, portInfo, entries } = useSerial();
+  const latestEntry = entries?.[entries.length - 1];
 
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [appTheme, setAppTheme] = useState(() => loadAppThemeId());
@@ -66,7 +67,7 @@ export default function Header({
         {/* Brand & System Title */}
         <div className="flex items-center gap-2.5">
           <div className="relative flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-cyan-500/20 to-amber-500/10 border border-cyan-500/40 shadow-cyan-glow flex-shrink-0">
-            <Usb className="w-4 h-4 text-cyan-400" />
+            <img src={skonLogo} alt="Skon" className="w-7 h-auto sm:w-8 select-none" draggable="false" />
             <span className="absolute -bottom-1 -right-1 flex h-2 w-2">
               <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isConnected ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
               <span className={`relative inline-flex rounded-full h-2 w-2 ${isConnected ? 'bg-emerald-500' : 'bg-slate-600'}`}></span>
@@ -93,53 +94,57 @@ export default function Header({
           </div>
         </div>
 
-        {/* Utility controls (serial connection controls now live in the terminal drawer) */}
-        <div className="flex items-center gap-2">
-          {/* Terminal Drawer Toggle Button */}
+        {/* Serial: drawer toggle, connection controls and the latest line (the drawer drops down below the header) */}
+        <div className="flex items-center gap-2.5 min-w-0 flex-1 justify-center order-last w-full lg:order-none lg:w-auto">
           {onToggleDrawer && (
             <button
               onClick={onToggleDrawer}
-              title={isDrawerOpen ? "Hide Live Terminal Drawer" : "Show Live Terminal Drawer"}
-              className={`p-1.5 rounded-lg border text-xs transition-all ${
-                isDrawerOpen 
-                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-cyan-glow' 
-                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border-slate-800'
+              aria-expanded={!!isDrawerOpen}
+              title={isDrawerOpen ? 'Hide the serial terminal drawer (Ctrl+J)' : 'Show the serial terminal drawer (Ctrl+J)'}
+              className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-xs font-bold transition-all shrink-0 ${
+                isDrawerOpen
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-cyan-glow'
+                  : 'bg-slate-900 text-cyan-400 hover:text-cyan-300 border-slate-800'
               }`}
             >
-              <PanelBottom className="w-3.5 h-3.5" />
+              <Terminal className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">SERIAL</span>
+              {isDrawerOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
           )}
+          <SerialControls />
+          {!isDrawerOpen && latestEntry && (
+            <div className="hidden 2xl:flex items-center gap-2 text-[11px] text-slate-400 truncate min-w-0 max-w-md">
+              <span className="text-slate-600 text-[10px] shrink-0">{latestEntry.timestamp}</span>
+              <span className={`truncate ${latestEntry.type === 'rx' ? 'text-cyan-300' : latestEntry.type === 'tx' ? 'text-amber-400' : 'text-slate-400'}`}>
+                {latestEntry.text}
+              </span>
+            </div>
+          )}
+        </div>
 
-          {/* App colour theme (VS Code palettes + Dracula) */}
-          <div className="flex items-center gap-1 bg-slate-900 rounded-lg border border-slate-800 pl-2 pr-0.5" title="App colour theme">
-            <span className="flex rounded-sm overflow-hidden border border-slate-700 w-6 h-3.5 shrink-0">
+        {/* Utility controls */}
+        <div className="flex items-center gap-2">
+
+          {/* App colour theme: just the palette swatch; the native select sits invisibly on top so a click opens the list */}
+          <label
+            className="relative flex items-center justify-center p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 cursor-pointer"
+            title={`App colour theme: ${APP_THEMES.find((t) => t.id === appTheme)?.name || appTheme}`}
+          >
+            <span className="flex rounded-sm overflow-hidden border border-slate-700 w-6 h-3.5 shrink-0 pointer-events-none">
               {themeSwatch(appTheme).map((c, i) => <span key={i} className="flex-1" style={{ background: c }} />)}
             </span>
             <select
+              aria-label="App colour theme"
               value={appTheme}
               onChange={(e) => { setAppTheme(e.target.value); applyAppTheme(e.target.value); saveAppThemeId(e.target.value); }}
-              className="bg-transparent text-xs font-mono text-slate-300 px-1 py-1.5 outline-none cursor-pointer max-w-[6.5rem] md:max-w-[10rem]"
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             >
               {APP_THEMES.map((t) => (
                 <option key={t.id} value={t.id} className="bg-slate-900 text-slate-200">{t.name}</option>
               ))}
             </select>
-          </div>
-
-          {/* Standalone Wiki Link (Deep-linked to current active tool or Workspace) */}
-          <a
-            href={activeTool ? `./wiki/?tool=${activeTool}` : './wiki/?article=workspace'}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={`Open Wiki Documentation for ${activeTool ? toolMeta(activeTool).title : 'Workspace'}`}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold font-mono transition-all active:scale-95 shadow-sm shadow-indigo-500/10"
-          >
-            <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="hidden md:inline">WIKI</span>
-            <span className="text-[10px] text-indigo-200/80 max-w-[8rem] truncate hidden xl:inline">
-              {`(${activeTool ? toolMeta(activeTool).title : 'Workspace'})`}
-            </span>
-          </a>
+          </label>
 
           {/* Command Palette Trigger */}
           {onOpenCommandPalette && (

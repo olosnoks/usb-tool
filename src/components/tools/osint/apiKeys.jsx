@@ -7,6 +7,7 @@ const KEY_STORE = {
   shodan: 'skon.osint.shodanKey',
   urlscan: 'skon.osint.urlscanKey',
   hackertarget: 'skon.osint.htKey',
+  hibp: 'skon.breach.hibpKey',
 };
 
 export const getKey = (s) => { try { return localStorage.getItem(KEY_STORE[s]) || ''; } catch { return ''; } };

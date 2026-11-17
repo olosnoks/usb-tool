@@ -15,6 +15,8 @@ export default defineConfig({
     // to Shodan from the Worker (no CORS); here Vite does the same. Keep the
     // longer prefix first — Vite matches keys by prefix in order.
     proxy: {
+      '/api/crtsh': { target: 'https://crt.sh', changeOrigin: true, rewrite: (p) => p.replace(/^\/api\/crtsh/, '/') },
+      '/api/hibp': { target: 'https://haveibeenpwned.com', changeOrigin: true, rewrite: (p) => p.replace(/^\/api\/hibp/, '/api/v3') },
       '/api/shodan-exploits': { target: 'https://exploits.shodan.io', changeOrigin: true, rewrite: (p) => p.replace(/^\/api\/shodan-exploits/, '/api') },
       '/api/shodan': { target: 'https://api.shodan.io', changeOrigin: true, rewrite: (p) => p.replace(/^\/api\/shodan/, '') },
     }

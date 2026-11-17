@@ -109,6 +109,13 @@ export default function PortapackWorkbench() {
               allow="usb; microphone; geolocation; hid"
               onLoad={() => setIsLoading(false)}
             />
+            {/* GPL-3.0 §6: the app is served compiled, so offer its corresponding source from the same place */}
+            <div className="shrink-0 px-3 py-1 text-[10px] font-mono text-slate-500 border-t border-slate-900 bg-[#070a10]">
+              Mayhem Mobile is licensed under the GPL-3.0 (built from PortaPack Mayhem).{' '}
+              <a href="./mayhem/mayhem-mobile-source.zip" className="text-purple-300 hover:underline" download>Source code</a>
+              {' · '}
+              <a href="./mayhem/LICENSE.txt" className="text-purple-300 hover:underline" target="_blank" rel="noreferrer">License</a>
+            </div>
           </div>
         ) : (
           <div className="flex-1 min-h-0 overflow-auto p-4 bg-slate-950">

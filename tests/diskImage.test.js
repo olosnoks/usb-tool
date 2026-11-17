@@ -212,3 +212,139 @@ describe('drive access', () => {
     expect(buildDemoDisk().length).toBe(cap.totalBytes);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Opening a disk image as a File
+// ---------------------------------------------------------------------------
+
+import { fileReader, fileSectorReader } from '../src/utils/diskImage';
+
+/** A File stand-in that counts every slice() so tests can prove reads are range-limited. */
+function fakeFile(bytes) {
+  const slices = [];
+  return {
+    size: bytes.length,
+    slices,
+    slice(a, b) {
+      slices.push([a, b]);
+      const part = bytes.slice(a, b);
+      return { arrayBuffer: async () => part.buffer.slice(part.byteOffset, part.byteOffset + part.byteLength) };
+    }
+  };
+}
+
+/** Partition table, filesystem labels, root listing (with deleted entries) through any read function. */
+async function inspect(read) {
+  const reader = new DiskReader(async (lba, n) => read(lba * 512, n * 512), { blockSize: 512 });
+  const pt = await readPartitionTable((o, n) => reader.read(o, n));
+  const out = { scheme: pt.scheme, parts: [] };
+  for (const p of pt.partitions) {
+    const at = reader.at(p.startLba * 512);
+    const fs = await detectFilesystem(at);
+    const vol = await openVolume(at);
+    const list = vol ? await vol.list() : null;
+    out.parts.push({ type: p.typeName, startLba: p.startLba, sectors: p.sectors, fs, list: list && list.map((e) => ({ name: e.name, deleted: e.deleted, size: e.size, isDir: e.isDir })) });
+  }
+  return out;
+}
+
+describe('fileReader (open a disk image file)', () => {
+  const sample = [
+    { path: 'README.TXT', data: 'hello' },
+    { path: 'Long file name.txt', data: 'long names work' },
+    { path: 'DCIM/IMG_1.JPG', data: new Uint8Array(900).fill(7) },
+    { path: 'gone.txt', data: 'deleted', deleted: true }
+  ];
+
+  it('gives the same partition table, filesystems, listing and deleted entries as the in-memory path (FAT16, FAT32 and FAT12)', async () => {
+    const disks = [
+      buildMbrDisk(buildFatVolume({ sectors: 16384, fatBits: 16, label: 'SIXTEEN', files: sample }), { startLba: 2048, type: 0x06 }),
+      buildMbrDisk(buildFatVolume({ sectors: 70000, fatBits: 32, label: 'THIRTYTWO', files: sample }), { startLba: 2048, type: 0x0c }),
+      buildFatVolume({ sectors: 2880, fatBits: 12, label: 'FLOPPY', files: sample, sectorsPerCluster: 1 }) // no partition table
+    ];
+    for (const disk of disks) {
+      const mem = await inspect(memoryReader(disk));
+      const file = await inspect(fileReader(fakeFile(disk)));
+      expect(file).toEqual(mem);
+      expect(mem.parts.length).toBeGreaterThan(0);
+      expect(mem.parts[0].list.some((e) => e.deleted)).toBe(true);
+    }
+  });
+
+  it('also matches for GPT disks', async () => {
+    const disk = new Uint8Array(64 * 512);
+    disk[446 + 4] = 0xee; new DataView(disk.buffer).setUint32(446 + 8, 1, true); new DataView(disk.buffer).setUint32(446 + 12, 63, true);
+    disk[510] = 0x55; disk[511] = 0xaa;
+    disk.set(enc('EFI PART'), 512);
+    const dv = new DataView(disk.buffer);
+    dv.setUint32(512 + 72, 2, true); dv.setUint32(512 + 80, 4, true); dv.setUint32(512 + 84, 128, true);
+    disk.set([0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44, 0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7], 1024); // Microsoft basic data
+    dv.setUint32(1024 + 32, 34, true); dv.setUint32(1024 + 40, 63, true);
+    [...'data'].forEach((c, k) => dv.setUint16(1024 + 56 + k * 2, c.charCodeAt(0), true));
+    const a = await readPartitionTable(memoryReader(disk));
+    const b = await readPartitionTable(fileReader(fakeFile(disk)));
+    expect(b).toEqual(a);
+    expect(b.scheme).toBe('gpt');
+    expect(b.partitions[0]).toMatchObject({ typeName: 'Microsoft basic data', name: 'data', startLba: 34 });
+  });
+
+  it('reads exFAT identically through a File', async () => {
+    const sector = 512;
+    const img = new Uint8Array(64 * sector);
+    const dv = new DataView(img.buffer);
+    img.set(enc('EXFAT   '), 3);
+    dv.setUint32(80, 8, true); dv.setUint32(84, 1, true); dv.setUint32(88, 16, true); dv.setUint32(92, 40, true); dv.setUint32(96, 2, true);
+    dv.setUint32(100, 0xcafef00d, true); img[108] = 9; img[109] = 0;
+    dv.setUint32(8 * sector + 2 * 4, 0xffffffff, true);
+    const o = 16 * sector;
+    img[o] = 0x85; img[o + 1] = 2; dv.setUint16(o + 4, 0x20, true);
+    img[o + 32] = 0xc0; img[o + 33] = 3; img[o + 35] = 3; dv.setUint32(o + 40, 5, true); dv.setUint32(o + 52, 3, true); dv.setUint32(o + 56, 5, true);
+    img[o + 64] = 0xc1; [...'a.b'].forEach((c, i) => dv.setUint16(o + 66 + i * 2, c.charCodeAt(0), true));
+    img.set(enc('HELLO'), 16 * sector + sector); // cluster 3
+    const read = fileReader(fakeFile(img));
+    expect(await detectFilesystem(read)).toEqual(await detectFilesystem(memoryReader(img)));
+    const vol = await ExFatVolume.open(read);
+    const list = await vol.list();
+    expect(list.map((e) => e.name)).toEqual(['a.b']);
+    expect(text(await vol.readFile(list[0]))).toBe('HELLO');
+  });
+
+  it('never loads the whole file: only ranges are sliced', async () => {
+    const disk = buildMbrDisk(buildFatVolume({ sectors: 60000, fatBits: 16, label: 'BIGGER', files: sample }), { startLba: 2048, type: 0x06 });
+    const file = fakeFile(disk);
+    const result = await inspect(fileReader(file));
+    expect(result.parts[0].list.map((e) => e.name)).toContain('README.TXT');
+    const sliced = file.slices.reduce((n, [a, b]) => n + (b - a), 0);
+    expect(file.slices.length).toBeGreaterThan(0);
+    expect(file.slices.every(([a, b]) => b - a < disk.length / 10)).toBe(true);
+    expect(sliced).toBeLessThan(disk.length / 4);
+  });
+
+  it('zero-pads past the end of the file, and fileSectorReader reads whole sectors', async () => {
+    const bytes = Uint8Array.from({ length: 1000 }, (_, i) => (i % 250) + 1);
+    const read = fileReader(fakeFile(bytes));
+    const tail = await read(900, 300);
+    expect(Array.from(tail.subarray(0, 100))).toEqual(Array.from(bytes.subarray(900)));
+    expect(tail.subarray(100).every((b) => b === 0)).toBe(true);
+    expect((await read(5000, 10)).every((b) => b === 0)).toBe(true);
+    const sectors = await fileSectorReader(fakeFile(bytes))(1, 1);
+    expect(Array.from(sectors.subarray(0, 488))).toEqual(Array.from(bytes.subarray(512)));
+    expect(sectors.length).toBe(512);
+  });
+});
+
+describe('FAT free space', () => {
+  it('lists unallocated clusters, which is where deleted file data sits', async () => {
+    const vol0 = buildFatVolume({ sectors: 20000, fatBits: 16, files: [
+      { path: 'keep.txt', data: 'kept' },
+      { path: 'gone.bin', data: new Uint8Array(1500).fill(0x5a), deleted: true }
+    ] });
+    const vol = await FatVolume.open(memoryReader(vol0));
+    const gone = (await vol.list()).find((e) => e.deleted);
+    const ranges = await vol.freeRanges();
+    const at = vol.clusterOffset(gone.cluster);
+    expect(ranges.some((r) => at >= r.start && at + 1500 <= r.start + r.length)).toBe(true);
+    const keep = (await vol.list()).find((e) => e.name === 'keep.txt');
+    expect(ranges.every((r) => !(vol.clusterOffset(keep.cluster) >= r.start && vol.clusterOffset(keep.cluster) < r.start + r.length))).toBe(true);
+  });
+});

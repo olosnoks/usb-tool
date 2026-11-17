@@ -20,9 +20,9 @@ import {
 } from '../../utils/usbPdDriver';
 import StatusBadge from '../common/StatusBadge';
 
-import { confirmAction, useSessionError } from '../../utils/sessionLog';
+import { confirmAction, useSessionError, record } from '../../utils/sessionLog';
 export default function UsbPdWorkbench() {
-  const [client] = useState(() => new UsbPdClient(console.log));
+  const [client] = useState(() => new UsbPdClient((m) => record('USB-PD', 'info', m)));
   const [isConnected, setIsConnected] = useState(false);
 
   const [error, setError] = useSessionError('USB-PD');

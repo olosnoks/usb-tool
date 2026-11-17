@@ -1,7 +1,7 @@
-import React, { useState, useCallback } from 'react';
-import { Camera, Usb, Power, ShieldAlert, Sparkles, Download, RefreshCw, Loader2, Image as ImageIcon, Trash2, Aperture } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Camera, Usb, Power, ShieldAlert, Sparkles, Download, RefreshCw, Loader2, Image as ImageIcon, Trash2, Aperture, Upload, SlidersHorizontal, Bell } from 'lucide-react';
 import JSZip from 'jszip';
-import { PtpDevice, requestPtpDevice, objectFormatName, PTP_OP } from '../../utils/ptpDriver';
+import { PtpDevice, requestPtpDevice, objectFormatName, PTP_OP, PTP_EVENT } from '../../utils/ptpDriver';
 import { imageMime } from '../../utils/scpiTools';
 import StatusBadge from '../common/StatusBadge';
 
@@ -24,7 +24,58 @@ export default function PtpWorkbench() {
   const [thumbs, setThumbs] = useState({}); // handle -> object URL
   const [selected, setSelected] = useState(new Set());
   const [bulk, setBulk] = useState(null); // { done, total }
+  const [props, setProps] = useState([]); // property descriptors the camera reported
+  const [events, setEvents] = useState([]);
+  const [eventsOn, setEventsOn] = useState(false);
+  const ptpRef = useRef(null);
+  const pollRef = useRef(null);
+  const fileRef = useRef(null);
   const webUsbAvailable = typeof navigator !== 'undefined' && 'usb' in navigator;
+
+  // Stop event polling and close the camera when the tool is closed.
+  useEffect(() => () => {
+    pollRef.current?.stop();
+    const dev = ptpRef.current;
+    ptpRef.current = null;
+    if (dev) dev.closeSession().then(() => dev.close()).catch(() => {});
+  }, []);
+
+  const loadProps = async (dev) => { try { setProps(await dev.getCommonProps()); } catch (e) { setProps([]); } };
+
+  const changeProp = async (code, raw) => {
+    setBusy('prop'); setError('');
+    try {
+      const next = await ptp.setDeviceProp(code, raw);
+      setProps((list) => list.map((p) => (p.code === code ? next : p)));
+    } catch (err) { setError(err.message); }
+    finally { setBusy(''); }
+  };
+
+  const toggleEvents = (on, dev = ptp) => {
+    pollRef.current?.stop();
+    pollRef.current = null;
+    setEventsOn(false);
+    if (!on || !dev) return;
+    const h = dev.startEventPolling((ev) => {
+      setEvents((list) => [{ ...ev, at: new Date().toLocaleTimeString() }, ...list].slice(0, 50));
+      if (ev.code === PTP_EVENT.DevicePropChanged) loadProps(dev);
+    }, { onError: (e) => setError(`Event polling: ${e.message}`) });
+    pollRef.current = h;
+    setEventsOn(!!h);
+  };
+
+  const upload = async (file) => {
+    if (!file) return;
+    if (!confirmAction(`Copy "${file.name}" (${fmtBytes(file.size)}) to the camera storage?`)) return;
+    setBusy('upload'); setError('');
+    try {
+      const [storageId] = storage.length ? [storage[0].id] : await ptp.getStorageIds();
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      await ptp.uploadObject({ storageId, filename: file.name, bytes });
+      await loadObjects(ptp);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(''); if (fileRef.current) fileRef.current.value = ''; }
+  };
 
   const loadObjects = async (dev) => {
     const handles = await dev.getObjectHandles();
@@ -44,7 +95,8 @@ export default function PtpWorkbench() {
       await dev.open();
       await dev.openSession();
       setInfo(await dev.getDeviceInfo());
-      setPtp(dev); setStatus('online');
+      setPtp(dev); ptpRef.current = dev; setStatus('online');
+      await loadProps(dev);
       const ids = await dev.getStorageIds().catch(() => []);
       const st = [];
       for (const id of ids) { try { st.push({ id, ...(await dev.getStorageInfo(id)) }); } catch (e) { /* not supported */ } }
@@ -56,7 +108,10 @@ export default function PtpWorkbench() {
   };
 
   const disconnect = async () => {
+    toggleEvents(false);
+    ptpRef.current = null;
     try { await ptp?.closeSession(); await ptp?.close(); } catch (e) { /* ignore */ }
+    setProps([]); setEvents([]);
     setPtp(null); setStatus('offline'); setInfo(null); setObjects([]);
     Object.values(thumbs).forEach((u) => URL.revokeObjectURL(u));
     setThumbs({}); setSelected(new Set()); setStorage([]); setBattery(null);
@@ -202,6 +257,57 @@ export default function PtpWorkbench() {
         </div>
       )}
 
+      {ptp && (props.length > 0 || ptp.canPollEvents) && (
+        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+          {props.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <span className="font-bold text-slate-200 flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-cyan-400" /> CAMERA SETTINGS</span>
+                <button onClick={() => { setBusy('props'); loadProps(ptp).finally(() => setBusy('')); }} disabled={!!busy} className="p-1 rounded bg-slate-900 text-cyan-400 border border-slate-800 disabled:opacity-40" title="Read again">
+                  <RefreshCw className={`w-3.5 h-3.5 ${busy === 'props' ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 @sm:grid-cols-3 gap-2 pt-2">
+                {props.map((p) => (
+                  <div key={p.code} className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase block">{p.name}</span>
+                    {p.writable && p.options && ptp.supports(PTP_OP.SetDevicePropValue) ? (
+                      <select
+                        value={p.value}
+                        disabled={!!busy}
+                        onChange={(e) => changeProp(p.code, e.target.value)}
+                        aria-label={p.name}
+                        className="mt-0.5 w-full bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-slate-200 font-semibold disabled:opacity-40"
+                      >
+                        {p.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    ) : (
+                      <span className="text-slate-200 font-semibold">{p.display}{p.writable ? '' : ' (read-only)'}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-600 pt-1">Only settings this camera reports are shown. Changes apply to the camera right away.</p>
+            </div>
+          )}
+          {ptp.canPollEvents && (
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <span className="font-bold text-slate-200 flex items-center gap-2"><Bell className="w-4 h-4 text-amber-400" /> CAMERA EVENTS</span>
+                <label className="flex items-center gap-1.5 text-slate-400">
+                  <input type="checkbox" checked={eventsOn} onChange={(e) => toggleEvents(e.target.checked)} /> listen
+                </label>
+              </div>
+              <div className="pt-1 max-h-32 overflow-auto text-[11px]">
+                {events.length === 0 ? <p className="text-slate-600">{eventsOn ? 'Waiting for events (press the shutter, change a setting)...' : 'Turn on "listen" to see ObjectAdded, DevicePropChanged and CaptureComplete as they happen.'}</p> : events.map((ev, i) => (
+                  <div key={i} className="text-slate-400"><span className="text-slate-600">[{ev.at}]</span> <span className="text-cyan-300">{ev.name}</span>{ev.params.length ? ` (${ev.params.map((x) => `0x${x.toString(16)}`).join(', ')})` : ''}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {ptp && (
         <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
@@ -219,6 +325,14 @@ export default function PtpWorkbench() {
               <button onClick={capture} disabled={!!busy} className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold disabled:opacity-40">
                 {busy === 'capture' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Aperture className="w-3.5 h-3.5" />} CAPTURE
               </button>
+            )}
+            {ptp.canUpload && (
+              <>
+                <input ref={fileRef} type="file" className="hidden" aria-label="File to upload" onChange={(e) => upload(e.target.files?.[0])} />
+                <button onClick={() => fileRef.current?.click()} disabled={!!busy} className="flex items-center gap-1 px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-200 font-bold disabled:opacity-40">
+                  {busy === 'upload' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} UPLOAD FILE
+                </button>
+              </>
             )}
             {bulk && busy === 'bulk' && <span className="text-slate-400">{bulk.done} / {bulk.total}</span>}
             {bulk && busy !== 'bulk' && bulk.done === bulk.total && <span className="text-emerald-300">Saved {bulk.total} file(s).</span>}

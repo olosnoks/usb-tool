@@ -364,8 +364,10 @@ export function shortChipLabel(chip) {
   return (src || 'USB').split(/[\s/]+/)[0] || 'USB';
 }
 
+const UNKNOWN_FOR_PRODUCT = 'unknown for this product';
+
 export function identifyUsbChip(vendorId, productId) {
-  if (!vendorId) {
+  if (vendorId == null) {
     return {
       known: false,
       manufacturer: 'Generic UART',
@@ -378,7 +380,7 @@ export function identifyUsbChip(vendorId, productId) {
   }
 
   const vHex = Number(vendorId).toString(16).padStart(4, '0').toLowerCase();
-  const pHex = productId ? Number(productId).toString(16).padStart(4, '0').toLowerCase() : '0000';
+  const pHex = productId != null ? Number(productId).toString(16).padStart(4, '0').toLowerCase() : '0000';
   const key = `${vHex}:${pHex}`;
 
   if (USB_CHIP_DATABASE[key]) {
@@ -389,17 +391,19 @@ export function identifyUsbChip(vendorId, productId) {
     };
   }
 
-  // Check by VID only if specific PID is not matched
+  // Known vendor, but this exact product is not curated. Name the vendor, but
+  // never reuse another product's voltage / auto-reset / notes: say they are unknown.
   const vidOnlyMatches = Object.entries(USB_CHIP_DATABASE).filter(([k]) => k.startsWith(`${vHex}:`));
   if (vidOnlyMatches.length > 0) {
-    const fallback = vidOnlyMatches[0][1];
+    const manufacturer = vidOnlyMatches[0][1].manufacturer;
     return {
       known: true,
-      manufacturer: fallback.manufacturer,
-      chip: `${fallback.manufacturer} Device (VID: 0x${vHex.toUpperCase()} PID: 0x${pHex.toUpperCase()})`,
-      voltage: fallback.voltage,
-      autoReset: fallback.autoReset,
-      notes: fallback.notes,
+      vidOnly: true,
+      manufacturer,
+      chip: `${manufacturer} Device (VID: 0x${vHex.toUpperCase()} PID: 0x${pHex.toUpperCase()})`,
+      voltage: UNKNOWN_FOR_PRODUCT,
+      autoReset: UNKNOWN_FOR_PRODUCT,
+      notes: `${manufacturer} is a known vendor, but this product (${key}) is not in the curated list, so voltage, auto-reset and driver notes are unknown.`,
       key
     };
   }
@@ -413,4 +417,42 @@ export function identifyUsbChip(vendorId, productId) {
     notes: 'Unrecognized chip. Operates as standard UART serial bus.',
     key
   };
+}
+
+/**
+ * Async identification that merges the curated table with the full usb.ids
+ * list (lazy-loaded). Curated voltage/auto-reset/notes are kept when the exact
+ * VID:PID is curated; otherwise those fields are labelled unknown and the
+ * usb.ids vendor/product names are added.
+ * @returns {Promise<object>} identifyUsbChip() fields plus
+ *   { curated, vendorName, productName, source: 'curated'|'usb.ids'|'none' }
+ */
+export async function identifyUsbDevice(vendorId, productId) {
+  const base = identifyUsbChip(vendorId, productId);
+  const curated = !!USB_CHIP_DATABASE[base.key];
+  let ids = null;
+  if (vendorId != null) {
+    try {
+      const { lookupProduct } = await import('./usbIds.js');
+      ids = await lookupProduct(Number(vendorId), productId != null ? Number(productId) : 0);
+    } catch (e) { ids = null; }
+  }
+  const vendorName = ids?.vendor ?? null;
+  const productName = ids?.product ?? null;
+  const out = {
+    ...base,
+    curated,
+    vendorName,
+    productName,
+    source: curated ? 'curated' : (vendorName ? 'usb.ids' : 'none')
+  };
+  if (!curated && vendorName) {
+    out.known = true;
+    out.manufacturer = vendorName;
+    if (productName) out.chip = `${vendorName} ${productName}`;
+    out.voltage = UNKNOWN_FOR_PRODUCT;
+    out.autoReset = UNKNOWN_FOR_PRODUCT;
+    out.notes = `Named by usb.ids; no curated notes for ${base.key}.`;
+  }
+  return out;
 }

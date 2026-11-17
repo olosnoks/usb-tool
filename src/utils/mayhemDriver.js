@@ -73,6 +73,73 @@ export const FREQMAN_PRESETS = [
   { id: 'subghz-315', freq: 315000000, mod: 'ASK', label: 'Car TPMS & Gate 315.000 MHz (US/Asia)', bw: 50000, category: 'Automotive' }
 ];
 
+export const FREQMAN_MIN_HZ = 1e6;
+export const FREQMAN_MAX_HZ = 6e9;
+export const FREQMAN_STORAGE_KEY = 'usbtool.mayhem.freqman.v1';
+
+/**
+ * Parse a Mayhem FREQMAN.TXT. Lines are `f=<Hz>,a=<mod>,d=<label>,bw=<bw>`;
+ * `#` lines and blanks are ignored. Frequencies outside 1 MHz..6 GHz,
+ * malformed lines and bad bandwidths are rejected (counted), repeated
+ * freq+modulation pairs are dropped (counted as duplicates).
+ * Returns { entries: [{freq, mod, label, bw}], rejected, duplicates }.
+ */
+export function parseFreqmanTxt(text) {
+  const entries = [];
+  const seen = new Set();
+  let rejected = 0, duplicates = 0;
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (!/^f=/i.test(line)) { rejected++; continue; }
+    let rest = line, bw = 12500, bwOk = true;
+    const bm = rest.match(/,\s*bw=([^,]*)\s*$/i);
+    if (bm) {
+      rest = rest.slice(0, bm.index);
+      bwOk = /^\d+$/.test(bm[1].trim());
+      bw = bwOk ? parseInt(bm[1], 10) : 0;
+    }
+    let label = '';
+    const di = rest.search(/,\s*d=/i);
+    if (di >= 0) { label = rest.slice(di).replace(/^,\s*d=/i, '').trim(); rest = rest.slice(0, di); }
+    let freq = NaN, mod = 'NFM';
+    for (const part of rest.split(',')) {
+      const eq = part.indexOf('=');
+      if (eq < 0) { freq = NaN; break; }
+      const k = part.slice(0, eq).trim().toLowerCase(), v = part.slice(eq + 1).trim();
+      if (k === 'f') freq = /^\d+$/.test(v) ? parseInt(v, 10) : NaN;
+      else if (k === 'a') mod = v.toUpperCase();
+      else { freq = NaN; break; }
+    }
+    if (!(freq >= FREQMAN_MIN_HZ && freq <= FREQMAN_MAX_HZ) || !bwOk || bw <= 0 || !/^[A-Z0-9_-]{1,8}$/.test(mod)) { rejected++; continue; }
+    const key = freq + '|' + mod;
+    if (seen.has(key)) { duplicates++; continue; }
+    seen.add(key);
+    entries.push({ freq, mod, label: label || `${(freq / 1e6).toFixed(4)} MHz`, bw });
+  }
+  return { entries, rejected, duplicates };
+}
+
+function freqmanStorage() {
+  try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch (_) { return null; }
+}
+
+function loadFreqList() {
+  try {
+    const st = freqmanStorage();
+    const raw = st && st.getItem(FREQMAN_STORAGE_KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      if (d && d.v === 1 && Array.isArray(d.list)) {
+        const list = d.list.filter((f) => f && typeof f.id === 'string' && Number.isFinite(f.freq) && typeof f.mod === 'string'
+          && typeof f.label === 'string' && Number.isFinite(f.bw));
+        return list.map((f) => ({ ...f, category: f.category || 'Custom' }));
+      }
+    }
+  } catch (_) { /* fall through to presets */ }
+  return [...FREQMAN_PRESETS];
+}
+
 export const MAYHEM_APPS = [
   { id: 'menu', name: 'Main Menu', category: 'System', icon: 'Grid' },
   { id: 'audio_rx', name: 'Audio Receiver (AM/NFM/WFM)', category: 'Receiver', icon: 'Headphones' },
@@ -131,7 +198,7 @@ export class MayhemPortaPackDriver {
     this.rssi = -85; // dBm
 
     // Frequency Manager Table
-    this.freqList = [...FREQMAN_PRESETS];
+    this.freqList = loadFreqList();
 
     // Logs & Terminal History
     this.logs = [];
@@ -1055,13 +1122,45 @@ export class MayhemPortaPackDriver {
       category
     };
     this.freqList.unshift(item);
+    this._saveFreqList();
     this.log(`Added ${(freq / 1000000).toFixed(4)} MHz (${label}) to FREQMAN`, 'success');
     return item;
   }
 
   deleteFrequency(id) {
     this.freqList = this.freqList.filter(f => f.id !== id);
+    this._saveFreqList();
     this.log('Entry removed from FREQMAN', 'info');
+  }
+
+  _saveFreqList() {
+    try {
+      const st = freqmanStorage();
+      if (st) st.setItem(FREQMAN_STORAGE_KEY, JSON.stringify({ v: 1, list: this.freqList }));
+    } catch (_) { /* storage full or blocked: the list just won't persist */ }
+  }
+
+  /** Replace the list with the contents of a FREQMAN.TXT. Nothing is changed when no line is valid. */
+  importFreqmanTxt(text) {
+    const { entries, rejected, duplicates } = parseFreqmanTxt(text);
+    if (!entries.length) {
+      this.log(`FREQMAN import: no valid entries (${rejected} line${rejected === 1 ? '' : 's'} rejected)`, 'warning');
+      return { imported: 0, rejected, duplicates, applied: false };
+    }
+    const known = new Map(this.freqList.map((f) => [f.freq + '|' + f.mod, f]));
+    this.freqList = entries.map((e) => {
+      const old = known.get(e.freq + '|' + e.mod);
+      return { id: old ? old.id : `fm-${e.freq}-${e.mod}`, ...e, category: old ? old.category : 'Imported' };
+    });
+    this._saveFreqList();
+    this.log(`FREQMAN import: ${entries.length} entries, ${rejected} rejected, ${duplicates} duplicates`, 'success');
+    return { imported: entries.length, rejected, duplicates, applied: true };
+  }
+
+  resetFreqmanToPresets() {
+    this.freqList = [...FREQMAN_PRESETS];
+    this._saveFreqList();
+    this.log('FREQMAN reset to presets', 'info');
   }
 
   exportFreqmanTxt() {

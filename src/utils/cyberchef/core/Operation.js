@@ -24,6 +24,8 @@ export class Operation {
     this.inputType = options.inputType || 'string';
     this.outputType = options.outputType || 'string';
     this.args = Array.isArray(options.args) ? options.args : [];
+    // Extra search terms for the operation list (matched alongside name/description).
+    this.keywords = Array.isArray(options.keywords) ? options.keywords : [];
   }
 
   /**

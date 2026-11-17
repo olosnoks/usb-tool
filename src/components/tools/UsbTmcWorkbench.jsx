@@ -1,8 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Gauge, Usb, Power, ShieldAlert, Sparkles, Play, Loader2, Activity, Camera, Download, Square, FileCode, Terminal } from 'lucide-react';
+import { Gauge, Usb, Power, ShieldAlert, Sparkles, Play, Loader2, Activity, Camera, Download, Square, FileCode, Terminal, OctagonX } from 'lucide-react';
 import { UsbTmcDevice, requestUsbTmcDevice } from '../../utils/usbtmcDriver';
 import {
-  detectProfile, presetsFor, fetchWaveform, waveformStats, waveformCsv, fetchScreenshot, DMM_FUNCTIONS, parseNumber
+  detectProfile, presetsFor, fetchWaveform, waveformStats, waveformCsv, fetchScreenshot, DMM_FUNCTIONS, parseNumber, drainErrors
 } from '../../utils/scpiTools';
 import StatusBadge from '../common/StatusBadge';
 import { record } from '../../utils/sessionLog';
@@ -76,6 +76,8 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
   const [history, setHistory] = useState([]);
   const [histPos, setHistPos] = useState(-1);
   const [checkErrors, setCheckErrors] = useState(false);
+  const [timeoutMs, setTimeoutMs] = useState(5000);
+  const [stb, setStb] = useState(null); // last USB488 status byte, or { error }
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState([]);
   const busyRef = useRef(false);
@@ -113,11 +115,15 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
     try { return await fn(); } finally { busyRef.current = false; setBusy(false); }
   };
 
+  useEffect(() => {
+    if (inst) inst.timeoutMs = Math.max(100, Number(timeoutMs) || 5000);
+  }, [inst, timeoutMs]);
+
   const connect = async () => {
     setBusy(true);
     try {
       const transport = await requestUsbTmcDevice();
-      const d = new UsbTmcDevice(transport);
+      const d = new UsbTmcDevice(transport, { timeoutMs: Math.max(100, Number(timeoutMs) || 5000) });
       await d.open();
       const id = await d.identify();
       const p = detectProfile(id);
@@ -136,7 +142,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
     setLogging(false);
     stopScript.current = true;
     try { await inst?.close(); } catch (e) { /* ignore */ }
-    setInst(null); setIdn(''); setProfile(null); setStatus('offline'); setWaves({}); setShot(null);
+    setInst(null); setStb(null); setIdn(''); setProfile(null); setStatus('offline'); setWaves({}); setShot(null);
   };
 
   const send = async (command) => {
@@ -144,9 +150,26 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
     if (command.includes('?')) addLog('in', await inst.query(command));
     else await inst.write(command);
     if (checkErrors && !/ERR/i.test(command)) {
-      const e = await inst.query('SYST:ERR?');
-      if (!/^\+?0\b/.test(e.trim())) addLog('err', `Instrument error: ${e}`);
+      for (const e of await drainErrors(inst)) addLog('err', `Instrument error: ${e}`);
     }
+  };
+
+  /** Abort the stuck transfer and clear the instrument's USBTMC state (does not wait for the busy queue). */
+  const abortClear = async () => {
+    if (!inst) return;
+    addLog('out', 'abort / clear');
+    try {
+      const ok = await inst.abortAndClear();
+      addLog(ok ? 'in' : 'err', ok ? 'Abort/clear confirmed by the instrument.' : 'Abort/clear was not confirmed; reconnect if it still does not answer.');
+    } catch (err) { addLog('err', `Abort/clear failed: ${err.message}`); }
+  };
+
+  const readStb = async () => {
+    try {
+      const v = await exclusive(() => inst.readStatusByte());
+      setStb({ value: v });
+      addLog('in', `STB = 0x${v.toString(16).padStart(2, '0')} (${[[0x10, 'MAV'], [0x04, 'EAV'], [0x20, 'ESB'], [0x40, 'RQS/MSS']].filter(([m]) => v & m).map(([, n]) => n).join(', ') || 'none set'})`);
+    } catch (err) { setStb({ error: err.message }); addLog('err', `Status byte: ${err.message}`); }
   };
 
   const run = async (command) => {
@@ -284,6 +307,16 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
               <Power className="w-3.5 h-3.5" /> DISCONNECT
             </button>
           )}
+          {inst && (
+            <>
+              <label className="flex items-center gap-1 text-slate-400">TIMEOUT
+                <input type="number" min="100" step="100" value={timeoutMs} onChange={(e) => setTimeoutMs(e.target.value)} className={`${inp} w-20`} /> ms
+              </label>
+              <button onClick={abortClear} className={btn2} title="Abort the current bulk transfer and clear the instrument's USBTMC buffers"><OctagonX className="w-3.5 h-3.5" /> ABORT / CLEAR</button>
+              <button onClick={readStb} disabled={busy} className={btn2} title="USB488 READ_STATUS_BYTE">STB?</button>
+              {stb && <span className={stb.error ? 'text-amber-300' : 'text-emerald-300'}>{stb.error ? stb.error : `STB 0x${stb.value.toString(16).padStart(2, '0')}`}</span>}
+            </>
+          )}
           {profile && (
             <span className="text-[11px] text-slate-400">
               <span className="text-emerald-400">{profile.maker} {profile.model}</span> · {profile.kind === 'unknown' ? 'instrument' : profile.kind} · {profile.family === 'generic' ? 'generic SCPI' : `${profile.family} commands`}
@@ -313,7 +346,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
                 {presets.map((q) => (
                   <button key={q} onClick={() => { setCmd(q); run(q); }} disabled={busy} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 disabled:opacity-40">{q}</button>
                 ))}
-                <label className="ml-auto flex items-center gap-1 text-slate-400"><input type="checkbox" checked={checkErrors} onChange={(e) => setCheckErrors(e.target.checked)} className="accent-cyan-500" /> check SYST:ERR? after each command</label>
+                <label className="ml-auto flex items-center gap-1 text-slate-400"><input type="checkbox" checked={checkErrors} onChange={(e) => setCheckErrors(e.target.checked)} className="accent-cyan-500" /> drain SYST:ERR? after each command</label>
               </div>
             </>
           )}

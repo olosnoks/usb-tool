@@ -32,13 +32,14 @@ describe('windowed workspace', () => {
     expect(html).not.toContain('WORKSPACE EMPTY');
   });
 
-  it('shows the empty-desktop hint and no taskbar when nothing is open', () => {
+  it('shows the empty-desktop hint and a taskbar with just the Start button when nothing is open', () => {
     const html = renderToString(
       <Desktop state={createInitialState()} viewport={VP} onViewport={noop} renderTool={() => null} metaFor={() => ({ icon: null, naturalWidth: 1100 })}
         onFocus={noop} onMove={noop} onResize={noop} onMinimize={noop} onToggleMaximize={noop} onClose={noop} onTile={noop} onCascade={noop} onCloseAll={noop} />
     );
     expect(html).toContain('WORKSPACE EMPTY');
-    expect(html).not.toContain('data-testid="taskbar"');
+    expect(html).toContain('data-testid="taskbar"');
+    expect(html).toContain('data-testid="start-button"');
   });
 
   it('a window has eight resize handles unless maximized, and is positioned by its geometry', () => {

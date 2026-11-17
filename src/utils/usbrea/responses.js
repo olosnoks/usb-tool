@@ -24,7 +24,7 @@
 // - A named mode reading's Field.table is a Map raw -> label (sorted by raw); limits are [min, max] arrays.
 // - Python id(transfer) keys become Maps/Sets keyed by the Transfer object itself.
 import { Action } from './model.js';
-import { hex } from './bytes.js';
+import { hex, maxOf, minOf } from './bytes.js';
 import { fmt_fixed } from './pyfmt.js';
 import { Command, Field, _fit_linear, _infer_command, _get } from './infer.js';
 
@@ -248,7 +248,7 @@ export function pair(groups, transfers, window = WINDOW) {
 }
 
 export function _pattern(datas) {
-  const n = Math.min(...datas.map((d) => d.length));
+  const n = minOf(datas.map((d) => d.length));
   const out = [];
   for (let i = 0; i < n; i++) {
     const v = datas[0][i];
@@ -274,7 +274,7 @@ export function decode(name, source, pairs, shape, latency, labels = {}, packet 
   const datas = got.map(([, r]) => r.data);
   const qdatas = got.map(([q]) => q.data);
   const frames = got.map(([, r]) => r.frame);
-  const qlen = qdatas.length ? Math.min(...qdatas.map((d) => d.length)) : 0;
+  const qlen = qdatas.length ? minOf(qdatas.map((d) => d.length)) : 0;
 
   const echo_of = (o, skip = new Set()) => {
     for (let k = 0; k < qlen; k++) {
@@ -336,7 +336,7 @@ export function decode(name, source, pairs, shape, latency, labels = {}, packet 
     }
     const vals = datas.map((d) => _get(d, o, width, end));
     by_off.set(o, new Field({
-      offset: o, kind: 'reading', width, endian: end, limits: [Math.min(...vals), Math.max(...vals)], frames,
+      offset: o, kind: 'reading', width, endian: end, limits: [minOf(vals), maxOf(vals)], frames,
     }));
     if (width === 2) by_off.delete(o + 1);
     o += width;
@@ -454,7 +454,7 @@ export function name_readings(fields, replies, seen, notes) {
     }
     for (const [off, e] of _u32_spans(fields)) cands.push([off, 4, e]);
     // a negative value on screen: 8/16-bit readings whose top bit gets set may be two's complement
-    const minv = Math.min(...obs.map((o) => o.value));
+    const minv = minOf(obs.map((o) => o.value));
     cands = cands.map((c) => [...c, false]).concat(
       cands.filter((c) => c[1] <= 2 && minv < 0 && replies.some((r) => _get(r.data, c[0], c[1], c[2], true) < 0))
         .map((c) => [...c, true]));
@@ -499,7 +499,7 @@ export function name_readings(fields, replies, seen, notes) {
     const [off, w, end, sg, scale, bias, pts] = hits[0];
     const vals = replies.map((r) => _get(r.data, off, w, end, sg));
     const f = new Field({
-      offset: off, kind: 'reading', width: w, endian: end, scale, bias, limits: [Math.min(...vals), Math.max(...vals)],
+      offset: off, kind: 'reading', width: w, endian: end, scale, bias, limits: [minOf(vals), maxOf(vals)],
       name, signed: sg, frames: replies.map((r) => r.frame).slice(0, 20),
       observed: pts.map(([o, r]) => [o.value, _get(r.data, off, w, end, sg), r.frame, o.time]),
     });
@@ -570,7 +570,7 @@ export function name_level(name, fields, replies, tries, notes) {
   const vals = replies.map((r) => get(r.data));
   const f = new Field({
     offset: off, kind: 'reading', width: 1, endian: 'le', scale: 1.0, bias: 0.0,
-    limits: [Math.min(...vals), Math.max(...vals)], name, bit_offset: lo, bit_width: bw,
+    limits: [minOf(vals), maxOf(vals)], name, bit_offset: lo, bit_width: bw,
     frames: replies.map((r) => r.frame).slice(0, 20),
     observed: pts.map(([o, r]) => [o.value, get(r.data), r.frame, o.time]),
   });
@@ -715,7 +715,7 @@ export function name_mode(name, fields, replies, tries, notes) {
   const get = bo === null ? (d) => d[off] : (d) => (d[off] >> bo) & ((1 << bw) - 1);
   const vals = replies.map((r) => get(r.data));
   const f = new Field({
-    offset: off, kind: 'reading', width: 1, endian: 'le', limits: [Math.min(...vals), Math.max(...vals)], name,
+    offset: off, kind: 'reading', width: 1, endian: 'le', limits: [minOf(vals), maxOf(vals)], name,
     table: new Map([...table.entries()].sort((a, b) => a[0] - b[0])), bit_offset: bo, bit_width: bw,
     frames: replies.map((r) => r.frame).slice(0, 20),
     observed: pts.map(([o, r]) => [o.value, get(r.data), r.frame, o.time]),
@@ -725,7 +725,7 @@ export function name_mode(name, fields, replies, tries, notes) {
     if (x.kind === 'reading' && !x.name && x.width === 2 && x.offset <= off && off <= x.offset + 1) {
       const other = x.offset + (off === x.offset ? 1 : 0); // the byte of the u16 reading that is not the mode
       const vs = replies.map((r) => r.data[other]);
-      rest.push(new Field({ offset: other, kind: 'reading', limits: [Math.min(...vs), Math.max(...vs)], frames: x.frames }));
+      rest.push(new Field({ offset: other, kind: 'reading', limits: [minOf(vs), maxOf(vs)], frames: x.frames }));
     } else if (!(x.offset === off && !x.name)) {
       rest.push(x);
     }
@@ -748,7 +748,7 @@ export function link_command_ids(responses, qconsts) {
   }
   for (const rs of by_ep.values()) {
     if (rs.length < 2) continue;
-    const maxLen = Math.max(...rs.map((r) => r.length));
+    const maxLen = maxOf(rs.map((r) => r.length));
     for (let o = 0; o < maxLen; o++) {
       const hit = [];
       for (const r of rs) for (const f of r.fields) if (f.offset === o && f.kind === 'const') hit.push([r, f]);
@@ -760,7 +760,7 @@ export function link_command_ids(responses, qconsts) {
         ks = ks === null ? mine : new Set([...ks].filter((k) => mine.has(k)));
       }
       if (ks.size) {
-        const m = Math.min(...ks);
+        const m = minOf(ks);
         for (const [, f] of hit) {
           f.kind = 'echo';
           f.echo = m;
@@ -773,7 +773,7 @@ export function link_command_ids(responses, qconsts) {
 /** Explain a background poll's own bytes (constant, sequence counter, checksum) so a driver can send it. */
 export function query_command(name, qs) {
   qs = [...qs].sort((a, b) => a.frame - b.frame);
-  const n = Math.min(...qs.map((t) => t.data.length));
+  const n = minOf(qs.map((t) => t.data.length));
   qs = qs.filter((t) => t.data.length === n);
   // checksums first: a sum over a +1 sequence byte also counts up by one
   const c = _infer_command(name, qs.map((t) => [new Action({ label: name, start: 0, end: 0 }), t]), n, [], new Map(), false);
@@ -869,7 +869,7 @@ export function analyze_responses(transfers, commands, background, seen = []) {
   for (const [name, key] of used) {
     const qs = groups.get(key);
     if (qs[0].data.length) {
-      const n = Math.min(...qs.map((t) => t.data.length));
+      const n = minOf(qs.map((t) => t.data.length));
       const m = new Map();
       for (let k = 0; k < n; k++) if (new Set(qs.map((t) => t.data[k])).size === 1) m.set(k, qs[0].data[k]);
       qconsts.set(name, m);
