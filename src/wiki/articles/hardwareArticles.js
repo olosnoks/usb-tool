@@ -10,32 +10,29 @@ export const HARDWARE_ARTICLES = [
     toolId: 'programmers',
     category: 'programmers',
     title: 'Hardware Programmers Suite — CH341A, CMSIS-DAP, JTAG & AVR ISP',
-    summary: 'Master motherboard BIOS unbricking, Winbond 25Qxx SPI flash memory reading, ARM Cortex-M SWD debugging, FPGA JTAG boundary scan, and AVR ISP programming.',
+    summary: 'Motherboard BIOS dumping and reflashing with a CH341A, ARM Cortex-M debugging through a CMSIS-DAP probe, JTAG chain scan / SVF playback / boundary scan, and AVR fuse and bootloader programming with an ArduinoISP.',
     tags: ['CH341A', 'BIOS', 'SPI Flash', 'CMSIS-DAP', 'SWD', 'JTAG', 'AVR ISP', 'EEPROM', 'Winbond', 'Unbrick', 'flashrom'],
     readTime: '30 min read',
     content: `
 # Hardware Programmers Suite — Low-Level Memory & Silicon
 
-The **Hardware Programmers Suite** aggregates four essential low-level microcontroller, FPGA, and non-volatile memory programming interfaces into a single unified browser workbench:
-1. **CH341A Programmer**: SPI Flash (25-series) & I2C EEPROM (24-series) reading, erasing, and burning.
-2. **CMSIS-DAP / DAPLink Debugger**: ARM Cortex-M SWD debugging, memory inspection, and flashing.
-3. **JTAG SVF Player**: IEEE 1149.1 boundary scan interrogation and FPGA/CPLD bitstream burning.
-4. **AVR ISP Engine**: Microchip / Atmel 8-bit AVR microcontroller fuse bit calculation and flash programming.
+The **Hardware Programmers Suite** aggregates four low-level programming interfaces into a single browser workbench, selected with the tabs at the top:
+1. **CH341A BIOS Flash**: 25-series SPI NOR flash and 24-series I2C EEPROM reading, erasing, and writing through a WCH CH341A (WebUSB).
+2. **CMSIS-DAP Debugger**: ARM Cortex-M debugging over SWD through a CMSIS-DAP probe (WebUSB v2 or WebHID v1): halt/step/reset, registers, memory, RTT, SWO/ITM, breakpoints and flash programming.
+3. **JTAG / SVF Player**: JTAG chain scan, SVF playback and boundary-scan SAMPLE/EXTEST, driven through a CMSIS-DAP probe that supports JTAG.
+4. **AVR ISP & Bootloader**: fuse, lock-bit, flash and bootloader programming of 8-bit AVRs through an Arduino running ArduinoISP (or any STK500v1 programmer) over WebSerial.
+
+All of it needs a Chromium browser (WebUSB / WebSerial / WebHID). On Windows, the CH341A needs the **WinUSB** driver bound with Zadig.
 
 ---
 
 ### 1. CH341A SPI Flash & I2C EEPROM Programmer
 
-The **WCH CH341A** is a multi-function USB interface chip manufactured by Nanjing Qinheng Microelectronics. In hardware programming mode (SDA and SCL jumper bridged on pins 1-2), the CH341A operates as a full-speed USB 2.0 host bridge supporting high-speed SPI master transfers up to 3 MHz and I2C master transfers up to 400 kHz.
+The **WCH CH341A** is a multi-function USB interface chip manufactured by Nanjing Qinheng Microelectronics. In hardware programming mode (SDA and SCL jumper bridged on pins 1-2), the CH341A operates as a USB bridge with an SPI master and an I2C master. The tool looks for the programmer's USB ID \`1A86:5512\`; the serial-mode ID \`1A86:7523\` is not used.
 
 #### Supported Flash Families & Capacities:
-- **25-Series SPI Flash (SOIC-8, SOIC-16, DIP-8, WSON-8)**:
-  - Winbond: \`W25Q08\` (1MB), \`W25Q16\` (2MB), \`W25Q32\` (4MB), \`W25Q64\` (8MB), \`W25Q128\` (16MB), \`W25Q256\` (32MB).
-  - Macronix: \`MX25L4006\`, \`MX25L8006\`, \`MX25L1606\`, \`MX25L3206\`, \`MX25L6406\`, \`MX25L12835\`.
-  - GigaDevice: \`GD25Q16\`, \`GD25Q32\`, \`GD25Q64\`, \`GD25Q128\`.
-  - Spansion / Cypress: \`S25FL032P\`, \`S25FL064P\`, \`S25FL128P\`.
-- **24-Series I2C EEPROM**:
-  - \`24C02\` (256 bytes), \`24C04\` (512 bytes), \`24C08\` (1KB), \`24C16\` (2KB), \`24C32\` (4KB), \`24C64\` (8KB), \`24C128\` (16KB), \`24C256\` (32KB), \`24C512\` (64KB), \`24C1024\` (128KB).
+- **25-Series SPI Flash (SOIC-8, SOIC-16, DIP-8, WSON-8)**: the JEDEC ID is looked up in a built-in database covering Winbond (\`W25Q80\` to \`W25Q256\`, \`W25Q128JV-M\`, \`W25Q64DW\`, \`W25X40\`), Macronix (\`MX25L8005\` to \`MX25L25635F\`), GigaDevice (\`GD25Q16\` to \`GD25Q128\`, \`GD25LQ64\`), Micron (\`N25Q128\`, \`N25Q256\`), EON, SST/Microchip, Adesto, ISSI, Puya, Boya, XTX, XMC, Zbit and Fudan parts. An unknown JEDEC ID is still usable: the size is taken from the chip's SFDP table, or failing that from the capacity byte of the ID. Chips above 16 MB automatically use 4-byte addressing.
+- **24-Series I2C EEPROM** (selected from a drop-down, device address \`0x50\` by default): \`24C01\` (128 B), \`24C02\` (256 B), \`24C04\` (512 B), \`24C08\` (1 KB), \`24C16\` (2 KB), \`24C32\` (4 KB), \`24C64\` (8 KB), \`24C128\` (16 KB), \`24C256\` (32 KB), \`24C512\` (64 KB), \`24CM01\` (128 KB), \`24CM02\` (256 KB).
 
 > [!WARNING]
 > ### Critical 3.3V Hardware Modification Warning
@@ -47,24 +44,23 @@ The **WCH CH341A** is a multi-function USB interface chip manufactured by Nanjin
 > 3. Solder a thin bodge wire from pin 28 to the 3.3V output pin of the on-board AMS1117-3.3 regulator.
 
 <details>
-<summary>Deep-Dive: Master SPI Flash Opcode Set & Status Register 1 Bitfields</summary>
+<summary>Deep-Dive: SPI Flash Opcode Set & Status Register 1 Bitfields</summary>
 
-The CH341A driver implements the universal SPI flash command set conforming to JEDEC JESD216 SFDP:
+The driver uses the common 25-series command set (JEDEC JESD216 / SFDP). Opcodes the tool actually sends:
 
 | Opcode (Hex) | Command Name | Data Bytes Sent | Data Bytes Received | Description |
 | :--- | :--- | :---: | :---: | :--- |
-| **\`0x9F\`** | **Read JEDEC ID** | 0 | 3 | Queries 1-byte Manufacturer, 1-byte Memory Type, 1-byte Capacity. |
-| **\`0x06\`** | **Write Enable (WREN)** | 0 | 0 | Sets the Write Enable Latch (WEL) bit in Status Register 1. |
-| **\`0x04\`** | **Write Disable (WRDI)** | 0 | 0 | Clears the WEL bit, locking memory against writes. |
-| **\`0x05\`** | **Read Status Register 1** | 0 | 1 | Samples the BUSY (bit 0) and WEL (bit 1) flags. |
-| **\`0x01\`** | **Write Status Register** | 1 or 2 | 0 | Writes protection bits (BP0-BP2, SEC, TB) to unlock flash. |
-| **\`0x03\`** | **Read Data Bytes** | 3 (Address) | $N$ | Streams continuous data bytes at normal SPI read clock. |
-| **\`0x0B\`** | **Fast Read** | 3 (Addr) + 1 (Dummy) | $N$ | Reads flash bytes at higher clock frequencies with dummy cycle. |
-| **\`0x20\`** | **Sector Erase (4KB)** | 3 (Address) | 0 | Erases a 4,096-byte sector to \`0xFF\` (~45ms). |
-| **\`0x52\`** | **Block Erase (32KB)** | 3 (Address) | 0 | Erases a 32,768-byte half-block to \`0xFF\` (~120ms). |
-| **\`0xD8\`** | **Block Erase (64KB)** | 3 (Address) | 0 | Erases a 65,536-byte block to \`0xFF\` (~150ms). |
-| **\`0xC7\`** / **\`0x60\`** | **Chip Erase** | 0 | 0 | Wipes entire flash memory die to \`0xFF\` (2 to 30 seconds). |
-| **\`0x02\`** | **Page Program** | 3 (Addr) + up to 256 | 0 | Programs 1 to 256 bytes into a single memory page (~0.8ms). |
+| **\`0x9F\`** | **Read JEDEC ID** | 0 | 3 | Manufacturer, memory type, capacity. |
+| **\`0x5A\`** | **Read SFDP** | 3 (Addr) + 1 (Dummy) | $N$ | Reads the density for chips missing from the database. |
+| **\`0x06\`** | **Write Enable (WREN)** | 0 | 0 | Sets the Write Enable Latch (WEL). |
+| **\`0x05\`** / **\`0x35\`** / **\`0x15\`** | **Read Status Register 1 / 2 / 3** | 0 | 1 | BUSY (bit 0), WEL (bit 1), block-protect and QE bits. |
+| **\`0x01\`** | **Write Status Register** | 1 or 2 | 0 | Writes protection bits (BP0-BP2, SEC, TB). |
+| **\`0x03\`** / **\`0x13\`** | **Read Data** (3-byte / 4-byte address) | 3 or 4 (Address) | $N$ | Streams data in 4 KB reads. |
+| **\`0x20\`** / **\`0x21\`** | **Sector Erase 4 KB** (3-byte / 4-byte address) | 3 or 4 (Address) | 0 | Erases a 4,096-byte sector to \`0xFF\`. |
+| **\`0xC7\`** | **Chip Erase** | 0 | 0 | Wipes the whole chip to \`0xFF\` (waits up to 4 minutes). |
+| **\`0x02\`** / **\`0x12\`** | **Page Program** (3-byte / 4-byte address) | 3 or 4 (Addr) + up to 256 | 0 | Programs one 256-byte page. |
+
+32 KB / 64 KB block erase and Fast Read are defined in the driver but not used by the buttons.
 
 #### Status Register 1 (SR1) Bit Anatomy:
 \`\`\`text
@@ -79,7 +75,7 @@ Bit 0: BUSY / WIP (Write In Progress: 1 = Erase/Write Active, 0 = Ready)
 \`\`\`
 
 #### How to Clear Hardware Write Protection:
-If \`Read Status Register\` returns \`0x1C\` or \`0x3C\` (BP0-BP2 set), flash memory is hardware write-protected. Skon's USB Tool automatically issues \`WREN (0x06)\` followed by \`WRSR (0x01 0x00 0x00)\` to clear all protection bits before erasing or programming!
+The **STATUS & WRITE PROTECTION** card shows SR1/SR2/SR3 and the decoded BP, TB, SEC, SRP0 and QE bits, and warns when blocks are write-protected. The tool does **not** clear protection on its own during a write: click **UNPROTECT** (it clears BP0-BP2, TB and SEC in SR1 and reads the register back). If SRP is set and WP# is held low, the bits will not clear and the tool says so. A write to a protected area fails the read-back verify with "Is the chip write-protected?". The card also has a manual **SR1** hex field with a **WRITE** button (with a confirmation, since SRP0 with WP# low can lock the register until power-off).
 </details>
 
 <details>
@@ -95,36 +91,30 @@ Flashing a BIOS chip directly on a motherboard using a spring-loaded SOIC-8 test
 
 #### Step-by-Step Tutorial: Reading & Unbricking a Motherboard BIOS
 1. Align the red wire of the SOIC-8 test clip with **Pin 1** of the flash chip (indicated by a small circular dot/indent on the plastic casing).
-2. Plug the CH341A programmer into your computer's USB port.
-3. In Skon's USB Tool, open the **Hardware Programmers Suite** and select the **CH341A Programmer** tab.
-4. Click **Read JEDEC ID**:
-   - The tool transmits opcode \`0x9F\` and displays the detected silicon:
-     \`\`\`text
-     JEDEC ID: EF 40 18
-     Manufacturer: Winbond Electronics (0xEF)
-     Memory Type: SPI Flash (0x40)
-     Capacity: 16,777,216 Bytes (16 MB / 128 Mbit - W25Q128FV)
-     \`\`\`
-5. Click **Read / Dump Flash**:
-   - The tool streams the entire 16MB image over USB, displaying a real-time progress bar and throughput rate (typically ~180 KB/s).
-   - Once completed, click **Save Dump (.bin)** to save a backup of the original BIOS.
-6. Click **Select Firmware File** and select your clean motherboard BIOS update file (\`.bin\` or \`.rom\`).
-7. Click **Auto Flash (Erase -> Write -> Verify)**:
-   - **Stage 1 (Erase)**: Clears all sectors from \`0x000000\` to end of flash.
-   - **Stage 2 (Write)**: Programs flash memory in 256-byte chunks via opcode \`0x02\`.
-   - **Stage 3 (Verify)**: Reads back the entire chip and compares the SHA-256 hash against the source file. If hashes match, the chip is 100% verified!
+2. Plug the CH341A programmer (mode jumper on the SPI/I2C position) into your computer's USB port.
+3. In Skon's USB Tool, open the **Hardware Programmers Suite** and select the **CH341A BIOS Flash** tab.
+4. Click **CONNECT CH341A (WEBUSB)** and choose the device. The tool reads the JEDEC ID and status registers immediately and fills the Detected Flash Chip / Flash Capacity / JEDEC ID cards, e.g. \`0xEF4018\` Winbond W25Q128 16 MB. **READ JEDEC ID** repeats the query. An ID of \`FF FF FF\` or \`00 00 00\` means no chip answered (check the clip, pin 1 and the 3.3 V jumper).
+5. Click **DUMP FULL CHIP** (or **DUMP 64 KB** for a quick test). A progress bar shows the transfer; the first 2,048 bytes appear in the buffer preview. Click **SAVE DUMP (.BIN)** to save a backup (\`bios-dump-<chip>-<time>.bin\`).
+6. Click **LOAD .BIN FILE** and select the replacement image (\`.bin\`, \`.rom\`; the file is used as raw bytes, an Intel HEX file is not converted).
+7. Optionally use **FILE vs CHIP** or **FILE vs BUFFER** to compare a file against the chip or the buffer; differing byte ranges are listed.
+8. Click **WRITE BUFFER TO FLASH** and confirm. The image is written from address 0, sector by sector: sectors that already match are skipped, sectors needing a 0-to-1 change are erased, only changed pages are programmed, and every sector is read back and verified. A summary reports sectors erased, pages programmed and sectors skipped. **CHIP ERASE** (confirmation required) is available separately.
+
+For a 24Cxx EEPROM, put it in the programmer's 8-pin socket, choose the type and device address in the **I2C EEPROM (24Cxx)** card, then use **READ EEPROM** (loads the buffer) or **WRITE EEPROM** (writes the buffer, verified by read-back). A missing chip reads as all \`FF\`.
 
 ---
 
 ### 2. CMSIS-DAP / DAPLink ARM Cortex-M SWD Debugger
 
-**CMSIS-DAP** is the official microcontroller debug access port standard defined by Arm Limited. When paired with a CMSIS-DAP compatible probe (such as the Raspberry Pi Debug Probe, DAPLink, ST-Link v2 running DAP firmware, or an RP2040 running Picoprobe), Skon's USB Tool communicates directly with the ARM CoreSight debug infrastructure inside the target microcontroller over **Serial Wire Debug (SWD)**.
+**CMSIS-DAP** is the official microcontroller debug access port standard defined by Arm Limited. With a CMSIS-DAP probe (Raspberry Pi Debug Probe, DAPLink / micro:bit, LPC-Link2, EDBG, or a Picoprobe), Skon's USB Tool talks directly to the ARM CoreSight debug infrastructure inside the target over **Serial Wire Debug (SWD)**. **ST-Link is not CMSIS-DAP** and is not supported by this tab.
+
+Two connect buttons: **CONNECT PROBE (WEBUSB)** for CMSIS-DAP v2 probes (bulk endpoints) and **HID PROBE** for v1 probes (older DAPLink firmware, micro:bit v1) over WebHID. SWD runs at 1 MHz by default.
 
 #### Supported Microcontroller Architectures:
-- **ARM Cortex-M0 / M0+**: Raspberry Pi RP2040, STM32F0, Microchip SAMD21, NXP LPC800.
-- **ARM Cortex-M3**: STM32F103 (BluePill), Microchip SAM3X8E (Arduino Due).
-- **ARM Cortex-M4**: STM32F401 / F411 (BlackPill), Nordic nRF52840, TI CC2652.
-- **ARM Cortex-M7**: STM32H7, Teensy 4.0 / 4.1 (NXP i.MX RT1062).
+The core is identified from its CPUID register: **Cortex-M0, M0+, M1, M3, M4, M7, M23, M33, M55 and M85** are recognised by name (anything else shows "unknown core"). Typical examples:
+- **Cortex-M0 / M0+**: Raspberry Pi RP2040, STM32F0 / G0, Microchip SAMD21.
+- **Cortex-M3**: STM32F103 (BluePill).
+- **Cortex-M4**: STM32F401 / F411, Nordic nRF52840.
+- **Cortex-M7**: STM32H7, Teensy 4.x (NXP i.MX RT1062).
 
 #### The 2-Wire SWD Physical Layer:
 - **SWDIO (Serial Wire Data Input/Output)**: Bidirectional data line with internal pull-up.
@@ -177,29 +167,26 @@ The **Memory Access Port (MEM-AP)** allows direct reading and writing of SRAM, f
 #### Step-by-Step Tutorial: Connecting to an STM32 or RP2040 Target
 1. Connect your CMSIS-DAP probe (e.g. Raspberry Pi Debug Probe) to your PC via USB.
 2. Wire the probe's SWCLK, SWDIO, and GND pins to the target board's SWD header.
-3. In Skon's USB Tool, navigate to **Hardware Programmers** -> **CMSIS-DAP**.
-4. Click **Connect Probe & Detect Target**:
-   - The tool performs the \`0xE79E\` SWD line switch, reads DPIDR, halts the core, and displays:
-     \`\`\`text
-     Connected: CMSIS-DAP v2 (Raspberry Pi Picoprobe)
-     Target Architecture: ARM Cortex-M0+ (DPIDR: 0x0BC11477)
-     Core State: HALTED
-     Program Counter (PC): 0x10000184
-     Stack Pointer (SP):   0x20041F00
-     \`\`\`
-5. **Inspect Memory**: Enter memory start address \`0x20000000\` (SRAM) and length \`0x100\` to inspect RAM variables in real time.
-6. **Flash Firmware**: Select your compiled \`.bin\` or \`.hex\` file and click **Program Flash**. The debugger writes pages directly through the MEM-AP and triggers a hardware system reset.
+3. In Skon's USB Tool, open the **Hardware Programmers Suite** and select the **CMSIS-DAP Debugger** tab.
+4. Click **CONNECT PROBE (WEBUSB)** (or **HID PROBE**). The tool performs the line reset and \`0xE79E\` JTAG-to-SWD switch, reads DPIDR and CPUID, and shows the probe, firmware, transport, DPIDR and core (for example "Cortex-M0+ r0p1").
+5. Use **TARGET STATE** and its buttons: **RESET + HALT** (system reset, halted at the first instruction), **HALT CPU**, **RESUME / RUN** and **STEP (1 INSTRUCTION)**. While the core runs, the tool polls and notices a self-halt (breakpoint or fault).
+6. **ARM CORE REGISTERS** lists R0-R12, SP, LR, PC, xPSR, MSP, PSP and PRIMASK.
+7. **MEMORY & PERIPHERAL INSPECTOR**: enter an address (default \`0x20000000\`, SRAM) to read words; the table shows address, hex, decimal and ASCII. **WRITE 32-BIT VALUE** writes one word to an address you give.
+8. Below these, tabs add more tools: **RTT CONSOLE** (search RAM for the SEGGER RTT control block or give its address, read and send on channels), **SWO / ITM** (set the core clock and SWO baud; ITM stimulus text per port), **FLASH**, **BREAK / WATCH** and **DUMP**.
+9. **FLASH** programs internal flash with the chip vendor's **CMSIS-Pack flash algorithm**: click **OPEN .PACK / .FLM**, choose the device and algorithm, set the RAM region used by the algorithm, then choose a firmware file (\`.bin\`, \`.hex\`, \`.elf\`; a plain \`.bin\` needs a "load at" address). Options: erase whole chip, verify, reset and run after. Click **PROGRAM FLASH**. Without a pack/FLM there is no flash programming; the tool has no built-in per-chip database.
+10. **BREAK / WATCH**: **ENABLE BREAKPOINT UNITS**, then add hardware breakpoints ("BREAK AT") and data watchpoints (1/2/4 bytes; on read, write or read/write).
+11. **DUMP**: save an address range (flash, RAM or peripherals) to a \`.bin\` with **DUMP TO FILE**. Read-protected chips return errors or zeros.
 
 ---
 
 ### 3. JTAG Boundary Scan & SVF Player
 
-**JTAG (Joint Test Action Group - IEEE 1149.1)** is the universal hardware standard for digital IC testing, boundary scanning, and FPGA configuration. Using four dedicated digital signals, JTAG allows you to test circuit board interconnects without test probes, observe physical pin logic states, and program FPGA bitstreams into non-volatile configuration memory.
+**JTAG (Joint Test Action Group - IEEE 1149.1)** is the universal hardware standard for digital IC testing, boundary scanning, and FPGA configuration. Using four dedicated digital signals, JTAG allows you to test circuit board interconnects without test probes, observe physical pin logic states, and configure or program devices from SVF scripts.
+
+> **Hardware:** the JTAG tab drives the chain through a **CMSIS-DAP probe that supports JTAG** (DAPLink, Raspberry Pi Debug Probe, LPC-Link2), connected with **CONNECT PROBE (WEBUSB)**. FTDI/other USB-JTAG adapters are not supported. Without a probe, the page shows a demo pin grid for illustration only.
 
 #### Supported Silicon & Targets:
-- **FPGAs**: Xilinx Spartan-6, Artix-7, Kintex-7; Altera Cyclone IV / V; Gowin GW1N / GW2A; Lattice iCE40 / ECP5.
-- **CPLDs**: Xilinx XC9500, CoolRunner-II; Altera MAX II / MAX V.
-- **Processors**: Broadcom BCM2835/2837 (Raspberry Pi), Allwinner H3/H6, NXP i.MX.
+Any JTAG device on the chain is listed with its IDCODE, version, part number and manufacturer (decoded from the JEDEC code). A built-in table names a few parts and fills in family, package, pin count and IR length: Xilinx Spartan-6 XC6SLX9 and Artix-7 XC7A35T / XC7A100T, Altera Cyclone IV E (EP4CE6 / EP4CE10), STM32F1 and STM32F405/407 boundary-scan TAPs, ARM CoreSight JTAG-DP (Cortex-M3/M4/M7) and the ESP32 Xtensa TAP. Other FPGAs, CPLDs and SoCs appear with their manufacturer and part code only.
 
 #### The 4-Wire JTAG Interface:
 - **TCK (Test Clock)**: Synchronizes data transfers on rising/falling clock edges.
@@ -253,32 +240,30 @@ Every JTAG operation is governed by a 16-state finite state machine inside the t
 <details>
 <summary>Deep-Dive: SVF (Serial Vector Format) File Execution Engine</summary>
 
-**SVF (Serial Vector Format)** is an industry-standard ASCII language created by ASSET InterTech and Texas Instruments to describe JTAG test and configuration vectors:
+**SVF (Serial Vector Format)** is an industry-standard ASCII language created by ASSET InterTech and Texas Instruments to describe JTAG test and configuration vectors. The player supports (comments with \`!\` or \`//\`):
 
 | SVF Command | Syntax & Example | Operational Behavior |
 | :--- | :--- | :--- |
-| **\`FREQUENCY\`** | \`FREQUENCY 1000000 HZ;\` | Sets the maximum TCK clock frequency (e.g. 1 MHz). |
-| **\`STATE\`** | \`STATE IDLE;\` | Drives TMS transitions to move the TAP state machine to a specific state. |
-| **\`SIR\`** | \`SIR 6 TDI (02);\` | Shifts a 6-bit instruction opcode into the Instruction Register. |
-| **\`SDR\`** | \`SDR 32 TDI (00000000) TDO (01260093);\` | Shifts 32 data bits into TDI while asserting expected output bits on TDO. |
-| **\`RUNTEST\`** | \`RUNTEST 10000 TCK;\` | Holds the TAP in Run-Test/Idle for 10,000 clocks to allow internal FPGA PLLs or flash charge pumps to settle. |
-| **\`HDR\` / \`HIR\`** | \`HIR 0;\` | Sets header bits for daisy-chained multi-chip scan chains. |
+| **\`FREQUENCY\`** | \`FREQUENCY 1000000 HZ;\` | Sets the TCK clock frequency on the probe. |
+| **\`TRST\`** | \`TRST ON;\` | Drives the optional TRST line (if the probe exposes it). |
+| **\`STATE\`** | \`STATE IDLE;\` | Drives TMS to move the TAP state machine to a specific state. |
+| **\`ENDIR\` / \`ENDDR\`** | \`ENDDR IDLE;\` | Sets the stable state after shifts (RESET, IDLE, DRPAUSE, IRPAUSE only). |
+| **\`SIR\`** | \`SIR 6 TDI (02);\` | Shifts an instruction into the Instruction Register. |
+| **\`SDR\`** | \`SDR 32 TDI (00000000) TDO (01260093) MASK (FFFFFFFF);\` | Shifts data in and compares TDO against the expected value under MASK; stops at the first mismatch. |
+| **\`RUNTEST\`** | \`RUNTEST 10000 TCK;\` | Clocks the TAP in Run-Test/Idle (or waits the given time). |
+| **\`HDR\` / \`HIR\` / \`TDR\` / \`TIR\`** | \`HIR 0;\` | Header / trailer padding for daisy-chained devices. |
+
+\`PIO\` and \`PIOMAP\` (parallel I/O) are not supported and raise an error.
 
 </details>
 
-#### Step-by-Step Tutorial: Scanning a JTAG Chain & Playing an SVF Bitstream
-1. Connect TCK, TMS, TDI, TDO, and GND from your USB-JTAG bridge to the target board.
-2. In Skon's USB Tool, select **Hardware Programmers** -> **JTAG SVF Player**.
-3. Click **Scan JTAG Chain**:
-   - The tool holds TMS HIGH for 5 clock cycles to reset the TAP, shifts out the 32-bit IDCODE, and parses the silicon manufacturer:
-     \`\`\`text
-     Chain Scan Result: 1 Device Detected
-     Device #0: Xilinx Spartan-6 XC6SLX9 (IDCODE: 0x04001093)
-     Instruction Register Length: 6 bits
-     \`\`\`
-4. Click **Load SVF File** and select your synthesized FPGA bitstream (\`.svf\` file generated by Xilinx ISE, Vivado, or Gowin EDA).
-5. Click **Execute SVF**:
-   - The engine parses commands sequentially, streams configuration vectors into the FPGA configuration SRAM, verifies the DONE pin transition, and logs success!
+#### Step-by-Step Tutorial: Scanning a JTAG Chain & Playing an SVF Script
+1. Connect TCK, TMS, TDI, TDO and GND from your CMSIS-DAP probe to the target board.
+2. In Skon's USB Tool, open the **Hardware Programmers Suite** and select the **JTAG / SVF Player** tab, then click **CONNECT PROBE (WEBUSB)**.
+3. Click **SCAN JTAG CHAIN (READ IDCODE)**. The tool resets the TAP, reads the IDCODEs of every device in the chain and lists each with manufacturer, family, part, package, pin count and IR length where known (e.g. \`0x03628093\` is a Xilinx Spartan-6 XC6SLX9 with a 6-bit IR).
+4. In **SVF BITSTREAM SCRIPT PLAYER**, click **LOAD .SVF FILE** (or paste commands into the text box). The SVF file comes from your vendor tool's export.
+5. Click **EXECUTE SVF SEQUENCE**. A progress bar shows the current command; TDO checks run as the script goes, and the result reports the statements run and checks passed, or the failing line.
+6. **PROBE PINS & BOUNDARY SCAN (SAMPLE)**: **READ PROBE PINS** shows the probe's pin levels. For boundary scan, pick the device, enter the IR lengths (TDO end first), the SAMPLE opcode and the boundary length from the device's BSDL file (or click **LOAD BSDL FILE** to fill them in and name the pins), then **SAMPLE BOUNDARY CELLS**. The table lists each port with IN/OUT values and a **DRIVE (EXTEST)** control to force a pin low/high (a confirmation warns this can damage hardware); **RESET TAP** returns the chip to normal.
 
 ---
 
@@ -286,9 +271,10 @@ Every JTAG operation is governed by a 16-state finite state machine inside the t
 
 **AVR ISP** is the standard SPI-based programming protocol for 8-bit Microchip / Atmel microcontrollers (ATmega328P, ATmega2560, ATtiny85, ATtiny13A). It operates by holding the microcontroller's RESET line LOW while issuing 4-byte programming commands over the SPI bus.
 
+> **Hardware:** the tool does not drive SPI pins itself. It speaks **STK500v1 at 19200 baud over WebSerial** to an **Arduino running the ArduinoISP sketch** (or any STK500v1 programmer); that programmer does the ISP. Wire the programmer's pins 10 / 11 / 12 / 13 to the target's RESET / MOSI / MISO / SCK. USBasp and other non-serial programmers are not supported.
+
 #### Supported Silicon:
-- **ATmega Series**: \`ATmega328P\` (Arduino Uno / Nano / Pro Mini), \`ATmega2560\` (Arduino Mega), \`ATmega32U4\` (Arduino Leonardo / Pro Micro), \`ATmega168\`, \`ATmega8\`.
-- **ATtiny Series**: \`ATtiny85\`, \`ATtiny45\`, \`ATtiny84\`, \`ATtiny13A\`, \`ATtiny2313\`.
+The signature table covers: **ATmega328P**, **ATmega328PB**, **ATmega168**, **ATmega8**, **ATmega2560**, **ATmega1284P**, **ATmega32U4** and **ATtiny85**, **ATtiny45**, **ATtiny84**, **ATtiny13A**. Other chips report "Unknown AVR" and cannot be programmed (page size comes from the table).
 
 #### Physical Wiring (Standard 6-Pin AVR ISP Header):
 \`\`\`text
@@ -301,11 +287,11 @@ Every JTAG operation is governed by a 16-state finite state machine inside the t
 <details>
 <summary>Deep-Dive: AVR ISP 4-Byte Command Protocol & Memory Architecture</summary>
 
-The AVR ISP protocol communicates through synchronous 4-byte transactions:
+The tool sends these 4-byte ISP transactions to the programmer as STK500 *Universal* commands (flash pages go through STK500 *Prog Page* with read-back verify):
 
 | Command Name | Byte 1 | Byte 2 | Byte 3 | Byte 4 | Description & Response |
 | :--- | :---: | :---: | :---: | :---: | :--- |
-| **Programming Enable** | \`0xAC\` | \`0x53\` | \`0x00\` | \`0x00\` | Syncs interface. Target echoes back \`0x53\` on Byte 3. |
+| **Programming Enable** | \`0xAC\` | \`0x53\` | \`0x00\` | \`0x00\` | Syncs interface. Target echoes back \`0x53\` on Byte 3 (done by the programmer's STK500 *Enter Progmode*). |
 | **Chip Erase** | \`0xAC\` | \`0x80\` | \`0x00\` | \`0x00\` | Erases entire flash memory and lock bits to \`0xFF\` (~10ms). |
 | **Read Device Signature** | \`0x30\` | \`0x00\` | \`Address\` | Output | Addr \`0x00\`=Vendor, \`0x01\`=Part Family, \`0x02\`=Part Number. |
 | **Read Low Fuse** | \`0x50\` | \`0x00\` | \`0x00\` | Output | Returns 8-bit Low Fuse byte. |
@@ -322,12 +308,13 @@ The AVR ISP protocol communicates through synchronous 4-byte transactions:
 - **ATmega2560**: \`0x1E 0x98 0x01\` (Atmel, 256KB Flash, Model 01).
 - **ATmega32U4**: \`0x1E 0x95 0x87\` (Atmel, 32KB Flash, Native USB).
 - **ATtiny85**: \`0x1E 0x93 0x0B\` (Atmel, 8KB Flash).
+- **ATmega328P**: \`0x1E 0x95 0x0F\`; **ATmega168**: \`0x1E 0x94 0x06\`; **ATmega8**: \`0x1E 0x93 0x07\`; **ATmega1284P**: \`0x1E 0x97 0x05\`.
 </details>
 
 <details>
-<summary>Deep-Dive: Interactive Fuse Bit Calculator & Clock Recovery Mechanics</summary>
+<summary>Deep-Dive: Fuse Bits & Clock Recovery Mechanics</summary>
 
-Fuses configure the fundamental hardware behavior of the AVR processor. Unlike flash memory, **a fuse bit is programmed when set to \`0\` (LOW)** and unprogrammed when set to \`1\` (HIGH):
+Fuses configure the fundamental hardware behavior of the AVR processor. The **FUSES AND LOCK BITS** card shows each fuse as hex and as 8 binary digits and lets you edit L/H/E in hex (the lock byte is read-only; it is set by the bootloader burn). There is no per-bit checkbox calculator. Unlike flash memory, **a fuse bit is programmed when set to \`0\` (LOW)** and unprogrammed when set to \`1\` (HIGH):
 
 #### 1. Low Fuse (CKSEL, SUT, CKDIV8):
 - **CKSEL[3:0] (Clock Source Selection)**:
@@ -346,16 +333,13 @@ If an ATmega is configured for an external crystal but no crystal is connected, 
 </details>
 
 #### Step-by-Step Tutorial: Burning Optiboot Bootloader onto a Raw ATmega328P
-1. Connect your programmer (e.g. Arduino as ISP or USBasp) to the ATmega328P.
-2. In Skon's USB Tool, open **Hardware Programmers** -> **AVR ISP**.
-3. Click **Sync & Read Signature**:
-   - The tool pulses RESET LOW, issues \`0xAC 0x53\`, reads signature bytes, and validates \`0x1E 0x95 0x0F\`.
-4. Click **Set Standard Arduino Uno Fuses**:
-   - Automatically populates: Low Fuse = \`0xFF\`, High Fuse = \`0xDE\`, Extended Fuse = \`0xFD\`.
-   - Click **Write Fuses**: Burns fuse cells and verifies byte readbacks.
-5. Click **Load Optiboot Hex** (built-in \`optiboot_atmega328.hex\`).
-6. Click **Burn Bootloader & Lock Bits**:
-   - Executes chip erase, writes bootloader pages to memory offset \`0x7E00\`, and sets Lock Byte to \`0x0F\` (protecting bootloader space from application overwrites).
+1. Load the **ArduinoISP** sketch onto an Arduino and wire its pins 10 / 11 / 12 / 13 to the ATmega328P's RESET / MOSI / MISO / SCK (plus VCC and GND).
+2. In Skon's USB Tool, open **Hardware Programmers** and select the **AVR ISP & Bootloader** tab.
+3. Click **CONNECT ARDUINOISP (SERIAL)** and pick the programmer's port. After a 2-second boot delay the tool syncs with the STK500 programmer, then enters programming mode and reads the signature (validating \`0x1E 0x95 0x0F\` for ATmega328P). **RE-READ CHIP** repeats this. The chip card shows the target, signature, flash/EEPROM size and current fuses.
+4. In **FUSES AND LOCK BITS**, click **use these** next to "Arduino defaults for ATmega328P" (L=\`0xFF\`, H=\`0xDE\`, E=\`0xFD\`), then **WRITE FUSES**. Writes that would disable ISP (SPIEN, RSTDISBL, DWEN) need a second confirmation, and values are read back afterwards.
+5. In **FLASH & BOOTLOADER**, click **LOAD .HEX FILE** and choose the bootloader hex from the Arduino IDE (for example \`hardware/arduino/avr/bootloaders/optiboot/optiboot_atmega328.hex\`). Nothing is built in.
+6. Click **BURN AS BOOTLOADER (FUSES + LOCK)**: it erases the chip, writes the chip's default fuses with a temporary lock of \`0x3F\`, writes and verifies the hex, then sets the lock byte to the chip default (\`0x0F\` for ATmega328P). The bootloader's address (\`0x7E00\` for Optiboot) comes from the hex file.
+7. For ordinary application code use **ERASE, WRITE & VERIFY HEX**, or **CHIP ERASE** to wipe flash and EEPROM.
 
 ---
 
@@ -373,14 +357,14 @@ If an ATmega is configured for an external crystal but no crystal is connected, 
     id: 'usb-pd',
     toolId: 'usb-pd',
     category: 'programmers',
-    title: 'USB-PD Power Delivery — PPS Voltage Trigger & VBUS Analyzer',
-    summary: 'Negotiate USB-C Power Delivery contracts up to 100W/240W, trigger variable PPS voltages (3.3V-21V), and monitor real-time VBUS power and current draw.',
-    tags: ['USB-PD', 'Power Delivery', 'PPS', 'USB-C', 'VBUS', 'Voltage Trigger', 'Power Supply', 'FUSB302'],
+    title: 'USB-PD Power Delivery — STUSB4500 Fixed-Voltage Trigger',
+    summary: 'Request 5-20 V USB-C Power Delivery contracts through an STUSB4500 sink board wired to a Bus Pirate, read the negotiated contract, and edit the power-up PDOs stored in its NVM.',
+    tags: ['USB-PD', 'Power Delivery', 'STUSB4500', 'Bus Pirate', 'USB-C', 'Voltage Trigger', 'Power Supply', 'NVM'],
     readTime: '20 min read',
     content: `
 # USB-PD Power Delivery — Voltage Trigger & Monitor Manual
 
-The **USB-PD Workbench** interfaces with USB Type-C Power Delivery controller hardware (such as the ON Semiconductor FUSB302, WCH CH224K, Ingenic IP2721, or STMicroelectronics STUSB4500) over I2C or serial UART. Sourced directly from the official USB-IF Power Delivery 3.0 specification and \`src/utils/usbPdDriver.js\`, this guide documents Biphase Mark Coding (BMC) negotiation, Power Data Object (PDO) bitfield analysis, Programmable Power Supply (PPS) dynamic voltage requests, and real-time VBUS telemetry logging.
+The **USB-PD Workbench** drives an **STMicroelectronics STUSB4500** USB-PD sink controller (for example the SparkFun Power Delivery Board) over I2C (address \`0x28\`) through a **Bus Pirate v3/v4** in binary mode, which the tool opens as a serial port (115200 baud, I2C at 100 kHz). Other controllers (FUSB302, CH224K, IP2721) are not supported. This guide documents Biphase Mark Coding (BMC) negotiation, Power Data Object (PDO) bitfields, how the tool requests a contract, and the STUSB4500 NVM, based on the USB-IF Power Delivery 3.0 specification and \`src/utils/usbPdDriver.js\`.
 
 ---
 
@@ -389,10 +373,10 @@ The **USB-PD Workbench** interfaces with USB Type-C Power Delivery controller ha
 Legacy USB Type-A ports supply only **5.0 Volts DC** at up to 2.4 Amperes (12 Watts). While sufficient for basic microcontrollers, modern bench testing demands variable voltages to power:
 - Single Board Computers (9V or 12V for LattePanda, Orange Pi 5).
 - Soldering Irons (20V for Pinecil, TS100, TS80P).
-- Battery Charging Circuits (custom 3.3V to 21.0V CC/CV curves for 2S, 3S, 4S Li-ion battery packs).
+- Fixed-voltage bench or charging inputs (for example 12 V or 15 V rails).
 - High-power radio transmitters and RF amplifiers.
 
-The **USB-PD Workbench** transforms any standard USB-C GaN laptop charger into an intelligent, programmable bench power supply capable of delivering from **5V up to 48V (EPR)** and up to **5 Amperes (100W to 240W)** directly from your web browser without buying dedicated bench lab equipment.
+The **USB-PD Workbench** turns a standard USB-C charger and an STUSB4500 board into a switchable **5 V to 20 V** supply (fixed voltages only, up to 5 A requested). The chip negotiates **fixed PDOs only: no PPS, no EPR (28-48 V)**, and it **does not measure VBUS voltage or current**, so check the output with a meter. Wiring: Bus Pirate MOSI = SDA, CLK = SCL, GND to GND, and Vpu to the board's 3.3 V for the pull-ups; the Bus Pirate's own supplies stay off because the board is powered from VBUS.
 
 ---
 
@@ -425,7 +409,7 @@ Every USB-PD message is framed by a strict transmission envelope:
 
 #### 2. The Power Negotiation State Machine:
 1. **Source Capabilities Broadcast**: Upon connection, the power supply broadcasts a \`Source_Capabilities\` message containing an array of 32-bit Power Data Objects (PDOs).
-2. **Sink Request**: The tool evaluates the broadcast list, selects the desired voltage/current contract, and transmits a \`Request\` data message referencing the selected PDO index.
+2. **Sink Request**: The sink controller (the STUSB4500, following the PDOs the tool programmed) evaluates the broadcast list, selects a voltage/current contract, and transmits a \`Request\` data message referencing the selected PDO index.
 3. **Accept**: The power supply responds with an \`Accept\` control message.
 4. **Transition & PS_RDY**: The charger ramps its internal DC-DC converter at a controlled slew rate ($30\,\text{mV/ms}$). Once the new voltage stabilizes within the specified $\pm 5\%$ regulation window, the charger transmits a \`PS_RDY (Power Supply Ready)\` message.
 
@@ -462,18 +446,18 @@ The 32-bit integer transmitted for each supported supply mode defines electrical
 </details>
 
 <details>
-<summary>Deep-Dive: FUSB302 Controller Hardware Registers & I2C Control</summary>
+<summary>Deep-Dive: STUSB4500 Registers Used by the Tool</summary>
 
-For hardware builds utilizing the ON Semiconductor **FUSB302B** USB-PD PHY controller over I2C (Address \`0x22\`):
+The STUSB4500 (I2C address \`0x28\`, device ID \`0x21\` or \`0x25\`) is read and written through the Bus Pirate:
 
-| Register Offset | Register Name | Bitfield Function |
+| Register Offset | Register Name | Use |
 | :---: | :--- | :--- |
-| **\`0x01\`** | **DEVICE_ID** | Silicon revision identification (Returns \`0x91\` or \`0x92\`). |
-| **\`0x02\`** | **SWITCHES0** | Connects internal BMC transmitter and receiver to CC1 or CC2 pin. |
-| **\`0x03\`** | **SWITCHES1** | Configures internal BMC pull-down resistors ($R_d = 5.1\,\text{k}\Omega$). |
-| **\`0x07\`** | **RESET** | Resets internal transmit and receive FIFO buffers. |
-| **\`0x0A\`** | **MASKA** | Interrupt mask register for SOP detection, CRC errors, and packet arrival. |
-| **\`0x43\`** | **FIFOS** | Direct 64-byte burst read/write port for incoming and outgoing USB-PD frames. |
+| **\`0x2F\`** | **DEVICE_ID** | Checked on connect (\`0x21\` / \`0x25\`); anything else is refused. |
+| **\`0x0E\`** | **PORT_STATUS_1** | Bit 0: a source is attached. |
+| **\`0x91\`** | **RDO_STATUS** | 32-bit Request Data Object of the current contract (source PDO position, operating and max current, capability mismatch). |
+| **\`0x70\`** | **DPM_PDO_NUMB** | Number of sink PDOs (1-3). |
+| **\`0x85\`** | **DPM_SNK_PDO1..3** | The three 32-bit little-endian sink PDOs (voltage in 50 mV, current in 10 mA units). |
+| **\`0x51\`** / **\`0x1A\`** | **TX_HEADER_LOW** / **PD_COMMAND_CTRL** | Write \`0x0D\` then \`0x26\` to send a PD soft reset so new sink PDOs are renegotiated. |
 
 </details>
 
@@ -481,26 +465,15 @@ For hardware builds utilizing the ON Semiconductor **FUSB302B** USB-PD PHY contr
 
 ### 3. Interactive Workbench Features
 
-#### 1. 1-Click Fixed Contract Triggers
-Click any preset contract button to immediately trigger standard voltages:
-- **5.0V**: Safe default for microcontrollers, logic analyzers, and sensors.
-- **9.0V**: Ideal for Arduino Uno VIN pins and quick-charge power banks.
-- **12.0V**: Standard voltage for automotive sensors, 3.5-inch hard drives, and Wi-Fi routers.
-- **15.0V**: Common for audio amplifiers and USB-C monitors.
-- **20.0V**: Maximum standard power for Pinecil/TS100 soldering irons and laptop mainboards (up to 100W).
+Click **CONNECT STUSB4500 (BUS PIRATE)** and choose the Bus Pirate's serial port. The tool checks the chip ID, records the power-up PDOs, and shows two panels. Nothing is shown before you connect: there are no simulated PPS sliders or VBUS meters, because the chip has neither.
 
-#### 2. Programmable Power Supply (PPS) Variable Slider
-For chargers broadcasting an Augmented PPS PDO:
-- Adjust voltage smoothly between **3.30V and 21.00V in fine 20mV increments**.
-- Adjust current compliance limits in **50mA increments**.
-- **Constant Current / Constant Voltage (CC/CV) Simulation**: If target load current exceeds the programmed compliance threshold, the power supply automatically throttles voltage downward to maintain constant current, mimicking an industrial bench supply!
+#### 1. STUSB4500 Contract panel
+- Shows **SOURCE** (ATTACHED / NONE), **CONTRACT** (which source PDO was taken), **OPERATING CURRENT** and **MAX CURRENT**, refreshed every 1.5 s (or with the refresh button), plus the three **Sink PDOs** (voltage / current, "off" for unused ones). A "capability mismatch" note appears if the charger could not satisfy any requested voltage above 5 V and the board fell back to 5 V.
+- **Preset buttons 5 V, 9 V, 12 V, 15 V, 20 V** and a **V at A** field with **SET** request a fixed voltage (5-20 V) at a given current (up to 5 A, default 1.5 A). After a confirmation, the tool keeps PDO1 at 5 V, rewrites PDO2 in the chip's RAM with your voltage and sends a PD soft reset so the charger renegotiates. Choosing 5 V drops back to a single PDO. This only works if the connected charger offers that voltage; these changes are **lost at power-off**.
 
-#### 3. Real-Time VBUS Power Telemetry Visualizer
-The telemetry HUD samples onboard voltage and current sensors (e.g. INA219, INA226, or internal controller ADCs) at 20 Hz:
-- **Voltage Meter (V)**: Calibrated bus voltage displayed with millivolt precision.
-- **Current Meter (A)**: Real-time current consumption in amperes.
-- **Wattage Gauge (W)**: Instantaneous power delivery ($P = V \times I$).
-- **Accumulated Energy (Wh / mAh)**: Continuous integration of power over time, essential for battery capacity profiling and thermal dissipation testing.
+#### 2. NVM: Power-Up PDOs (survive power-off)
+- **READ NVM** reads the chip's NVM sectors and decodes the PDOs; **BACKUP** saves them to a \`.txt\` file; **RESTORE...** writes a backup file back (all 40 bytes, after confirmation).
+- The editor sets the number of PDOs (1-3), PDO2/PDO3 voltage (5-20 V) and each PDO's current from the chip's fixed steps (0.5 to 5 A). **WRITE NVM** is enabled only when the NVM decodes to exactly the PDOs the chip loaded at power-up (the tool shows "Layout verified"); otherwise writing is disabled. Power-cycle the board and reconnect before reading if it says the layout is not verified. New PDOs apply after the next power-up. Check the output with a meter before connecting anything.
 
 ---
 
@@ -510,7 +483,8 @@ The telemetry HUD samples onboard voltage and current sensors (e.g. INA219, INA2
 | :--- | :--- | :--- |
 | **USB Power Delivery Specification (PD 2.0 / 3.0 / 3.1)** | USB Implementers Forum (USB-IF) | [USB-IF Power Delivery Specification](https://www.usb.org/usb-charger-pd) |
 | **Type-C Cable & Connector Specification** | USB-IF Working Group (CC pin signaling, BMC 300kHz modulation, SOP framing) | [USB Type-C Specification](https://www.usb.org/developers) |
-| **FUSB302 / CH224K USB-PD Controller Architecture** | ON Semiconductor / Fairchild & Nanjing Qinheng Microelectronics (WCH) | [onsemi FUSB302 Datasheet](https://www.onsemi.com) |
+| **STUSB4500 USB-PD Sink Controller** | STMicroelectronics | [STUSB4500 product page](https://www.st.com/en/interfaces-and-transceivers/stusb4500.html) |
+| **Bus Pirate** | Dangerous Prototypes / community | [Bus Pirate](https://buspirate.com) |
 `
   },
   {
@@ -525,7 +499,7 @@ The telemetry HUD samples onboard voltage and current sensors (e.g. INA219, INA2
 # Alfa Wi-Fi Workbench — WebUSB & RTL8812AU Manual
 
 ### 1. What Is This Tool & Why Do You Need It?
-This tool bypasses the operating system's native Wi-Fi drivers using the WebUSB API. It loads a Rust-based WASM driver (\`@openipc-rs/web\`) to interface directly with the Alfa AWUS036ACH (RTL8812AU chipset), allowing for raw 802.11 frame capture (monitor mode) directly in the browser.
+This tool bypasses the operating system's native Wi-Fi drivers using the WebUSB API. It loads a Rust-based WASM driver (\`@openipc-rs/web\`) to interface directly with the Alfa AWUS036ACH (RTL8812AU chipset), allowing for raw 802.11 frame capture (monitor mode) directly in the browser. The **Adapter** dropdown offers **Alfa RTL8812AU**, **Panda PAU09 (RT5572)** and **All Supported USB**; the supported chipset list is in section 44. The workbench is receive/analysis oriented (monitor mode and frame capture); there is no deauth or other attack function.
 
 ### 2. Hardware Architecture & Physics / Protocol Theory
 <details>
@@ -563,37 +537,30 @@ Raw bulk RX transfers from the RTL8812AU arrive encapsulated in a **Radiotap Hea
 ### 3. Complete UI Control Mapping
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| Connect via WebUSB | Button | Prompts the browser's native USB device picker. |
-| Simulate RF | Toggle | Injects synthetic 802.11 frames for testing without hardware. |
-| Channel Dropdown | Select | Configures the hardware's center frequency (1-165). |
-| Auto-Hop Channels | Checkbox | Automatically cycles channel through 1, 6, 11, 36, 40, 44, 48 every 500ms. |
-| Pause / Resume | Button | Freezes packet ingestion buffer without tearing down the USB interface. |
-| Export PCAP | Button | Downloads raw 802.11 packet buffer as a Wireshark-compatible PCAP file. |
-| Export Wigle CSV | Button | Generates WigleWifi-1.4 formatted CSV for wardriving and Wigle.net uploads. |
-| Export JSON | Button | Serializes the aggregated BSSID and Client directory into a downloadable JSON file. |
-| Probing Clients | Tab View | Identifies client stations broadcasting Probe Requests seeking specific network SSIDs. |
-| Spectrum Tab | Tab View | Bar chart visualizer displaying real-time packet density and congestion across RF channels. |
-| Topology View | Tab View | Interactive SVG graph rendering physical relationships, parent APs, orbiting client stations, and encryption security colors. |
-| Signal Trend | Column | Real-time SVG sparkline visualizer tracking the last 15 RSSI data points per transmitter. |
-| Handshake | Column | Shows green lock indicator when a complete WPA/WPA2 4-way handshake (or M1+M2) is captured. |
-| GPS Tagging | Toggle | Hooks browser Geolocation API (\`navigator.geolocation.watchPosition\`) to tag discovered devices with latitude, longitude, and accuracy. |
-| Distance | Column | Displays real-time Haversine distance (in meters) from operator GPS fix to the Access Point. |
-| Device Table | Tab View | Live diagnostic table listing BSSID, SSID, Handshake status, RSSI, channel, distance, and vendor. |
-| Save Session | Button | Serializes and persists current AP, client, channel, and packet buffers to browser IndexedDB store. |
-| Load Session | Button | Opens modal interface to hydrate state from historical IndexedDB capture sessions. |
-| Anomalies | Tab View | Surfaces suspected device identity rotation anomalies where multiple MACs probe identical SSID sequences. |
-| Signal Map | Tab View | Plots physical GPS coordinates and RSSI signal strength heatmaps using Leaflet and vector overlays. |
-| Waterfall | Tab View | Real-time canvas-based RF spectrum waterfall showing rolling channel packet density over time. |
-| Signature | Column | Displays extracted Information Element (IE) Tag sequence and flags potential MAC randomization. |
-| Posture Score | Header Gauge | Circular visualizer calculating environment health (0-100) based on open APs, legacy ciphers, and threat anomalies. |
-| Cleartext | Tab View | Monitors observable DNS query domains (UDP 53) and HTTP endpoints (TCP 80) from unencrypted Data frames. |
-| Executive Report | Button | Generates and exports a styled standalone HTML audit report of the RF environment. |
-| Roaming Tab | Tab View | Dedicated mobility audit table tracking client handoffs, source/destination BSSIDs, and roam latency (ms). |
-| Upload PCAP | Button | Ingests offline .pcap binary capture files and replays raw frames through the background Web Worker. |
-| Wi-Fi 6 Badge | Badge | Blue pill indicating 802.11ax High-Efficiency capabilities and spatial reuse BSS Color. |
+| Adapter | Select | Chooses the adapter profile: Alfa RTL8812AU, Panda PAU09 (RT5572), or All Supported USB (the device picker then lists every supported VID/PID). |
+| Connect via WebUSB / Connect PAU09 via WebUSB | Button | Prompts the browser's native USB device picker; replaced by **Disconnect** once connected. Disabled during an offline PCAP replay. |
+| Start Monitor / Stop | Button | Starts or stops monitor-mode capture on the connected adapter. |
+| Pause / Resume | Button | Freezes packet ingestion without tearing down the USB interface. |
+| Channel | Select | Sets the monitor channel (2.4 GHz and 5 GHz channels). |
+| Auto-Hop Channels | Checkbox | Cycles the channel through 1, 6, 11, 36, 40, 44, 48 every 500 ms. |
+| Wardriving Mode | Toggle | Turns on GPS coordinate tagging and dual-band auto-hop together. |
+| RF Options | Dropdown | **GPS Coordinate Tagging** (browser Geolocation \`watchPosition\`), **Desktop Alerts (WIDS)**, **Physical RX Gain** slider (1-10), **Driver Guide** and **HW Status**. |
+| Filtering | Popover | Min RSSI cutoff, ignore Data / Management / Control frames, target MAC filter (the pre-worker filter pipeline). |
+| Sensitivity | Slider | RF sensitivity threshold, -100 to -50 dBm. |
+| Session & Actions | Dropdown | Save Current Session, Load Saved Session (IndexedDB), Timeline Replay Scrubber, Save Baseline Snapshot, Stream Live to Disk, Upload .pcap File, Clear Telemetry Buffer. |
+| Upload PCAP / Clear | Buttons | Replay an offline \`.pcap\` through the parser worker; clear devices, clients and packets. |
+| Access Points / Clients / Roaming / Watchlist / Probing / Spectrum / Waterfall / Interference / Topology / Anomalies / Signal Map / Frames / Hex / Cleartext / Heuristics / Layer 3 / Rules | Tabs | The analysis views described below (Probing: stations sending Probe Requests; Spectrum: channel packet density; Topology: APs with orbiting clients and security colours; Anomalies: rotating-MAC suspects). |
+| Signal Trend | Column | SVG sparkline of recent RSSI per transmitter. |
+| Handshake | Column | Green lock when a complete WPA/WPA2 4-way handshake (M1+M2) is captured. |
+| Distance | Column | Haversine distance (m) from the operator's GPS fix to the AP. |
+| Signature | Column | IE tag sequence and a possible MAC-randomization flag. |
+| Posture Score | Header Gauge | Circular 0-100 environment health score from open APs, legacy ciphers and anomalies. |
+| Export PCAP | Button | Appears in the **PCAP buffer full** banner (50,000-frame ring buffer reached) to download the buffer as a Wireshark PCAP. |
+| Export Device PCAP | Button | In a device's detail panel: downloads a PCAP containing only that device's frames. |
+| Run TX Loopback Test | Button | In the hardware panel; disabled with "Transmit not supported by this chipset." on RX-only profiles. |
+| Wi-Fi 6 Badge | Badge | Blue pill for 802.11ax HE capability and BSS Color. |
 
-
-
+> **Export menu:** the **Export** dropdown next to **Session & Actions** offers **JSON**, **Wigle CSV**, **Executive Report** (HTML), **GeoJSON** and **KML**. It is disabled until at least one access point or client has been captured; GeoJSON and KML also need GPS-tagged devices. PCAP export stays in the buffer-full banner and the per-device panel, and there is no simulated RF mode: capture needs real hardware or a replayed PCAP.
 
 ### 4. Step-by-Step Engineering Walkthroughs
 #### Walkthrough A: Getting Hardware Access on Windows
@@ -603,7 +570,7 @@ Raw bulk RX transfers from the RTL8812AU arrive encapsulated in a **Radiotap Hea
 4. Refresh the tool and click "Connect".
 
 #### Walkthrough B: Analyzing Captures in Wireshark
-1. Click **Export PCAP** in the action bar to download your raw packet stream.
+1. Capture with **Session & Actions > Stream Live to Disk** (writes a \`.pcap\` as it captures), or use **Export PCAP** from the buffer-full banner, or **Export Device PCAP** from a device's detail panel.
 2. Open the resulting \`.pcap\` file directly in **Wireshark**.
 3. Wireshark automatically recognizes **LinkType 127 (\`LINKTYPE_IEEE802_11_RADIOTAP\`)**:
    - Inspect full radio physical metrics (dBm RSSI, channel frequency, channel bandwidth, and data rates) decoded in the Radiotap layer.
@@ -645,7 +612,7 @@ The **Spectrum** tab provides an interactive bar chart of channel packet density
 - **Packet Density Tracking**: Continuously tallies frame counts per channel (\`channelStatsRef\`) without impacting frame capture throughput.
 - **Spectrum Band Filtering**: Toggle between **All Channels**, **2.4 GHz (Channels 1–14)**, and **5 GHz (UNII Channels 36–165)**.
 - **Congestion KPI Metrics**: Displays Total Logged Packets, Peak Congestion Channel, and an automated **Recommended Channel** recommendation based on the lowest observed packet density across non-overlapping channels.
-- **Interactive Click-to-Retune**: Clicking any channel bar on the spectrum graph immediately retunes the Alfa radio hardware or simulated RF engine to that channel.
+- **Interactive Click-to-Retune**: Clicking any channel bar on the spectrum graph immediately retunes the Alfa radio hardware to that channel.
 - **Optimal Channel Selection**:
   - **2.4 GHz**: Select non-overlapping channels \`1\`, \`6\`, or \`11\` to avoid adjacent channel interference.
   - **5 GHz**: UNII-1/UNII-3 channels (\`36-48\` and \`149-165\`) offer up to 80 MHz channel widths with lower interference from consumer electronics.
@@ -664,7 +631,7 @@ The workbench features native browser geolocation logging using the W3C Geolocat
 - **Haversine Distance Estimation**: When GPS is active, the AP table calculates the approximate line-of-sight distance in meters between the operator and each discovered transmitter using the Haversine formula:
   $$\Delta\sigma = 2\arcsin\left(\sqrt{\sin^2\left(\frac{\Delta\phi}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\Delta\lambda}{2}\right)}\right)$$
   $$d = R \cdot \Delta\sigma \quad (R = 6,371,000\text{ m})$$
-- **Standardized Wigle CSV Export**: When clicking **Wigle CSV**, the exporter populates the \`CurrentLatitude\`, \`CurrentLongitude\`, and \`AccuracyMeters\` columns with tagged coordinates (defaulting to \`0.0\` / \`0\` if GPS is disabled), producing fully compliant WigleWifi-1.4 files ready for upload.
+- **Wigle CSV Export (Export menu)**: the exporter fills the \`CurrentLatitude\`, \`CurrentLongitude\` and \`AccuracyMeters\` columns with tagged coordinates (\`0.0\` / \`0\` without GPS) to produce WigleWifi-1.4 files.
 
 ### 12. Interactive Network Topology Map (Map View)
 The **Topology** tab renders a real-time vector relationship graph showing the physical and operational structure of the RF environment:
@@ -699,7 +666,7 @@ The **Signal Map** workbench integrates GPS coordinates with RF signal strength 
   - **Amber Yellow (\`-75 dBm to -60 dBm\`)**: Moderate signal / intermediate boundary.
   - **Rose Red (\`< -75 dBm\`)**: Weak signal / edge of radio reception.
 - **Target AP Filtering**: A top toolbar dropdown allows isolating a single target BSSID or viewing all geotagged access points concurrently.
-- **Leaflet & Vector Themes**: Supports high-contrast CartoDB Dark Matter tiles and OpenStreetMap standard layers with smooth recentering and interactive popup inspection.
+- **Leaflet & Vector Themes**: Supports a dark Esri gray basemap and OpenStreetMap standard layers with smooth recentering and interactive popup inspection.
 
 ### 16. Undisclosed Identity Correlation & Client Signature Profiling
 Many 802.11 Access Points conceal their Service Set Identifier (SSID) in periodic Beacon broadcasts, reporting an empty or null string (\`<Hidden SSID>\`). However, 802.11 client devices looking for or associating to these hidden networks must explicitly transmit the SSID in cleartext inside:
@@ -744,7 +711,7 @@ Unencrypted 802.11 Data frames (Frame Control Type 2, Protected bit 14 = 0) tran
 
 ### 20. Executive Summary Reporting & HTML Export
 Auditing dense corporate or industrial Wi-Fi environments requires executive-ready reporting that translates low-level 802.11 frame telemetry into actionable security intelligence:
-- **Standalone Single-File HTML Reports**: When clicking **Executive Report** in the action bar, the generator compiles all session metrics into a self-contained, beautifully styled HTML document.
+- **Standalone Single-File HTML Reports**: The generator (\`downloadExecutiveReport\`, currently without a button in the UI) compiles all session metrics into a self-contained, beautifully styled HTML document.
 - **Executive Scorecard & Risk Triage**: Prominently highlights the overall Environment Posture Score, Risk Level badge, and specific security penalties.
 - **Infrastructure Inventory & Top 10 APs**: Details the 10 strongest Access Points ranked by RSSI, including encryption standards, channel allocation, handshake capture status, and vendor OUIs.
 - **Threat Anomaly Ledger**: Records all identified Rogue AP Evil Twins, conflicting encryption mesh duplicates, and MAC rotation clusters.
@@ -836,7 +803,7 @@ The automated Heuristic Engine (\`heuristicEngine.js\`) passively inspects beaco
 Traditional browser memory buffers store captured 802.11 frames in a JavaScript array (\`rawPacketsRef\`), which creates memory pressure and crashes the tab during multi-hour packet auditing sessions. The Live Disk Streaming engine (\`livePcapWriter.js\`) eliminates memory constraints by streaming frames directly to local disk:
 - **File System Access API Integration**: Prompts the operator via \`window.showSaveFilePicker()\` to choose a destination \`.pcap\` file on physical NVMe/SSD storage.
 - **Immediate Global Header Initialization**: Upon file handle creation, the stream writer immediately creates an asynchronous writable stream (\`fileHandle.createWritable()\`) and commits the standard 24-byte PCAP file header (\`0xA1B2C3D4\`, Version 2.4, Snaplen 65535, LinkType 127: \`LINKTYPE_IEEE802_11_RADIOTAP\`).
-- **Sequential Record Streaming**: As raw \`Uint8Array\` packet chunks arrive from hardware or simulation, the engine formats a 16-byte PCAP record header containing second/microsecond timestamps and packet length, immediately pushing both header and raw payload to the file stream.
+- **Sequential Record Streaming**: As raw \`Uint8Array\` packet chunks arrive from hardware or a PCAP replay, the engine formats a 16-byte PCAP record header containing second/microsecond timestamps and packet length, immediately pushing both header and raw payload to the file stream.
 - **Zero-Copy Memory Bypass**: When "Stream to Disk" is active, incoming frames completely bypass the in-memory 50,000-frame ring buffer, enabling indefinite multi-gigabyte capture sessions without browser tab exhaustion.
 - **Safe Buffer Flushing & Finalization**: The stream automatically flushes buffered chunks every 5 seconds and performs clean stream termination upon stopping monitor mode or component unmount.
 
@@ -931,12 +898,7 @@ To support modern Geographic Information Systems (GIS) and spatial war-driving w
   - **Placemark Titles**: Formatted as \`SSID (BSSID)\` for instant identification in the 3D globe viewer.
   - **HTML CDATA Descriptions**: Richly formatted balloons displaying signal strength, channel, encryption, vendor OUI, and observation timestamps.
   - **Coordinates String**: \`lon,lat,alt\` triplets for native 3D spatial pin placement.
-- **Unified Export Action Menu**: The Action Bar export button features a dropdown offering:
-  - **Export PCAP**: Full packet captures for Wireshark analysis.
-  - **Export Wigle CSV**: Wardriving format for community wireless mapping.
-  - **Export GeoJSON**: Standard JSON geospatial format.
-  - **Export KML**: Google Earth spatial overlay format.
-  - **Export HTML & JSON**: Audit summaries and machine-readable dumps.
+- **Export menu**: use **Export > Export GeoJSON** or **Export > Export KML** (next to **Session & Actions**). Both report an error if no device carries GPS coordinates. PCAP export is in the buffer-full banner and the per-device panel.
 
 ### 43. Hardware Receiver (RX) Gain & Sensitivity Tuning
 Optimizing RF reception across varying physical environments requires fine-grained control over baseband receiver amplification:
@@ -1046,7 +1008,7 @@ The **Geospatial Signal Heatmap** (\`GeospatialMap.jsx\`) maps 802.11 RF signal 
   - For each observed node, the map renders a semi-transparent circular boundary whose radius in meters is strictly proportional to the physical GPS accuracy tolerance (\`±m\`).
   - Color-coded borders immediately indicate RF signal strength: Emerald (>= -60 dBm, Strong), Cyan (-70 to -60 dBm, Good), Amber (-80 to -70 dBm, Moderate), and Rose (< -80 dBm, Weak).
 - **Multi-Provider Tile Switching**:
-  - **Dark Vector View**: High-contrast CartoDB dark tile basemap optimized for tactical wardriving and night operations.
+  - **Dark Vector View**: Dark Esri World Dark Gray basemap optimized for tactical wardriving and night operations.
   - **OSM Standard View**: OpenStreetMap cartographic vectors highlighting streets, buildings, and civil infrastructure.
   - **Satellite Imagery**: High-resolution Esri World Imagery providing aerial terrain and foliage visibility to correlate RF attenuation with physical obstacles.
 - **Interactive Inspection**:
@@ -1075,7 +1037,7 @@ Dense 802.11 deployments frequently suffer from co-channel interference and spec
 | \`NotFoundError\` | User cancelled prompt or no device found. | Ensure adapter is plugged in. |
 | \`NetworkError\` | Driver is claimed by OS (Windows) or cable disconnected. | Use Zadig to install WinUSB driver; verify USB-C cable connection. |
 | WebUSB undefined | Unsupported browser (Safari/Firefox). | Use Google Chrome or Microsoft Edge. |
-| PCAP buffer full | Capture session exceeded 50,000 frames. | Enable "Stream to Disk" for unlimited capture, or click "Export PCAP" and clear buffer. |
+| PCAP buffer full | Capture session exceeded 50,000 frames. | Enable "Stream Live to Disk" (Session & Actions) for unlimited capture, or click "Export PCAP" in the banner and clear the buffer. |
 | GPS Not Locked / 0.0 | Location permission denied or device lacks GPS. | Grant browser location permissions in browser site settings. |
 | Airtime Gauge Stuck at 0% | No frames observed or duration field missing. | Verify monitor mode is active and channel is set to an active frequency. |
 | Packets Not Appearing | Pre-worker filtering pipeline discarding frames. | Open "Filtering" popover and reset filters or raise RSSI sensitivity threshold. |
@@ -1107,7 +1069,7 @@ Dense 802.11 deployments frequently suffer from co-channel interference and spec
     toolId: 'fastboot',
     category: 'programmers',
     title: 'Android Fastboot — Bootloader Unlock, Partition Flashing & Reboot',
-    summary: 'Drive an Android device in bootloader/fastboot mode over WebUSB: read variables, unlock your own bootloader, flash and erase partitions, boot a transient image, and reboot — the clean path to repurposing a phone as a homelab server.',
+    summary: 'Drive an Android device in bootloader/fastboot mode over WebUSB: read variables, unlock your own bootloader, flash (sparse-aware, A/B slots) and erase partitions, boot a transient image, flash a whole factory-image zip, and reboot.',
     tags: ['Fastboot', 'Android', 'Bootloader', 'Unlock', 'Flash', 'WebUSB', 'Partition', 'Recovery', 'A/B slots', 'Homelab'],
     readTime: '18 min read',
     content: `
@@ -1152,17 +1114,20 @@ Fastboot is a request/response protocol on one **bulk endpoint pair**, on the US
 
 ### 3. UI control mapping
 
+The **Android** tool has two tabs, **ADB** and **Fastboot**; the sidebar entries "Fastboot" and "ADB" just open it on the matching tab (only the selected mode holds the WebUSB claim). There is no demo/simulated device.
+
 | UI Element | Purpose |
 | :--- | :--- |
-| **Connect Fastboot (WebUSB)** | Opens a device in fastboot mode, claims the fastboot interface and reads \`getvar:all\`. |
-| **Demo** | Runs a simulated bootloader so you can learn the flow with no device (labeled as simulated). |
-| **Device panel** | Product, bootloader version, serial, active A/B slot, and the locked/unlocked badge. |
-| **Unlock bootloader** | Sends \`flashing unlock\` (falling back to \`oem unlock\`). The phone asks you to confirm; this **wipes user data**. |
-| **Flash image** | Loads a file, runs the download handshake, then \`flash:<partition>\`, with a progress bar. |
-| **Boot once** | Downloads an image and \`boot\`s it without flashing — handy for testing a recovery or boot image. |
-| **Erase partition** | \`erase:<partition>\`. |
-| **Set active slot** | \`set_active:a\`/\`b\` on A/B devices. |
-| **Reboot** | \`reboot\`, \`reboot-bootloader\`, \`reboot-fastboot\`, \`reboot-recovery\`. |
+| **CONNECT FASTBOOT (WEBUSB)** | Opens a device in fastboot mode, claims the fastboot interface and reads \`getvar:all\`. **DISCONNECT** and **RE-READ VARS** appear once connected. |
+| **DEVICE panel** | Product, bootloader version, serial, active slot, baseband, secure, max download size, partition count, and the BOOTLOADER LOCKED / UNLOCKED badge. On A/B devices, **slot A / slot B** buttons run \`set_active\`. |
+| **BOOTLOADER LOCK: UNLOCK BOOTLOADER** | Sends \`flashing unlock\` (falling back to \`oem unlock\`). The phone asks you to confirm; this **wipes user data**. **RE-LOCK** sends the lock command (also wipes on most devices). |
+| **Partition / Slot / CHOOSE IMAGE...** | Partition name (suggestions come from the device's variables), slot (current / A / B / both, on A/B devices) and the image file (raw or Android sparse). The tool shows whether it is sparse and how many pieces it will be split into if larger than \`max-download-size\`. |
+| **FLASH IMAGE** | Download handshake then \`flash:<partition>\` (confirmation first). The bootloader refuses it while locked. |
+| **BOOT ONCE** | Downloads an image and \`boot\`s it without flashing. |
+| **ERASE PARTITION** | \`erase:<partition>\` (confirmation first). |
+| **FACTORY IMAGE (FLASH-ALL)** | **OPEN FACTORY ZIP...** reads a factory image zip (or its inner \`image-*.zip\`), checks the bootloader/baseband requirements against the device, lets you untick individual images, optionally **wipe user data** (like \`flash-all.sh -w\`), and **FLASH FACTORY IMAGE** runs the bootloader, radio, boot-type images, and fastbootd steps in order. Requires an unlocked bootloader; the whole zip is read into memory. |
+| **REBOOT** | **System (Android)**, **Bootloader**, **Fastbootd (userspace)**, **Recovery**. |
+| **All variables / LOG** | The full \`getvar:all\` table and an activity log. |
 
 Every destructive action asks for confirmation first, and flashing/erasing is refused by the bootloader while it is locked.
 
@@ -1172,8 +1137,8 @@ Every destructive action asks for confirmation first, and flashing/erasing is re
 
 1. Back up anything you still want — unlocking erases the device.
 2. If the phone has a forgotten PIN or account, first do a normal factory reset and recover the Google/Samsung account; fastboot does not bypass those.
-3. Boot to the bootloader and click **Connect Fastboot (WebUSB)**. Confirm the product and serial.
-4. **Unlock bootloader** and approve the prompt on the phone. It reboots and wipes.
+3. Boot to the bootloader and click **CONNECT FASTBOOT (WEBUSB)**. Confirm the product and serial.
+4. **UNLOCK BOOTLOADER** and approve the prompt on the phone. It reboots and wipes.
 5. Flash a custom recovery (\`flash recovery twrp.img\`) or a ROM per its install guide, or just re-lock and run the stock OS with **Termux** for small always-on services.
 6. For a headless server, enable ADB and use \`adb tcpip 5555\` so you can reach it over the network.
 
@@ -1181,10 +1146,11 @@ Every destructive action asks for confirmation first, and flashing/erasing is re
 
 ### 5. Implementation & Architecture
 
+- **Image tools:** [\`src/utils/fastbootTools.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fastbootTools.js) parses and splits Android sparse images, resolves A/B partition names, and reads and runs factory-image zips.
 - **Driver:** [\`src/utils/fastbootDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fastbootDriver.js) owns the protocol with no React or \`navigator.usb\` dependency: \`FastbootDevice\` serializes commands on the shared bulk pipe, \`parseResponse\` splits the tag, \`download()\` runs the DATA handshake and chunks the upload, and \`getAllVars()\` parses \`getvar:all\` (splitting on the **last** colon, since names like \`partition-type:boot\` contain colons).
 - **Transport:** \`FastbootUsbTransport\` finds the class \`ff/42/03\` interface and its bulk endpoints.
 - **Workbench:** [\`src/components/tools/FastbootWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/FastbootWorkbench.jsx) renders the device summary, the lock/flash/erase/boot/reboot panels and the variable table, with a confirmation on every destructive step.
-- **Tests:** [\`tests/fastboot.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fastboot.test.js) runs the driver against a simulated bootloader covering getvar, the download handshake, lock-gated flashing, erase, slots, boot and reboot.
+- **Tests:** [\`tests/fastboot.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fastboot.test.js) and [\`tests/fastbootTools.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fastbootTools.test.js) run the driver and image tools against a simulated bootloader covering getvar, the download handshake, lock-gated flashing, erase, slots, boot, factory zips and reboot.
 
 ---
 
@@ -1202,7 +1168,7 @@ Every destructive action asks for confirmation first, and flashing/erasing is re
     toolId: 'adb',
     category: 'programmers',
     title: 'Android ADB over WebUSB — Shell, File Transfer & Wireless',
-    summary: 'Connect to an Android device with USB debugging enabled: run shell commands, push and pull files, restart ADB over Wi-Fi, and reboot — all in the browser, with the RSA "Allow USB debugging" handshake handled for you.',
+    summary: 'Connect to an Android device with USB debugging enabled: device info, shell, file browser, app manager, logcat and screen control, restart ADB over Wi-Fi, and reboot — all in the browser, with the RSA "Allow USB debugging" handshake handled for you.',
     tags: ['ADB', 'Android', 'Shell', 'Push', 'Pull', 'WebUSB', 'RSA', 'adbd', 'Wireless', 'Homelab', 'Termux'],
     readTime: '20 min read',
     content: `
@@ -1244,25 +1210,28 @@ After \`CNXN\`, everything happens on **streams**. The host \`OPEN\`s a service 
 
 ### 3. UI control mapping
 
+ADB and Fastboot share the **Android** tool (tabs **ADB** / **Fastboot**; the sidebar entries open the matching tab). There is no demo/simulated device.
+
 | UI Element | Purpose |
 | :--- | :--- |
-| **Connect ADB (WebUSB)** | Opens the device, runs the auth handshake (approve the prompt on the phone). |
-| **Demo** | A simulated device with a few canned shell replies and an in-memory filesystem (labeled as simulated). |
-| **Shell** | Run a command and see its output. |
-| **Push file** | Upload a local file to a path on the device. |
-| **Pull file** | Download a file from the device to your computer. |
-| **Restart ADB over TCP/IP** | \`tcpip:5555\`; afterwards run \`adb connect <ip>:5555\` from any machine. |
-| **Reboot** | Reboot to the chosen mode (Bootloader lands you in the Fastboot tool). |
+| **CONNECT ADB (WEBUSB)** | Opens the device and runs the auth handshake (approve the prompt on the phone); **DISCONNECT** afterwards. |
+| **DEVICE tab** | Device summary from \`getprop\` (model, Android version, etc.), battery and screen size; **REFRESH**, **ALL PROPERTIES** (saves \`getprop.txt\`). **WIRELESS: RESTART ADB OVER TCP/IP** (port field, default 5555); afterwards run \`adb connect <ip>:5555\` from any machine. **REBOOT**: System, Bootloader, Recovery, Fastbootd. |
+| **SHELL tab** | Command box with Enter-to-run, a history list, and quick buttons (\`ps -A\`, \`df -h\`, \`ip addr\`, \`dumpsys wifi\`, \`settings list global\`, \`cat /proc/cpuinfo\`, \`dumpsys activity top\`, \`id\`). Each run is a one-shot \`shell:\` command; there is no interactive TTY. |
+| **FILES tab** | Browsable directory listing (starts at \`/sdcard/\`, breadcrumb and path box), **PUSH HERE** to upload, **PULL** per file to download, and a delete (trash) button. |
+| **APPS tab** | Package list with a filter and a show-system-apps checkbox; **INSTALL APK**; per app **INFO**, **LAUNCH**, **STOP**, **SAVE APK**, **CLEAR DATA**, **UNINSTALL**. |
+| **LOGCAT tab** | **START** / **STOP** polling, level filter (V, D, I, W, E, F), text/tag/PID filter, **CLEAR**, **SAVE**. |
+| **SCREEN tab** | **CAPTURE** a screenshot (optionally refresh every 1.5 s), **SAVE PNG**; click the screenshot to tap there; key buttons (HOME, BACK, APPS, POWER, VOL +/-, WAKE, ENTER, ...) and a type-text box. |
+| **LOG** | Activity log of what the tool did. |
 
 ---
 
 ### 4. Walkthrough: a phone as a headless homelab box
 
 1. Enable Developer options (tap Build number 7×), then turn on **USB debugging**.
-2. **Connect ADB (WebUSB)** and tap **Always allow** on the phone.
-3. Install **Termux** (from F-Droid) and push any scripts or binaries your service needs with **Push file**.
-4. In **Shell**, start your service (or set it up to start on boot with Termux:Boot).
-5. **Restart ADB over TCP/IP**, note the phone's IP, and from then on manage it over Wi-Fi with no cable.
+2. **CONNECT ADB (WEBUSB)** and tap **Always allow** on the phone.
+3. Install **Termux** (from F-Droid, via the **APPS** tab's **INSTALL APK**) and push any scripts or binaries your service needs from the **FILES** tab (**PUSH HERE**).
+4. In **SHELL**, start your service (or set it up to start on boot with Termux:Boot).
+5. On the **DEVICE** tab, **RESTART ADB OVER TCP/IP**, note the phone's IP, and from then on manage it over Wi-Fi with no cable.
 
 ---
 
@@ -1270,6 +1239,7 @@ After \`CNXN\`, everything happens on **streams**. The host \`OPEN\`s a service 
 
 - **Crypto:** [\`src/utils/adbCrypto.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbCrypto.js) — RSA key generation, \`android_pubkey\` encoding (modulus, Montgomery \`n0inv\` and \`rr\`), and PKCS#1 v1.5 token signing by BigInt modexp.
 - **Protocol:** [\`src/utils/adbDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbDriver.js) — message framing, the CNXN/AUTH handshake, the OPEN/OKAY/WRTE/CLSE stream with flow control, and the shell / sync / tcpip / reboot services.
+- **Device tools:** [\`src/utils/adbTools.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/adbTools.js) — \`getprop\`/battery/package parsing, APK install and uninstall, logcat polling, input commands and screenshot (\`screencap\`) decoding.
 - **Workbench:** [\`src/components/tools/AdbWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/AdbWorkbench.jsx).
 - **Tests:** [\`tests/adbCrypto.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/adbCrypto.test.js) proves a signed token verifies as a valid PKCS#1 block and the public-key blob round-trips; [\`tests/adb.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/adb.test.js) runs the full handshake, shell, and file push/pull against a simulated adbd.
 
@@ -1289,7 +1259,7 @@ After \`CNXN\`, everything happens on **streams**. The host \`OPEN\`s a service 
     toolId: 'dfu',
     category: 'programmers',
     title: 'WebUSB DFU Flasher — STM32 & DfuSe Firmware Download',
-    summary: 'Flash firmware onto microcontrollers with USB DFU 1.1 and ST DfuSe bootloaders directly from the browser: parse memory layouts from alternate interfaces, mass or sector erase, and program .bin or .dfu firmware files.',
+    summary: 'Flash firmware onto microcontrollers with USB DFU 1.1 and ST DfuSe bootloaders directly from the browser: pick a target address and erase page size, check the DFU suffix, and program .bin or .dfu firmware files.',
     tags: ['DFU', 'DfuSe', 'STM32', 'Firmware', 'WebUSB', 'Bootloader', 'Flasher', 'GD32', 'ARM'],
     readTime: '16 min read',
     content: `
@@ -1330,15 +1300,12 @@ ST DfuSe multiplexes command transactions through \`DFU_DNLOAD\` with block numb
 - **Page Erase (\`0x41\`):** \`[0x41, addr_0, addr_1, addr_2, addr_3]\` (Triggers non-volatile flash page erase at target address).
 - **Mass Erase (\`0x41\` without address):** Erases all flash sectors.
 
-#### DfuSe Memory Map Parsing
-DfuSe devices name their alternate interface settings using a structured string descriptor:
+#### DfuSe Memory Map (not parsed by the tool)
+DfuSe devices name their alternate interface settings with a structured string descriptor, for example:
 \`\`\`text
 @Internal Flash  /0x08000000/04*016Kg,01*064Kg,07*128Kg
 \`\`\`
-The WebUSB DFU client automatically parses this string to compute:
-1. Base flash memory address (\`0x08000000\`).
-2. Sector geometry: 4 sectors of 16 KB, 1 sector of 64 KB, and 7 sectors of 128 KB.
-3. Sector erase boundaries so only modified flash blocks are erased before programming.
+That means a base of \`0x08000000\` and sectors of 4 x 16 KB, 1 x 64 KB and 7 x 128 KB. **The tool does not read or parse this string.** You supply the **Target flash address** (default \`0x08000000\`) and an **Erase page size** yourself (see below), and it uses the first DFU interface it finds.
 
 ---
 
@@ -1346,24 +1313,24 @@ The WebUSB DFU client automatically parses this string to compute:
 
 1. **Enter DFU Bootloader Mode:**
    - Pull **BOOT0** high (to 3.3V) and momentarily toggle **RESET / NRST**.
-   - Plug the board directly into your computer via a data USB cable.
+   - Plug the board directly into your computer via a data USB cable. On Windows an ST DFU device may need the WinUSB driver (Zadig).
 2. **Connect via WebUSB:**
-   - Click **Connect DFU Device** in the DFU Flasher.
-   - Select the device from the browser prompt (typically labeled *STM32 BOOTLOADER* with VID \`0x0483\` / PID \`0xDF11\`).
+   - Click **Select DFU Device** in the DFU Flasher and choose the device in the browser prompt (the chooser is filtered to USB class \`0xFE\` subclass \`0x01\`; an STM32 ROM bootloader is typically VID \`0x0483\` / PID \`0xDF11\`).
+   - The Device card shows the interface number, transfer size, DFU version and whether it is **DfuSe (ST)** (bcdDFU \`0x011A\`) or **DFU 1.1**.
 3. **Select Firmware File:**
-   - Upload a raw binary (\`.bin\`) or structured ST DfuSe image (\`.dfu\`).
-   - If using \`.bin\`, confirm the flash base address (defaults to \`0x08000000\` for STM32).
-4. **Flash & Verify:**
-   - Click **Erase & Flash Firmware**. The workbench erases necessary sectors, streams 2048-byte blocks via \`DFU_DNLOAD\`, polls \`DFU_GETSTATUS\`, and verifies MD5 checksums.
+   - Click **Load .bin / .dfu** and choose a raw binary (\`.bin\`) or a structured ST DfuSe image (\`.dfu\` / \`.dfuse\`). If the file has a DFU suffix, its CRC and target VID:PID are shown; a mismatch with the connected device prompts a confirmation.
+   - For a \`.bin\` on a DfuSe device, set the **Target flash address** (defaults to \`0x08000000\`) and the **Erase page size (bytes, 0 = mass erase)**. A page size of \`0\` erases the **whole flash**; enter your part's page size (STM32F1: 1024 or 2048; F4 has variable sectors, so prefer a \`.dfu\` there) to erase only the pages the image covers. A \`.dfu\` file carries its own addresses.
+4. **Flash:**
+   - Click **Flash Firmware**. The tool erases, then streams blocks of the interface's transfer size (read from the DFU functional descriptor, 1024 bytes if absent) with \`DFU_DNLOAD\`, polling \`DFU_GETSTATUS\` between blocks, and runs the manifestation phase. There is **no read-back / checksum verification** step.
 5. **Reboot to Application:**
-   - Disconnect BOOT0 (tie back to GND) and toggle Reset, or click **Manifest / Leave DFU**.
+   - Most devices leave DFU and start the new firmware by themselves after manifestation. If yours does not, tie BOOT0 back to GND and press reset. There is no separate "Leave DFU" button; **Disconnect** just releases the device.
 
 ---
 
 ### 4. Implementation & Architecture
 
-- **Driver:** [\`src/utils/dfuDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/dfuDriver.js) — complete USB DFU 1.1 / DfuSe driver, state machine polling, alternate interface parsing, and binary chunking.
-- **Workbench:** [\`src/components/tools/DfuFlasher.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/DfuFlasher.jsx) — interactive memory layout viewer, progress gauge, and multi-file flasher.
+- **Driver:** [\`src/utils/dfuDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/dfuDriver.js) — USB DFU 1.1 / DfuSe driver: state machine polling, DFU interface and functional-descriptor discovery, DFU suffix and DfuSe image parsing, and block chunking.
+- **Workbench:** [\`src/components/tools/DfuFlasher.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/DfuFlasher.jsx) — device card, firmware loader with DFU-suffix check, address/page-size inputs, progress bar and session log.
 - **Tests:** [\`tests/dfuDriver.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/dfuDriver.test.js).
 `
   }

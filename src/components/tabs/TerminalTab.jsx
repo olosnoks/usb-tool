@@ -50,7 +50,7 @@ export default function TerminalTab() {
 
     setIsScanning(true);
     setHunterResults([]);
-    addLog('[BAUD HUNTER] Starting automated scan across 9 candidate baud rates...', 'sys');
+    addLog(`[BAUD HUNTER] Starting automated scan across ${CANDIDATE_BAUD_RATES.length} candidate baud rates...`, 'sys');
 
     const results = [];
     for (const baud of CANDIDATE_BAUD_RATES) {
@@ -180,7 +180,7 @@ export default function TerminalTab() {
                 </div>
 
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Automatically cycles through 9 candidate baud rates, samples live UART bytes, and computes entropy & printable ASCII ratio to pinpoint the correct baud.
+                  Automatically cycles through {CANDIDATE_BAUD_RATES.length} candidate baud rates, samples live UART bytes, and computes entropy & printable ASCII ratio to pinpoint the correct baud.
                 </p>
 
                 <div className="flex items-center gap-2">

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Search, RefreshCw, FileDown, ShieldCheck, ShieldAlert, Link2, FileCode, Image, Code2, Fingerprint, Cookie, Globe } from 'lucide-react';
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
@@ -20,9 +20,9 @@ import CrawlerTab from './webanalyzer/CrawlerTab';
  * hosts. Analyze only targets you own or are authorized to assess.
  */
 
-function Section({ icon: Icon, title, count, accent = 'text-cyan-400', children }) {
+function Section({ icon: Icon, title, count, accent = 'text-cyan-400', id, children }) {
   return (
-    <section className="mb-3">
+    <section id={id} className="mb-3">
       <h3 className={`text-xs font-semibold uppercase tracking-wide mb-1 flex items-center gap-1.5 ${accent}`}>
         <Icon size={13} /> {title}{count !== undefined && <span className="text-slate-500">({count})</span>}
       </h3>
@@ -46,7 +46,14 @@ function List({ items, linkify = true }) {
 
 const SEV_COLOR = { High: 'text-red-400', Medium: 'text-orange-400', Low: 'text-yellow-400', Info: 'text-gray-400' };
 
-export default function WebAnalyzerWorkbench({ onLogMessage }) {
+// initialTab -> which section to open/scroll to (paths | crawler open an on-demand
+// section; passive | links scroll to that result block once an analysis exists).
+export const WEB_ANALYZER_TABS = { paths: 'wa-paths', crawler: 'wa-crawler', passive: 'wa-passive', links: 'wa-links' };
+
+export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
+  const [pathsOpen, setPathsOpen] = useState(initialTab === 'paths');
+  const [crawlerOpen, setCrawlerOpen] = useState(initialTab === 'crawler');
+  const scrolledRef = useRef(false);
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -89,6 +96,13 @@ export default function WebAnalyzerWorkbench({ onLogMessage }) {
     } catch (e) { setError(describeNetworkError(e)); }
     setBusy(false);
   };
+
+  useEffect(() => {
+    if (scrolledRef.current) return;
+    const id = WEB_ANALYZER_TABS[initialTab];
+    const el = id && document.getElementById(id);
+    if (el) { scrolledRef.current = true; el.scrollIntoView?.({ block: 'start' }); }
+  }, [initialTab, data]);
 
   const onExtraReport = useCallback((key, payload) => { extraRef.current[key] = payload; }, []);
 
@@ -186,14 +200,14 @@ export default function WebAnalyzerWorkbench({ onLogMessage }) {
             ))}
           </Section>
 
-          <Section icon={ShieldAlert} title="Passive scan" count={d.passive.alerts.length} accent="text-orange-400">
+          <Section id="wa-passive" icon={ShieldAlert} title="Passive scan" count={d.passive.alerts.length} accent="text-orange-400">
             {d.passive.note && <div className="text-[10px] text-slate-500 mb-1">{d.passive.note}</div>}
             {d.passive.alerts.map((a, i) => (
               <div key={i} className="py-0.5"><span className={`font-semibold ${SEV_COLOR[a.severity] || ''}`}>{a.severity}</span>{a.cwe ? <span className="text-slate-500 font-mono"> CWE-{a.cwe}</span> : ''} — <span className="text-gray-300">{a.desc}</span></div>
             ))}
           </Section>
 
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]">
+          <div id="wa-links" className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]">
             <Section icon={Link2} title="Links" count={d.page.links.length}><List items={d.page.links} /></Section>
             <Section icon={FileCode} title="Scripts" count={d.page.resources.scripts.length}><List items={d.page.resources.scripts} /></Section>
             <Section icon={Code2} title="Stylesheets" count={d.page.resources.styles.length}><List items={d.page.resources.styles} /></Section>
@@ -220,11 +234,11 @@ export default function WebAnalyzerWorkbench({ onLogMessage }) {
       )}
 
       {/* On-demand, long-running sections */}
-      <details className="mt-2 border-t border-slate-800 pt-3" open={false}>
+      <details id="wa-paths" className="mt-2 border-t border-slate-800 pt-3" open={pathsOpen} onToggle={(e) => setPathsOpen(e.currentTarget.open)}>
         <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-rose-300">Path Prober (on-demand)</summary>
         <div className="mt-1"><NiktoScannerWorkbench onLogMessage={onLogMessage} hideProxyConfig fixedTarget={normalized()} onReport={(p) => onExtraReport('paths', p)} /></div>
       </details>
-      <details className="mt-2 border-t border-slate-800 pt-3">
+      <details id="wa-crawler" className="mt-2 border-t border-slate-800 pt-3" open={crawlerOpen} onToggle={(e) => setCrawlerOpen(e.currentTarget.open)}>
         <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-emerald-300">Crawler (on-demand)</summary>
         <div className="mt-1"><CrawlerTab onLogMessage={onLogMessage} fixedTarget={normalized()} onReport={(p) => onExtraReport('crawler', p)} /></div>
       </details>

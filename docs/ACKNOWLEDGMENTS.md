@@ -2,7 +2,7 @@
 
 Skon's USB Tool stands on a large amount of open-source and open-standard work.
 This file attributes everything the project **did not create itself** — the
-libraries it depends on, the code it is modeled on, the external hardware and
+libraries it depends on, the code it is ported from or modeled on, the external hardware and
 firmware it controls or flashes, and the standards and data sources it uses.
 Each dependency remains under its own license; see the respective projects for
 full terms.
@@ -25,15 +25,17 @@ project in each tool's article.
 | `pako` | zlib (inflate/deflate) in JS | Vitaly Puzrin & Andrey Tupitsin | MIT |
 | `jwt-decode` | JWT inspection (CyberChef) | Auth0 | MIT |
 | `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` | Drag-and-drop (CyberChef recipe) | Claudéric Demers | MIT |
-| `@uiw/react-codemirror`, `@codemirror/lang-json`, CodeMirror 6 | Code/JSON editor | Marijn Haverbeke & CodeMirror / uiwjs | MIT |
-| `@openipc-rs/web` | Realtek RTL8812AU WebUSB monitor-mode WASM driver | OpenIPC project | see [OpenIPC/openipc-rs](https://github.com/OpenIPC/openipc-rs) |
+| `@uiw/react-codemirror`, `@codemirror/lang-json`, `@codemirror/lang-sql`, `@codemirror/state`, `@codemirror/view` (CodeMirror 6) | Code/JSON/SQL editor | Marijn Haverbeke & CodeMirror / uiwjs | MIT |
+| `sql.js` | SQLite compiled to WASM (DB Browser) | sql.js contributors (SQLite is public domain) | MIT |
+| `@openipc-rs/web` | Realtek RTL8812AU WebUSB monitor-mode WASM driver | OpenIPC project, [OpenIPC/openipc-rs](https://github.com/OpenIPC/openipc-rs) | MIT |
 
 ## Build & Dev Tooling
 
 | Package | Used For | Author / Project | License |
 | :--- | :--- | :--- | :--- |
 | `vite`, `@vitejs/plugin-react`, `vite-plugin-wasm`, `vite-plugin-top-level-await` | Bundler / dev server / WASM support | Evan You & Vite contributors | MIT |
-| `tailwindcss`, `postcss`, `autoprefixer` | Styling pipeline | Tailwind Labs & PostCSS | MIT |
+| `tailwindcss`, `@tailwindcss/container-queries`, `postcss`, `autoprefixer` | Styling pipeline | Tailwind Labs & PostCSS | MIT |
+| `terser` | Production minifier | Mihai Bazon & contributors | BSD-2-Clause |
 | `typescript` | Type checking | Microsoft | Apache-2.0 |
 | `vitest` | Unit tests | Vitest contributors | MIT |
 | `@types/react`, `@types/react-dom` | Type definitions | DefinitelyTyped contributors | MIT |
@@ -44,7 +46,35 @@ project in each tool's article.
 
 ---
 
-## Code We Modeled On
+## Code We Ported or Modeled On
+
+### Ported
+
+- **usb-rea** — the *USB Protocol RE* tool (`src/components/tools/UsbReaWorkbench.jsx`,
+  `src/utils/usbrea/`, `tests/usbrea/`) is an in-browser JavaScript port of **usb-rea**
+  by **Emir Mrkaljević**: capture parsing, action markers, protocol inference,
+  checksum detection, HID descriptor decoding, handshake and state analysis, the
+  report, Python driver scaffold and Wireshark Lua dissector generators, and the
+  VID:PID lookup. [github.com/emirmrkaljevic/usb-rea](https://github.com/emirmrkaljevic/usb-rea)
+  — **MIT**, (c) 2026 Emir Mrkaljević. The port keeps that notice in each module header
+  and lists its deviations from the Python original there.
+- **Mayhem Mobile** (RocketGod) — the PortaPack receiver bundle (`src/mayhem-mobile/`,
+  built to `public/mayhem/`, and the HackRF demodulation shape in
+  `src/utils/hackrfDemod.js`) is [RocketGod-git/mayhem-mobile](https://github.com/RocketGod-git/mayhem-mobile),
+  **GPL-3.0**, itself built from PortaPack Mayhem (GPL-3.0) and the HackRF project.
+  Its in-app credits list the upstream authors, including dump1090 (Salvatore Sanfilippo),
+  multimon-ng (Thomas Sailer, Elias Oenal, Craig Shelley), rtlamr (Douglas Hall),
+  acarsdec (Thierry Leconte), rtl_433 (Benjamin Larsson and contributors), librtlsdr, mbelib,
+  and the Flipper Zero SubGHz protocols (Flipper Devices); each keeps its own license.
+  The GPL-3.0 terms apply to that part of the app.
+- **WarHog web flasher** — the Warhog & Piglet suite's board carousel, flashing, device
+  screens, pig sprites and Piglet toolkit/monitor are ports of the web flasher in
+  [olosnoks/warhog](https://github.com/olosnoks/warhog) (same author as this project).
+- **aircrack-js** (georg95), a browser port of aircrack-ng, provides the optional SIMD
+  `public/wasm/aircrack.wasm` accelerator; the aircrack-ng project is GPL-2.0.
+  See each upstream repository for its license text.
+
+### Modeled on
 
 - **CyberChef** — the in-app CyberChef engine (`src/utils/cyberchef/`, the
   `Operation` / `Dish` / `Chef` / recipe / Magic architecture) is an
@@ -93,7 +123,10 @@ Wireshark dissector conventions; ChibiOS/RT (PortaPack shell); DuckyScript
 - **OUI / MAC vendor data** derived from the IEEE registration authority.
 - **SecLists** (wordlists for the web/security tools) — Daniel Miessler, Jason Haddix & contributors — MIT; fetched on demand from the **jsDelivr** CDN.
 - **HaveIBeenPwned** Pwned Passwords range API (k-anonymity) — Troy Hunt.
-- **Google Public DNS** DNS-over-HTTPS endpoint (DNS Enumerator).
+- **Google Public DNS** DNS-over-HTTPS endpoint (DNS Toolkit).
+- **crt.sh** (Sectigo) Certificate Transparency search (crt.sh Subdomain Finder, Certificate Inspector).
+- **Shodan**, **urlscan.io** and **HackerTarget** APIs (OSINT API Clients; bring your own key).
+- **OpenDeviceDB** (optional online lookup in USB Protocol RE).
 
 ---
 

@@ -10,10 +10,9 @@ import {
   CheckCircle2, 
   Layers, 
   Search, 
-  ShieldCheck,
   FileText
 } from 'lucide-react';
-import { inspectEspSilicon, parseFlashCapacity, FLASH_MANUFACTURERS } from '../utils/espMemoryTool';
+import { inspectEspSilicon, parseFlashCapacity } from '../utils/espMemoryTool';
 import { dumpFlashViaStub, isWebSerialSupported } from '../utils/espFlashDump';
 import { useSerial } from '../context/SerialContext';
 
@@ -147,7 +146,7 @@ export default function EspMemoryInspector({
       </div>
 
       {/* Silicon Metadata Grid */}
-      <div className="grid grid-cols-1 @sm:grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-1 @sm:grid-cols-2 gap-2.5">
         <div className="bg-[#030712] border border-slate-800 rounded-lg p-3">
           <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Target MAC Address</span>
           <div className="text-sm font-bold text-cyber-cyan">
@@ -159,14 +158,6 @@ export default function EspMemoryInspector({
           <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Chip Architecture</span>
           <div className="text-sm font-bold text-slate-200">
             {siliconInfo?.chipFamily || '--'}
-          </div>
-        </div>
-
-        <div className="bg-[#030712] border border-slate-800 rounded-lg p-3">
-          <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">Security Flags</span>
-          <div className="text-sm font-bold text-emerald-400 flex items-center gap-1">
-            <ShieldCheck className="w-4 h-4" />
-            <span>Standard ROM Boot</span>
           </div>
         </div>
       </div>

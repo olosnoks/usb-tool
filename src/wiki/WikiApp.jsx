@@ -34,6 +34,9 @@ import {
   Github
 } from 'lucide-react';
 import { WIKI_ARTICLES, WIKI_CATEGORIES } from './wikiArticles';
+import { searchTools } from '../utils/toolSearch';
+
+const WIKI_SEARCH_FIELDS = { name: ['title'], id: ['id'], keywords: ['tags'], desc: ['summary'], body: ['content'] };
 
 // Map icon string names to Lucide icons
 const CATEGORY_ICONS = {
@@ -113,6 +116,7 @@ export const TOOL_TO_ARTICLE_MAP = {
   'esp-dump': 'esp-dump',
   'usb-descriptors': 'usb-descriptors',
   hid: 'hid',
+  'usb-rea': 'usb-rea',
   'mass-storage': 'mass-storage',
   ptp: 'ptp',
   fido2: 'fido2',
@@ -220,17 +224,8 @@ export default function WikiApp() {
 
   // Filter articles by category and search query
   const filteredArticles = useMemo(() => {
-    return WIKI_ARTICLES.filter(article => {
-      const q = searchQuery.toLowerCase().trim();
-      const matchesCategory = selectedCategory === 'all' || article.category === selectedCategory;
-      const matchesSearch = !q ||
-        article.title.toLowerCase().includes(q) ||
-        article.summary.toLowerCase().includes(q) ||
-        article.content.toLowerCase().includes(q) ||
-        article.tags.some(t => t.toLowerCase().includes(q));
-
-      return matchesCategory && matchesSearch;
-    });
+    const ranked = searchTools(WIKI_ARTICLES, searchQuery, { fields: WIKI_SEARCH_FIELDS });
+    return ranked.filter(article => selectedCategory === 'all' || article.category === selectedCategory);
   }, [searchQuery, selectedCategory]);
 
   const activeArticle = useMemo(() => {

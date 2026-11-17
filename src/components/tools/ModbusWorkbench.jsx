@@ -21,6 +21,11 @@ import {
 import StatusBadge from '../common/StatusBadge';
 import { useSerial } from '../../context/SerialContext';
 
+export function formatWriteFeedback(result, addr, val) {
+  if (result && result.ok) return `Wrote ${val} to ${40001 + addr} successfully.`;
+  return `Write to ${40001 + addr} FAILED: ${(result && result.message) || 'unknown error'}`;
+}
+
 export default function ModbusWorkbench() {
   const {
     isConnected: portConnected,
@@ -97,10 +102,15 @@ export default function ModbusWorkbench() {
       alert('Invalid address or value');
       return;
     }
-    await client.writeSingleRegister(addr, val);
-    setWriteFeedback(`Wrote ${val} to 4000${addr + 1} successfully.`);
-    setTimeout(() => setWriteFeedback(''), 2500);
-    handleManualPoll();
+    let result;
+    try {
+      result = await client.writeSingleRegisterDetailed(addr, val);
+    } catch (err) {
+      result = { ok: false, message: err.message };
+    }
+    setWriteFeedback(formatWriteFeedback(result, addr, val));
+    setTimeout(() => setWriteFeedback(''), result.ok ? 2500 : 6000);
+    if (result.ok) handleManualPoll();
   };
 
   return (
@@ -273,8 +283,8 @@ export default function ModbusWorkbench() {
             <span>WRITE SINGLE REGISTER (FUNCTION CODE 0x06)</span>
           </span>
           {writeFeedback && (
-            <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
-              <Check className="w-3 h-3" />
+            <span className={`text-[10px] font-bold flex items-center gap-1 ${writeFeedback.includes('FAILED') ? 'text-rose-400' : 'text-emerald-400'}`}>
+              {writeFeedback.includes('FAILED') ? <AlertTriangle className="w-3 h-3" /> : <Check className="w-3 h-3" />}
               <span>{writeFeedback}</span>
             </span>
           )}

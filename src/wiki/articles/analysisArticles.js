@@ -15,7 +15,7 @@ export const ANALYSIS_ARTICLES = [
     content: `
 # Packet & Protocol Lab — 802.11 Dissector & PCAP Studio
 
-The **Packet & Protocol Lab** turns raw serial streams from sniffing firmwares (such as ESP32 Marauder, Wi-Fi Pen Tool, or custom ESP-IDF promiscuous sniffers) into structured IEEE 802.11 network packet dissections, Wireshark-compatible PCAP captures, and custom embedded protocol decoders.
+The **Packet & Protocol Lab** groups four packet-inspection views: a sample-frame 802.11 / serial packet viewer, a Kismet Studio client for Alfa-style Wi-Fi monitor setups, a live hex stream viewer and a custom serial packet framer (start/end bytes, fixed length or SLIP).
 
 ---
 
@@ -23,7 +23,7 @@ The **Packet & Protocol Lab** turns raw serial streams from sniffing firmwares (
 
 Normally, network cards filter out Wi-Fi frames that aren't addressed to your specific computer. In cybersecurity auditing and wireless protocol development, you need to see **everything** in the air: beacon frames announcing access points, probe requests from smartphones searching for known home Wi-Fi networks, deauthentication packets, and cryptographic key exchanges.
 
-The **Packet & Protocol Lab** ingests raw promiscuous radio streams over serial, dissects the binary MAC headers in your browser, isolates WPA/WPA2 4-way handshakes, and lets you download standard \`.pcap\` files that open instantly in **Wireshark** or **Hashcat**.
+The **Packet & Protocol Lab** has four sub-tabs: a sample-frame **Wi-Fi & PCAP Analyzer**, a live **Kismet Studio** client for a real Kismet server, a **Hex Stream Viewer** for the shared serial stream, and a **Packet Framer** that slices that stream into packets. It does not itself capture raw 802.11 from your serial port or write \`.pcap\` files; the 802.11 background below explains the formats you will meet when using sniffers and Kismet.
 
 ---
 
@@ -83,21 +83,20 @@ To authenticate and generate the session encryption keys without transmitting pa
 </details>
 
 <details>
-<summary>Custom Protocol Framer: SLIP, COBS & Byte Stuffing Algorithms</summary>
+<summary>Custom Protocol Framer: SLIP & Byte Stuffing Background</summary>
 
-When transmitting binary packets across raw serial channels without hardware flow control, embedded engineers use byte stuffing algorithms to prevent binary data from colliding with packet framing markers:
+The **Packet Framer** supports three framing modes: **Start / End Byte** (custom hex delimiters, default \`0xAA\` / \`0x55\`), **Fixed Length** (default 16 bytes) and **SLIP (0xC0)**. COBS is background only: it appears in the tab's name but the framer has no COBS mode.
 
-#### 1. SLIP (Serial Line Internet Protocol — RFC 1055)
+#### SLIP (Serial Line Internet Protocol — RFC 1055)
 - **Frame End**: \`0xC0\` (Octal \`0300\`).
 - **Frame Escape**: \`0xDB\` (Octal \`0333\`).
-- If data byte is \`0xC0\`, replace with \`0xDB 0xDC\`.
-- If data byte is \`0xDB\`, replace with \`0xDB 0xDD\`.
-- Widely used by ESP-IDF ROM bootloader and IP-over-serial stacks.
+- If data byte is \`0xC0\`, the sender replaces it with \`0xDB 0xDC\`.
+- If data byte is \`0xDB\`, the sender replaces it with \`0xDB 0xDD\`.
+- The tool's SLIP mode cuts the stream at \`0xC0\` boundaries. It does not un-escape the payload.
 
-#### 2. COBS (Consistent Overhead Byte Stuffing)
+#### COBS (Consistent Overhead Byte Stuffing) — background
 - Encodes a packet of *N* bytes with at most $\lfloor N/254 \rfloor + 1$ bytes of overhead.
-- Completely eliminates all zero (\`0x00\`) bytes from the payload.
-- This allows \`0x00\` to serve as an infallible, self-synchronizing packet boundary delimiter in industrial telemetry and drone telemetry links.
+- Removes all zero (\`0x00\`) bytes from the payload so \`0x00\` can serve as the packet delimiter.
 
 </details>
 
@@ -105,29 +104,63 @@ When transmitting binary packets across raw serial channels without hardware flo
 
 ### 3. Complete UI Control Mapping
 
+**Lab sub-tabs**
+
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Parser Mode** | Dropdown | Selects active protocol dissector: 802.11 Wi-Fi, Raw Hex Stream, SLIP Framer, or COBS Framer. |
-| **Clear Buffer** | Button | Resets packet capture table and frees internal memory buffers. |
-| **Filter by MAC / SSID** | Text Input | Live search filter isolating packets matching specific BSSID, client MAC, or network name. |
-| **Filter by Frame Type** | Dropdown | Isolates Management (Beacons, Probes, Deauths), Control (ACKs, RTS/CTS), or Data frames. |
-| **Handshake Alert Banner**| Status Pill | Flashes green when a full or partial EAPOL 4-way handshake (or PMKID) is captured. |
-| **Export PCAP** | Button | Generates standard Libpcap \`.pcap\` binary file containing all captured 802.11 frames with nanosecond timestamps. |
-| **Packet Detail Drawer** | Drawer | Displays hierarchical tree decomposition of the selected packet down to individual bitfields. |
+| **Wi-Fi & PCAP Analyzer** | Tab | Sample-frame viewer (802.11, EAPOL, NMEA, Modbus examples). |
+| **Kismet Studio (Alfa / 802.11)** | Tab | Live client for a Kismet server. |
+| **Hex Stream Viewer** | Tab | Live hex/ASCII view of the shared serial byte stream. |
+| **Packet Framer (SLIP / COBS)** | Tab | Frames the byte stream by start/end bytes, fixed length or SLIP. |
+
+**Wi-Fi & PCAP Analyzer**
+
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Clear** | Button | Empties the packet table. |
+| **Samples** | Button | Reloads the five built-in sample frames. |
+| **Export Capture** | Button | Downloads the table as \`skons_packet_capture.json\` (JSON, not PCAP). |
+| **Filter by MAC, SSID, protocol...** | Text Input | Live filter on protocol, source, destination or SSID. |
+| **ALL / Management / Data / Serial** | Buttons | Filter by frame type. |
+| **Packet Capture Stream** | Table | Time, Protocol, Source, Destination / SSID and RSSI per frame. |
+| **Frame Details & Hex Inspector** | Panel | Frame type, channel, addresses, payload length and raw hex of the selected row. |
+
+**Hex Stream Viewer**
+
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **8-Byte / 16-Byte** | Toggle | Bytes per row. |
+| **Search hex (e.g. 55 AA)...** | Text Input | Highlights matching byte sequences. |
+| **Auto-scroll** | Icon button | Follows incoming bytes. |
+| **HEX / C[]** | Buttons | Copy the visible bytes as a hex string or a C array. |
+| **Clear Hex Stream Buffer** | Icon button | Clears the hex stream buffer. |
+
+**Packet Framer**
+
+| UI Element | Type | Purpose & Behavior |
+| :--- | :--- | :--- |
+| **Start / End Byte, Fixed Length, SLIP (0xC0)** | Buttons | Framing mode. |
+| **START / END / LENGTH** | Inputs | Frame delimiter bytes (hex) or fixed frame length. |
+| **Pause / Resume** | Button | Pauses frame extraction. |
+| **Search hex bytes or ASCII payload...** | Text Input | Filters the framed packets. |
+| **Export JSON** | Button | Downloads the framed packets. |
+| **Clear Packets** | Button | Empties the packet list. |
 
 ---
 
-### 4. Step-by-Step Engineering Walkthroughs
+#### Walkthrough A: Framing a Binary Serial Stream
+1. Connect your device from the header so bytes flow into the shared stream.
+2. Open the **Packet Framer (SLIP / COBS)** sub-tab.
+3. Pick **Start / End Byte** and enter the **START** / **END** bytes (e.g. \`0xAA\` and \`0x55\`), or choose **Fixed Length** (set **LENGTH**) or **SLIP (0xC0)**.
+4. Each complete frame appears in the table with Time, Bytes, Opcode (the second byte), Hex Payload and ASCII. Use the search box to filter by hex or ASCII.
+5. Click a row to open the **Packet Inspector**, which also shows its CRC-16/Modbus.
+6. Click **Export JSON** to save the framed packets. Use the pause button to freeze capture.
 
-#### Walkthrough A: Capturing a WPA2 Handshake with ESP32 Marauder
-1. Connect your ESP32 running Marauder firmware to Skon's USB Tool.
-2. Open the **Packet & Protocol Lab** and verify **Parser Mode** is set to **Wi-Fi 802.11**.
-3. In the terminal drawer, send \`channel -s 6\` to lock onto your target AP's channel.
-4. Send \`sniffraw\` or \`sniffpmkid\` to begin serial packet streaming.
-5. In the workbench, observe incoming beacon frames confirming signal strength and SSID.
-6. When a client reconnects, the green **Handshake Captured** banner illuminates.
-7. Click **Export PCAP** to save the file as \`capture.pcap\`.
-8. Open the PCAP file in Wireshark or pass it to \`aircrack-ng\` to verify cryptographic integrity!
+#### Walkthrough B: Browsing the Sample Frames
+1. Open the **Wi-Fi & PCAP Analyzer** sub-tab. It starts with five sample frames.
+2. Filter with the search box or the **ALL / Management / Data / Serial** buttons.
+3. Click a row to see its addresses, length and raw hex in the details pane.
+4. **Export Capture** downloads the table as \`skons_packet_capture.json\`.
 
 <details>
 <summary>Deep Dive: Alfa Network Wi-Fi Adapters & Kismet REST / WebSocket Architecture</summary>
@@ -153,26 +186,10 @@ Kismet functions as a headless multi-threaded C++ RF capture engine serving real
 - \`GET /pcap/all.pcapng\`: Real-time streaming PCAP-NG capture file directly from monitor interfaces.
 - \`ws://localhost:2501/devices/views/all/devices.ws\`: High-throughput binary WebSocket stream pushing delta device updates without polling overhead.
 
-#### 3. WIDS Anomaly Detection Algorithms
-1. **Deauthentication Flood Detection**: Measures moving rate of 802.11 Reason Code 1/2/3/7 management frames. If >50 deauth frames arrive per second directed at a single BSSID, a Critical WIDS alarm is generated.
-2. **Rogue AP / Evil Twin Detection**: Flags when an established SSID suddenly broadcasts from an unfamiliar BSSID or with mismatched RSN/WPA capabilities.
-3. **Null Probe Response**: Identifies rogue or misconfigured APs answering wildcard probe requests with malformed information elements.
+#### 3. WIDS Alerts
+The **WIDS Intrusion Alerts** tab lists the alerts Kismet itself raises (the tool polls the server's alert list and colors them by severity). Typical Kismet alerts cover deauthentication floods, suspected rogue / evil-twin access points and malformed probe responses. The detection thresholds belong to Kismet, not to this tool.
 
 </details>
-
----
-
-### 4. Step-by-Step Engineering Walkthroughs
-
-#### Walkthrough A: Capturing a WPA2 Handshake with ESP32 Marauder
-1. Connect your ESP32 running Marauder firmware to Skon's USB Tool.
-2. Open the **Packet & Protocol Lab** and verify **Parser Mode** is set to **Wi-Fi 802.11**.
-3. In the terminal drawer, send \`channel -s 6\` to lock onto your target AP's channel.
-4. Send \`sniffraw\` or \`sniffpmkid\` to begin serial packet streaming.
-5. In the workbench, observe incoming beacon frames confirming signal strength and SSID.
-6. When a client reconnects, the green **Handshake Captured** banner illuminates.
-7. Click **Export PCAP** to save the file as \`capture.pcap\`.
-8. Open the PCAP file in Wireshark or pass it to \`aircrack-ng\` to verify cryptographic integrity!
 
 #### Walkthrough B: Dual-Band Auditing with Alfa AWUS036ACH & Kismet Studio
 1. Plug your Alfa AWUS036ACH or AWUS1900 adapter into your workstation USB 3.0 port.
@@ -195,21 +212,23 @@ Kismet functions as a headless multi-threaded C++ RF capture engine serving real
 
 | Error Message / Symptom | Root Cause | Engineering Solution |
 | :--- | :--- | :--- |
-| **No Packets Appearing in Table** | Firmware is not in raw packet streaming mode or wrong baud rate. | Ensure baud rate is 115200 or 921600. In Marauder, verify \`settings -s ForcePackets enable\`. |
+| **Packets table is empty after pressing Clear** | The Wi-Fi & PCAP Analyzer only holds sample frames. | Click **Samples** to reload the five sample frames. It has no live capture input. |
+| **Hex Stream Viewer / Packet Framer show nothing** | No serial device is connected, or nothing is arriving. | Connect a board from the header, then check that the Terminal shows traffic. |
+| **Packet Framer finds no packets** | Start/End bytes or length do not match the stream. | Check the **START** / **END** hex values (e.g. \`0xAA\`, \`0x55\`), the **LENGTH**, or switch to **SLIP (0xC0)**. Framing is paused if the pause button is active. |
 | **Cannot Connect to Kismet (Port 2501)** | Kismet daemon is not running or blocked by local firewall. | Run \`kismet -c wlan1mon\` in terminal. Verify \`http://localhost:2501\` responds in browser. |
 | **Connect fails only from the hosted (https) site** | Browser blocks a plain-http / non-CORS Kismet from an https page. | Run the \`cors-proxy\` Docker backend and set it as the proxy in Kismet Studio's proxy bar; requests then reach Kismet via \`localhost:47101\`. |
+| **Kismet refused the login** | Kismet needs an API key or user:password. | Enter the API key (sent as the \`KISMET\` URL parameter) or \`user:password\` (sent as Basic auth) and connect again. |
 | **Alfa Adapter Not Entering Monitor Mode** | NetworkManager or wpa_supplicant reclaiming USB interface. | Run \`sudo airmon-ng check kill\` prior to starting monitor mode. Ensure correct DKMS driver is installed. |
-| **FCS (Checksum) Errors on All Frames** | RF multipath interference or antenna impedance mismatch. | Attach external 2.4GHz/5GHz SMA antennas and keep adapter at least 1 meter away from USB 3.0 hubs. |
-| **Missing Handshake Message 4** | Client was too far away for the sniffer to receive the low-power station ACK. | Move the sniffing antenna physically closer to the client laptop or smartphone. |
 
 ---
 
 ### Implementation & Architecture
 
-- **Component:** [\`src/components/tools/ProtocolPacketLab.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/ProtocolPacketLab.jsx) is a thin tab router. By active sub-tab it mounts one of four views: \`PacketAnalyzerWorkbench\` (802.11 dissector), \`HexViewer\` (raw hex stream), \`PacketFramer\` (SLIP/COBS framer), or \`KismetStudioWorkbench\` (Alfa / 802.11 studio).
-- **802.11 parsing:** frame dissection uses [\`src/utils/wifiParser.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/wifiParser.js) — the same parser the Alfa capture worker runs — so radiotap stripping, frame-control type/subtype, address extraction, and SSID/security IE parsing are shared, not duplicated.
-- **Hex stream:** \`HexViewer\` renders \`hexByteStream\` straight from the shared \`SerialContext\` (every RX/TX byte, color-coded by direction), so it reflects whatever the Terminal is connected to.
-- **PCAP & framing:** import/export go through \`pcapReader.js\` / \`pcapExporter.js\` for Wireshark-compatible files, and \`PacketFramer\` builds and parses SLIP (RFC 1055) and COBS frames with live checksums.
+- **Component:** [\`src/components/tools/ProtocolPacketLab.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/ProtocolPacketLab.jsx) is a thin tab router. The sub-tabs are **Wi-Fi & PCAP Analyzer** (\`PacketAnalyzerWorkbench\`), **Kismet Studio (Alfa / 802.11)** (\`KismetStudioWorkbench\`), **Hex Stream Viewer** (\`HexViewer\`) and **Packet Framer (SLIP / COBS)** (\`PacketFramer\`). The tool IDs \`packet-analyzer\`, \`hex\`, \`packets\` and \`kismet\` all open this same lab on the matching sub-tab.
+- **Wi-Fi & PCAP Analyzer:** \`PacketAnalyzerWorkbench\` is a **sample-data viewer**. It ships five built-in sample frames (a beacon, a probe request, an EAPOL message 1, an NMEA sentence and a Modbus RTU response). It does not read the serial port, parse 802.11 from a live stream, import PCAP files or detect handshakes, and **Export Capture** writes the table as JSON, not a \`.pcap\`. Real 802.11 parsing (\`src/utils/wifiParser.js\`) and PCAP handling (\`pcapReader.js\` / \`pcapExporter.js\`) are used by other tools, such as the Alfa Wi-Fi workbench.
+- **Hex stream:** \`HexViewer\` renders \`hexByteStream\` straight from the shared \`SerialContext\` (every RX/TX byte, color-coded by direction, last 4096 bytes shown), so it reflects whatever the Terminal is connected to.
+- **Framing:** \`PacketFramer\` slices that same byte stream into packets using Start / End byte, Fixed Length or SLIP (0xC0) framing, and shows a CRC-16/Modbus value for the selected packet.
+- **Kismet:** \`KismetStudioWorkbench\` talks to a Kismet server's REST API through \`src/utils/kismetClient.js\` (optionally via the local \`cors-proxy\` Docker backend). Kismet does all the radio capture.
 
 ---
 
@@ -229,13 +248,13 @@ Kismet functions as a headless multi-threaded C++ RF capture engine serving real
     toolId: 'logic-analyzer',
     category: 'analysis',
     title: '24MHz Logic Analyzer — 8-Channel Waveforms & Protocol Decoders',
-    summary: 'Hardware digital signal analysis up to 24 MSps, edge triggers, protocol decoders for UART/SPI/I2C, sample buffers, and VCD export for Sigrok.',
+    summary: 'Hardware digital signal analysis up to 24 MSps, SUMP and fx2lafw capture, protocol decoders (I2C, UART, SPI, 1-Wire, CAN, WS2812, IR, SWD), edge/pattern search, and VCD / PulseView .sr export and import.',
     tags: ['Logic Analyzer', '24MHz', 'Waveforms', 'Protocol Decoder', 'Sigrok', 'VCD', 'SPI', 'I2C', 'UART'],
     readTime: '22 min read',
     content: `
 # 24MHz Logic Analyzer — Digital Signal Workbench
 
-The **Logic Analyzer** workbench transforms your browser into an 8-channel digital storage oscilloscope and protocol analyzer. Interfacing with low-cost logic hardware (SUMP-protocol devices over Web Serial, such as Arduino / Raspberry Pi Pico sketches and the Open Bench Logic Sniffer, or Cypress FX2LP boards running sigrok's fx2lafw firmware over WebUSB), it captures high-speed logic state transitions and decodes UART, SPI, and I2C packets directly over the waveform.
+The **Logic Analyzer** workbench is an 8-channel digital logic analyzer and protocol decoder in your browser. It captures from low-cost logic hardware (SUMP-protocol devices over Web Serial, such as Arduino / Raspberry Pi Pico sketches and the Open Bench Logic Sniffer, or Cypress FX2LP boards running sigrok's fx2lafw firmware over WebUSB), or opens existing \`.vcd\` / PulseView \`.sr\` files. It decodes I2C, UART, SPI, 1-Wire, CAN, WS2812, IR (NEC / RC-5) and SWD directly over the waveform.
 
 ---
 
@@ -255,12 +274,14 @@ An oscilloscope displays analog voltages, but a **Logic Analyzer** records the d
 
 | Channel | Function / Color | Voltage Tolerance | Recommended Use |
 | :--- | :--- | :--- | :--- |
-| **CH0** | Brown | 0V to 5.5V TTL | UART TX / I2C SCL / SPI SCK (Clock Line) |
-| **CH1** | Red | 0V to 5.5V TTL | UART RX / I2C SDA / SPI MOSI (Data Master-Out) |
-| **CH2** | Orange | 0V to 5.5V TTL | SPI MISO (Data Master-In) |
-| **CH3** | Yellow | 0V to 5.5V TTL | SPI CS / SS (Chip Select Active-Low) |
-| **CH4 - CH7**| Green/Blue/Violet/Grey | 0V to 5.5V TTL | Interrupt lines, PWM motor signals, GPIO triggers |
+| **D0** | Brown | 0V to 5.5V TTL | Decoder defaults: I2C SCL |
+| **D1** | Red | 0V to 5.5V TTL | I2C SDA |
+| **D2** | Orange | 0V to 5.5V TTL | UART RX (default) |
+| **D3** | Yellow | 0V to 5.5V TTL | Free; any role can be remapped |
+| **D4 - D7**| Green/Blue/Violet/Grey | 0V to 5.5V TTL | SPI defaults: CS = D4, MOSI = D5, MISO = D6, CLK = D7 |
 | **GND** | Black | **0V Reference** | **MANDATORY**: Must connect to target board ground! |
+
+Wire colors vary by board (the colors shown are the usual 24 MHz 8-channel clone leads). The decoder defaults above can be changed with the role dropdowns in the Protocol Decoder bar.
 
 <details>
 <summary>Hardware Architecture: Cypress FX2LP GPIF Engine & 24 MSps Nyquist Limits</summary>
@@ -269,7 +290,7 @@ An oscilloscope displays analog voltages, but a **Logic Analyzer** records the d
 Low-cost $8 USB logic analyzers utilize the Cypress FX2LP microcontroller running custom open-source Sigrok firmware:
 - **General Programmable Interface (GPIF)**: Bypasses the 8051 CPU core entirely. It latches Port B/D pins directly into internal FIFO buffers at 24 MHz driven by a 48 MHz crystal oscillator.
 - **USB 2.0 High-Speed Bulk Streaming**: Pours uncompressed 8-bit samples across USB Bulk Endpoint 2 (512-byte packets) at up to **192 Mbps** ($24 \text{ MSps} \times 8 \text{ bits}$).
-- **Host-Side Ring Buffer**: Skon's USB Tool ingests these bulk byte streams over WebUSB and queues them into a circular memory buffer rendered via an offscreen HTML5 canvas.
+- **Host-Side Buffer**: Skon's USB Tool reads the bulk byte stream over WebUSB into the packed sample buffer, which is then drawn on the waveform canvas.
 
 #### Nyquist-Shannon Sampling Constraints
 To faithfully reconstruct digital square pulses without aliasing:
@@ -283,17 +304,19 @@ $$\text{Sample Rate} \ge 4 \times f_{\text{signal}}$$
 <details>
 <summary>Sigrok / PulseView VCD File Format Specification</summary>
 
-When clicking **Export VCD**, the analyzer generates standard IEEE 1364 **Value Change Dump** files compatible with Sigrok, PulseView, and GTKWave:
+When clicking **VCD**, the analyzer generates standard IEEE 1364 **Value Change Dump** files compatible with Sigrok, PulseView, and GTKWave:
 
 \`\`\`text
-$date 2026-10-24 00:00:00 $end
-$version Skon's USB Tool VCD Generator $end
-$timescale 1ns $end
+$date 2026-10-24T00:00:00.000Z $end
+$version Skon's USB Tool logic analyzer $end
+$comment samplerate 24000000 $end
+$timescale 1 ns $end
 $scope module logic $end
-$var wire 1 ! ch0 $end
-$var wire 1 " ch1 $end
-$var wire 1 # ch2 $end
-$var wire 1 $ ch3 $end
+$var wire 1 ! D0 $end
+$var wire 1 " D1 $end
+$var wire 1 # D2 $end
+$var wire 1 $ D3 $end
+...(eight signals, D0 to D7)
 $upscope $end
 $enddefinitions $end
 #0
@@ -301,12 +324,12 @@ $enddefinitions $end
 0"
 1#
 1$
-#41
+#42
 1!
 #83
 0!
 \`\`\`
-Every transition records the nanosecond timestamp (\`#41\`) followed by the logic state and channel token (\`1!\`), minimizing file sizes compared to raw CSV dumps.
+Every value change records a timestamp (\`#41\`, in the file's timescale unit) followed by the logic state and channel token (\`1!\`), minimizing file sizes compared to raw CSV dumps. Signals are named after the channel names (default \`D0\`..\`D7\`). The \`.sr\` export is a PulseView/sigrok session file for the same data, and both formats can be re-opened with **OPEN .VCD / .SR**.
 
 </details>
 
@@ -316,30 +339,36 @@ Every transition records the nanosecond timestamp (\`#41\`) followed by the logi
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Connect SUMP (Serial)** | Button | Opens a SUMP device over Web Serial (115200 baud), checks its \`1ALS\` ID and reads its metadata. |
-| **Connect FX2 (USB)** | Button | Opens an FX2 board over WebUSB (fx2lafw \`1D50:608C\`, or a blank FX2 / Saleae-clone ID). A board without fx2lafw asks for the firmware file, uploads it to RAM, and re-enumerates; on Windows it needs the WinUSB driver (Zadig). |
-| **Demo** | Button | Fills the buffer with synthetic traffic, labeled as simulated. |
-| **Sample Rate** | Dropdown | Selects acquisition sampling frequency from 20 kHz up to 24 MHz. |
-| **Sample Depth** | Dropdown | Configures acquisition buffer size from 10k samples up to 10M samples. |
-| **Trigger Channel** | Dropdown | Designates which channel initiates capture (None, CH0 through CH7). |
-| **Trigger Type** | Dropdown | Selects trigger condition: Rising Edge (↑), Falling Edge (↓), or High/Low level. |
-| **Start Capture** | Button | Arms the trigger and begins continuous or triggered data acquisition. |
-| **Waveform Canvas** | Viewport | Interactive 8-channel timing diagram with zoom in/out (<kbd>+</kbd>/<kbd>-</kbd>) and pan controls. |
-| **Decoder Selector** | Dropdown | Adds protocol decoders: I2C, SPI, or UART directly mapped to selected channels. |
-| **Export VCD** | Button | Downloads capture session as an IEEE 1364 Value Change Dump for Sigrok/PulseView. |
+| **CONNECT SUMP (SERIAL)** | Button | Opens a SUMP device over Web Serial (115200 baud), checks its \`1ALS\` ID and reads its metadata. |
+| **CONNECT FX2 (USB)** | Button | Opens an FX2 board over WebUSB (fx2lafw \`1D50:608C\`, Saleae-clone / USBee IDs or a blank Cypress FX2). A board without fx2lafw shows **LOAD FIRMWARE FILE** (\`.fw\`, \`.bin\`, \`.hex\`, \`.ihx\`), uploads it to RAM, and re-enumerates; on Windows it needs the WinUSB driver (Zadig). Needs Chrome or Edge. |
+| **DISCONNECT** | Button | Closes the connected device. |
+| **OPEN .VCD / .SR** | Button | Loads a VCD or PulseView \`.sr\` file into the buffer for decoding. |
+| **CAPTURE SIGNAL** | Button | Acquires one buffer from the connected device (shows progress for FX2). Disabled without a device. |
+| **RATE** | Dropdown | 20 kHz up to 24 MHz (the device may use a nearby achievable rate, shown as "capture is ..."). |
+| **SAMPLES** | Dropdown | 1,024 up to 1M samples. |
+| **HW TRIGGER MASK / VALUE** | Hex inputs | SUMP only: channels in the mask must match the value to start capture; mask \`00\` starts immediately. |
+| **Zoom out / Zoom in / Fit whole capture** | Buttons | Zoom the waveform; also mouse wheel pans and Ctrl+wheel zooms. |
+| **Waveform canvas** | Viewport | 8-channel timing diagram. Click sets cursor A, Shift-click cursor B; ΔT and 1/ΔT are shown. **TIMELINE PAN** slider scrolls. |
+| **FIND** | Dropdown + PREV / NEXT | Searches from cursor A for a rising edge, falling edge, any edge, glitch (short pulse) or pattern (mask/value) on a channel. |
+| **VCD / PULSEVIEW .SR** | Buttons | Export the capture as a Value Change Dump or a PulseView/sigrok session file. |
+| **Protocol Decoder buttons** | Buttons | Pick I2C, UART, SPI, 1-Wire, CAN, WS2812, IR or SWD; role dropdowns map decoder signals to D0-D7 and parameter fields (baud, parity, SPI mode...) appear. |
+| **AUTO-BAUD** | Button | UART only: estimates the baud rate from the shortest pulses. |
+| **CSV** | Button | Exports the decoded items. |
+| **Channel Measurements** | Table | Per channel name (editable), edges, frequency, duty and min/max pulse. |
 
 ---
 
 ### 4. Step-by-Step Engineering Walkthroughs
 
 #### Walkthrough A: Decoding an I2C Sensor Bus
-1. Connect **GND** to target board ground. Connect **CH0** to SCL (Clock) and **CH1** to SDA (Data).
-2. Set **Sample Rate** to **8 MHz** and **Sample Depth** to **1M samples**.
-3. Set **Trigger Channel** to **CH1** and **Trigger Type** to **Falling Edge** (catches the I2C START condition).
-4. Click **Start Capture**.
-5. Once data is captured, open the **Decoders** panel and select **I2C Decoder**.
-6. Map SCL to CH0 and SDA to CH1.
-7. The canvas instantly renders green START flags, hex address badges (e.g. \`0x68 [W]\`), ACK/NACK status, and hexadecimal register payloads!
+1. Connect **GND** to target board ground. Connect **D0** to SCL (Clock) and **D1** to SDA (Data).
+2. Click **CONNECT SUMP (SERIAL)** or **CONNECT FX2 (USB)** and pick your device.
+3. Set **RATE** to **8 MHz** and **SAMPLES** to a depth your device supports (e.g. **100k Samples**).
+4. For a SUMP device, optionally set **HW TRIGGER MASK** / **VALUE** (hex, e.g. mask \`02\` value \`00\` to start when D1 is low). Mask \`00\` starts at once. FX2 captures start immediately.
+5. Click **CAPTURE SIGNAL**.
+6. In the **Protocol Decoder** bar choose **I2C** and make sure **SCL** is D0 and **SDA** is D1.
+7. The canvas shows START/STOP flags, address badges (e.g. \`W 0x68 ACK\`), data bytes and NACKs, and a transaction summary lists each READ/WRITE with its bytes. Click a row in the table to jump to it.
+8. Use **FIND** (rising edge, falling edge, any edge, glitch or pattern) with **PREV** / **NEXT** to hunt for events, and click the canvas for cursor A or Shift-click for cursor B to read ΔT and 1/ΔT.
 
 ---
 
@@ -347,23 +376,26 @@ Every transition records the nanosecond timestamp (\`#41\`) followed by the logi
 
 | Error Message / Symptom | Root Cause | Engineering Solution |
 | :--- | :--- | :--- |
-| **\`USB Transfer Failed: Overflow\`** | Host computer USB bus cannot sustain 192 Mbps bulk transfer. | Lower sample rate from 24 MHz to 16 MHz or 12 MHz, or unplug other high-bandwidth USB 3 devices. |
+| **\`USB transfer\` error / gaps in the capture** | Host computer USB bus cannot sustain the bulk transfer at 12 MS/s and above. | Lower sample rate to 8 MHz or less, or unplug other high-bandwidth USB devices. |
+| **Access denied / cannot claim interface (Windows)** | The FX2 board is not using the WinUSB driver. | Install WinUSB for the board with Zadig. |
+| **Device answered "...", not the SUMP ID "1ALS"** | The selected serial port is not a SUMP analyzer. | Pick the right port, or use **CONNECT FX2 (USB)** for FX2 boards. |
 | **Signals Always Read High (3.3V / 5V)** | Ground reference is not connected between analyzer and target. | Connect the black GND pin directly to the microcontroller or sensor ground plane. |
-| **Decoded UART Characters are Gibberish** | Sample rate is too low or baud rate parameter in decoder is incorrect. | Ensure sample rate is at least 4x baud rate (e.g. at least 1 MHz sample rate for 115200 baud). |
+| **Nothing decoded on these channels** | Wrong channel mapping or options in the Protocol Decoder bar. | Choose the right channel per role (SCL/SDA, RX, CLK/MOSI...) and check the parameters. |
+| **Decoded UART Characters are Gibberish / "Sample rate too low"** | Sample rate is too low or baud rate parameter in decoder is incorrect. | Use at least 4x the baud rate as sample rate (the decoder refuses below 2 samples per bit), or press **AUTO-BAUD**. |
 
 ---
 
 ### Implementation & Architecture
 
-> **Capture hardware.** SUMP devices over Web Serial: the tool programs the
-> divider, sample count and trigger (mask/value on D0-D7), then reads the buffer
+> **Capture hardware.** SUMP devices over Web Serial (115200 baud): the tool programs the
+> divider, sample count and hardware trigger (mask/value on D0-D7), then reads the buffer
 > (newest sample first, reversed for display). FX2 boards over WebUSB with
 > fx2lafw: samples stream from bulk endpoint 2 at up to 24 MS/s (USB gaps are
-> possible above ~12 MS/s). The decoders are the same for real and demo data.
+> possible above ~12 MS/s). There is no demo / simulated capture mode in the tool; without hardware you can open a \`.vcd\` or PulseView \`.sr\` file instead.
 
-- **Component:** [\`src/components/tools/LogicAnalyzerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/LogicAnalyzerWorkbench.jsx) holds the sample rate (up to 24 MHz), eight named channels (D0–D7, pre-labeled UART/SPI/I2C), and a **packed digital sample buffer** — a \`Uint8Array\` where each byte encodes all 8 channels as individual bits.
-- **Decoders:** [\`src/utils/logicAnalyzerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/logicAnalyzerDriver.js) provides edge-walking protocol decoders (e.g. \`decodeI2C\`) that scan the sample buffer for START/STOP/clock edges and reconstruct bus transactions, rendered as annotations over the canvas waveforms.
-- **Capture:** \`SumpAnalyzer\` (serial) and \`Fx2LogicAnalyzer\` (WebUSB, including firmware upload through the FX2's 0xA0 vendor request) fill the packed buffer; the demo fills it with synthetic traffic instead. The waveform canvas and decoder tables redraw from that buffer either way.
+- **Component:** [\`src/components/tools/LogicAnalyzerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/LogicAnalyzerWorkbench.jsx) holds the sample rate (up to 24 MHz), eight named channels (D0–D7, renameable in the Channel Measurements table), and a **packed digital sample buffer** — a \`Uint8Array\` where each byte encodes all 8 channels as individual bits.
+- **Decoders:** [\`src/utils/logicDecoders.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/logicDecoders.js) holds the edge-walking decoders (I2C, UART, SPI, 1-Wire, CAN, WS2812, IR NEC / RC-5, SWD), the trigger/pattern search, per-channel measurements and the VCD / \`.sr\` import and export. Decoded items are drawn as annotations under the waveforms and listed in a table (click a row to jump to it).
+- **Capture:** [\`src/utils/logicAnalyzerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/logicAnalyzerDriver.js) provides \`SumpAnalyzer\` (serial) and \`Fx2LogicAnalyzer\` (WebUSB, including firmware upload through the FX2's 0xA0 vendor request). Both fill the packed buffer; imported files fill it too.
 
 ---
 
@@ -388,7 +420,7 @@ Every transition records the nanosecond timestamp (\`#41\`) followed by the logi
     content: `
 # CAN Bus & OBD-II Scanner — Automotive Workbench
 
-The **CAN Bus & OBD-II Scanner** interfaces with CAN-to-USB adapters (such as Lawicel SLCAN adapters, CANable / Candlelight, or ESP32 TWAI transceivers like the SN65HVD230) to sniff automotive networks, reverse engineer CAN IDs, and query vehicle engine telemetries.
+The **CAN Bus & OBD-II Scanner** interfaces with CAN-to-USB adapters running SLCAN firmware (such as Lawicel SLCAN adapters or CANable / Candlelight) over Web Serial to sniff automotive networks, reverse engineer CAN IDs, query vehicle engine telemetries and talk UDS to an ECU.
 
 ---
 
@@ -486,31 +518,37 @@ When communicating with vehicles on Mode 01 (Live Current Data), broadcast reque
 
 ### 3. Complete UI Control Mapping
 
-The CAN workbench rides on the app's **shared serial connection** — connect your
+The CAN workbench rides on the app's **shared serial connection**: connect your
 SLCAN adapter once from the top bar (**Connect**), then this deck frames and
-transmits SLCAN ASCII over that port. A **Test Simulation** toggle generates
-synthetic traffic so the sniffer, gauges, and byte-diff view can be explored with
-no vehicle attached.
+transmits SLCAN ASCII over that port. All data is live; there is no simulation or demo mode.
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
 | **(Top-bar Connect)** | Button | Attaches the SLCAN adapter via the shared Web Serial transport; the deck reads/writes through it. |
-| **Mode Toggle** | Buttons | Switches between **CAN Bus Sniffer** and **OBD-II Scanner & Gauges** views. |
-| **Test Simulation** | Toggle | Injects synthetic CAN/OBD-II traffic (sine-wave RPM, speed, temp) for demos without hardware. |
-| **CAN Bitrate** | Dropdown | Selects network baud rate: 125 / 250 / 500 kbps (standard OBD-II) / 1 Mbps. |
-| **CAN Sniffer Table** | Table | Live IDs with period (ms), count, and payload bytes, with per-byte change highlighting. |
-| **Filter by CAN ID** | Input | Isolates specific 11-bit or 29-bit identifiers (hex substring match). |
-| **Send CAN Frame** | Inputs + Button | Builds an SLCAN frame (\`t\`/\`T\`) from a hex ID + data bytes and transmits it over the shared port. |
-| **Read Fault Codes** | Button | Retrieves stored DTCs. *In the current build this returns representative demo codes (e.g. P0300, P0171) rather than issuing a live Mode 03 request.* |
-| **Clear Fault Codes** | Button | Clears the displayed DTC list (demo Mode 04). |
+| **CAN Bus Sniffer / OBD-II Scanner & Gauges / UDS Diagnostics / Record & Replay** | Mode buttons | Switch between the four views. |
+| **CAN BAUD** | Dropdown | 100 kbps, 125 kbps (low-speed / body), 250 kbps, 500 kbps (standard automotive high-speed, default) or 1000 kbps. |
+| **START SNIFFER / PAUSE** | Button | Opens the SLCAN channel (\`C\`, \`S<n>\`, \`O\`) and starts listening; PAUSE sends \`C\` to close it. |
+| **Clear captured packets** | Icon button | Empties the sniffer table. |
+| **LOAD DBC** | Button | Loads a \`.dbc\` file so known frames show their name and decoded signals (**×** unloads it). |
+| **IDs: 1DC, 200-2FF, !7DF** | Input | Comma-separated IDs or ranges to show; prefix \`!\` to hide. |
+| **changing only** | Checkbox | Hides frames whose data has not changed. |
+| **CAN Sniffer Table** | Table | CAN ID (hex), Type (STD 11b / EXT 29b), DLC, data bytes (changed bytes highlighted), Delta (ms) and Count. |
+| **TRANSMIT CAN FRAME** | Inputs + Button | Hex ID, **29-bit** checkbox, data bytes and **SEND FRAME**; **PERIODIC** repeats it every N ms. |
+| **START LIVE GAUGES (MODE 01)** | Button | Polls Mode 01 PIDs for RPM, speed, coolant, load, throttle and module voltage. |
+| **READ VIN (09)** / **SCAN SUPPORTED PIDS** | Buttons | Read the VIN and list the PIDs the vehicle answers. |
+| **READ CODES (03)** | Button | Sends a live Mode 03 request and lists stored DTCs with descriptions where known. |
+| **CLEAR CODES (04)** | Button | Appears when codes are listed; asks for confirmation, then sends Mode 04 (clears codes and freeze-frame data). |
+| **UDS Diagnostics** | Panel | REQUEST ID / RESPONSE ID, **29-bit IDs**, **TesterPresent keep-alive**, DEFAULT / EXTENDED SESSION, READ IDENTIFICATION, READ DTCs (19 02), CLEAR DTCs (14), ECU RESET (11 01), READ DID and a RAW REQUEST box. |
+| **START RECORDING / STOP** | Button | Records frames; export as **CANDUMP .LOG** or **CSV**, or open a candump log with **OPEN CANDUMP LOG**. |
+| **REPLAY ONTO BUS** | Button | Replays recorded frames with original timing (**REPLAY SPEED** 0.25x to 10x, optional **loop**); **VIEW IN SNIFFER TABLE** shows a loaded log. |
 
 ---
 
 ### 3b. Implementation & Architecture
 
-- **Component:** [\`src/components/tools/CanBusWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/CanBusWorkbench.jsx) uses \`useSerial()\` for \`isConnected\`/\`sendString\`, keeps a \`messages\` map keyed by CAN ID (for the de-duplicated sniffer table with period/count), and a \`sniffer\`/\`obd2\` view mode.
-- **Framing:** \`buildSlcanFrame(id, bytes, isExtended)\` in [\`src/utils/canBusDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/canBusDriver.js) encodes the Lawicel \`t<id><len><data>\` (11-bit) / \`T<id><len><data>\` (29-bit) ASCII form, which is written over the shared serial port via \`sendString(frame, '')\`.
-- **Simulation:** when **Test Simulation** is on, a timer synthesizes plausible traffic (e.g. RPM = \`1200 + sin(t)*800 + noise\`) and feeds the same \`messages\` map, so the table and gauges render identically to live data.
+- **Component:** [\`src/components/tools/CanBusWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/CanBusWorkbench.jsx) uses \`useSerial()\` for \`isConnected\`/\`sendString\`, keeps a \`messages\` map keyed by CAN ID (for the de-duplicated sniffer table with delta/count and per-byte change highlighting), and four modes: \`sniffer\`, \`obd2\`, \`uds\` and \`log\`.
+- **Framing:** \`buildSlcanFrame(id, bytes, isExtended)\` in [\`src/utils/canBusDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/canBusDriver.js) encodes the Lawicel \`t<id><len><data>\` (11-bit) / \`T<id><len><data>\` (29-bit) ASCII form, which is written over the shared serial port. Starting the sniffer sends \`C\`, the bitrate code (e.g. \`S6\`) and \`O\`.
+- **Diagnostics and tools:** \`src/utils/canTools.js\` provides the DBC parser, ID filter, candump/CSV logging, replay, the ISO-TP channel and the UDS client. All traffic is real: there is no simulation mode, so a connected adapter and bus are required.
 - **Transport reuse:** because it shares \`SerialContext\`, the CAN deck inherits the same connection, RX loop, and byte-stats as the Terminal and other serial tools rather than opening its own port.
 
 ---
@@ -518,13 +556,14 @@ no vehicle attached.
 ### 4. Step-by-Step Engineering Walkthroughs
 
 #### Walkthrough A: Reverse Engineering Steering Wheel Controls
-1. Connect your CANable adapter to the vehicle's OBD-II port (Pins 6 and 14).
-2. Set **CAN Bitrate** to **500 kbps** and enable **Listen-Only Mode**.
-3. Click **Connect Adapter**. Packets will begin streaming into the sniffer table.
-4. Keep the vehicle idling and do not touch any controls. Let the packet counts stabilize.
+1. Connect your CANable (SLCAN firmware) adapter to the vehicle's OBD-II port (Pins 6 and 14), and connect it to the app from the top bar.
+2. Open the **CAN Bus Sniffer** mode and set **CAN BAUD** to **500 kbps (Standard Automotive High-Speed)**.
+3. Click **START SNIFFER**. Frames begin to fill the table (CAN ID, Type, DLC, Data Bytes, Delta, Count).
+4. Keep the vehicle idling and do not touch any controls. Tick **changing only** to hide IDs whose bytes do not change.
 5. Repeatedly press the **Volume Up** button on the steering wheel while watching the screen.
-6. The byte-diff highlighter will flash red on the exact CAN ID and byte offset transmitting the button press!
-7. Record the CAN ID (e.g. \`0x2C4\`) and payload byte pattern to integrate into your custom embedded steering wheel controller project!
+6. Bytes that just changed are highlighted in amber in the Data Bytes column, showing the exact CAN ID and byte offset carrying the button press.
+7. Record the CAN ID (e.g. \`0x2C4\`) and payload byte pattern. Use the **IDs** filter (e.g. \`2C4\` or \`!7DF\`) to isolate or hide IDs, and optionally **LOAD DBC** to decode known signals.
+8. In **Record & Replay**, **START RECORDING** to save a candump log or CSV and later **REPLAY ONTO BUS** (only on buses you own).
 
 ---
 
@@ -532,9 +571,10 @@ no vehicle attached.
 
 | Error Message / Symptom | Root Cause | Engineering Solution |
 | :--- | :--- | :--- |
-| **\`SLCAN Error: Bus-Off (Flag 0x80)\`** | Bitrate mismatch or missing $120\Omega$ termination resistor. | Verify vehicle CAN speed (500 kbps for cars, 250 kbps for heavy trucks). Enable adapter termination jumper. |
+| **No frames / nothing after START SNIFFER** | No adapter connected, wrong CAN BAUD, or missing termination. | Connect the SLCAN adapter from the top bar first. Match **CAN BAUD** to the bus (500 kbps for most cars, 250 kbps for heavy trucks) and make sure the bus has two 120 Ω terminators. |
 | **No Packets on 2008+ Vehicle OBD-II Port**| Vehicle gateway ECU isolating OBD-II port from powertrain CAN. | Some modern vehicles require an active wakeup frame or direct tapping behind the gateway module. |
-| **OBD-II PIDs Return No Response** | Ignition is off or vehicle uses non-standard diagnostic address. | Turn ignition to **ON / RUN** position (engine can be off). Ensure request is addressed to \`0x7DF\`. |
+| **OBD-II PIDs Return No Response / "--" or "n/a" gauges** | Ignition is off, or the ECU does not support that PID. | Turn ignition to **ON / RUN** position (engine can be off). Use **SCAN SUPPORTED PIDS** to see what the vehicle answers. |
+| **UDS requests time out** | Wrong REQUEST ID / RESPONSE ID or the ECU needs a non-default session. | Use the ECU's physical IDs (engine ECU is usually 7E0 / 7E8), tick **29-bit IDs** if needed, and try **EXTENDED SESSION** with **TesterPresent keep-alive**. |
 
 ---
 
@@ -564,10 +604,9 @@ address scanning, chip identification, and register read/write.
 
 > **Hardware: Bus Pirate v3/v4.** "Connect Bus Pirate" opens it over Web
 > Serial (115200 baud), switches it to binary (BBIO) mode and raw I2C, and every
-> scan, read and write goes to the real bus. Power, pull-ups and bus speed are
-> set from the toolbar; SPI transfers use the Bus Pirate's raw SPI mode. The
-> **Demo** button instead models virtual chips (an MPU-6050 at \`0x68\`, a
-> BME280 at \`0x76\`, ...) for practice without hardware, labeled as simulated.
+> scan, read and write goes to the real bus. Power, pull-ups and I2C bus speed are
+> set from the toolbar once connected; SPI transfers use the Bus Pirate's raw SPI mode. There is
+> no demo or simulated bus: the tool needs a Bus Pirate.
 
 ---
 
@@ -607,7 +646,7 @@ When performing a bus sweep, cross-reference responding addresses against this s
 <details>
 <summary>SPI Protocol Timing & Mode Selection (Modes 0 to 3)</summary>
 
-Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Communication requires setting the matching **CPOL (Clock Polarity)** and **CPHA (Clock Phase)** mode:
+Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Communication requires setting the matching **CPOL (Clock Polarity)** and **CPHA (Clock Phase)** mode. (The Bus Explorer's SPI transfer and flash dump use mode 0 only.)
 
 | SPI Mode | CPOL (Idle State) | CPHA (Sample Edge) | Description & Typical Silicon |
 | :--- | :--- | :--- | :--- |
@@ -631,15 +670,17 @@ Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Commu
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Connect Bus Pirate (Serial)** | Button | Opens a Bus Pirate v3/v4, enters binary mode and raw I2C. |
-| **Demo** | Button | Starts a simulated bus with virtual chips (labeled as simulated). |
-| **Scan I2C Bus (7-bit Sweep)** | Button | Sends START + address for every address \`0x08\`–\`0x77\` and lists those that ACK. |
-| **Power / pull-ups / speed** | Toolbar | Switch the Bus Pirate's 3.3 V / 5 V supplies and pull-ups, and set 5 / 50 / 100 / 400 kHz. |
-| **Address Grid** | Hex Matrix | Responding addresses with chip-identification badges from the built-in dictionary. |
-| **Register Dump** | Panel | Reads 32 registers from the start register you enter (write pointer, repeated START, read). |
-| **Write Register** | Button | Writes one byte to a register, then reads the dump again. |
-| **SPI Transfer** | Panel | Sends hex bytes with CS held low and shows the bytes clocked back (\`9F 00 00 00\` reads a flash JEDEC ID). |
-| **Disconnect** | Button | Turns the supplies off and returns the Bus Pirate to its text console. |
+| **CONNECT BUS PIRATE (SERIAL)** | Button | Opens a Bus Pirate v3/v4 over Web Serial (115200 baud), enters binary mode and raw I2C. |
+| **SCAN I2C BUS (7-BIT SWEEP)** | Button | Sends START + address for every address \`0x08\`–\`0x77\` and lists those that ACK. |
+| **3.3V/5V power, pull-ups, speed** | Checkboxes + Dropdown | Shown once connected: switch the Bus Pirate's supply and pull-ups, and set the I2C speed (5 / 50 / 100 / 400 kHz). |
+| **Address Grid** | Hex Matrix | Responding addresses with chip-identification badges from the built-in dictionary; click one to select it. |
+| **Chip Intelligence** | Panel | Device name, category and description of the selected address. |
+| **Quick Register Write (Hex)** | Inputs + **WRITE** | Writes one byte to a register, then reads the dump again. |
+| **Register Dump (32 from start)** | Input + **READ REGISTERS** | Reads 32 registers from the start register you enter (write pointer, repeated START, read). |
+| **SPI Transfer** | Input + **TRANSFER** | Sends hex bytes with CS held low (SPI mode 0) and shows the bytes clocked back as MISO (\`9F 00 00 00\` reads a flash JEDEC ID). |
+| **Sensor Readout** | Panel | **IDENTIFY** matches the selected address to a built-in driver (BME280/BMP280, MPU-6050 family, DS3231, ADS1115, INA219, SSD1306); **READ** and **LIVE (1 s)** show values, and SSD1306 OLEDs get **CHECKER / FULL / CLEAR** test patterns. |
+| **SPI Flash Dump** | Panel | **READ JEDEC ID** identifies the chip, then **DUMP** reads the entered number of bytes and **SAVE .BIN** downloads them. |
+| **DISCONNECT** | Button | Turns the supplies off and returns the Bus Pirate to its text console. |
 
 ---
 
@@ -654,14 +695,14 @@ Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Commu
 ### 3. Step-by-Step Engineering Walkthroughs
 
 #### Walkthrough A: Interrogating an Unknown I2C Sensor
-1. Connect SDA, SCL, 3.3V, and GND from your bridge adapter to the sensor breakout.
-2. Ensure pull-up resistors are installed (or enabled via software on the bridge).
-3. In Skon's USB Tool, click **Connect Bus Pirate (Serial)** and pick its port; enable pull-ups if the breakout has none.
-4. Click **Scan I2C Bus**.
-5. Address \`0x68\` responds with an ACK! The tool matches it against the built-in dictionary: *MPU-6050 6-Axis IMU or DS3231 RTC*.
-6. In **Register Address**, enter \`0x75\` and click **Read Register**.
-7. The sensor returns \`0x68\`. This confirms beyond doubt that the chip is an **InvenSense MPU-6050**!
-8. Enter \`0x6B\` (Power Management 1) and write \`0x00\` to wake the accelerometer from sleep mode.
+1. Connect SDA, SCL, 3.3V, and GND from your Bus Pirate to the sensor breakout.
+2. Ensure pull-up resistors are installed (or enable the Bus Pirate's **pull-ups** checkbox once connected).
+3. In Skon's USB Tool, click **CONNECT BUS PIRATE (SERIAL)** and pick its port; tick **3.3V/5V power** and **pull-ups** if the breakout needs them, and pick the I2C speed.
+4. Click **SCAN I2C BUS (7-BIT SWEEP)**.
+5. Address \`0x68\` responds with an ACK and turns green. Click it: **Chip Intelligence** shows the dictionary match, *MPU-6050 / DS3231* (6-DoF IMU / precision RTC).
+6. In the **Register Dump** panel set the start register to \`0x75\` and click **READ REGISTERS**. The first cell (\`R_0x75\`) is the WHO_AM_I register.
+7. The sensor returns \`0x68\`. This confirms beyond doubt that the chip is an **InvenSense MPU-6050**! (**IDENTIFY** in the Sensor Readout panel can also match a built-in driver.)
+8. In **Quick Register Write**, enter register \`0x6B\` (Power Management 1) and value \`0x00\`, then click **WRITE** to wake the accelerometer from sleep mode. The dump refreshes afterwards.
 
 ---
 
@@ -786,7 +827,7 @@ When a slave device cannot fulfill a master request, it returns the requested Fu
 
 Modbus registers are strictly 16 bits wide. To transmit a 32-bit floating point number (like \`124.50 Volts\` or \`1520.40 kWh\`), the slave splits the 32 bits across two consecutive 16-bit registers (e.g. registers \`40001\` and \`40002\`).
 
-Because the original 1979 Modbus specification didn't define 32-bit float order, manufacturers implemented four conflicting byte orders. If your reading displays as \`NaN\` or \`1.23e-38\`, switch the **Float Endianness** dropdown:
+Because the original 1979 Modbus specification didn't define 32-bit float order, manufacturers implemented four conflicting byte orders. The workbench shows each register as its own 16-bit value (raw hex and decimal) and does not combine pairs or offer a float-order setting, so combine the two words yourself using your device's documented order:
 1. **Big-Endian (AB CD)**: High byte first, high word first (Standard for Schneider Electric).
 2. **Little-Endian (CD AB)**: Low word first, high word second.
 3. **Mid-Big / Byte Swap (BA DC)**: High word first, but bytes inside each word swapped.
@@ -796,54 +837,47 @@ Because the original 1979 Modbus specification didn't define 32-bit float order,
 
 ### 5. Complete UI Control Mapping
 
-The workbench has two connection modes. **Live** talks to real hardware over a
-USB-to-RS485 adapter; **Simulation** feeds synthetic inverter data so you can
-explore the UI without hardware. A banner above the register table always states
-which mode is active so you never mistake synthetic values for real ones.
+The workbench is **live only**: it talks to real hardware over a USB-to-RS485
+adapter through the app's shared serial connection. There is no simulation mode.
+After connecting, a banner states the slave and baud being polled.
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Connect Serial Port…** | Button | Shown when no serial port is open. Prompts the browser's port picker to attach your USB-RS485 adapter. |
-| **Connect Live (RS-485)** | Button | Reopens the connected port at the selected baud (8-N-1) and polls the real slave. Responses are CRC-16 validated and Modbus exceptions are decoded; frames stream into the app's live terminal. |
-| **Simulation** | Button | Connects a virtual inverter/energy-meter with synthetic (clearly labeled) holding registers — no hardware required. |
-| **Slave ID Input** | Number | Target industrial node address ($1$ to $247$). |
-| **Baud Rate** | Dropdown | 4800 / 9600 / 19200 / 38400 / 57600 / 115200 bps. The port is reopened at this rate in Live mode. |
-| **Poll Once** | Button | Sends one Read Holding Registers (FC 0x03) request for registers 40001–40008 and renders the decoded table. |
-| **Start Auto-Poll** | Toggle | Repeats the FC 0x03 read every ~1 second; toggles to "Auto-Polling (1s)" while active. |
-| **Holding Registers Table** | Table | Live view of registers 40001–40008 with raw hex, uint16/int16, and scaled measurements (AC voltage, current, power, frequency, power factor, temperature, daily/lifetime energy). |
-| **Write Single Register** | Form | Register Offset + Value (uint16) inputs and a **Write Register** button issuing FC 0x06; the echo response is CRC-validated before the write is reported as acknowledged. |
+| **CONNECT SERIAL PORT…** | Button | Shown when no serial port is open. Prompts the browser's port picker to attach your USB-RS485 adapter. |
+| **CONNECT LIVE (RS-485)** | Button | Reopens the connected port at the selected baud (8-N-1) and polls the real slave. Responses are CRC-16 validated and Modbus exceptions are decoded; frames stream into the app's live terminal. |
+| **SLAVE ID** | Number | Target industrial node address (1 to 247). Locked while connected. |
+| **BAUD RATE** | Dropdown | 4800 / 9600 / 19200 / 38400 / 57600 / 115200 bps. The port is reopened at this rate. Locked while connected. |
+| **POLL ONCE** | Button | Sends one Read Holding Registers (FC 0x03) request for registers 40001–40008 and renders the table. |
+| **START AUTO-POLL** | Toggle | Repeats the FC 0x03 read every 1 second; reads "AUTO-POLLING (1s)" while active. |
+| **Holding Registers table** | Table | Address, Register, Measurement Description, Raw Hex, Decimal (uint16) and Scaled Value for registers 40001–40008. The description and scaling use a fixed inverter-style map. |
+| **Write Single Register** | Form | Register Offset (0 = 40001) and Value (decimal uint16) inputs and a **WRITE REGISTER** button issuing FC 0x06. |
+| **DISCONNECT** | Button | Stops polling and clears the table. |
 
-> The current build focuses on **Read Holding Registers (FC 0x03)** and **Write
-> Single Register (FC 0x06)**. The driver (\`utils/modbusDriver.js\`) also builds
-> frames for coils, discrete inputs, input registers, and multiple-register
-> writes, and includes uint16/int16/uint32/float32 decoders used by the scaled
-> table.
+> The tool implements **Read Holding Registers (FC 0x03)** and **Write Single
+> Register (FC 0x06)** only, on registers 40001–40008. Coils, discrete inputs, input
+> registers and multi-register writes (the function codes in section 3) are not
+> exposed in the interface.
 
 ---
 
 ### 6. Step-by-Step Engineering Walkthroughs
 
-#### Walkthrough A: Polling a Real RS-485 Energy Meter / Inverter (Live Mode)
+#### Walkthrough A: Polling a Real RS-485 Energy Meter / Inverter
 1. Wire RS-485 **A (D-)** to the meter's **A/D-** and **B (D+)** to **B/D+**, with a common ground and $120\Omega$ termination at both ends of the run.
-2. Click **Connect Serial Port…** and pick your USB-RS485 adapter in the browser prompt.
-3. Set **Slave ID** to the meter's address (e.g. \`1\`) and **Baud Rate** to match the device (e.g. \`9600\`).
-4. Click **Connect Live (RS-485)** — the port reopens at 9600 8-N-1 and an FC 0x03 read is issued automatically.
-5. The Holding Registers table fills with CRC-validated values; the scaled column shows AC voltage, current, power, and frequency. Empty rows mean no/invalid response (check A/B polarity, baud, and slave ID).
-6. Click **Start Auto-Poll** to watch the registers update once per second. Use **Write Single Register** (FC 0x06) to set a writable setpoint.
-
-#### Walkthrough B: Exploring the UI Without Hardware (Simulation)
-1. Click **Simulation** — a virtual solar inverter comes online with synthetic registers.
-2. Poll and auto-poll behave exactly as in Live mode, but the banner reads **SIMULATION** and every log line is prefixed \`SIM:\` so the data is never mistaken for a real device.
-
+2. Click **CONNECT SERIAL PORT…** and pick your USB-RS485 adapter in the browser prompt.
+3. Set **SLAVE ID** to the meter's address (e.g. \`1\`) and **BAUD RATE** to match the device (e.g. \`9600\`).
+4. Click **CONNECT LIVE (RS-485)**. The port reopens at 9600 8-N-1 and an FC 0x03 read is issued automatically.
+5. The Holding Registers table fills with CRC-validated values; the scaled column shows them using a fixed inverter-style map (AC voltage, current, power, frequency, power factor, temperature, daily/lifetime energy), whatever your device actually stores there. Empty rows mean no or invalid response (check A/B polarity, baud, and slave ID); the reason is written to the terminal log.
+6. Click **START AUTO-POLL** to watch the registers update once per second. Use **Write Single Register** (FC 0x06, register offset and uint16 value) to set a writable setpoint. The tool reports success only when the slave echoes the write; a timeout, CRC failure, mismatched echo or Modbus exception (named, e.g. \`0x02: Illegal Data Address\`) is shown in red next to the form and logged to the terminal.
 ---
 
 ### 7. Complete Troubleshooting & Diagnostic Matrix
 
 | Error Message / Symptom | Root Cause | Engineering Solution |
 | :--- | :--- | :--- |
-| **\`Timeout: No response from slave\`** | Inverted A/B differential polarity or wrong slave address. | Swap wires A and B. Verify slave address configured in physical meter menu. |
-| **\`Modbus CRC Mismatch\`** | RS-485 bus reflections or missing $120\Omega$ termination resistors. | Install a $120\Omega$ resistor across lines A and B at both physical ends of the cable run. |
-| **Float Value Displays \`NaN\`** | Word endianness mismatch between master and slave PLC. | Toggle between Big-Endian, Mid-Little (Word Swap), and Little-Endian in the settings dropdown. |
+| **\`No response (timeout)\`** (in the terminal log) | Inverted A/B differential polarity, wrong baud/slave address, or missing termination. | Swap wires A and B. Verify the slave address and baud configured in the physical meter menu. The tool waits about 800 ms per request. |
+| **\`CRC mismatch — frame rejected\`** (in the terminal log) | RS-485 bus reflections or missing $120\Omega$ termination resistors. | Install a $120\Omega$ resistor across lines A and B at both physical ends of the cable run. |
+| **32-bit float / uint32 values look like nonsense** | The table shows each register as a separate 16-bit value; the tool does not combine register pairs. | Read the two raw hex words yourself and combine them in the word order your device documents (see section 4). |
 
 ---
 
@@ -861,13 +895,13 @@ which mode is active so you never mistake synthetic values for real ones.
     toolId: 'plotter',
     category: 'analysis',
     title: 'Oscilloscope Plotter — Multi-Channel Real-Time Waveforms',
-    summary: 'High-speed 60 FPS real-time serial waveform grapher, auto-scaling, CSV telemetry parsers, multi-channel color assignment, and data logging.',
+    summary: 'Real-time serial waveform grapher with auto-scaling, CSV and key:value telemetry parsing, multi-channel colors, per-channel statistics, and CSV export.',
     tags: ['Plotter', 'Oscilloscope', 'Waveforms', 'ADC', 'Telemetry', 'Sensors', 'Graphing', 'CSV'],
     readTime: '18 min read',
     content: `
 # Oscilloscope Plotter — Live Waveform Visualizer
 
-The **Oscilloscope Plotter** transforms numeric serial streams from analog-to-digital converters (ADCs), IMU motion sensors, temperature probes, and power monitors into high-speed, real-time graphical waveforms rendered on an HTML5 canvas at 60 FPS.
+The **Oscilloscope Plotter** transforms numeric serial streams from analog-to-digital converters (ADCs), IMU motion sensors, temperature probes, and power monitors into real-time graphical waveforms rendered on an HTML5 canvas.
 
 ---
 
@@ -875,7 +909,7 @@ The **Oscilloscope Plotter** transforms numeric serial streams from analog-to-di
 
 Reading numerical numbers scrolling down a text terminal at 100 Hz is impossible for the human eye. If an analog sensor has noise spikes, if a PID temperature loop is oscillating, or if an accelerometer is vibrating, you need a visual graph to understand the signal over time.
 
-The **Oscilloscope Plotter** reads numeric serial output from any microcontroller code without requiring specialized graphing libraries. It auto-scales the vertical voltage axis, tracks multi-channel variables with distinct neon colors, pauses for crosshair inspection, and exports clean CSV logs.
+The **Oscilloscope Plotter** reads numeric serial output from any microcontroller code without requiring specialized graphing libraries. It auto-scales the vertical axis, tracks multi-channel variables with distinct neon colors, lets you hide channels and pause, shows live min/avg/max per channel, and exports the buffered samples as CSV.
 
 ---
 
@@ -897,17 +931,18 @@ The plotter's parsing engine automatically recognizes and splits numbers from an
 \`\`\`text
 voltage:3.31 current:0.42 temp:24.8\r\n
 \`\`\`
-The plotter extracts the variable labels (\`voltage\`, \`current\`, \`temp\`) and automatically assigns them to the legend!
+The plotter extracts the variable labels (\`voltage\`, \`current\`, \`temp\`) and uses them as channel names on the cards. \`name=value\` also works. Unlabeled numeric lines are named **CH 0**, **CH 1**, and so on. Lines that do not parse as numbers (text, boot logs) are ignored.
 
 <details>
-<summary>Advanced Real-Time Signal Processing: FFT & Rolling Statistics</summary>
+<summary>Statistics Shown Per Channel</summary>
 
-The oscilloscope plotter computes dynamic statistics over the sliding sample window:
-- **Peak-to-Peak ($V_{pp}$)**: $V_{\max} - V_{\min}$, highlighting power rail ripple voltage.
-- **Root-Mean-Square ($V_{rms}$)**:
-  $$V_{rms} = \sqrt{\frac{1}{N}\sum_{i=1}^N x_i^2}$$
-- **Moving Average Filter**: Smooths high-frequency ADC quantization jitter over an adjustable 5 to 50 sample rolling window.
-- **Frequency Counter**: Automatically measures signal cycle frequency by detecting upward zero/mean-crossing thresholds.
+Over the visible sample window the plotter shows, for each channel:
+- **Current**: the latest value.
+- **Min / Max**: the smallest and largest values in the window (peak-to-peak is $V_{\max} - V_{\min}$).
+- **Avg**: the arithmetic mean of the window.
+
+By default the vertical axis is auto-scaled with 10% padding; untick **Auto-scale** to set a fixed Min/Max. The plotter does not compute RMS, FFT, moving-average filtering or a frequency counter. To get those, export the CSV and process it elsewhere:
+$$V_{rms} = \sqrt{\frac{1}{N}\sum_{i=1}^N x_i^2}$$
 
 </details>
 
@@ -915,15 +950,18 @@ The oscilloscope plotter computes dynamic statistics over the sliding sample win
 
 ### 3. Complete UI Control Mapping
 
+The plotter has no connect button of its own: it plots whatever numeric text arrives on the app's shared serial connection.
+
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Connect Serial** | Button | Connects WebSerial to microcontroller streaming numeric values. |
-| **Canvas Viewport** | Canvas | Hardware-accelerated 60 FPS oscilloscope trace viewport with grid lines. |
-| **Auto-Scale Y-Axis** | Toggle | Automatically adjusts minimum and maximum vertical bounds to fit signal peaks. |
-| **Fixed Bounds Min/Max** | Inputs | Manually pins the vertical scale (e.g. \`0\` to \`4095\` for a 12-bit ADC). |
-| **Time Window (Samples)**| Slider | Adjusts visible historical sample depth from 100 points up to 5,000 points. |
-| **Pause / Inspect** | Button | Freezes canvas drawing and activates cursor inspection for delta voltage/time measurements. |
-| **Export CSV** | Button | Downloads captured time-series buffer into a formatted CSV spreadsheet for Python/MATLAB. |
+| **Firmware Sketches** | Button | Opens a modal with copy-ready Arduino C++ (ESP32 / Uno), MicroPython (ESP32 / Pico) and Key:Value Named Channels snippets (**Copy Code**). |
+| **Window selector** | Dropdown | Visible history: 50, 100, 150, 300 or 500 Samples. |
+| **Auto-scale / Min / Max** | Checkbox + number inputs | Auto-scale (on by default) fits the Y axis to the visible channels plus 10% padding. Untick it to enable the Min and Max inputs and fix the Y range. |
+| **Pause / Resume Waveform** | Icon button | Stops (or resumes) ingesting new samples. |
+| **Export CSV Dataset** | Icon button | Downloads the buffered samples as \`serial-plot-<timestamp>.csv\` (Timestamp + one column per channel). |
+| **Clear Waveform Data** | Icon button | Empties the buffer. |
+| **Canvas viewport** | Canvas | Grid, dashed zero line when in range, one colored trace per channel, auto-scaled (or fixed Min/Max) with Max / Min labels. |
+| **Channel cards** | Cards | Per channel: label, current value, Min / Avg / Max over the window, and an eye button to hide or show its trace. |
 
 ---
 
@@ -937,18 +975,18 @@ The oscilloscope plotter computes dynamic statistics over the sliding sample win
      delay(10);
    }
    \`\`\`
-2. Open the **Oscilloscope Plotter** and connect at **115,200 baud**.
-3. The canvas immediately starts plotting the analog value at 100 Hz.
-4. Wave your hand over the photodiode and observe the immediate real-time voltage dip.
-5. Click **Pause** and hover over the peak and trough to measure exact response rise time!
+2. Connect to the ESP32 from the app header at **115,200 baud** (the plotter uses the shared connection), then open the **Oscilloscope Plotter**.
+3. The canvas starts plotting the analog value at 100 Hz as channel **CH 0**.
+4. Wave your hand over the photodiode and watch the real-time dip; the CH 0 card shows the current, min, avg and max over the window.
+5. Click the **Pause** button to freeze the trace for a closer look, then **Export CSV Dataset** to save the buffered samples.
 
 ---
 
 ### Implementation & Architecture
 
-- **Component:** [\`src/components/SerialPlotter.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/SerialPlotter.jsx) subscribes to the shared serial text stream (\`latestTextStream\` from \`SerialContext\`), so it plots **live data from the connected device** — no separate connection or parser hookup needed.
-- **Parsing:** \`parseLineTelemetry()\` auto-detects the format per line — key/value (\`temp:24.5 volt:3.3\`), or comma/space/colon-separated numbers — and extracts a labeled value vector. Multi-line chunks are split first so bursts aren't dropped at high sample rates.
-- **Rendering:** parsed values feed per-channel ring buffers (a 50–500 sample window) drawn to an HTML5 canvas via \`requestAnimationFrame\` (~60 FPS), with live min/max/average statistics and one-click CSV export of the captured session.
+- **Component:** [\`src/components/SerialPlotter.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/SerialPlotter.jsx) subscribes to the shared serial text stream (\`latestTextStream\` from \`SerialContext\`), so it plots **live data from the connected device** — no separate connection and no simulated data. Pausing stops new samples from being ingested.
+- **Parsing:** \`parseLineTelemetry()\` splits each chunk into lines and auto-detects the format per line — key/value (\`temp:24.5 volt:3.3\` or \`temp=24.5\`, when the pairs cover at least 40% of the line), or lines made only of numbers separated by commas, semicolons, spaces or tabs. Common boot-log lines (\`rst:\`, \`boot:\`, \`=>\`, \`[SYS]\`, \`[WiFi]\`, ...) are ignored.
+- **Rendering:** parsed values go into a rolling buffer; the last 50–500 samples (the window selector) are drawn on an HTML5 canvas, redrawn whenever new data arrives. Auto-scaling is on by default (the vertical range follows the visible channels plus 10% padding); unticking it uses the Min/Max inputs instead. Max/Min labels are drawn either way. Each channel card shows current, min, average and max over the window, and **CSV export** writes every buffered sample with an ISO timestamp.
 
 ---
 
@@ -965,13 +1003,13 @@ The oscilloscope plotter computes dynamic statistics over the sliding sample win
     toolId: 'bridge',
     category: 'analysis',
     title: 'MitM Serial Bridge — Dual-Port Pass-Through & Sniffer',
-    summary: 'Connect two WebSerial ports concurrently to inspect, log, filter, and inject traffic between a master controller and slave device.',
-    tags: ['Serial Bridge', 'MitM', 'Sniffer', 'Dual Port', 'Pass-Through', 'Injection', 'Reverse Engineering'],
+    summary: 'Relay traffic between two concurrently connected serial boards while logging, searching and exporting the conversation between a master controller and slave device.',
+    tags: ['Serial Bridge', 'MitM', 'Sniffer', 'Dual Port', 'Pass-Through', 'Reverse Engineering'],
     readTime: '18 min read',
     content: `
 # MitM Serial Bridge — Dual-Port Interceptor
 
-The **MitM Serial Bridge** enables hardware Man-in-the-Middle (MitM) inspection by managing two independent serial COM ports concurrently in your browser. It allows you to place your computer between two devices communicating over serial to inspect, modify, or inject packets on the fly.
+The **MitM Serial Bridge** enables hardware Man-in-the-Middle (MitM) inspection by relaying between two serial boards connected concurrently in your browser. It lets you place your computer between two devices communicating over serial to watch and log their conversation.
 
 ---
 
@@ -989,10 +1027,10 @@ Traffic from Device A is displayed in the browser and transparently forwarded to
 <details>
 <summary>Baud Rate Matching & Latency Tuning for Dual-Port Bridges</summary>
 
-#### Asynchronous Forwarding & Microsecond Latency
-1. **Baud Rate Translation**: Port A and Port B do **not** need to operate at the same speed. You can bridge a legacy 9600 baud device on Port A to a 115200 baud modem on Port B.
-2. **Buffer Overrun Protection**: When forwarding from a high-speed port to a low-speed port, the bridge implements FIFO backpressure to prevent packet loss.
-3. **USB Frame Scheduling**: Modern USB host controllers poll bulk endpoints at 1 ms intervals. For high-speed packet exchanges, Skon's USB Tool utilizes zero-copy ArrayBuffer piping to minimize browser thread latency to under $1.5\,\text{ms}$.
+#### Baud Rates & Forwarding
+1. **Independent Baud Rates**: Each board is connected at its own baud rate, so Port A and Port B do **not** need to match. The bridge just relays received bytes, so a 9600 baud device can be bridged to a 115200 baud one.
+2. **No Flow Control Beyond the Ports**: Bytes are written to the other port as they arrive. When forwarding from a fast port to a slow port, make sure traffic is light enough for the slow side to keep up.
+3. **Browser Latency**: Forwarding happens in the browser per received chunk, so it adds a small, non-deterministic delay (typically a few milliseconds). Very timing-sensitive protocols may not tolerate it.
 
 </details>
 
@@ -1011,13 +1049,13 @@ You need **two** USB-UART adapters connected to your computer:
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Port A Connect** | Button + Dropdown | Connects first WebSerial port with independent baud rate and flow control options. |
-| **Port B Connect** | Button + Dropdown | Connects second WebSerial port with independent baud rate and flow control options. |
-| **Bridge Active Toggle** | Switch | Engages or disengages bidirectional automatic packet forwarding. |
-| **Stream Viewer** | Viewport | Split-column traffic log color-coding packets as \`A -> B\` (Blue) or \`B -> A\` (Green). |
-| **Inject to Port A** | Input + Button | Transmits custom hex or ASCII string towards Device A. |
-| **Inject to Port B** | Input + Button | Transmits custom hex or ASCII string towards Device B. |
-| **Packet Filter / Mangle**| Panel | Regex rules to drop specific packets or alter payload bytes on the fly. |
+| **PORT A / PORT B** | Dropdowns | Pick which connected board is on each side (shown as name and baud). Locked while the bridge is active. |
+| **+ Add serial port** | Button | Adds and connects another board via the browser serial picker. |
+| **START MitM BRIDGE / BRIDGE ACTIVE (SNIFFING)** | Button | Starts or stops forwarding bytes between the two boards. Needs two distinct boards. |
+| **Feed viewport** | Viewport | Log of each chunk: time, direction (cyan for A to B, amber for B to A), delta in ms, text and hex. |
+| **Search dialogue text or hex...** | Input | Filters the feed. |
+| **Export JSON** | Button | Downloads the feed as \`serial_bridge_capture_<timestamp>.json\`. |
+| **Clear Feed** | Icon button | Empties the log. |
 
 ---
 
@@ -1026,23 +1064,25 @@ You need **two** USB-UART adapters connected to your computer:
 #### Walkthrough A: Intercepting Scooter Dashboard Communications
 1. Unplug the 4-wire waterproof connector between the scooter handlebar dashboard and motor controller.
 2. Connect Adapter A to the dashboard harness and Adapter B to the controller harness.
-3. In Skon's USB Tool, connect Port A at **115,200 baud** and Port B at **115,200 baud**.
-4. Enable **Bridge Active**. The scooter powers on normally!
-5. In the stream viewer, observe periodic 100ms packets flowing back and forth.
-6. Pull the brake lever: observe which byte flips value in the \`A -> B\` stream.
-7. Use the **Inject to Port B** bar to send modified speed limit bytes to unlock higher acceleration modes!
+3. Connect both adapters as boards in Skon's USB Tool (each at **115,200 baud** in this example).
+4. Open the bridge, choose the two boards in **PORT A** and **PORT B**, and click **START MitM BRIDGE**. The scooter powers on normally; the button reads **BRIDGE ACTIVE (SNIFFING)**.
+5. In the feed, observe periodic 100ms packets flowing back and forth (with the \`+ms\` delta since the previous chunk).
+6. Pull the brake lever: observe which byte flips value in the \`A -> B\` stream. Use the search box to filter by text or hex.
+7. Click **Export JSON** to save the capture for offline analysis. (The bridge only observes and relays; it cannot modify or inject bytes.)
 
 ---
 
 ### Implementation & Architecture
 
-> **Status note.** The MitM Serial Bridge UI is present and documents the intended
-> dual-port pass-through workflow, but in the current app shell its bridge toggle
-> and log are wired to no-ops (\`App.jsx\` passes inert handlers), so the relay
-> isn't actively forwarding yet. Treat this as a scaffolded feature.
+> **How it works.** The bridge relays between two boards in the app's multi-board session.
+> Use **+ Add serial port** (next to **PORT A / PORT B**) to open the browser's serial picker and
+> add another board, then pick its baud rate in the board status row (the rate is locked once the
+> board is connected) and use **Connect** on any board that shows *disconnected*. Each board keeps
+> its own baud rate. With fewer than two distinct boards, **START MitM BRIDGE** is disabled and an
+> inline hint explains what to do.
 
-- **Component:** [\`src/components/SerialBridgeDeck.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/SerialBridgeDeck.jsx) is designed around the **multi-board** capability of \`SerialContext\` — two independently-connected boards (A and B) registered in the same provider.
-- **Intended data flow:** bytes arriving on board A's RX loop are written to board B via \`sendRawBytes\`, and vice-versa, with each direction tapped into a bridge log so you can watch a device↔device conversation man-in-the-middle. Wiring those handlers in \`App.jsx\` (instead of the current no-ops) is what turns the scaffold into a live tap.
+- **Component:** [\`src/components/SerialBridgeDeck.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/SerialBridgeDeck.jsx) is built on the **multi-board** capability of \`SerialContext\`: two independently-connected boards (A and B) registered in the same provider.
+- **Data flow:** while active, \`subscribeRx\` receives every chunk read from either board; a chunk from board A is written to board B with \`sendRawToBoard\` and vice-versa, and each chunk is logged with its direction (\`A->B\` / \`B->A\`), the delay since the previous chunk, hex and printable text. The log keeps the last 2000 entries. The relay forwards bytes unchanged: there is no injection, filtering or rewriting.
 
 ---
 
@@ -1065,7 +1105,7 @@ You need **two** USB-UART adapters connected to your computer:
     content: `
 # CyberChef Workbench — Multi-Threaded Data Engine & Magic Analysis
 
-The **CyberChef Workbench** in Skon's USB Tool brings the full architectural power of GCHQ's CyberChef into a high-performance, asynchronous Web Worker pipeline. It enables reverse engineers, firmware auditors, and penetration testers to manipulate binary, hex, encrypted, and obfuscated payloads in real-time without stuttering the browser DOM.
+The **CyberChef Workbench** in Skon's USB Tool is an independent implementation modeled on GCHQ's CyberChef (Operation / Dish / Recipe architecture), running in a high-performance, asynchronous Web Worker pipeline. It enables reverse engineers, firmware auditors, and penetration testers to manipulate binary, hex, encrypted, and obfuscated payloads in real-time without stuttering the browser DOM.
 
 ---
 
@@ -1190,16 +1230,16 @@ Auditing layered obfuscation (e.g. Base64 -> XOR -> Gzip -> Hex) requires inspec
 - **Auto-Bake with 300ms Debounce**:
   - When enabled, editing any input character or modifying operation arguments automatically queues a background worker bake after 300ms of inactivity.
   - Stale worker requests are automatically cancelled via monotonic request correlation IDs, preventing race conditions.
-  - Analysts can toggle Auto-Bake off when working with massive multi-megabyte payloads or CPU-intensive algorithms, switching to manual **"BAKE!"** triggers.
+  - Analysts can toggle Auto-Bake off when working with massive multi-megabyte payloads or CPU-intensive algorithms, switching to manual baking with <kbd>Ctrl</kbd>+<kbd>Enter</kbd> or the Command Palette's **Bake** action. The Auto-Bake on/off toggle also lives in the Command Palette.
 - **Multi-Tab Architecture**:
   - Open multiple concurrent analysis sessions across independent tabs.
   - Each tab preserves its own isolated Input payload, Recipe configuration, Output format, and debugging breakpoint state.
 - **Chunked File Ingestion & Drag-and-Drop**:
-  - Drop binary firmwares, PCAP slices, or memory dumps directly onto the input drop zone.
+  - Drop binary firmwares, PCAP slices, or memory dumps directly onto the input drop zone, or use the **Upload** button.
   - Files are read as zero-copy \`ArrayBuffer\` streams and piped cleanly into the Dish without UI freezing.
 - **Output Views**:
-  - Instant one-click toggling between **Raw Text**, **Hex Bytes**, **Base64 String**, and **Formatted Hexdump** (16-byte aligned with ASCII gutter).
-  - Includes a **"Replace Input with Output"** button for iterative multi-stage deobfuscation.
+  - Instant one-click toggling between the **Text**, **Hex**, **Base64**, **Hexdump** (16-byte aligned with ASCII gutter), **Hex Editor**, **Charts**, **JSON Tree**, **Table** and **JWT** views.
+  - Includes a **Use Output as Input** button for iterative multi-stage deobfuscation.
 
 ---
 
@@ -1208,10 +1248,10 @@ Auditing layered obfuscation (e.g. Base64 -> XOR -> Gzip -> Hex) requires inspec
 When inspecting unfamiliar firmware chunks or network payloads, reverse engineers often don't know what encoding was applied. The **Magic Engine v2** solves this using multi-step chaining and a 3-stage heuristic diagnostic:
 
 #### 1. Multi-Step Chaining (Depth ≤ 3)
-Rather than testing single encodings in isolation, Magic v2 utilizes a breadth-first search (BFS) over high-yield deobfuscation paths:
+Rather than testing single encodings in isolation, Magic v2 runs a breadth-first search (BFS) over chains of four candidate steps (\`From Base64\`, \`From Hex\`, \`URL Decode\`, \`Gunzip\`), and checks for Gzip magic bytes and JWT structure directly. Example chains it can find:
 - \`From Base64\` -> \`Gunzip\`
-- \`From Hex\` -> \`From Base64\`
-- \`From Base85\` -> \`Raw Inflate\`
+- \`From Hex\` -> \`From Base64\` -> \`Gunzip\`
+- \`URL Decode\` -> \`From Base64\`
 
 #### 2. Shannon Entropy Calculation ($H$)
 Information entropy measures the unpredictability of byte distributions:
@@ -1232,7 +1272,7 @@ The engine matches leading byte headers against standard forensic databases:
 - **Windows PE**: \`4D 5A\` (\`MZ\`)
 
 #### 4. Printable ASCII Ratio Scoring
-Calculates the proportion of bytes falling within printable ranges ($[32..126, 9, 10, 13]$). If a trial transformation raises printable density above $75\\%$, or exposes recognized magic bytes, it generates a high-confidence recommendation with one-click recipe application.
+Calculates the proportion of bytes falling within printable ranges ($[32..126, 9, 10, 13]$). If a trial transformation raises printable density above $70\\%$, or exposes recognized magic bytes (such as a Gzip header), it generates a recommendation with one-click recipe application.
 
 ---
 
@@ -1267,7 +1307,7 @@ Analyzing hardware telemetry (such as serial debugging logs, GPS NMEA streams, s
    - Analysts click **"Pipe Hardware"** in the Input Deck to open the source selection deck.
    - Sources include connected **WebSerial COM devices**, **Alfa Wi-Fi 802.11 monitor streams**, or realistic mock streams (**GPS NMEA 0183**, **ESP32 Firmware Telemetry**, **16-byte Binary Sensor Frames**).
 2. **Rolling Buffer Memory Management**:
-   - Configurable rolling buffer window (2KB, 5KB, 10KB, or 50KB) prevents memory exhaustion and DOM freezing during high-baud transmissions.
+   - Configurable rolling buffer window (2KB, 5KB, 10KB (default), 50KB or Unlimited) prevents memory exhaustion and DOM freezing during high-baud transmissions.
    - Slices incoming byte buffers to continuously retain only the most recent $N$ bytes.
 3. **Continuous Auto-Bake Pipeline**:
    - In combination with Auto-Bake, the Web Worker decodes the streaming telemetry buffer in the background at 300ms intervals, giving immediate live deciphering of checksums, decodings, or ciphers.
@@ -1278,7 +1318,7 @@ Analyzing hardware telemetry (such as serial debugging logs, GPS NMEA streams, s
 
 The Baked Output pane includes a native 16-bytes-per-line **Interactive Hex Editor**:
 
-- **Dual-Pane Grid**:
+- **Paged Dual-Pane Grid** (512 bytes, 32 lines per page):
   - **Offset Address**: 8-digit hexadecimal memory offsets (\`00000000\`, \`00000010\`, ...).
   - **16 Hex Byte Cells**: Split into two 8-byte columns with subtle gutter separators.
   - **ASCII Column**: Simultaneous representation of printable characters and control points.
@@ -1349,7 +1389,7 @@ Raw text or hexdump outputs are often insufficient for deeply nested configurati
      - **Signature** (Purple): Base64URL cryptographic verification block.
 
 3. **HTML Table View**:
-   - For tabular outputs (such as *Parse CSV*, TSV datasets, or regex extractor lists of IOCs).
+   - For tabular outputs (such as delimiter-separated text or regex extractor lists of IOCs).
    - Automatically parses delimiter-separated lines into structured columns with styled header rows.
    - Includes real-time row filtering and row-count telemetry.
 
@@ -1365,9 +1405,9 @@ For advanced analysts requiring custom string manipulation, binary transformatio
 - **Integrated Code Editor**:
   - Embedded monospace editor directly within the recipe step card.
   - Includes quick snippet insertion buttons:
-    - **Reverse String**: \`return input.split('').reverse().join('');\`
-    - **Uppercase**: \`return input.toUpperCase();\`
-    - **Filter Lines**: \`return input.split('\\n').filter(l => l.trim()).join('\\n');\`
+    - **Reverse**: \`return input.split('').reverse().join('');\`
+    - **Upper**: \`return input.toUpperCase();\`
+    - **Filter**: \`return input.split('\\n').filter(l => l.trim()).join('\\n');\`
 - **Error Handling**:
   - Runtime exceptions or syntax faults are trapped and surfaced as clear \`Custom Script Execution Error\` alerts without crashing the worker or browser.
 
@@ -1378,9 +1418,9 @@ For advanced analysts requiring custom string manipulation, binary transformatio
 Sharing and archiving multi-stage analysis workflows is supported through comprehensive portability features:
 
 1. **Recipe Sharing (Import/Export)**:
-   - **Save Recipe**: Serializes the current operation pipeline and parameter dictionary into a downloadable \`.cyberchef\` (or \`.json\`) file.
-   - **Load Recipe**: Uploads an existing \`.cyberchef\` configuration file, automatically reconstructing the pipeline UI and triggering an immediate re-bake.
-   - **Copy Recipe**: One-click clipboard export of clean JSON recipe arrays for sharing in team documentation, incident tickets, or chat channels.
+   - **Save**: Serializes the current operation pipeline and parameter dictionary into a downloadable \`.cyberchef\` (or \`.json\`) file.
+   - **Load**: Uploads an existing \`.cyberchef\` configuration file, automatically reconstructing the pipeline UI and triggering an immediate re-bake.
+   - **Copy**: One-click clipboard export of clean JSON recipe arrays for sharing in team documentation, incident tickets, or chat channels.
 2. **Standalone HTML Session Exporter**:
    - Clicking **"HTML"** in the Baked Output deck generates a completely self-contained, offline-compatible HTML5 document.
    - Embeds the full audit record: session metadata, generation timestamp, input data, each configured recipe step with arguments, and raw/hex/JSON output formats.
@@ -1439,8 +1479,8 @@ For high-velocity operations, the CyberChef Workbench incorporates an overlay Co
 - **Fuzzy Search**: Filter across all 80+ operations, saved recipes, and UI actions.
 - **Immediate Execution**:
   - \`Ctrl+Enter\`: Force Bake current recipe.
-  - \`Ctrl+S\`: Save recipe / download output.
-  - \`Ctrl+Z\`: Revert the last recipe change with full undo history stack.
+  - \`Ctrl+S\`: Save the recipe file.
+  - \`Ctrl+Z\`: Revert the last recipe change with full undo history stack (ignored while typing in a text field).
   - \`Esc\`: Dismiss palette.
 - **UI Shortcuts**:
   - Switch output formats (Text, Hex, Tree, Table, JWT, Hex Editor, Charts).
@@ -1461,7 +1501,7 @@ Iterative reverse engineering requires tracking how data evolves across multiple
 3. **One-Click State Restoration**:
    - The left pane features a **History** tab alongside the Operations library.
    - Analysts can browse the chronological snapshot feed and click any entry to immediately restore the exact Input, Recipe, and Output state.
-   - A **Clear History** button allows purging all snapshots at any time.
+   - A **Clear** button above the list purges all snapshots at any time.
 
 ---
 
@@ -1492,29 +1532,29 @@ As recipes grow into complex multi-stage pipelines with custom scripts and flow 
 1. **Test Case Modal**:
    - Click the **Test** button on the Recipe header bar or on any saved recipe in the Presets manager.
    - Define custom test cases with distinct **Input Strings** and **Expected Output Strings**.
-   - Choose between **Exact Match** (\`assert.strictEqual\`) and **Fuzzy Contains** assertions.
+   - Choose between an exact match and a **Contains Substring** assertion.
 2. **Execution & Feedback**:
    - Click **Run All Tests** to execute the pipeline through the Chef engine in isolated dishes.
    - Passing tests display a green checkmark with execution latency in milliseconds.
-   - Failing tests display a red X with a visual side-by-side diff comparing Expected vs. Actual output.
+   - Failing tests display a red X with a diff comparing Expected vs. Actual output.
 3. **Persistence**:
    - Test suites are persisted to browser \`localStorage\` keyed by recipe signature, ensuring regression suites are retained across sessions.
 
 ---
 
-### 20. Presentation Mode & Dynamic Theming
+### 20. Dynamic Theming
 
-Sharing technical findings with non-technical stakeholders or presenting during security reviews requires a clean, distraction-free interface:
+Three interface themes are available from the **Cyber / Matrix / Light** buttons at the top right of the workbench:
 
-1. **Presentation Mode**:
-   - Located in the top action bar: click **Presentation Mode**.
-   - Collapses the Operations library and Recipe pipeline columns, expanding the Input and Output decks across the entire 12-column viewport.
-   - CodeMirror editors expand with line numbers and syntax highlighting, ideal for screenshots, reports, and live conference demonstrations.
-2. **Multi-Palette Theming**:
-   - **Cyberpunk Dark**: Sleek deep-slate and cyan interface designed for extended analytical sessions.
-   - **Matrix Green**: High-contrast pure black background (\`#000000\`) with phosphor neon green accents (\`#00ff66\`) and monospace terminal aesthetics.
-   - **Classic Light**: Clean light-gray and slate styling tailored for standard office environments, documentation, and high-visibility displays.
-   - Theme selections persist across browser sessions via \`localStorage\`.
+- **Cyberpunk Dark** (Cyber): Sleek deep-slate and cyan interface designed for extended analytical sessions.
+- **Matrix Green** (Matrix): High-contrast pure black background (\`#000000\`) with phosphor neon green accents (\`#00ff66\`) and monospace terminal aesthetics.
+- **Classic Light** (Light): Clean light-gray and slate styling tailored for standard office environments, documentation, and high-visibility displays.
+
+The theme selection persists across browser sessions via \`localStorage\`.
+
+### 21. Presentation Mode
+
+The **Presentation mode** button in the toolbar (next to the theme buttons), or **Toggle Presentation Mode** in the Command Palette, hides the Operations/History sidebar and widens the input and output panes for focused analysis and clean screenshots. Click **Exit Presentation** in the purple banner (or the toolbar button again) to restore the layout.
 `
   },
   {
@@ -1547,11 +1587,14 @@ SCPI itself is the familiar hierarchical text: \`*IDN?\`, \`MEAS:VOLT:DC?\`, \`S
 
 | UI Element | Purpose |
 | :--- | :--- |
-| **Connect Instrument (WebUSB)** | Opens a USBTMC device (class FE / subclass 03) and reads \`*IDN?\`. |
-| **Demo** | A simulated instrument that answers \`*IDN?\`, measurements and errors (labeled as simulated). |
-| **SCPI line** | Send any command; lines containing \`?\` are treated as queries and the reply is shown. |
-| **Quick buttons** | \`*IDN?\`, \`*RST\`, \`*CLS\`, \`SYST:ERR?\`, \`MEAS:VOLT:DC?\`. |
-| **Exchange log** | Every command (») and response («). |
+| **CONNECT INSTRUMENT (WEBUSB)** | Opens a USBTMC device (class FE / subclass 03) from the browser's device picker and reads \`*IDN?\`. Needs a Chromium browser (Chrome / Edge) over HTTPS or localhost. After connecting, the tool picks a starting tab by instrument type. **DISCONNECT** closes it. |
+| **CONSOLE tab** | A **SCPI** line (Enter or **SEND**, <kbd>Up</kbd>/<kbd>Down</kbd> for history); commands containing \`?\` are queries and the reply is shown. |
+| **Preset buttons** | Common commands (\`*IDN?\`, \`*RST\`, \`*CLS\`, \`*OPC?\`, \`SYST:ERR?\`, \`*TST?\`) plus presets for the detected scope, DMM, power supply or signal generator and its brand's dialect. |
+| **check SYST:ERR? after each command** | Checkbox: queries the error queue after every command and logs a non-zero result as an instrument error. |
+| **SCOPE tab** | **CH1-CH4** checkboxes, **POINTS** (not shown for Rigol / Siglent), **FETCH WAVEFORM** (chart, Vpp / min / max / mean / RMS / frequency / sample rate per channel, CSV per channel), **SCREENSHOT** and **SAVE IMAGE**. Waveform and screenshot support depends on the instrument family. |
+| **DMM / PSU LOGGER tab** | **MEASURE** function (DC/AC voltage, DC/AC current, 2- and 4-wire resistance, frequency, capacitance, temperature) or a custom query, an interval in ms (min 50), **START / STOP**, **CLEAR**, **CSV**, with Now / Min / Max / Mean / Std Dev and a live chart. |
+| **SCRIPT tab** | One command per line, \`wait <ms>\` to pause, \`#\` comments. **RUN SCRIPT** stops at the first failing command. |
+| **Exchanges log** | Every command (») and response («), errors (✗), with a button to save the log as a text file. |
 
 ---
 
@@ -1559,7 +1602,8 @@ SCPI itself is the familiar hierarchical text: \`*IDN?\`, \`MEAS:VOLT:DC?\`, \`S
 
 - **Driver:** [\`src/utils/usbtmcDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/usbtmcDriver.js) — \`buildMsgOut\`/\`buildRequestIn\`/\`parseMsgIn\` for the framing, \`UsbTmcDevice\` with a rolling bTag, \`write\`/\`read\`/\`query\`/\`queryBinary\`, and fragment reassembly until EOM.
 - **Workbench:** [\`src/components/tools/UsbTmcWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/UsbTmcWorkbench.jsx).
-- **Tests:** [\`tests/usbtmc.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/usbtmc.test.js) checks the header building/parsing and runs \`*IDN?\` and measurement queries against a simulated instrument.
+- **Instrument profiles:** [\`src/utils/scpiTools.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/scpiTools.js) detects the maker and family (Rigol, Keysight / Agilent, Siglent, Tektronix or generic) from the \`*IDN?\` reply and supplies the preset commands, IEEE 488.2 binary-block parsing, waveform scaling, screenshot capture and DMM function list.
+- **Tests:** [\`tests/usbtmc.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/usbtmc.test.js) checks the header building/parsing and runs \`*IDN?\` and measurement queries against a simulated instrument. The tool itself has no demo mode: it needs a real USBTMC device.
 
 ---
 

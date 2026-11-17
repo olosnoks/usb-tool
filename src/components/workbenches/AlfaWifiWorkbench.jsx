@@ -145,7 +145,6 @@ export default function AlfaWifiWorkbench() {
   const [isConnected, setIsConnected] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [isSimulateRf, setIsSimulateRf] = useState(false);
   const [adapterPreset, setAdapterPreset] = useState(() => {
     try { return localStorage.getItem('alfa_wifi_adapter_preset') || 'alfa'; } catch { return 'alfa'; }
   });
@@ -1393,7 +1392,7 @@ export default function AlfaWifiWorkbench() {
       hopIntervalRef.current = null;
     }
 
-    if (isAutoHop && (isMonitoring || isSimulateRf)) {
+    if (isAutoHop && isMonitoring) {
       let hopIndex = 0;
       hopIntervalRef.current = setInterval(async () => {
         if (isRetuningRef.current) return;
@@ -1422,7 +1421,7 @@ export default function AlfaWifiWorkbench() {
         hopIntervalRef.current = null;
       }
     };
-  }, [isAutoHop, isMonitoring, isConnected, isSimulateRf]);
+  }, [isAutoHop, isMonitoring, isConnected]);
 
   // 4. WIDS Check Helper
   // Highest standard 802.11 reason code is in the 60s; attacks use low codes (1, 7).
@@ -1479,7 +1478,7 @@ export default function AlfaWifiWorkbench() {
 
   // 4b. Hardware Heartbeat Watchdog & Autonomous Reconnect
   useEffect(() => {
-    if (!isConnected || !isMonitoring || isPaused || isSimulateRf || replayingPcapState?.active) {
+    if (!isConnected || !isMonitoring || isPaused || replayingPcapState?.active) {
       return;
     }
 
@@ -1535,7 +1534,7 @@ export default function AlfaWifiWorkbench() {
     }, 2000);
 
     return () => clearInterval(watchdogInterval);
-  }, [isConnected, isMonitoring, isPaused, isSimulateRf, replayingPcapState, activeDeviceProfile, isWatchdogRecovering]);
+  }, [isConnected, isMonitoring, isPaused, replayingPcapState, activeDeviceProfile, isWatchdogRecovering]);
 
   const handleSelectAdapterPreset = (preset) => {
     setAdapterPreset(preset);
@@ -1545,15 +1544,12 @@ export default function AlfaWifiWorkbench() {
       setActiveDeviceProfile(isPau09 ? getDeviceProfile(0x148F, 0x5572) : (preset === 'alfa' ? getDeviceProfile(0x0BDA, 0x8812) : null));
       setHardwareStatus({
         adapterMac: isPau09 ? '9C:EF:D5:98:76:54' : '00:C0:CA:98:76:54',
-        firmwareVersion: isPau09 ? (isSimulateRf ? 'v0.36 (Simulated rt2800usb)' : 'v0.36 (rt2870.bin / rt2800usb)') : (isSimulateRf ? 'v2.4.1 (Simulated)' : 'v2.4.1 (rtl8812au_fw)'),
+        firmwareVersion: isPau09 ? 'v0.36 (rt2870.bin / rt2800usb)' : 'v2.4.1 (rtl8812au_fw)',
         chipsetModel: isPau09 ? 'Ralink RT5572 (Panda Wireless PAU09)' : 'Realtek RTL8812AU (Alfa AWUS036ACH)',
-        temperatureC: isSimulateRf ? (isPau09 ? 39 : 41) : null,
-        status: isSimulateRf ? 'Active (Simulated)' : 'Idle / Disconnected',
-        isIntrospected: isSimulateRf
+        temperatureC: null,
+        status: 'Idle / Disconnected',
+        isIntrospected: false
       });
-      if (isSimulateRf && isMonitoring) {
-        setChipsetStatus(isPau09 ? 'RT5572 (Simulated - PAU09)' : 'RTL8812AU (Simulated)');
-      }
       setStatusLevel('info');
       setStatusMessage(
         isPau09
@@ -1895,19 +1891,9 @@ export default function AlfaWifiWorkbench() {
 
   // 9. Start Monitor Mode
   const handleStartMonitor = async () => {
-    if (!isConnected && !isSimulateRf) {
+    if (!isConnected) {
       setStatusLevel('error');
-      setStatusMessage('Connect hardware or enable "Simulate RF" first.');
-      return;
-    }
-
-    if (isSimulateRf) {
-      setIsMonitoring(true);
-      setIsPaused(false);
-      isCapturingRef.current = true;
-      setChipsetStatus(`Monitor CH ${channel} (Simulated)`);
-      setStatusLevel('success');
-      setStatusMessage(`Monitor active on Channel ${channel} (Simulated).`);
+      setStatusMessage('Connect hardware first.');
       return;
     }
 
@@ -1952,7 +1938,7 @@ export default function AlfaWifiWorkbench() {
       } catch (e) {}
     }
 
-    setChipsetStatus(isConnected ? 'Ready' : (isSimulateRf ? 'Simulating' : 'Idle'));
+    setChipsetStatus(isConnected ? 'Ready' : 'Idle');
     setStatusLevel('info');
     setStatusMessage('Monitor mode stopped.');
   };
@@ -1977,8 +1963,6 @@ export default function AlfaWifiWorkbench() {
       } finally {
         isRetuningRef.current = false;
       }
-    } else if (isSimulateRf && isMonitoring) {
-      setChipsetStatus(`Monitor CH ${chNum} (Simulated)`);
     }
   };
 
@@ -2122,13 +2106,7 @@ export default function AlfaWifiWorkbench() {
   const handleRunWriteTest = async () => {
     setIsTestingWrite(true);
     try {
-      let radio = deviceRef.current;
-      if (!radio && isSimulateRf) {
-        radio = {
-          write: async () => true,
-          bulkOutEndpoint: () => 2
-        };
-      }
+      const radio = deviceRef.current;
       const ok = await runOutputTest(radio);
       if (ok) {
         setStatusMessage('Output Endpoint Verified');
@@ -3005,7 +2983,7 @@ export default function AlfaWifiWorkbench() {
               type="button"
               onClick={() => setIsSettingsDropdownOpen(prev => !prev)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
-                (isSimulateRf || isDesktopAlerts)
+                isDesktopAlerts
                   ? 'bg-slate-900 text-cyan-300 border-cyan-500/40 shadow-sm'
                   : 'bg-slate-900/90 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
               }`}
@@ -3013,7 +2991,7 @@ export default function AlfaWifiWorkbench() {
             >
               <Sliders className="w-3.5 h-3.5 text-cyan-400" />
               <span>RF Options</span>
-              {(isSimulateRf || isDesktopAlerts) && (
+              {isDesktopAlerts && (
                 <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
               )}
               <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${isSettingsDropdownOpen ? 'rotate-180' : ''}`} />
@@ -3193,8 +3171,8 @@ export default function AlfaWifiWorkbench() {
             <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
               <div className="text-[10px] text-slate-500 uppercase font-semibold">Endpoint Status</div>
               <div className="text-slate-200 font-bold mt-0.5 text-[13px] flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${isConnected || isSimulateRf ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
-                <span>{isConnected ? 'USB EP Active' : isSimulateRf ? 'Simulated' : 'Idle / Disconnected'}</span>
+                <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                <span>{isConnected ? 'USB EP Active' : 'Idle / Disconnected'}</span>
                 {hardwareStatus.temperatureC && (
                   <span className="text-amber-300 text-xs ml-auto">
                     {hardwareStatus.temperatureC}°C
@@ -3717,6 +3695,52 @@ export default function AlfaWifiWorkbench() {
 
         {/* Right: Sleek Forensic & Session Dropdown Menus */}
         <div className="flex flex-wrap items-center gap-2 min-w-0">
+          {/* Export Dropdown Menu */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsExportDropdownOpen(prev => !prev)}
+              disabled={Object.keys(devices).length === 0 && Object.keys(clients).length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs transition font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Export captured APs and clients (JSON, Wigle CSV, HTML report, GeoJSON, KML)"
+              aria-haspopup="menu"
+              aria-expanded={isExportDropdownOpen}
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export</span>
+              <ChevronDown className={`w-3 h-3 transition-transform ${isExportDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {isExportDropdownOpen && (
+              <div
+                role="menu"
+                style={{ backgroundColor: '#0a0f1d' }}
+                className="absolute right-0 mt-2 w-56 rounded-xl border border-slate-700 shadow-2xl p-2 z-50 text-xs font-mono space-y-1 text-slate-200"
+                onMouseLeave={() => setIsExportDropdownOpen(false)}
+              >
+                {[
+                  ['Export JSON', handleExportJson],
+                  ['Export Wigle CSV', handleExportWigle],
+                  ['Export Executive Report', handleExportExecutiveReport],
+                  ['Export GeoJSON', handleExportGeoJson],
+                  ['Export KML', handleExportKml]
+                ].map(([label, fn]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsExportDropdownOpen(false);
+                      fn();
+                    }}
+                    className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-slate-800/80 text-slate-200 hover:text-cyan-300 transition font-semibold"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Session & Forensics Actions Dropdown Menu */}
           <div className="relative">
             <button
@@ -4486,7 +4510,7 @@ export default function AlfaWifiWorkbench() {
               <SpectrumWaterfall
                 latestSlice={latestWaterfallSlice}
                 currentChannel={channel}
-                isMonitoring={isMonitoring || isSimulateRf}
+                isMonitoring={isMonitoring}
               />
             </div>
           )}

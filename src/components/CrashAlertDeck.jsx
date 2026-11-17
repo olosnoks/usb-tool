@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ShieldAlert, 
   Volume2, 
@@ -24,6 +24,60 @@ const DEFAULT_PATTERNS = [
   'CORRUPT HEAP'
 ];
 
+export const TAIL_LIMIT = 4096;
+
+/**
+ * Patterns written as /body/flags are regular expressions; anything else is a
+ * case-insensitive substring. An invalid regex falls back to text (invalid: true).
+ */
+export function compilePattern(pattern) {
+  const m = /^\/(.+)\/([a-z]*)$/.exec(pattern);
+  if (m) {
+    try {
+      const flags = m[2].replace(/[gy]/g, '');
+      return { pattern, kind: 'regex', re: new RegExp(m[1], flags), invalid: false };
+    } catch {
+      return { pattern, kind: 'text', text: pattern.toLowerCase(), invalid: true };
+    }
+  }
+  return { pattern, kind: 'text', text: pattern.toLowerCase(), invalid: false };
+}
+
+/**
+ * Scan `chunk` appended to the rolling `tail`. A match only counts if it ends inside
+ * the new chunk (matches wholly inside the old tail were already reported), so one
+ * panic fires once even though it stays in the buffer, and dumps split across chunks
+ * are still found. Returns { tail, hit: { pattern, snippet } | null }.
+ */
+export function scanChunk(tail, chunk, compiled) {
+  const oldLen = tail.length;
+  const combined = (tail + chunk).slice(-TAIL_LIMIT * 2);
+  const offset = (tail + chunk).length - combined.length; // chars dropped from the front
+  const newFrom = Math.max(0, oldLen - offset);
+  let hit = null;
+  for (const c of compiled) {
+    let start = -1; let end = -1;
+    if (c.kind === 'regex') {
+      const re = new RegExp(c.re.source, c.re.flags + 'g');
+      let m;
+      while ((m = re.exec(combined))) {
+        if (m[0].length === 0) { re.lastIndex++; continue; }
+        if (m.index + m[0].length > newFrom) { start = m.index; end = m.index + m[0].length; break; }
+      }
+    } else {
+      const lower = combined.toLowerCase();
+      let from = Math.max(0, newFrom - c.text.length + 1);
+      const idx = c.text ? lower.indexOf(c.text, from) : -1;
+      if (idx >= 0 && idx + c.text.length > newFrom) { start = idx; end = idx + c.text.length; }
+    }
+    if (start >= 0 && end > newFrom) {
+      hit = { pattern: c.pattern, snippet: combined.slice(Math.max(0, start - 200)).trim() };
+      break;
+    }
+  }
+  return { tail: combined.slice(-TAIL_LIMIT), hit };
+}
+
 export default function CrashAlertDeck({
   latestTextStream = '',
   onPauseTerminal,
@@ -36,42 +90,47 @@ export default function CrashAlertDeck({
   const [crashHistory, setCrashHistory] = useState([]);
   const [copiedId, setCopiedId] = useState(null);
 
+  const [patternWarning, setPatternWarning] = useState('');
   const lastProcessedTextRef = useRef('');
+  const tailRef = useRef('');
+  const compiled = useMemo(() => activePatterns.map(compilePattern), [activePatterns]);
 
   // Monitor incoming stream
   useEffect(() => {
     if (!latestTextStream || latestTextStream === lastProcessedTextRef.current) return;
     lastProcessedTextRef.current = latestTextStream;
 
-    for (const pattern of activePatterns) {
-      if (latestTextStream.toLowerCase().includes(pattern.toLowerCase())) {
-        const time = new Date().toTimeString().split(' ')[0] + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
-        const newCrash = {
-          id: Math.random().toString(36).substring(2, 9),
-          time,
-          signature: pattern,
-          snippet: latestTextStream.trim()
-        };
+    const { tail, hit } = scanChunk(tailRef.current, latestTextStream, compiled);
+    tailRef.current = tail;
+    if (hit) {
+      const pattern = hit.pattern;
+      const time = new Date().toTimeString().split(' ')[0] + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+      const newCrash = {
+        id: Math.random().toString(36).substring(2, 9),
+        time,
+        signature: pattern,
+        snippet: hit.snippet
+      };
 
-        setCrashHistory(prev => [newCrash, ...prev.slice(0, 49)]);
+      setCrashHistory(prev => [newCrash, ...prev.slice(0, 49)]);
 
-        if (audioEnabled) {
-          alertSynth.playCrashAlarm();
-        }
-
-        if (autoPauseEnabled && onPauseTerminal) {
-          onPauseTerminal(true);
-        }
-
-        onLogMessage?.(`[CRASH ALERT] Matched signature "${pattern}" @ ${time}!`, 'sys');
-        break;
+      if (audioEnabled) {
+        alertSynth.playCrashAlarm();
       }
+
+      if (autoPauseEnabled && onPauseTerminal) {
+        onPauseTerminal(true);
+      }
+
+      onLogMessage?.(`[CRASH ALERT] Matched signature "${pattern}" @ ${time}!`, 'sys');
     }
-  }, [latestTextStream, activePatterns, audioEnabled, autoPauseEnabled, onPauseTerminal, onLogMessage]);
+  }, [latestTextStream, compiled, audioEnabled, autoPauseEnabled, onPauseTerminal, onLogMessage]);
 
   const addCustomPattern = (e) => {
     e.preventDefault();
     if (!customPattern.trim() || activePatterns.includes(customPattern.trim())) return;
+    const c = compilePattern(customPattern.trim());
+    setPatternWarning(c.invalid ? `Invalid regex "${customPattern.trim()}" - matching it as plain text instead.` : '');
     setActivePatterns(prev => [...prev, customPattern.trim()]);
     setCustomPattern('');
   };
@@ -145,11 +204,12 @@ export default function CrashAlertDeck({
               type="text"
               value={customPattern}
               onChange={(e) => setCustomPattern(e.target.value)}
-              placeholder="+ Add regex / string..."
+              placeholder="+ text or /regex/i"
               className="bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-xs text-slate-200 outline-none focus:border-rose-500 w-36"
             />
           </form>
         </div>
+        {patternWarning && <div className="text-[10px] text-amber-400">{patternWarning}</div>}
       </div>
 
       {/* Crash Incident Log Feed */}

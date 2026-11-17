@@ -1,15 +1,18 @@
 # Security Policy
 
 Skon's USB Tool is a client-side hardware security and reverse-engineering
-workbench. It runs entirely in the browser (Web Serial / WebUSB / WASM) with no
+workbench. It runs in the browser (Web Serial / WebUSB / WASM) with no application
 backend, so the primary attack surface is the static web app itself and the way
-it handles data from connected devices and imported files.
+it handles data from connected devices and imported files. The one server-side
+piece is a small Cloudflare Worker (`worker/index.js`) that relays the Shodan API
+for `/api/*`; it stores nothing, and the caller's own Shodan key travels in the query string and is not kept.
 
 ## Supported Versions
 
 Only the latest version deployed from the `main` branch
-(https://olosnoks.github.io/usb-tool/) is supported. There are no long-term
-support branches; fixes land on `main` and deploy automatically.
+(https://usb-tool.olosnoks.com) is supported. There are no long-term
+support branches; fixes land on `main` and the owner deploys them from a PC with
+`scripts/release-local.py`.
 
 ## Reporting a Vulnerability
 
@@ -29,7 +32,7 @@ Please include:
 - Any relevant logs, payloads, or sample files (sanitized).
 
 You can expect an initial acknowledgement within a few days. Once a fix is
-prepared it will be deployed to `main`, and the advisory will be published with
+prepared it will be merged to `main` and deployed, and the advisory will be published with
 credit to the reporter unless anonymity is requested.
 
 ## Scope
@@ -39,6 +42,7 @@ In scope:
 - XSS, prototype pollution, or unsafe parsing in the web app (e.g. handling of
   imported PCAP/firmware/JSON files or data streamed from a connected device).
 - Supply-chain issues in the build/dependency graph.
+- Flaws in the `/api/*` relay Worker (for example an open relay to hosts other than Shodan).
 - Logic flaws that could cause the tool to send unintended data to a device.
 
 Out of scope:

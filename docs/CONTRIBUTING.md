@@ -1,9 +1,10 @@
 # Contributing to Skon's USB Tool
 
 Thanks for your interest in contributing! This is a client-side hardware hacker
-workbench built with **Vite + React + Tailwind CSS**, hosted statically on
-Cloudflare Pages. Everything runs in the browser over Web Serial, WebUSB, and WASM —
-there is no backend.
+workbench built with **Vite + React + Tailwind CSS**, served from a
+Cloudflare Worker (static assets plus a tiny `/api/*` Shodan relay in `worker/index.js`) at
+https://usb-tool.olosnoks.com. Everything runs in the browser over Web Serial, WebUSB, and
+WASM; there is no application backend.
 
 By participating you agree to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 For security issues, follow the [Security Policy](SECURITY.md) instead of opening
@@ -24,19 +25,30 @@ Other scripts:
 npm run build      # production build to dist/ (must pass before a PR)
 npm run preview    # serve the production build locally
 npm run test       # run the Vitest unit suite
+npm run typecheck  # tsc --noEmit
 ```
 
-Use a Chromium-based browser (Chrome, Edge, Opera) — Web Serial / WebUSB are not
-available in Firefox or Safari.
+The owner builds and publishes from a PC with `scripts/release-local.py` (see *Releasing
+from your PC* in the README); contributors only need to open a PR.
+
+Use a Chromium-based browser (Chrome, Edge, Opera) — Web Serial / WebUSB / WebHID /
+Web Bluetooth are not available in Firefox or Safari.
 
 ## Project Layout
 
-- `src/components/` — UI. `tabs/` and `workbenches/` hold the tool views;
-  `layout/` holds the shell (Header, Sidebar, drawers).
-- `src/utils/` — protocol drivers and parsers (one module per device/protocol).
+- `src/components/` — UI. `tools/` and `workbenches/` hold most tool views (`tabs/` the
+  core serial tabs); `layout/` holds the shell (Header, Sidebar, Desktop and tool
+  windows, drawers). `ToolRegistry.jsx` maps tool ids to workbenches.
+- `src/utils/` — protocol drivers and parsers (one module per device/protocol;
+  `usbrea/` is the usb-rea port).
 - `src/context/SerialContext.jsx` — the shared Web Serial / WebUSB transport.
-- `src/workers/` — Web Workers for heavy parsing (802.11, CyberChef).
-- `src/wiki/` — the in-app documentation articles.
+- `src/workers/` — Web Workers for heavy work (802.11 parsing, CyberChef, HackRF DSP).
+- `src/wiki/` — the in-app documentation articles (`wiki/index.html` is its entry).
+- `src/mayhem-mobile/` — the GPL-3.0 Mayhem Mobile receiver (TypeScript); `npm run
+  build:mayhem` bundles it into `public/mayhem/build/`.
+- `worker/index.js` + `wrangler.jsonc` — the Cloudflare Worker (`/api/*` Shodan relay).
+- `backend/` — optional local Docker services (CORS proxy, nmap, TLS inspector, ...).
+- `scripts/release-local.py` — the local test + build + deploy script.
 - `tests/` — Vitest unit tests.
 - `docs/FEATURE_TOOL_HANDOFF.md` — the guide for adding a brand-new tool.
 
@@ -44,13 +56,16 @@ available in Firefox or Safari.
 
 Tools follow a **driver + workbench** pattern: a pure protocol/driver module in
 `src/utils/`, a React workbench in `src/components/`, lazy-loaded and routed from
-`src/App.jsx`, listed in `src/components/layout/Sidebar.jsx`, and documented with
-a wiki article in `src/wiki/articles/`. See
+`src/components/ToolRegistry.jsx` (add its id to `KNOWN_TOOL_IDS` too), listed in
+`src/components/layout/Sidebar.jsx`, and documented with a wiki article in
+`src/wiki/articles/`. See
 [FEATURE_TOOL_HANDOFF.md](FEATURE_TOOL_HANDOFF.md) for the full
 blueprint.
 
-Keep hardware access honest: if a workbench offers a simulation/demo mode,
-label it clearly so users can tell synthetic data from real hardware I/O.
+Keep hardware access honest: tools must not report results they did not get from
+hardware (`tests/demoHonesty.test.jsx` guards this). If a panel is interface-only or
+shows synthetic data, label it clearly (`DemoBanner`) so users can tell it from real
+hardware I/O.
 
 ## Pull Requests
 
@@ -63,6 +78,9 @@ label it clearly so users can tell synthetic data from real hardware I/O.
 4. Ensure `npm run build` and `npm run test` both pass locally. Hosted CI is
    opt-in (repo variable `CI_BUILDS_ENABLED`), so it will not run them for you.
 5. If you add or change a tool, update its wiki article and the README tool list.
+   If you port third-party code, keep its license header and add it to
+   [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md).
+   Do not push to `main`; the owner merges PRs.
 6. Open a PR describing what changed and how you verified it (which browser,
    which hardware, or which simulated path).
 

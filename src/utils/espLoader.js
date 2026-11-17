@@ -139,6 +139,11 @@ function esp8266EraseSize(offset, size) {
   return (numSectors - headSectors) * FLASH_SECTOR;
 }
 
+/** Thrown when a flash is cancelled through an AbortSignal. */
+export class FlashAbortedError extends Error {
+  constructor(msg = 'Flash aborted by user.') { super(msg); this.name = 'FlashAbortedError'; this.aborted = true; }
+}
+
 export class EspBootloaderClient {
   constructor(port, logger) {
     this.port = port;
@@ -325,7 +330,8 @@ export class EspBootloaderClient {
    * @param {function} onProgress (percent, written, total, block, blocks)
    * @param {boolean} rebootAfter
    */
-  async flashPartition(binaryData, flashOffset = 0x10000, blockSize = ROM_BLOCK_SIZE, onProgress, rebootAfter = true) {
+  async flashPartition(binaryData, flashOffset = 0x10000, blockSize = ROM_BLOCK_SIZE, onProgress, rebootAfter = true, signal) {
+    if (signal?.aborted) throw new FlashAbortedError();
     await this._ensurePrepared();
     const bs = Math.min(blockSize || ROM_BLOCK_SIZE, ROM_BLOCK_SIZE);
     // Pad to a 4-byte multiple, as esptool does.
@@ -343,6 +349,7 @@ export class EspBootloaderClient {
     await this.command(ESP_CMD.FLASH_BEGIN, begin, 0, Math.max(3000, ERASE_MS_PER_MB * Math.max(mb, 0.1)));
 
     for (let seq = 0; seq < blocks; seq++) {
+      if (signal?.aborted) throw new FlashAbortedError(`Flash aborted by user after ${seq} of ${blocks} blocks.`);
       const block = new Uint8Array(bs).fill(0xff);
       block.set(image.subarray(seq * bs, Math.min((seq + 1) * bs, image.length)));
       const payload = new Uint8Array(16 + bs);
@@ -353,6 +360,7 @@ export class EspBootloaderClient {
       if (onProgress) onProgress(Math.min(100, Number((((seq + 1) / blocks) * 100).toFixed(1))), written, binaryData.length, seq + 1, blocks);
     }
 
+    if (signal?.aborted) throw new FlashAbortedError();
     if (this.isEsp8266) {
       this.log('Written (the ESP8266 ROM cannot report an MD5, so this image is not verified).');
     } else {
@@ -368,11 +376,12 @@ export class EspBootloaderClient {
     return true;
   }
 
-  async flashMultiplePartitions(partitions, blockSize = ROM_BLOCK_SIZE, onProgress) {
+  async flashMultiplePartitions(partitions, blockSize = ROM_BLOCK_SIZE, onProgress, signal) {
     if (!partitions || partitions.length === 0) throw new Error('No partitions specified for flashing.');
     const totalAllBytes = partitions.reduce((sum, p) => sum + p.data.length, 0);
     let bytesWrittenPrior = 0;
     for (let i = 0; i < partitions.length; i++) {
+      if (signal?.aborted) throw new FlashAbortedError();
       const part = partitions[i];
       this.log(`[${i + 1}/${partitions.length}] ${part.label}: ${part.data.length} bytes -> 0x${part.offset.toString(16)}`);
       await this.flashPartition(part.data, part.offset, blockSize, (partPct, partWritten, partTotal, curBlock, totalBlocks) => {
@@ -390,9 +399,10 @@ export class EspBootloaderClient {
             totalBlocks
           });
         }
-      }, false);
+      }, false, signal);
       bytesWrittenPrior += part.data.length;
     }
+    if (signal?.aborted) throw new FlashAbortedError();
     await this.hardwareResetToApp();
     return true;
   }

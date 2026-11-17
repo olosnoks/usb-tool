@@ -23,6 +23,7 @@ import {
   assertUartBreak 
 } from '../../utils/serialSignals';
 import StatusBadge from '../common/StatusBadge';
+import { matchPrompt } from '../../utils/consoleShortcuts';
 
 const COMMON_PROMPTS = ['=>', 'u-boot>', 'cfe>', 'redboot>', '# ', '$ '];
 
@@ -62,14 +63,11 @@ export default function HardwareControlsTab() {
   useEffect(() => {
     if (!isSpamming || !latestRxText) return;
 
-    const lower = latestRxText.toLowerCase().trim();
-    for (const p of COMMON_PROMPTS) {
-      if (lower.endsWith(p)) {
-        setCapturedPrompt(p);
-        stopSpammer();
-        addLog(`[U-BOOT TRIAGE] Autoboot successfully halted! Caught prompt: "${p}"`, 'sys');
-        break;
-      }
+    const p = matchPrompt(latestRxText, COMMON_PROMPTS);
+    if (p) {
+      setCapturedPrompt(p);
+      stopSpammer();
+      addLog(`[U-BOOT TRIAGE] Autoboot successfully halted! Caught prompt: "${p}"`, 'sys');
     }
   }, [latestRxText, isSpamming, addLog]);
 

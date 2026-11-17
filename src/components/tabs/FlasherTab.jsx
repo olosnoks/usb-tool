@@ -95,6 +95,7 @@ export default function FlasherTab() {
   });
 
   const isFlashingRef = useRef(false);
+  const abortRef = useRef(null);
   const fileInputRefs = useRef({});
 
   // Apply layout preset
@@ -234,6 +235,8 @@ export default function FlasherTab() {
 
     setIsFlashing(true);
     isFlashingRef.current = true;
+    const abortController = new AbortController();
+    abortRef.current = abortController;
     const startTime = Date.now();
 
     // Mode 1: Native ESP ROM Bootloader
@@ -273,7 +276,8 @@ export default function FlasherTab() {
                   elapsedSeconds: Math.floor(elapsed),
                   etaSeconds: eta
                 });
-              }
+              },
+              abortController.signal
             );
           } finally {
             await client.release();
@@ -281,10 +285,15 @@ export default function FlasherTab() {
         });
         addLog(`[ESP FLASHER] Done: ${totalPayloadSize} bytes in ${partitionsToFlash.length} partition(s) written to the ${client.chip}${client.isEsp8266 ? '' : ' and MD5-verified'} in ${Math.floor((Date.now() - startTime) / 1000)}s. Chip reset into the application.`, 'sys');
       } catch (err) {
-        console.error('Flashing error:', err);
-        addLog(`[ESP FLASHER ERROR] ${err.message}`, 'sys');
-        alert(`Flashing error: ${err.message}`);
+        if (err?.aborted || abortController.signal.aborted) {
+          addLog(`[ESP FLASHER] Aborted: ${err.message || 'flash stopped'}. The port is still connected; the chip may hold a partial image, so re-flash before relying on it.`, 'sys');
+        } else {
+          console.error('Flashing error:', err);
+          addLog(`[ESP FLASHER ERROR] ${err.message}`, 'sys');
+          alert(`Flashing error: ${err.message}`);
+        }
       } finally {
+        abortRef.current = null;
         setIsFlashing(false);
         isFlashingRef.current = false;
       }
@@ -724,8 +733,10 @@ export default function FlasherTab() {
             <button
               onClick={() => {
                 isFlashingRef.current = false;
-                setIsFlashing(false);
-                addLog('[FLASHER] Aborted by user.', 'sys');
+                // Cancels the ROM flash between blocks; the flash loop resets the UI when it stops.
+                abortRef.current?.abort();
+                if (flasherMode !== 'esp-rom') setIsFlashing(false);
+                addLog('[FLASHER] Abort requested by user.', 'sys');
               }}
               className="px-4 py-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold transition-all"
             >

@@ -8,10 +8,17 @@ import { proxiedFetch, describeNetworkError } from '../../utils/netClient';
  * password and full hash never leave the browser. The Add-Padding header is sent
  * so the response size does not leak whether the prefix had many or few matches.
  */
+/** Masked form for logs/tables: first char + bullets + length. Never the plaintext. */
+export function maskPassword(pwd) {
+  const chars = Array.from(String(pwd));
+  return `${chars[0] || ''}•••(${chars.length})`;
+}
+
 export default function PwnedPasswordsCheckerWorkbench({ onLogMessage }) {
   const [input, setInput] = useState('');
   const [results, setResults] = useState([]);
   const [checking, setChecking] = useState(false);
+  const [shown, setShown] = useState({}); // row index -> reveal plaintext
 
   const log = (msg) => onLogMessage?.(msg);
 
@@ -25,6 +32,7 @@ export default function PwnedPasswordsCheckerWorkbench({ onLogMessage }) {
     if (lines.length === 0) return;
     setChecking(true);
     setResults([]);
+    setShown({});
     const out = [];
     for (const pwd of lines) {
       try {
@@ -38,10 +46,10 @@ export default function PwnedPasswordsCheckerWorkbench({ onLogMessage }) {
         const match = txt.split('\n').find((line) => line.startsWith(suffix));
         const count = match ? parseInt(match.split(':')[1], 10) : 0;
         out.push({ pwd, count });
-        log(`"${pwd}": ${count} breach${count !== 1 ? 'es' : ''}`);
+        log(`"${maskPassword(pwd)}": ${count} breach${count !== 1 ? 'es' : ''}`);
       } catch (e) {
         out.push({ pwd, count: -1, error: describeNetworkError(e) });
-        log(`"${pwd}": ${describeNetworkError(e)}`);
+        log(`"${maskPassword(pwd)}": ${describeNetworkError(e)}`);
       }
       setResults([...out]);
     }
@@ -72,7 +80,10 @@ export default function PwnedPasswordsCheckerWorkbench({ onLogMessage }) {
           <tbody>
             {results.map((r, i) => (
               <tr key={i} className={i % 2 ? 'bg-slate-900' : ''}>
-                <td className="p-1 border border-slate-700 break-all font-mono">{r.pwd}</td>
+                <td className="p-1 border border-slate-700 break-all font-mono">
+                  {shown[i] ? r.pwd : maskPassword(r.pwd)}{' '}
+                  <button type="button" onClick={() => setShown((s) => ({ ...s, [i]: !s[i] }))} className="ml-2 text-[10px] text-cyan-400 hover:text-cyan-300 font-sans">{shown[i] ? 'hide' : 'show'}</button>
+                </td>
                 <td className={`p-1 border border-slate-700 ${r.count > 0 ? 'text-red-400' : r.count === 0 ? 'text-green-400' : 'text-yellow-400'}`}>
                   {r.count < 0 ? `Error: ${r.error}` : r.count > 0 ? `${r.count.toLocaleString()} — compromised` : 'Not found'}
                 </td>

@@ -1,18 +1,16 @@
 /**
- * Industrial Modbus RTU & RS-485 Protocol Driver
- * 
+ * Modbus RTU & RS-485 protocol driver (live hardware only; no simulation).
+ *
  * Includes:
  * - Modbus RTU frame construction and CRC16 calculation
- * - Function codes:
- *   - 01: Read Coils
- *   - 02: Read Discrete Inputs
+ * - Function codes used by the workbench:
  *   - 03: Read Holding Registers
- *   - 04: Read Input Registers
- *   - 05: Write Single Coil
- *   - 06: Write Single Register
- *   - 16 (0x10): Write Multiple Registers
- * - Multi-format data decoders: uint16, int16, uint32, float32 (IEEE 754), ASCII
- * - Simulated Industrial Solar Inverter / Energy Meter
+ *   - 06: Write Single Register (echo, exception and CRC checked)
+ * - Standard exception code names (describeModbusException)
+ * - Register rows shaped as uint16 / hex / int16
+ *
+ * buildModbusRtuRequest can frame any 6-byte-PDU request (e.g. 01, 02, 04, 05),
+ * but the client has no coil, discrete-input or float32 helpers.
  */
 
 // Modbus CRC-16 (Polynomial 0xA001)
@@ -49,6 +47,10 @@ const MODBUS_EXCEPTIONS = {
   0x0A: 'Gateway Path Unavailable',
   0x0B: 'Gateway Target Failed to Respond'
 };
+
+export function describeModbusException(code) {
+  return MODBUS_EXCEPTIONS[code] || 'Unknown';
+}
 
 export function buildModbusRtuRequest(slaveId, functionCode, startAddress, quantityOrValue) {
   const pdu = new Uint8Array(6);
@@ -156,9 +158,13 @@ export class ModbusClient {
     return results;
   }
 
-  // Write single holding register (Function code 0x06)
-  async writeSingleRegister(addr, value) {
-    if (!this.isConnected) return false;
+  // Write single holding register (Function code 0x06).
+  // Returns a detailed result: { ok, reason, exceptionCode?, exceptionName?, message }
+  // reason: 'ok' | 'not-connected' | 'transport' | 'timeout' | 'exception' | 'crc' | 'mismatch'
+  async writeSingleRegisterDetailed(addr, value) {
+    if (!this.isConnected || typeof this.transceive !== 'function') {
+      return { ok: false, reason: 'not-connected', message: 'Not connected.' };
+    }
 
     const reqFrame = buildModbusRtuRequest(this.slaveId, 0x06, addr, value);
     this.logger(`[MODBUS TX] => Write Reg ${addr}: ${toHexString(reqFrame)}`);
@@ -169,23 +175,43 @@ export class ModbusClient {
       resp = await this.transceive(reqFrame, { expectedLength: 8, timeoutMs: 800 });
     } catch (err) {
       this.logger(`[MODBUS RX] <= Transport error: ${err.message}`);
-      return false;
+      return { ok: false, reason: 'transport', message: `Transport error: ${err.message}` };
     }
     if (!resp || resp.length < 5) {
       this.logger('[MODBUS RX] <= Write not acknowledged (timeout / short frame).');
-      return false;
+      return { ok: false, reason: 'timeout', message: 'No response (timeout).' };
     }
     if (resp[1] & 0x80) {
-      this.logger(`[MODBUS RX] <= Write exception 0x${resp[2].toString(16).padStart(2, '0')}: ${MODBUS_EXCEPTIONS[resp[2]] || 'Unknown'}.`);
-      return false;
+      const code = resp[2];
+      const name = describeModbusException(code);
+      this.logger(`[MODBUS RX] <= Write exception 0x${code.toString(16).padStart(2, '0')}: ${name}.`);
+      return {
+        ok: false,
+        reason: 'exception',
+        exceptionCode: code,
+        exceptionName: name,
+        message: `Exception 0x${code.toString(16).padStart(2, '0')}: ${name}`
+      };
     }
     const frame = resp.slice(0, 8);
     if (frame.length < 8 || !this.verifyCrc(frame)) {
       this.logger(`[MODBUS RX] <= Write ack CRC mismatch / malformed: ${toHexString(resp)}`);
-      return false;
+      return { ok: false, reason: 'crc', message: 'Malformed or CRC-failed response.' };
+    }
+    // The echo must repeat the request (slave, function, address, value)
+    for (let i = 0; i < 6; i++) {
+      if (frame[i] !== reqFrame[i]) {
+        this.logger(`[MODBUS RX] <= Write echo does not match request: ${toHexString(frame)}`);
+        return { ok: false, reason: 'mismatch', message: 'Response did not echo the write.' };
+      }
     }
     this.logger(`[MODBUS RX] <= Write Reg ${addr} acknowledged by Slave ${this.slaveId} (echo OK).`);
-    return true;
+    return { ok: true, reason: 'ok', message: 'Acknowledged.' };
+  }
+
+  // Boolean convenience wrapper: true only when the write echo is confirmed.
+  async writeSingleRegister(addr, value) {
+    return (await this.writeSingleRegisterDetailed(addr, value)).ok;
   }
 
   // Validate a complete Modbus RTU frame's trailing CRC-16 (little-endian).

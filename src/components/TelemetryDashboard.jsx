@@ -31,7 +31,6 @@ export default function TelemetryDashboard({
   });
 
   const [activeGaugeChannel, setActiveGaugeChannel] = useState('rpm');
-  const [streamFormat, setStreamFormat] = useState('auto'); // auto, json, csv, kv
   const lastParsedTextRef = useRef('');
   const demoIntervalRef = useRef(null);
 

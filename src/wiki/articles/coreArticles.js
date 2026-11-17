@@ -143,7 +143,7 @@ The header has a colour-theme dropdown (with a swatch preview) that restyles the
     content: `
 # Terminal & Console — Serial Monitor & Baud Hunter
 
-The **Terminal & Console** is the primary diagnostic and communication interface of Skon's USB Tool. It provides real-time, bidirectional asynchronous serial communication directly between your web browser and any connected microcontroller, single-board computer (SBC), cellular modem, radio transceiver, or industrial controller over the **W3C WebSerial API**.
+The **Terminal & Console** is the primary diagnostic and communication interface of Skon's USB Tool. It provides real-time, bidirectional asynchronous serial communication directly between your web browser and any connected microcontroller, single-board computer (SBC), cellular modem, radio transceiver, or industrial controller over the **W3C WebSerial API** (Chromium browsers only; a Bluetooth LE serial device can also be attached with the **BLE** button).
 
 ---
 
@@ -151,7 +151,7 @@ The **Terminal & Console** is the primary diagnostic and communication interface
 
 When you connect a hardware device to your computer via USB (such as an ESP32, Arduino, Raspberry Pi Pico, or GPS module), the device communicates using **UART (Universal Asynchronous Receiver-Transmitter)** serial signals. Traditionally, interacting with UART required installing desktop utilities like PuTTY, TeraTerm, screen, minicom, or the Arduino IDE Serial Monitor.
 
-The **Terminal & Console** eliminates all desktop software requirements. Using modern browser standards, it opens a raw hardware communication pipe, decodes streaming text, colors terminal output using ANSI VT100 escape sequences, captures raw hexadecimal streams, and provides an intelligent auto-detection engine ("Baud Hunter") to discover unknown baud rates.
+The **Terminal & Console** eliminates all desktop software requirements. Using modern browser standards, it opens a raw hardware communication pipe, shows streaming text with ANSI colour (SGR) styling, captures a raw hexadecimal stream, injects checksummed hex frames, and provides a heuristic auto-detection engine ("Baud Hunter") to help find unknown baud rates.
 
 ---
 
@@ -207,55 +207,57 @@ If connecting an external USB-to-UART bridge (CH340, CP2102, FT232R) to a bare m
 
 ### 4. Interactive Console Controls & Features
 
-The Terminal toolbar provides full operational authority over the serial connection:
+**Connection controls** (the BAUD / CONNECT strip, also shown in the terminal drawer header): a board selector, the **BAUD** dropdown, RX/TX activity lights, an ONLINE/OFFLINE badge, **CONNECT**, **BLE** and **DISCONNECT**. The baud list is \`300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880 (ESP8266 boot ROM), 115200, 230400, 460800, 921600, 1000000, 1500000, 2000000\` and is **locked while connected** — disconnect to change it. The advanced serial settings (data bits 8/7, stop bits 1/2, parity none/even/odd, flow control none/hardware) also cannot be changed while connected.
 
-1. **Baud Rate Selector**: Dropdown supporting all standard and non-standard baud rates:
-   \`300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880 (ESP8266 boot ROM), 115200, 230400, 460800, 921600\`.
-2. **Baud Hunter Button**: Runs automated heuristic baud rate detection on active ports.
-3. **Display Modes**:
-   - **ASCII Mode**: Formatted text with ANSI escape sequence color rendering.
-   - **Hex View Mode**: Dual-column hexadecimal and printable ASCII inspection for binary protocols.
-4. **Line Endings Selector**:
-   - **CRLF (\\r\\n - 0x0D 0x0A)**: Standard for AT command modems and ESP-IDF CLI.
-   - **LF (\\n - 0x0A)**: Standard for MicroPython REPL, Linux shells, and Arduino \`Serial.println()\`.
-   - **CR (\\r - 0x0D)**: Standard for U-Boot bootloader prompts.
-   - **None**: Sends raw keystrokes without appending line terminators.
-5. **Local Echo Toggle**: Displays transmitted characters directly in the console log.
-6. **Timestamp Toggle**: Prefixes every incoming line with millisecond-precision timestamps (\`[12:34:56.789]\`).
-7. **Auto-Scroll Toggle**: Automatically scrolls to the newest line; pauses scrolling when user manually scrolls up.
-8. **Clear Buffer Button (\`Ctrl+L\`)**: Clears active terminal display without disconnecting.
-9. **Export Session Log**: Downloads the complete interaction history as a timestamped \`.txt\` file.
-10. **Macro Keypads**: Customizable shortcut buttons to transmit frequent commands with a single click.
+The **Terminal** window itself has a mode bar with three side-panel toggles — **Hex Stream**, **Baud Hunter** and **Protocol Injector** — next to the **ANSI STREAM CONSOLE**:
+
+1. **STREAM / Δt TIMELINE**: STREAM is the classic colour log (RX/TX/SYS tags). Δt TIMELINE is a table of time, delta, direction, length, ASCII payload and hex bytes, with **all / rx / tx** filters.
+2. **Search box** ("Search stream..."): highlights matching text and shows the match count.
+3. **Timestamps** (clock icon): shows or hides the per-line timestamp.
+4. **Save icon (stream direct to disk)**: pipes every new line to a \`.log\`/\`.txt\` file you pick through the File System Access API (Chrome/Edge/Opera), for long unattended logs. Click the stop icon to close the file.
+5. **PAUSE / PAUSED**: freezes the view on a snapshot; new data keeps being logged (and streamed to disk).
+6. **Auto-scroll** (down arrow): follows the newest line; scrolling up manually turns it off, scrolling back to the bottom turns it on again.
+7. **Export**: in STREAM view the download icon saves the session as \`skons-serial-log-<timestamp>.log\`; in Δt TIMELINE view it saves a CSV timeline instead.
+8. **Clear** (trash icon): clears the terminal buffer without disconnecting.
+9. **Send bar**: type a command and press **SEND** (or Enter); the **Up/Down arrow keys** recall the last 50 commands. The line-ending dropdown offers:
+   - **CRLF (\\r\\n)**: default; AT-command modems and many CLIs.
+   - **LF (\\n)**: MicroPython REPL, Linux shells.
+   - **CR (\\r)**: U-Boot style prompts.
+   - **None (Raw)**: sends exactly what you typed.
+   - **Hex Bytes**: the text box is parsed as hex bytes (e.g. \`55 AA 01\`) and sent raw.
+10. **Hex Stream panel**: a hex + ASCII dump of the incoming/outgoing bytes (last ~4,096 bytes kept) with a row-width toggle, hex search (e.g. \`55 AA\`), auto-scroll, **Copy as Hex String**, **Copy as C-Array** and clear.
+11. **Protocol Injector panel**: type hex bytes, pick a checksum (Modbus CRC-16 LE/BE, Sum8, Two's-complement Sum8, XOR/LRC, CRC-16 CCITT/XMODEM, or none), see the computed frame, and **INJECT HEX FRAME TO SERIAL BUS**. Presets (Modbus reads/writes, ESP ROM sync frame, a ping frame) are built in and you can save your own.
+
+There is no local-echo toggle and no macro keypad in this tab. Press \`Ctrl+L\` while focus is anywhere in the console (including the input box) to clear it, or use the trash icon. (Macro Decks live in the Advanced Lab tool.)
 
 <details>
 <summary>Deep-Dive: How Baud Hunter Automatically Detects Unknown Frequencies</summary>
 
-When you click **Baud Hunter**, the engine executes a multi-stage heuristic analysis:
-1. Temporarily claims the WebSerial port and loops through standard test rates:
-   \`300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 74880 (ESP8266 boot ROM), 115200, 230400, 460800, 921600\`.
-2. For each baud rate, it listens for a 250ms sample window.
-3. It counts:
-   - **UART Framing Errors**: Occurs when stop bits fail to settle HIGH.
-   - **Printable ASCII Distribution**: Checks if received bytes fall within \`0x20\` to \`0x7E\` or common control bytes (\`\\r\`, \`\\n\`, \`\\t\`).
-   - **Shannon Entropy**: Measures randomness vs linguistic patterns.
-4. The candidate with the highest ASCII density and lowest framing error count is automatically locked and set as active!
+Open the **Baud Hunter** panel and click **RUN BAUD SCAN** (you must be connected). The **PROBE** button toggles between **Active (\\r\\n)** and **Passive (Listen)**:
+1. For each of the 9 candidate rates \`9600, 19200, 38400, 57600, 74880 (ESP8266 boot ROM), 115200, 230400, 460800, 921600\` the tool closes and re-opens the port at that rate with your current data bits / parity / stop bits / flow control.
+2. In Active mode it sends a single \`\\r\\n\` to provoke a prompt, then listens for about 400 ms (reads time out every 150 ms).
+3. It scores each sample:
+   - **Printable ratio**: share of bytes in \`0x20\`–\`0x7E\` plus tab, LF and CR.
+   - **Shannon entropy**: text typically scores around 3–5.8 bits per byte.
+   - A penalty applies if more than half the bytes are \`0x00\` or \`0xFF\` (floating-line noise).
+4. The results table lists **Baud**, **Confidence** (%), **Verdict** (HIGH PROBABILITY / MODERATE / LOW / UNLIKELY / NO DATA) and an **Apply** button per row. It does **not** auto-lock a winner: you choose and click **Apply**.
+
+Framing errors are not counted (WebSerial does not expose them), 300–4800 baud are not scanned, and a silent device that never answers a CR/LF scores "NO DATA" at every rate, so reset the board during an active or passive scan.
 </details>
 
 <details>
 <summary>Complete ANSI / VT100 Terminal Control Sequences (CSI & TrueColor)</summary>
 
-Skon's USB Tool embeds a full ECMA-48 / VT100 ANSI terminal emulator supporting cursor control, screen clearing, and 24-bit RGB TrueColor palettes:
+The console renders **SGR colour/style sequences only** (\`ESC [ ... m\`). Cursor movement, screen clearing and 24-bit colour are **not** interpreted, so a full-screen ncurses-style UI will not draw correctly.
 
-| Control Sequence | Function | Description |
-| :--- | :--- | :--- |
-| **\`\\x1b[2J\`** | Clear Entire Screen | Clears the terminal buffer without resetting cursor. |
-| **\`\\x1b[H\`** / **\`\\x1b[1;1H\`** | Cursor Home | Moves cursor to row 1, column 1 (top-left). |
-| **\`\\x1b[K\`** | Clear Line to Right | Erases characters from active cursor position to end of line. |
-| **\`\\x1b[0m\`** | Reset All Attributes | Returns text styling to default grey-on-dark. |
-| **\`\\x1b[1m\`** | Bold / Bright | Enhances font weight and luminance. |
-| **\`\\x1b[31m\` - \`\\x1b[37m\`** | 16-Color Palette | Red (31), Green (32), Yellow (33), Blue (34), Magenta (35), Cyan (36), White (37). |
-| **\`\\x1b[38;2;R;G;Bm\`** | 24-Bit RGB TrueColor | Sets 16.7 million color foreground (e.g. \`\\x1b[38;2;0;255;255m\` for Neon Cyan). |
-| **\`\\x1b[48;2;R;G;Bm\`** | 24-Bit Background | Sets 24-bit background fill color. |
+| Control Sequence | Supported | Effect |
+| :--- | :---: | :--- |
+| **\`\\x1b[0m\`** | Yes | Reset all attributes. |
+| **\`\\x1b[1m\`** / **\`\\x1b[2m\`** / **\`\\x1b[4m\`** | Yes | Bold / dim / underline. |
+| **\`\\x1b[30m\` - \`\\x1b[37m\`** | Yes | Foreground colours: black (grey), red, green, yellow, blue, magenta, cyan, white. |
+| **\`\\x1b[90m\` - \`\\x1b[97m\`** | Yes | Bright foreground colours. |
+| **\`\\x1b[40m\`–\`47m\`**, **\`38;5;N\`**, **\`38;2;R;G;B\`** | No | Background, 256-colour and TrueColor codes are ignored. |
+| **\`\\x1b[2J\`**, **\`\\x1b[H\`**, **\`\\x1b[K\`** | No | Cursor/erase sequences are not emulated. |
 
 </details>
 
@@ -263,13 +265,11 @@ Skon's USB Tool embeds a full ECMA-48 / VT100 ANSI terminal emulator supporting 
 <summary>Hardware vs Software Flow Control & Line Break Signaling</summary>
 
 High-speed serial streams (>230,400 baud) can overflow microcontroller internal ring buffers:
-1. **Hardware Flow Control (RTS / CTS)**:
-   - **RTS (Request To Send)**: Output from computer. Asserted LOW when the PC is ready to receive data.
-   - **CTS (Clear To Send)**: Input to computer from device. Target drives LOW when its internal FIFO has free space.
-2. **Software Flow Control (XON / XOFF)**:
-   - Transmits in-band ASCII control codes: \`0x13\` (XOFF / DC3) commands the sender to halt; \`0x11\` (XON / DC1) resumes transmission.
-3. **Serial Line Break Signaling**:
-   - Holding the TXD line LOW (Space condition) for longer than one full character frame (typically **250ms**) asserts a hardware BREAK. Used to enter bootloader ROMs or reset microcontrollers without toggling DTR/RTS.
+1. **Hardware Flow Control (RTS / CTS)**: the advanced serial settings offer **Flow Control: none / hardware**, applied when the port is opened (WebSerial \`flowControl: 'hardware'\`). The Hardware Controls tool shows the live CTS/DSR/DCD/RI input lines.
+   - **RTS (Request To Send)**: output from the computer.
+   - **CTS (Clear To Send)**: input from the device; the target drives it when it can accept data.
+2. **Software Flow Control (XON / XOFF)** is not a setting here (WebSerial has no such mode); you can still send \`0x13\` / \`0x11\` bytes with the **Hex Bytes** line ending if a device expects them.
+3. **Serial Line Break Signaling**: use **ASSERT n ms UART BREAK** in the **Hardware Controls** tool (50–1000 ms, default 250 ms) to hold TXD low. Useful for bootloader ROMs and some consoles.
 
 </details>
 
@@ -279,7 +279,7 @@ High-speed serial streams (>230,400 baud) can overflow microcontroller internal 
 
 | Symptom | Root Cause | Fix |
 | :--- | :--- | :--- |
-| Continuous \`x?x\` characters | Baud rate mismatch | Switch baud rate to 115200 (or run Baud Hunter). |
+| Continuous \`x?x\` characters | Baud rate mismatch | Disconnect, choose the right baud (115200 is typical, 74880 for ESP8266 boot ROM) and reconnect, or run Baud Hunter and **Apply** a result. |
 | Prompt says "No compatible devices found" | Missing USB driver or charge-only cable | Replace cable with a verified data cable; install CH340 / CP2102 drivers. |
 | Terminal prints initial boot messages, then freezes | Firmware entered deep sleep or crashed | Press EN/RESET button on the board; check power supply current. |
 | "Failed to open serial port: Access denied" | Port open in another app | Close Arduino IDE, VS Code serial monitor, or PuTTY. |
@@ -300,13 +300,13 @@ High-speed serial streams (>230,400 baud) can overflow microcontroller internal 
     toolId: 'flasher',
     category: 'core',
     title: 'Firmware Flasher — ESP32 & ESP8266 Memory Partition Studio',
-    summary: 'Master ESP-IDF ROM bootloader synchronization, high-speed baud auto-negotiation, partition tables, factory offsets, and unbricking stubs.',
+    summary: 'ESP ROM bootloader flashing from the browser: the cloud firmware catalog, multi-slot offset flashing, MD5 verification, partition table layout, and manual boot-mode recovery.',
     tags: ['Flasher', 'ESP32', 'ROM Bootloader', 'Partitions', 'esptool', 'Flash Memory', 'Firmware'],
     readTime: '26 min read',
     content: `
 # Firmware Flasher — Memory Partition Studio
 
-The **Firmware Flasher** is an industrial-grade in-browser microcontroller flashing engine. Built on the Espressif ESP-IDF ROM bootloader protocol, it allows you to burn complete operating systems, partition tables, bootloaders, and filesystems into flash memory across the entire ESP32 and ESP8266 silicon families without installing Python, pip, or esptool.py.
+The **Firmware Flasher** is an in-browser flashing engine for ESP chips. It speaks the Espressif ROM bootloader protocol (SLIP framing over WebSerial) directly, so you can write bootloaders, partition tables, applications and filesystem images to ESP32-family and ESP8266 flash without installing Python, pip, or esptool.py.
 
 ---
 
@@ -320,21 +320,23 @@ Historically, this required:
 3. Manually calculating hexadecimal byte offsets (\`0x1000\`, \`0x8000\`, \`0x10000\`).
 4. Typing complex terminal commands with exact COM port numbers.
 
-The **Firmware Flasher** handles all of this automatically in your browser. It auto-identifies your connected silicon, negotiates the fastest reliable transfer speed, checks MD5 checksums block-by-block, and flashes curated security/diagnostic suites or custom multi-binary partition layouts with 1 click.
+The **Firmware Flasher** handles this in your browser. It resets the chip into the ROM bootloader over DTR/RTS, syncs, identifies the silicon, writes each image at the offset you give it, and verifies each image with the chip's own MD5 (except on ESP8266, whose ROM cannot report one). You can load firmware from the built-in cloud catalog or flash your own multi-binary layout.
 
 ---
 
 ### 2. Supported Silicon Families
 
-| Silicon Family | CPU Architecture | Max Flashing Baud | Bootloader Offset | App0 Offset |
+The chip is identified from the ROM's chip-detect register after sync. Recognised by name: **ESP8266, ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C2, ESP32-C6, ESP32-H2**. A chip whose ID is not in that list is reported as "ESP32-family (magic 0x...)" and flashing is still attempted (this is what happens with the ESP32-C5, which is not identified by name). Bootloader offsets come from the built-in layout presets:
+
+| Silicon Family | Preset | Bootloader Offset | Partition Table | App Offset |
 | :--- | :--- | :--- | :--- | :--- |
-| **ESP32 Classic** | Dual-Core Xtensa LX6 @ 240MHz | 921,600 bps | \`0x1000\` | \`0x10000\` |
-| **ESP32-S2** | Single-Core Xtensa LX7 (USB OTG) | 921,600 bps | \`0x1000\` | \`0x10000\` |
-| **ESP32-S3** | Dual-Core Xtensa LX7 + Vector AI | 921,600 bps | \`0x0000\` | \`0x10000\` |
-| **ESP32-C3** | Single-Core RISC-V 32-bit | 921,600 bps | \`0x0000\` | \`0x10000\` |
-| **ESP32-C5 Beta**| Single-Core RISC-V Dual-Band 2.4/5GHz | 115,200 bps (Direct ROM) | \`0x0000\` | \`0x10000\` |
-| **ESP32-C6** | Single-Core RISC-V Wi-Fi 6 + Zigbee | 921,600 bps | \`0x0000\` | \`0x10000\` |
-| **ESP8266** | Tensilica L106 32-bit | 460,800 bps | N/A | \`0x00000\` |
+| **ESP32 (classic)** | ESP32 (Classic) | \`0x1000\` | \`0x8000\` | \`0x10000\` |
+| **ESP32-S3 / C3 / C2 / C6** | ESP32-S3 / C3 / C2 / C6 | \`0x0000\` | \`0x8000\` | \`0x10000\` |
+| **ESP8266** | ESP8266 / NodeMCU | n/a (all-in-one image) | n/a | \`0x00000\` |
+
+The ESP32-S2 uses \`0x1000\` like the classic ESP32 but has no preset of its own; type the offsets yourself. Offsets for other chips (C5, H2, ...) follow your firmware's own documentation; merged images ("\`.merged.bin\`") are normally written at \`0x0\`.
+
+**Speed:** the flasher uses the ROM bootloader directly (no RAM stub, no baud switch), so it transfers at the baud rate selected in the BAUD dropdown, in 1 KB blocks. Pick 460800 or 921600 *before* connecting if your adapter and cable allow it; 115200 always works. Reading flash back is not offered (it needs the stub).
 
 ---
 
@@ -347,7 +349,7 @@ FLASH MEMORY MAP (Standard 4MB ESP32)
 0x00000000 +-----------------------------------+
            | ROM Bootloader Vector (S3/C3/C6)  |
 0x00001000 +-----------------------------------+
-           | First-Stage Bootloader (Classic)  | Initializes DDR/Flash cache, loads partition table
+           | First-Stage Bootloader (Classic)  | Loads the partition table and the app
 0x00008000 +-----------------------------------+
            | Partition Table (partition.bin)   | Binary index table listing all flash zones below
 0x00009000 +-----------------------------------+
@@ -364,31 +366,31 @@ FLASH MEMORY MAP (Standard 4MB ESP32)
 <details>
 <summary>Deep-Dive: The ESP-IDF SLIP Framing & Flash Command Protocol</summary>
 
-All communication with the ESP32 ROM bootloader uses **SLIP (Serial Line Internet Protocol)** framing:
+All communication with the ESP ROM bootloader uses **SLIP (Serial Line Internet Protocol)** framing:
 - **Delimiter**: Packets begin and end with \`0xC0\`.
 - **Escaping**: If \`0xC0\` occurs in data, it is escaped as \`0xDB 0xDC\`. If \`0xDB\` occurs, it is escaped as \`0xDB 0xDD\`.
 
-#### Master ROM Bootloader Command Opcodes:
+#### ROM Bootloader Commands used by the tool:
 | Opcode (Hex) | Command Name | Description |
 | :--- | :--- | :--- |
-| **\`0x08\`** | **SYNC** | Sends \`0x07 0x07 0x12 0x20\` to sync UART baud timing |
-| **\`0x0A\`** | **READ_REG** | Reads 32-bit hardware register or eFuse word |
-| **\`0x09\`** | **WRITE_REG**| Writes 32-bit register value |
-| **\`0x24\`** | **CHANGE_BAUD**| Commands ROM to accelerate from 115,200 to 921,600 baud |
-| **\`0x02\`** | **FLASH_BEGIN**| Prepares flash controller, specifies byte count to write |
-| **\`0x03\`** | **FLASH_DATA** | Streams 1,024-byte data blocks with sequence numbers |
-| **\`0x04\`** | **FLASH_END**  | Reboots or runs uploaded stub application |
-| **\`0x13\`** | **MD5_CHECK**  | Requests silicon to compute hardware MD5 hash of written bytes |
+| **\`0x08\`** | **SYNC** | Sends \`0x07 0x07 0x12 0x20\` followed by 32 \`0x55\` bytes; retried up to 8 times |
+| **\`0x0A\`** | **READ_REG** | Reads the chip-detect register (\`0x40001000\`) to identify the silicon |
+| **\`0x0D\`** | **SPI_ATTACH** | Attaches the SPI flash (ESP32 family) |
+| **\`0x0B\`** | **SPI_SET_PARAMS** | Tells the ROM the flash geometry (sized at 16 MB so any offset is accepted) |
+| **\`0x02\`** | **FLASH_BEGIN** | Erases the target range and announces block count / size |
+| **\`0x03\`** | **FLASH_DATA** | Streams 1,024-byte blocks, each with a sequence number and checksum |
+| **\`0x13\`** | **SPI_FLASH_MD5** | Asks the chip for the MD5 of the written range (not available on ESP8266) |
 
-#### The RAM Stub Bootloader:
-Why can the tool flash at **921,600 baud** when the ROM bootloader defaults to 115,200?
-The tool uploads a tiny flasher program ("Stub Bootloader") directly into on-chip SRAM (\`0x40090000\`). The stub runs at full 240MHz CPU frequency, reconfigures the SPI peripheral for hardware DMA transfers, and validates MD5 hashes on the fly, unlocking blazing flash speeds!
+Opcodes such as CHANGE_BAUDRATE, the compressed FLASH_DEFL_* family and FLASH_END exist in the protocol but are not used: the tool resets the chip into the app with DTR/RTS after flashing instead of sending FLASH_END.
+
+#### No RAM stub
+The Espressif \`esptool\` normally uploads a small "stub" flasher into RAM for higher speed, compression and flash reading. This tool does **not** load a stub, so writes run at the ROM's own speed and the baud rate you selected.
 </details>
 
 <details>
 <summary>Deep-Dive: Partition Table CSV Syntax & 32-Byte Binary Layout</summary>
 
-The partition table stored at \`0x8000\` consists of 32-byte binary structures defining every zone in flash memory:
+The tool does not create or edit partition tables: it writes the \`partitions.bin\` you supply at the offset you give it. For reference, the table stored at \`0x8000\` consists of 32-byte binary structures defining every zone in flash memory:
 
 \`\`\`csv
 # Name,   Type, SubType, Offset,  Size, Flags
@@ -403,25 +405,18 @@ coredump, data, coredump,0x3F0000,0x10000,
 #### 32-Byte Partition Record Bitfields:
 - **Bytes 0 - 1**: Magic Word (\`0xAA 0x50\`).
 - **Byte 2**: Type (\`0x00\` = App, \`0x01\` = Data).
-- **Byte 3**: Subtype (\`0x00\` = Factory App, \`0x10\` = OTA_0, \`0x01\` = OTA Data, \`0x82\` = SPIFFS, \`0x02\` = NVS).
-- **Bytes 4 - 7**: 32-bit Starting Flash Offset (4KB aligned).
+- **Byte 3**: Subtype (App: \`0x00\` = Factory, \`0x10\` = OTA_0; Data: \`0x00\` = OTA Data, \`0x02\` = NVS, \`0x82\` = SPIFFS).
+- **Bytes 4 - 7**: 32-bit Starting Flash Offset (4KB aligned for data, 64KB for apps).
 - **Bytes 8 - 11**: 32-bit Partition Size in bytes (4KB aligned).
 - **Bytes 12 - 27**: Label string (Null-terminated ASCII, max 16 chars).
-- **Bytes 28 - 31**: Flags (Bit 0 = \`1\` for Encrypted with hardware AES-256).
+- **Bytes 28 - 31**: Flags (Bit 0 = \`1\` for Encrypted).
 
 </details>
 
 <details>
-<summary>Flash Memory Clock Dividers & SPI Transfer Modes (QIO, QOUT, DIO, DOUT)</summary>
+<summary>Flash mode, frequency and size (QIO, DIO, ...)</summary>
 
-Choosing the wrong SPI transfer mode in your flasher settings will cause the microcontroller to boot-loop with \`flash read err, 1000\`!
-
-| SPI Mode | Data Pins Used | Max Frequency | Description & Safety Rule |
-| :--- | :--- | :--- | :--- |
-| **QIO (Quad I/O)** | 4 lines (D0, D1, D2, D3) | 80 MHz | Fastest read speed. Requires WP and HOLD pins to be routed to flash. |
-| **QOUT (Quad Output)**| 4 lines (Out only) | 80 MHz | Fast output, standard 1-line address phase. |
-| **DIO (Dual I/O)** | 2 lines (D0, D1) | 40 MHz / 80 MHz | **RECOMMENDED DEFAULT.** Compatible with 100% of ESP32 DevKits. |
-| **DOUT (Dual Output)**| 2 lines (Out only) | 40 MHz | Safest fallback mode for noisy breadboard wiring. |
+The flasher has **no** flash-mode, flash-frequency or flash-size options, and it does not patch the image header: bytes are written exactly as found in your file. The SPI mode (QIO / QOUT / DIO / DOUT), frequency and size are stored in the second-stage bootloader's header at build time. If a board bootloops with \`flash read err, 1000\` after flashing, rebuild with the correct flash mode for that board (DIO is the safest default) or use an image built for it.
 
 </details>
 
@@ -429,38 +424,37 @@ Choosing the wrong SPI transfer mode in your flasher settings will cause the mic
 
 ### 4. Step-by-Step Flashing Procedure
 
-#### Method A: 1-Click Curated Preset Flashing
-1. Plug your ESP32 or ESP8266 development board into USB.
-2. Open the **Firmware Flasher** tab in Skon's USB Tool.
-3. Select a preset suite from the **Curated Firmware Presets** dropdown:
-   - **ESP32 Marauder** (Wi-Fi/Bluetooth offensive auditing).
-   - **Piglet Wardriver** (GPS wardriving for CYD and T-Display).
-   - **Bruce Multi-Tool** (M5Stack Cardputer Swiss-Army Knife).
-4. Select your exact board revision from the Board selector.
-5. Click the glowing **Connect & Flash** button.
-6. Select your serial port in the browser prompt.
-7. The flasher automatically executes the reset sequence, connects to the ROM, negotiates 921,600 baud, erases targeted sectors, and burns the image with 100% MD5 verification!
+The tool has two sub-tabs: **Cloud Firmware Catalog (400+ Presets)** (the default) and **Multi-Slot Partition Flasher**. The serial port is connected with the normal **CONNECT** button (BAUD strip), not from inside this tool.
 
-#### Method B: Custom Multi-Binary Flashing
-1. Switch to the **Custom Multi-Binary Layout** mode.
-2. In Slot 1, select your bootloader binary and set offset to \`0x1000\` (Classic) or \`0x0000\` (S3/C3/C6).
-3. In Slot 2, select your partition table binary and set offset to \`0x8000\`.
-4. In Slot 3, select your application firmware binary and set offset to \`0x10000\`.
-5. Click **Connect & Flash**.
+#### Method A: Cloud Firmware Catalog
+1. Plug your ESP board in and click **CONNECT** (choose the baud first; the ROM flasher uses it).
+2. In **Cloud Firmware Catalog**, search ("Search 400+ cloud firmwares (Marauder, Meshtastic, Bruce, Piglet...)") and pick a suite and board variant. The list is downloaded from the ESP Terminator manifest (\`espterminator.com\`); **Refresh** reloads it, and a small bundled fallback list (Piglet builds) is used if it cannot be fetched.
+3. Click **Load into Flasher Slots**. The firmware is downloaded in the browser (GitHub release files go through a CORS proxy) and the tool switches to the Multi-Slot tab with the files and their addresses filled in.
+4. Click **FLASH n PARTITION(S)**.
+
+#### Method B: Multi-Slot Partition Flasher (your own files)
+1. Optionally click a layout preset: **ESP32 (Classic)**, **ESP32-S3 / C3 / C2 / C6**, **ESP8266 / NodeMCU** or **Single Custom Binary**. Presets fill in slot labels and offsets (bootloader \`0x1000\` or \`0x0000\`, partition table \`0x8000\`, app \`0x10000\`; optional storage slots are unticked by default).
+2. For each slot, set the **OFFSET** (hex, e.g. \`0x10000\`; "Invalid Hex" is shown otherwise), tick or untick it, and select a \`.bin\`, \`.hex\` (Intel HEX) or \`.uf2\` file. For HEX/UF2 files with a start address, the offset is filled in automatically.
+3. Use the add-slot button (up to **4** slots) or the trash icon on a slot (at least one must remain).
+4. Under **BOOTLOADER ENGINE & TIMING CONTROLS**, leave **PROTOCOL** on **ESP ROM Bootloader (SLIP / Sync)**. **Reset Pulse Duration** (50–500 ms, default 150) and **Boot Pin (IO0) Hold Duration** (20–250 ms, default 50) tune the DTR/RTS auto-reset. **BLOCK SIZE** offers 256–4096 bytes but the ROM mode caps writes at 1024.
+5. Click **FLASH n PARTITION(S) [size]**. The tool resets into the bootloader, syncs, detects the chip, flashes each enabled slot in order with a per-slot MD5 check, then resets the chip into the application. Progress, speed, elapsed time and ETA are shown; **ABORT** stops both modes between blocks: an ESP ROM flash stops after the block in flight, skips the MD5 check and the reset, logs "Aborted", and leaves the port connected and usable. The chip may be left with a partial image, so flash again before relying on it.
+
+The alternative **PROTOCOL: Raw UART Block Streamer** simply writes the file bytes to the serial port in blocks (with a configurable delay). It does not talk to any bootloader, does not erase or verify, and is for custom targets that accept a raw byte stream.
 
 <details>
 <summary>Troubleshooting: Unbricking Boards with Failed Auto-Reset (Button Dance)</summary>
 
-If the flasher displays:
+If the flasher fails with:
 \`\`\`text
-Connecting... (Timed out waiting for packet header)
+The chip did not answer SYNC. Check that it is an ESP chip, the port and cable, and hold BOOT (IO0) while resetting if auto-reset does not work.
 \`\`\`
 **Perform the Manual Button Dance**:
 1. Locate the two physical push buttons on your board: **BOOT** (or GPIO0) and **RESET** (or EN).
 2. **Press and HOLD the BOOT button**.
 3. While continuing to hold BOOT, **press the RESET button once** and release it.
-4. Release the **BOOT button**.
-5. Your board is now locked in ROM download mode. Click **Connect & Flash** in the web tool, and it will sync immediately!
+4. Keep holding **BOOT** and click **FLASH** again (the tool's own reset pulse is harmless while BOOT is held); release BOOT once flashing starts.
+
+Boards with native USB (ESP32-S2/S3/C3 using USB-Serial/JTAG, VID \`0x303A\` PID \`0x1001\`) use a dedicated reset sequence automatically. Also try a longer reset pulse and a different baud rate.
 </details>
 
 ---
@@ -497,7 +491,7 @@ USB-to-UART bridge ICs (such as the CH340, CP2102, or FT232R) have more than jus
 
 On almost all microcontroller development boards (NodeMCU, ESP32 DevKit, Arduino), these two pins are wired to a pair of bipolar junction transistors (BJTs) that control the microcontroller's **EN (RESET)** and **GPIO0 (BOOT)** pins.
 
-The **Hardware Controls** workbench lets you bypass software automation and manually command these physical pins, send timed reset pulses, or continuously spam interrupt keys to catch bootloader shells on embedded Linux systems.
+The **Hardware Controls** workbench lets you bypass software automation and manually command these physical pins, run timed bootloader-entry and reset sequences, assert a UART line break, watch the input handshake lines, or spam interrupt keys to catch bootloader shells on embedded Linux systems. It needs a connected WebSerial port; the signals are driven with \`port.setSignals()\`.
 
 ---
 
@@ -523,6 +517,8 @@ RTS ----/   \\---- Base Q2 ---> Collector connected to ESP GPIO0 (BOOT)
 | **0 (LOW)** | **1 (HIGH)** | **ON (Pulls EN to 0V)** | OFF (GPIO0 remains HIGH) | **Hardware Reset** (Held in reset) |
 | **1 (HIGH)** | **0 (LOW)** | OFF (EN remains HIGH) | **ON (Pulls GPIO0 to 0V)** | GPIO0 pulled LOW (Prepares for download) |
 | **0 (LOW)** | **0 (LOW)** | OFF (Both cancel out) | OFF (Both cancel out) | Idle protected state |
+
+> **Polarity note:** the buttons in the tool report \`ASSERTED (HIGH)\` / \`IDLE (LOW)\` for the *software* flag passed to WebSerial (\`dataTerminalReady\` / \`requestToSend\` = true). USB-UART bridges invert these lines, so asserted means the physical pin is driven **low**. With the standard two-transistor circuit above, wiring conventions differ between boards; use a multimeter if you need to be sure.
 </details>
 
 ---
@@ -555,21 +551,25 @@ In newer RISC-V and Xtensa architectures (ESP32-S3, C3, C6):
 
 ### 4. Interactive Workbench Features
 
-#### 1. Manual DTR / RTS Line Toggles
-Click the **DTR** or **RTS** buttons to force lines HIGH or LOW:
-- Set **DTR to LOW** to hold your microcontroller in permanent hardware reset while you inspect pin voltages with a multimeter or wire logic probes.
-- Set **DTR to HIGH** to release reset and allow the processor to run.
+#### 1. Hardware Strapping Timing Controls (ESP32 / bootloader)
+Two sliders set the timing: **Reset Hold Duration** (50–500 ms, default 150) and **Boot Pin Hold Duration** (20–250 ms, default 50). Then:
+- **TRIGGER ESP32 BOOTLOADER MODE** runs the sequence shown in the tool: (1) EN low, IO0 low, wait the reset duration; (2) release EN while IO0 stays low, wait the boot-pin duration; (3) release IO0. It uses RTS for EN and DTR for IO0, the common auto-reset wiring.
+- **NORMAL REBOOT TO APP** pulses EN low for 120 ms and releases it with IO0 idle so the board boots its application.
+- **Pro Tip**: if your board has a large capacitor on the reset line (e.g. 10uF), the default 150 ms may be marginal; raise the reset slider to **250 ms** or more.
 
-#### 2. Trigger Auto-Reset
-Generates a hardware-timed reset cycle:
-- Pulses the \`EN\` line LOW for a configurable duration (50ms to 500ms).
-- **Pro Tip**: If your board has a large capacitor on the reset line (e.g. 10uF for noise filtering), standard 50ms pulses might not discharge the capacitor completely. Increase the pulse slider to **250ms** for 100% reliable reset triggering.
+#### 2. Manual UART Pin Toggles
+- **DTR PIN** and **RTS PIN** are toggle buttons. Each shows \`ASSERTED (HIGH)\` or \`IDLE (LOW)\` (see the polarity note above). Use them to hold EN (reset) or IO0 (boot) while you probe voltages with a multimeter, then toggle again to release.
+- **UART Line Break**: a slider (50–1000 ms, default 250) and an **ASSERT n ms UART BREAK** button that holds TXD low for that long.
 
-#### 3. U-Boot Console Interrupter
+#### 3. Live Hardware Input Signals
+**CTS, DSR, DCD and RI** are polled from the adapter every 250 ms (\`port.getSignals()\`) and shown as HIGH/LOW.
+
+#### 4. U-Boot Interrupt Spammer & Bootloader Halter
 When working with Linux Single Board Computers (Raspberry Pi, Orange Pi, Banana Pi, OpenWrt Wi-Fi routers, IP cameras):
 - The U-Boot bootloader provides a recovery shell to re-flash Linux kernels, dump flash memory, or bypass root passwords.
-- U-Boot only pauses autoboot if it receives a keypress (Space, Enter, or \`Ctrl+C\`) within a narrow 1-second countdown window after power-on.
-- **How to Use**: Click **Start U-Boot Interrupter**. Power cycle or reset your board. The tool spams interrupt characters 50 times per second until U-Boot halts and opens the \`=>\` prompt!
+- U-Boot only pauses autoboot if it receives a keypress (Space, Enter, or \`Ctrl+C\`) within its autoboot countdown after power-on.
+- **How to Use**: choose an **INTERRUPT KEY** (Spacebar \`0x20\`, Enter \`\\r\\n\`, Ctrl+C \`0x03\`, Escape \`0x1B\` or a custom string), set the **BURST INTERVAL** (10–100 ms, default 25 ms) and click **START SPAMMER**. Power cycle or reset your board. A burst counter runs until the tool sees one of these prompts at the end of the received text and stops itself: \`=>\`, \`u-boot>\`, \`cfe>\`, or \`redboot>\` (a "Caught" badge shows the match). Click **STOP SPAMMER** to stop manually.
+- **Quick Bootloader Actions** (send commands with an LF ending): **Bypass Root Password (init=/bin/sh)** sends \`setenv bootargs "\${bootargs} init=/bin/sh"\` then \`boot\`; **Dump Environment (printenv)**; **Target Version (version)**; **Memory Hexdump (md.b)** sends \`md.b 0x80000000 0x100\` (adjust the address in the Terminal for your SoC).
 
 <details>
 <summary>U-Boot Command Prompt Environment Variable Reference & Kernel Boot Commands</summary>

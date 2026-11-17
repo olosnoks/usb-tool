@@ -98,6 +98,13 @@ export default function CyberChefCommandPalette({
       description: 'Generates self-contained offline session report with embedded styles.'
     },
     {
+      id: 'toggle_presentation',
+      name: 'Toggle Presentation Mode',
+      category: 'Views',
+      icon: Eye,
+      description: 'Hides the sidebars for focused payload analysis and clean screenshots.'
+    },
+    {
       id: 'pipe_hardware',
       name: 'Pipe Live Hardware Data',
       category: 'Hardware',

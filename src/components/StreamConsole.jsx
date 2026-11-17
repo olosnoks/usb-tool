@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { isClearShortcut } from '../utils/consoleShortcuts';
 import { useConsolePause } from '../context/SerialContext';
 import { 
   Terminal as TerminalIcon, 
@@ -297,7 +298,16 @@ export default function StreamConsole({
   };
 
   return (
-    <div className="flex flex-col h-full bg-cyber-darkest border border-cyber-border rounded-xl shadow-xl overflow-hidden">
+    <div
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (isClearShortcut(e)) {
+          e.preventDefault();
+          if (onClear) onClear();
+        }
+      }}
+      className="flex flex-col h-full bg-cyber-darkest border border-cyber-border rounded-xl shadow-xl overflow-hidden outline-none"
+    >
       {/* Terminal Title Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[#090e1a] border-b border-cyber-border text-xs font-mono">
         <div className="flex items-center gap-2">

@@ -7,11 +7,12 @@ This document is an exhaustive engineering blueprint for an AI coding assistant 
 ## 1. High-Level Architecture Overview
 
 - **Frontend Core**: React 18 + Vite (SPA) + Tailwind CSS (vanilla utility styling) + Lucide React icons.
-- **Hardware Communication**: Client-side **W3C WebSerial API** and **WebUSB API**. No backend daemon or native drivers required.
+- **Hardware Communication**: Client-side **W3C WebSerial, WebUSB, WebHID and Web Bluetooth APIs**. No backend daemon or native drivers required. (The only server-side code is the `/api/*` Shodan relay in `worker/index.js`.)
 - **State & Plumbing**: `src/context/SerialContext.jsx` manages active COM ports, baud rate switching, raw byte buffers, hex streams, and disconnection cleanup.
 - **Dual Entrypoints**:
   1. Main Web Application (`index.html` -> `src/main.jsx` -> `src/App.jsx`)
   2. Technical Documentation Wiki (`wiki/index.html` -> `src/wiki/main.jsx` -> `src/wiki/WikiApp.jsx`)
+- **Windowed workspace**: every tool opens in its own window on the `Desktop`; `src/components/ToolRegistry.jsx` maps a tool id to its (lazy) workbench.
 
 ---
 
@@ -23,33 +24,41 @@ skons-usb-tool/
 │   ├── components/
 │   │   ├── layout/
 │   │   │   ├── Header.jsx           # App top bar & global connection indicators
-│   │   │   └── Sidebar.jsx          # Category groupings & tool selector list
-│   │   ├── tools/                   # Tool suites & modular workbenches
+│   │   │   └── Sidebar.jsx          # SIDEBAR_SECTIONS: category groupings & tool list
+│   │   ├── ToolRegistry.jsx         # renderTool() switch + KNOWN_TOOL_IDS
+│   │   ├── tools/                   # Most tool workbenches
 │   │   │   ├── ProtocolPacketLab.jsx
-│   │   │   ├── KismetStudioWorkbench.jsx
+│   │   │   ├── UsbReaWorkbench.jsx
 │   │   │   └── ...
-│   │   └── workbenches/             # Standalone hardware decks
-│   │       ├── FlipperWorkbench.jsx
-│   │       ├── ProxmarkWorkbench.jsx
+│   │   └── workbenches/             # Larger decks (Alfa Wi-Fi, WarHog/Piglet) and CyberChef parts
+│   │       ├── AlfaWifiWorkbench.jsx
+│   │       ├── WarhogPigletWorkbench.jsx
 │   │       └── ...
 │   ├── utils/                       # Low-level protocol drivers & packet parsers
 │   │   ├── flipperDriver.js
 │   │   ├── mayhemDriver.js
 │   │   ├── ubxProtocol.js
+│   │   ├── usbrea/                  # usb-rea port (pure modules)
 │   │   └── ...
+│   ├── workers/                     # Web Workers (CyberChef, 802.11 parser, HackRF DSP)
 │   ├── wiki/
 │   │   ├── WikiApp.jsx              # Standalone interactive docs app
-│   │   └── articles/                # 7 Article category modules
+│   │   ├── wikiArticles.js          # Aggregates the article modules + WIKI_CATEGORIES
+│   │   └── articles/                # 8 article modules
 │   │       ├── coreArticles.js
-│   │       ├── hardwareArticles.js
-│   │       ├── rfArticles.js
 │   │       ├── analysisArticles.js
+│   │       ├── rfArticles.js
+│   │       ├── webappArticles.js
 │   │       ├── payloadArticles.js
+│   │       ├── hardwareArticles.js
 │   │       ├── utilityArticles.js
 │   │       └── referenceArticles.js
-│   ├── App.jsx                      # Main router & lazy component loader
+│   ├── App.jsx                      # Shell: Header, Sidebar, Desktop (tool windows), drawers
 │   └── context/SerialContext.jsx    # Global WebSerial state
-└── tests/                           # Vitest unit test suites
+├── worker/index.js                  # Cloudflare Worker for /api/* (Shodan relay)
+├── wrangler.jsonc                   # Worker + static-assets config
+├── scripts/release-local.py         # test + build + deploy from a PC
+└── tests/                           # Vitest unit test suites (tests/usbrea/, ...)
 ```
 
 ---
@@ -61,7 +70,7 @@ skons-usb-tool/
 
 1. **Protocol Framing**: Implement the binary or ASCII packet framing logic (e.g., CRC-16, Fletcher checksums, SLIP/COBS, Protobuf, or magic preambles).
 2. **Serial Stream Ingestion**: Export functions to transform incoming `Uint8Array` byte chunks from `SerialContext` into structured JavaScript objects.
-3. **Simulation / Fallback Data**: Always export a deterministic set of sample frames or mock responses so the tool can be rendered and tested without a physical USB device connected.
+3. **Test Fixtures, not Fake Output**: Export deterministic sample frames (or use a fake port such as `FakeSerialPort` in `src/utils/serialLink.js`) so Vitest can exercise the driver without a physical USB device. The shipped UI must not present them as device data.
 
 ```javascript
 // src/utils/myNewDriver.js
@@ -73,7 +82,8 @@ export function parseMyProtocolPacket(rawBytes) {
   return { id: rawBytes[2], payload: rawBytes.slice(3, -2) };
 }
 
-export const MOCK_TELEMETRY = [
+// Test fixture only; never shown in the UI as real telemetry.
+export const SAMPLE_TELEMETRY = [
   { timestamp: '00:00:01.200', metricA: 142.5, status: 'NORMAL' },
   { timestamp: '00:00:01.300', metricA: 148.0, status: 'WARNING' }
 ];
@@ -93,7 +103,7 @@ export const MOCK_TELEMETRY = [
 2. **Essential UI Components**:
    - **Header Card**: Tool title, category pill badge, and connection controls.
    - **Telemetry KPI Strip**: 3–4 metric cards showing packet rates, detected nodes, voltages, or hardware state.
-   - **Offline / Simulation Toggle**: A checkbox or toggle button (e.g. `Simulate RF` or `Demo Mode`) allowing users and automated Vitest tests to test the full UI without real hardware.
+   - **Empty State**: Until a device is connected the tool shows an empty state, not simulated readings (the app has no simulated device modes; `tests/demoHonesty.test.jsx` guards this). Panels that are interface-only must say so with `DemoBanner` (`src/components/common/DemoNotice.jsx`).
    - **Action Bar**: Clear buffer, Pause/Resume, Export (JSON, CSV, PCAP, or VCD).
 
 ---
@@ -101,7 +111,7 @@ export const MOCK_TELEMETRY = [
 ### Step 3: Register in Sidebar & Navigation
 *Location: `src/components/layout/Sidebar.jsx`*
 
-Find the appropriate category array (`core`, `analysis`, `rf`, `payload`, `hardware`, or `utilities`) and add the item:
+Find the appropriate section in `SIDEBAR_SECTIONS` (`core`, `analysis`, `rf`, `webapp`, `programmers`, `utilities`, or `setup`) and add the item to its `items`:
 
 ```javascript
 // In src/components/layout/Sidebar.jsx:
@@ -110,7 +120,8 @@ Find the appropriate category array (`core`, `analysis`, `rf`, `payload`, `hardw
   name: 'My New Tool Name',
   icon: Radio,               // from 'lucide-react'
   accent: 'cyan',            // 'cyan' | 'purple' | 'amber' | 'emerald' | 'rose'
-  desc: 'Short 1-line engineering description of what this hardware tool does'
+  desc: 'Short 1-line engineering description of what this hardware tool does',
+  keywords: ['search', 'terms']   // used by the sidebar filter and the command palette
 }
 ```
 
@@ -123,21 +134,19 @@ const isActive =
 
 ---
 
-### Step 4: Lazy-Load and Render in App Router
-*Location: `src/App.jsx`*
+### Step 4: Lazy-Load and Render in the Tool Registry
+*Location: `src/components/ToolRegistry.jsx`*
 
 1. Add lazy import near the top:
    ```javascript
-   const MyNewToolWorkbench = React.lazy(() => import('./components/workbenches/MyNewToolWorkbench'));
+   const MyNewToolWorkbench = React.lazy(() => import('./tools/MyNewToolWorkbench'));
    ```
-2. Render in the main tool switch section:
+2. Add the id to `KNOWN_TOOL_IDS` and a case to the `renderTool` switch:
    ```jsx
-   {activeTool === 'my-new-tool' && (
-     <div className="w-full">
-       <MyNewToolWorkbench />
-     </div>
-   )}
+   case 'my-new-tool': return <MyNewToolWorkbench onLogMessage={addLog} />;
    ```
+3. If the tool is a sub-tab or alias of another tool's window, map it in `TOOL_GROUPS` in `src/utils/windowManager.js`. If it needs a wider default window, add it to `TOOL_NATURAL_WIDTH`.
+4. Add the id to `TOOL_TO_ARTICLE_MAP` in `src/wiki/WikiApp.jsx` if its wiki article id differs from the tool id.
 
 ---
 
@@ -151,7 +160,8 @@ Every tool in Skon's USB Tool **must** have an exhaustive engineering article in
 {
   id: 'my-new-tool',
   toolId: 'my-new-tool',
-  category: 'analysis',       // or 'core', 'rf', 'hardware', 'payload', 'utilities'
+  category: 'analysis',       // an id from WIKI_CATEGORIES (src/wiki/wikiArticles.js):
+                              // core, analysis, rf, webapp, pentesting, programmers, utilities, reference
   title: 'My New Tool — Full Engineering & Protocol Manual',
   summary: '1-sentence high-density summary of protocol, bitfields, and capabilities.',
   tags: ['Tag1', 'Tag2', 'Silicon', 'Protocol'],
@@ -211,8 +221,8 @@ fs.readdirSync('src/wiki/articles').forEach(f => {
 });
 "
 
-# 2. Run the Vitest unit test suite (ensure 92+ tests pass)
-npm test -- --run
+# 2. Run the Vitest unit test suite (every test must pass)
+npm run test
 
 # 3. Compile the production bundle (verify zero warnings or chunk errors)
 npm run build
@@ -223,4 +233,5 @@ npm run build
 ## 5. Security & Safety Guidelines
 
 - **Dual-Use / Defensive Focus**: Design wireless, serial, and protocol tools for diagnostic, educational, monitoring, and defensive analysis purposes (e.g. signal capture, packet dissection, WIDS intrusion alerts, device cataloging).
-- **Client-Side Isolation**: Do not introduce remote server dependencies unless connecting to local services (e.g., `localhost:2501` for Kismet) over standard REST/WebSocket endpoints. Never send user hardware keys or firmware dumps to external clouds.
+- **Client-Side Isolation**: Do not introduce remote server dependencies unless connecting to local services (e.g., `localhost:2501` for Kismet, or the optional `backend/` Docker services) over standard REST/WebSocket endpoints. The one hosted piece is the `/api/*` Shodan relay (`worker/index.js`). Never send user hardware keys or firmware dumps to external clouds.
+- **Third-Party Ports**: If you port someone else's code, keep its license and copyright note in the file header and add it to `docs/ACKNOWLEDGMENTS.md` (see `src/utils/usbrea/` for the pattern).

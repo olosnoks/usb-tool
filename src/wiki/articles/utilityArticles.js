@@ -10,8 +10,8 @@ export const UTILITY_ARTICLES = [
     toolId: 'micropython',
     category: 'utilities',
     title: 'MicroPython REPL & File Manager — WebFS & Raw Mode Studio',
-    summary: 'Master MicroPython Raw REPL control sequences (0x01-0x04), memory heap inspection, in-browser code editing, and chunked LittleFS/FAT file transfers.',
-    tags: ['MicroPython', 'Raw REPL', 'File Manager', 'LittleFS', 'FAT', 'Heap Memory', 'boot.py', 'main.py', 'WebFS'],
+    summary: 'Master MicroPython Raw REPL control sequences (0x01-0x04), on-board file browsing and in-browser editing, one-liner execution, and the bundled driver installer.',
+    tags: ['MicroPython', 'CircuitPython', 'Raw REPL', 'File Manager', 'LittleFS', 'FAT', 'boot.py', 'main.py', 'mip', 'WebFS'],
     readTime: '22 min read',
     content: `
 # MicroPython REPL & File Manager — WebFS & Raw Mode Studio
@@ -25,10 +25,11 @@ The **MicroPython Workbench** provides full file system and interactive programm
 When developing with MicroPython, developers frequently need to:
 - Inspect files on the board's internal flash storage.
 - Upload scripts (\`main.py\`, \`boot.py\`, custom libraries).
-- Edit code directly on the microcontroller with instant reboot.
-- Monitor free RAM to diagnose memory leaks and heap fragmentation.
+- Edit code directly on the microcontroller's flash.
+- Check free and total flash space.
+- Drop common sensor and display drivers into \`/lib\`.
 
-The **MicroPython Workbench** communicates directly over WebSerial using MicroPython's built-in **Raw REPL mode**, providing an in-browser graphical file manager, visual flash space indicators, and code editor.
+The **MicroPython Workbench** communicates directly over WebSerial using MicroPython's built-in **Raw REPL mode**, providing an in-browser graphical file manager, a free/total flash readout, a text editor, and a one-line code runner.
 
 ---
 
@@ -36,7 +37,7 @@ The **MicroPython Workbench** communicates directly over WebSerial using MicroPy
 
 When connected over serial, MicroPython typically runs a friendly, human-interactive REPL with prompt \`>>> \`. However, friendly REPL mode echoes back every character and inserts auto-indentation, making programmatic file transfers slow and prone to corruption.
 
-The workbench switches the microcontroller into **Raw REPL Mode** by issuing standard ASCII control byte sequences:
+For every operation (scan, read, write, delete, one-liner) the workbench enters **Raw REPL Mode**, runs one generated script, and leaves again, using standard ASCII control byte sequences:
 
 \`\`\`text
 Host (PC)                                   Target Microcontroller
@@ -48,59 +49,56 @@ Host (PC)                                   Target Microcontroller
    | --- Python Code Chunks (Max 256 bytes) ----------> | (Buffer script in RAM)
    | --- [0x04 (Ctrl+D)] -----------------------------> | (Execute buffered code)
    | <--- "OK" ---------------------------------------- | (Execution Started)
-   | <--- Script Stdout / Stderr ---------------------- | (Stream Output)
-   | <--- [0x04] -------------------------------------- | (Execution Finished)
+   | <--- Script Stdout [0x04] Stderr [0x04] ">" ------- | (Output, then traceback if any)
    |                                                    |
    | --- [0x02 (Ctrl+B)] -----------------------------> | (Exit Raw REPL to Normal)
 \`\`\`
 
 <details>
-<summary>Deep-Dive: Chunked File Upload & Download Mechanics with SHA-256 Checksums</summary>
+<summary>Deep-Dive: File Upload, Download & Directory Listing Mechanics</summary>
 
-To transfer binary files (images, audio clips, compiled \`.mpy\` files) reliably across serial without buffer overruns:
-1. **Chunked Base64 Streaming**:
-   - The file is divided into 128-byte to 512-byte blocks.
-   - For each block, the host executes a short Python helper script:
+Files cross the serial link as Base64 text embedded in short Python scripts, with marker lines that the host searches for in the output:
+1. **Upload / save**:
+   - The file's bytes (uploads are read as raw bytes; editor text is UTF-8 encoded) are Base64-encoded in the browser and sent as a single script (itself written to the wire in 256-byte pieces):
      \`\`\`python
-     with open('target_file.ext', 'ab') as f:
-         import ubinascii
-         f.write(ubinascii.a2b_base64(b'BASE64_CHUNK_DATA=='))
+     import ubinascii
+     with open('target_file.ext', 'wb') as f:
+         f.write(ubinascii.a2b_base64('BASE64_DATA'))
+     print("__FILE_WRITE_SUCCESS__")
      \`\`\`
-2. **Directory Traversal**:
-   - The tool lists files and folders using \`os.ilistdir('/')\`:
-     - Returns tuples: \`(name, type, inode, size)\`.
-     - \`type == 0x4000\`: Subdirectory.
-     - \`type == 0x8000\`: Standard File.
-3. **Integrity Verification**:
-   - After writing all chunks, the tool executes \`uhashlib.sha256()\` on the target file and compares the digest against the host file.
+   - There is no per-chunk streaming and no checksum verification; success is the \`__FILE_WRITE_SUCCESS__\` marker. Very large files may not fit in one script, and the transfer is text-based (see the note below).
+2. **Download / edit**:
+   - The device reads the file as bytes, prints it as Base64 between \`__FILE_DATA_START__\` and \`__FILE_DATA_END__\`, and the browser decodes it.
+3. **Directory Traversal**:
+   - The tool lists files and folders using \`os.ilistdir(path)\` (falling back to \`os.listdir\`):
+     - Entries are \`(name, type, inode, size)\`.
+     - \`type & 0x4000\`: Subdirectory.
+   - Free and total flash come from \`os.statvfs('/')\`.
+
+> Uploads and downloads are byte-exact, so binary files (images, \`.mpy\`) transfer intact. Paths are quoted as Python string literals, so names containing quotes or backslashes are safe. The in-browser editor decodes files as UTF-8, so only edit text files there.
 </details>
 
 <details>
-<summary>Deep-Dive: Real-Time Memory Heap Profiling & Garbage Collection</summary>
+<summary>Deep-Dive: The Bundled Driver Installer (mip tab)</summary>
 
-Microcontrollers have extremely limited RAM (e.g. 520 KB on ESP32, 264 KB on RP2040). MicroPython allocates memory dynamically on an internal heap. Over time, allocating small strings or byte buffers causes **heap fragmentation**, leading to \`MemoryError\` exceptions even when total free bytes appear high!
-
-The workbench periodically queries:
-\`\`\`python
-import gc
-free = gc.mem_free()
-alloc = gc.mem_alloc()
-total = free + alloc
-\`\`\`
-- **Heap Fragmentation Warning**: If the largest continuous free block is smaller than 20% of total free RAM, the workbench flashes an alert, allowing you to click **Trigger Garbage Collector (\`gc.collect()\`)** to coalesce free memory pages!
+The **PACKAGE MANAGER (mip)** tab lists a small built-in catalog of drivers (SSD1306 OLED, BME280, AHT10/AHT20, MPU6050, uMQTT Simple, VL53L0X). The source of each driver ships inside the app. **INSTALL TO /lib/** creates \`/lib\` (and \`/lib/umqtt\`) if needed and writes the file; nothing is downloaded from a package index and the real \`mip\` tool is not invoked. The search box filters by name, description or category.
 </details>
 
 ---
 
 ### 3. Step-by-Step Walkthrough
 
-1. Connect your MicroPython board via USB and select **115200 baud**.
-2. Click **Connect & Open WebFS**:
-   - The workbench interrupts any running loop, enters Raw REPL, queries \`os.uname()\`, and builds the directory tree.
-3. **Download File**: Click any file in the list (e.g. \`config.json\`) to download it to your computer.
-4. **Upload File**: Drag and drop any file from your desktop into the file explorer area.
-5. **Edit Code**: Double-click \`main.py\`. The integrated code editor opens with syntax highlighting.
-6. Click **Save & Soft Reboot**: Writes the file to flash and issues \`0x04\` to restart user code immediately.
+1. Connect your MicroPython or CircuitPython board with the app's serial connection (set the port and baud rate in the Terminal / connection controls; the workbench uses that shared port and has no baud selector of its own). If several boards are connected, pick one in the **TARGET** selector.
+2. Click **SCAN FILES**:
+   - The workbench interrupts any running loop, enters Raw REPL, reads \`sys.platform\` and flash usage, and lists the current directory. The platform shows as a badge in the header.
+3. **Navigate**: click a folder name or **ENTER**; use **UP** or the \`.. [Parent Directory]\` row to go back.
+4. **Edit File**: click **EDIT** on a text file. A plain text editor with a line-number gutter opens.
+5. **Download File**: click the download icon on a file row to save it to your computer.
+6. **Upload File**: click **UPLOAD** and choose a file; it is written into the current directory (there is no drag-and-drop).
+7. **NEW SCRIPT**: enter a filename and initial content, then **CREATE & FLASH**.
+8. Click **SAVE TO ON-CHIP FLASH** in the editor to write the file. It does not reboot the board; reset it yourself (or use the one-liner below) to run the new code.
+9. The trash icon deletes a file (after a confirmation). It uses \`os.remove\`, so it only removes files, not folders.
+10. **EXECUTE REPL**: type a one-liner and press Enter or **RUN**; the output appears in the session log.
 
 ---
 
@@ -118,8 +116,8 @@ total = free + alloc
     toolId: 'improv',
     category: 'utilities',
     title: 'Improv Wi-Fi — Standardized Serial IoT Wi-Fi Provisioner',
-    summary: 'Provision Wi-Fi credentials to ESPHome, Home Assistant, and Tasmota devices over serial without mobile apps or captive portals.',
-    tags: ['Improv Wi-Fi', 'Home Assistant', 'ESPHome', 'IoT', 'Provisioning', 'Wi-Fi Credentials', 'Tasmota'],
+    summary: 'Provision Wi-Fi credentials over serial using the Improv protocol (ESPHome, ESP Web Tools firmware) or the MicroPython / ESP-AT fallbacks, without mobile apps or captive portals.',
+    tags: ['Improv Wi-Fi', 'Home Assistant', 'ESPHome', 'IoT', 'Provisioning', 'Wi-Fi Credentials', 'ESP-AT', 'MicroPython'],
     readTime: '16 min read',
     content: `
 # Improv Wi-Fi — Serial Provisioner
@@ -136,7 +134,7 @@ Traditionally, setting up a new smart home device required:
 3. Navigating an unreliable captive portal web page.
 4. Reconnecting your computer to your home network.
 
-**Improv Wi-Fi** replaces this entire friction-filled process. When you plug a device into USB, Skon's USB Tool automatically detects whether the device supports Improv, lists available local Wi-Fi networks, and sends the credentials over serial in under 3 seconds!
+**Improv Wi-Fi** replaces this entire friction-filled process. When you plug a device into USB, Skon's USB Tool asks it for its state and identity over the serial port, can ask it to scan for local Wi-Fi networks, and sends the credentials over serial.
 
 ---
 
@@ -145,15 +143,19 @@ Traditionally, setting up a new smart home device required:
 Improv packets are framed with a human-readable header followed by binary payload bytes:
 
 \`\`\`text
-+--------------+-----------+--------+---------------+--------------------+----------+
-| Magic String | Packet    | Data   | Data Payload  | 8-Bit Checksum     | Term     |
-| "IMPROV"     | Type Byte | Length | (SSID + Pass) | (Modulo 256 sum)   | "\\r\\n"   |
-| (6 bytes)    | (1 byte)  | (1 B)  | (N bytes)     | (1 byte)           | (2 bytes)|
-+--------------+-----------+--------+---------------+--------------------+----------+
++--------------+---------+-----------+--------+---------------+--------------------+
+| Magic String | Version | Packet    | Data   | Data Payload  | 8-Bit Checksum     |
+| "IMPROV"     | 0x01    | Type Byte | Length | (N bytes)     | (Modulo 256 sum)   |
+| (6 bytes)    | (1 B)   | (1 byte)  | (1 B)  |               | (1 byte)           |
++--------------+---------+-----------+--------+---------------+--------------------+
+
+Packet types: 0x01 Current State, 0x02 Error State, 0x03 RPC Command, 0x04 RPC Result.
+RPC commands: 0x01 Wi-Fi Settings (SSID + password), 0x02 Get Current State, 0x03 Get Device Info, 0x04 Scan Networks.
+RPC data is: command byte, length of the rest, then length-prefixed strings.
 \`\`\`
 
 #### Checksum Calculation:
-The checksum byte is calculated by summing every byte from the start of \`IMPROV\` through the end of the Data Payload and taking the modulo 256:
+The checksum byte is calculated by summing every byte from the start of \`IMPROV\` through the end of the data payload and taking the modulo 256 (there is no trailing \`\r\n\`):
 \`\`\`javascript
 let sum = 0;
 for (let i = 0; i < packetBytes.length; i++) {
@@ -164,10 +166,10 @@ for (let i = 0; i < packetBytes.length; i++) {
 <details>
 <summary>Deep-Dive: Improv State Machine & Error Code Enums</summary>
 
-#### The 5 Improv State Enums:
+#### The Improv State Enums:
 | State Code | State Name | Meaning |
 | :---: | :--- | :--- |
-| **\`0x00\`** | **Stopped** | Improv service is idle or not initiated. |
+| **\`0x00\`** | **Unknown / Initializing** | The workbench has not received a state from the device yet. |
 | **\`0x01\`** | **Awaiting Authorization** | Target device requires a physical button press before accepting credentials. |
 | **\`0x02\`** | **Authorized** | Device is authorized and ready to accept Wi-Fi credentials. |
 | **\`0x03\`** | **Provisioning** | Device received SSID and password and is actively authenticating with AP. |
@@ -178,7 +180,8 @@ for (let i = 0; i < packetBytes.length; i++) {
 - **\`0x01\` (Invalid RPC Packet)**: Frame header missing or checksum mismatch.
 - **\`0x02\` (Unknown Command)**: Unsupported packet type.
 - **\`0x03\` (Unable to Connect)**: Incorrect Wi-Fi password or out-of-range SSID.
-- **\`0x04\` (Not Authorized)**: Provisioning attempted without required physical authorization.
+- **\`0x04\` (Not Authorized)**: Provisioning attempted without required physical authorization. The workbench has no dedicated text for this code and shows it as a generic error code.
+- **\`0xFF\` (Unknown Error)**.
 
 </details>
 
@@ -186,14 +189,18 @@ for (let i = 0; i < packetBytes.length; i++) {
 
 ### 3. Step-by-Step Usage Guide
 
-1. Plug your ESPHome, Tasmota, or custom IoT device into your computer via USB.
-2. Open the **Improv Wi-Fi** workbench and select **115200 baud**.
-3. Click **Connect**:
-   - The workbench queries device identity and displays firmware name (e.g. \`ESPHome Room-Sensor v2024.3.0\`).
-4. Type your home Wi-Fi SSID and password (or select from discovered networks).
-5. Click **Save & Connect**:
-   - The workbench formats the \`IMPROV\` frame and streams it over serial.
-   - The device status transitions from **Provisioning** to **Provisioned** and returns its local IP address (e.g. \`192.168.1.145\`) along with a direct web link to open the device dashboard!
+1. Plug your ESP32, ESP8266, Pico or other IoT device into your computer via USB and connect to its serial port with the app's shared connection (the workbench has no baud selector of its own).
+2. Choose the **Mode**:
+   - **IMPROV RPC (Standard)**: for firmware that implements the Improv serial protocol (for example ESPHome or ESP Web Tools firmware). On connect the workbench sends *Get Current State* and *Get Device Info*; the device line shows the returned firmware name, version, chip and device name.
+   - **MICROPYTHON REPL**: types a \`network.WLAN\` scan or connect one-liner into the normal REPL.
+   - **ESP-AT CMD**: sends \`AT+CWLAP\` to scan and \`AT+CWMODE=1\` + \`AT+CWJAP\` to connect.
+3. Click **SCAN APs** (optional). The device's networks are listed with signal in dBm and a lock icon for secured networks; click one to fill the SSID. If the device never answers, the scan gives up after 15 seconds.
+4. Type the **Network SSID** and **Wi-Fi Password** (the lock icon toggles password visibility).
+5. Click **CONNECT BOARD TO WI-FI**:
+   - In Improv mode the workbench sends the Wi-Fi Settings RPC. The status banner follows the state the device reports (provisioning, then provisioned) and shows the URL the device returns, if any, as an **OPEN** button.
+   - In the MicroPython and ESP-AT modes the workbench watches the text output for an IP address (for example from \`ifconfig\` or \`CIFSR\`) or a failure message.
+
+> The MicroPython and AT modes send plain text to whatever is on the port; they are best-effort fallbacks, not a standard protocol.
 
 ---
 
@@ -211,67 +218,56 @@ for (let i = 0; i < packetBytes.length; i++) {
     toolId: 'telemetry',
     category: 'utilities',
     title: 'Telemetry Gauges — Analog Speedometer & Metric Dials',
-    summary: 'Extract numerical sensor values from raw serial streams and display them on responsive analog gauge dials and digital meters.',
-    tags: ['Telemetry', 'Gauges', 'Analog Meter', 'Speedometer', 'Sensors', 'Metrics', 'Regex'],
+    summary: 'Parse JSON, key=value and CSV lines from the serial stream into named channels shown on an artificial horizon, a circular speedometer and live min/max metric cards.',
+    tags: ['Telemetry', 'Gauges', 'Speedometer', 'Artificial Horizon', 'Sensors', 'Metrics', 'JSON', 'CSV'],
     readTime: '15 min read',
     content: `
 # Telemetry Gauges — Analog Dials & Digital Meters
 
-The **Telemetry Gauges Workbench** bridges raw, unstructured text streams from serial devices (temperature probes, engine RPM sensors, solar charge controllers, digital multimeters) and transforms them into responsive, high-contrast analog dials and digital HUD instruments.
+The **Telemetry Gauges Workbench** (window title *Telemetry & Attitude Dashboard*) turns text lines arriving on the serial port (temperature probes, engine RPM sensors, IMUs, multimeters) into named numeric channels and shows them on three panels: an attitude horizon, a circular speedometer, and a grid of live metric cards.
 
 ---
 
-### 1. Under the Hood: Polar Needle Trigonometry & Regex Extraction
+### 1. Under the Hood: Line Parsing & Needle Math
 
-The analog gauge engine renders vector needles directly on an HTML5 2D canvas at 60 FPS using smooth trigonometric interpolation.
+Every new line from the serial stream is tried against three parsers in order; the first one that matches wins. There is no custom regular expression field and no format selector.
 
 <details>
-<summary>Deep-Dive: Mathematical Needle Deflection Calculations</summary>
+<summary>Deep-Dive: Supported Line Formats</summary>
 
-Given a gauge with minimum value $V_{\\text{min}}$, maximum value $V_{\\text{max}}$, start angle $\\theta_{\\text{start}} = -135^\\circ$, and sweep angle $\\Delta\\theta = 270^\\circ$:
+| Order | Format | Example Serial Line | Result |
+| :---: | :--- | :--- | :--- |
+| 1 | **JSON object** (line starts with \`{\` and ends with \`}\`) | \`{"rpm": 4820, "temp": 24.5}\` | One channel per key with a numeric value. |
+| 2 | **Key-Value** (\`key=number\` or \`key:number\`) | \`temp=24.5 rpm=3200\` or \`Temp: 24.5 C, Humidity: 62 %\` | One channel per pair, key lower-cased with non-alphanumerics removed. |
+| 3 | **CSV / sentence** (contains a comma, optional \`$TAG,\` prefix, at least 2 numbers) | \`$DATA,12.5,-4.2,24.5,12.1,2400\` | Numbers map by position to \`pitch, roll, temp, volts, rpm, altitude\`, then \`ch_7\`, \`ch_8\`... |
 
-#### 1. Normalized Sensor Value:
-\`\`\`text
-Normalized (t) = (Current_Value - V_min) / (V_max - V_min)
-(Clamped between 0.0 and 1.0)
-\`\`\`
-
-#### 2. Deflection Angle in Radians:
-\`\`\`text
-Angle (radians) = (theta_start + t * Delta_theta) * (PI / 180)
-\`\`\`
-
-#### 3. Needle Tip Coordinates:
-\`\`\`text
-X_tip = Center_X + Needle_Length * cos(Angle)
-Y_tip = Center_Y + Needle_Length * sin(Angle)
-\`\`\`
-
-The engine applies exponential smoothing ($V_{\\text{display}} = V_{\\text{prev}} + \\alpha \\times (V_{\\text{target}} - V_{\\text{prev}})$) with $\\alpha = 0.15$ to eliminate needle jitter while preserving instantaneous response!
+Channel names are used as-is, so send \`pitch\` and \`roll\` to move the horizon, and names containing \`temp\`, \`volt\`, \`rpm\` or \`alt\` get a \`°C\`, \`V\`, \`RPM\` or \`m\` unit. Any other new key creates a new channel automatically. The dashboard starts with six placeholder channels (pitch, roll, temp, volts, rpm, altitude) holding sample values until real data arrives.
 </details>
 
 <details>
-<summary>Deep-Dive: Regular Expression Parser Examples</summary>
+<summary>Deep-Dive: Needle Deflection Calculation</summary>
 
-The telemetry engine allows you to define custom regular expressions to extract numbers from any incoming string format:
+The speedometer is an SVG arc plus a rotating needle (not a canvas). The needle sweeps 270 degrees from -135 to +135:
 
-| Sensor Protocol / Printout | Example Serial Line | Recommended Extraction Regex |
-| :--- | :--- | :--- |
-| **Key-Value String** | \`Temp: 24.5 C, Humidity: 62 %\` | \`Temp:\\s*([\\d\\.]+)\` |
-| **CSV Telemetry** | \`$DATA,14.2,3.8,1250\` | \`\\$DATA,[\\d\\.]+,[\\d\\.]+,(\\d+)\` |
-| **JSON Payload** | \`{"rpm": 4820, "v": 12.4}\` | \`"rpm"\\s*:\\s*(\\d+)\` |
-| **Industrial Tag** | \`PV01=104.22 BAR\` | \`PV01=([\\d\\.]+)\` |
+\`\`\`text
+Normalized (t) = (Current_Value - Observed_Min) / (Observed_Max - Observed_Min)
+(Clamped between 0.0 and 1.0; if min equals max the scale falls back to 0 to 100)
+Needle angle (degrees) = -135 + t * 270
+\`\`\`
 
+The scale is **auto-ranging**: the minimum and maximum are the lowest and highest values seen so far for that channel, not user-set limits. The needle movement is smoothed with a short CSS transition; there is no exponential filter.
 </details>
 
 ---
 
-### 2. Configurable Dial Properties
+### 2. The Panels
 
-- **Gauge Ranges**: Set minimum and maximum limits (e.g. \`0\` to \`8000\` RPM, \`-40\` to \`+120\` °C).
-- **Warning & Danger Zones**: Define colored arc bands (Green = Safe, Amber = Warning, Red = Danger threshold).
-- **Peak Hold Indicators**: A subtle marker remains at the maximum observed value to capture transient spikes.
-- **Multi-Dial Layouts**: Create up to 6 simultaneous gauges arranged in a responsive grid.
+- **Attitude Horizon**: an artificial horizon driven by the \`pitch\` and \`roll\` channels, with the current pitch/roll in degrees in its header.
+- **Circular Speedometer**: pick any channel from the dropdown (or click a metric card) to show it on the dial, with its value, unit, and observed MIN / MAX underneath.
+- **Live Telemetry Feeds**: one card per channel with the latest value and the lowest and highest values seen (arrows down and up). Click a card to put it on the speedometer.
+- **RESET STATS**: collapses every channel's min and max to its current value, so the auto-range starts over.
+
+There are no warning or danger zones, peak-hold markers, or limits to set.
 
 ---
 
@@ -288,13 +284,13 @@ The telemetry engine allows you to define custom regular expressions to extract 
     toolId: 'alerts',
     category: 'utilities',
     title: 'Crash & Panic Alerts Deck — Kernel Exceptions & Guru Meditation',
-    summary: 'Real-time serial scanner detecting ESP-IDF Guru Meditation Errors, Watchdog timer resets, stack overflows, and register dumps.',
-    tags: ['Crash Alerts', 'Panic', 'Guru Meditation', 'Watchdog', 'ESP-IDF', 'Stack Overflow', 'addr2line'],
+    summary: 'Serial watcher that matches crash signatures (Guru Meditation, watchdog resets, HardFault, failed asserts), sounds an alarm, pauses the terminal and keeps a log of the dumps.',
+    tags: ['Crash Alerts', 'Panic', 'Guru Meditation', 'Watchdog', 'ESP-IDF', 'HardFault', 'addr2line'],
     readTime: '18 min read',
     content: `
 # Crash & Panic Alerts Deck — Exception Analyzer
 
-The **Crash & Panic Alerts Deck** is an automated background sentinel that monitors the serial stream for microcontroller fatal errors, architectural panics, FreeRTOS aborts, and watchdog timer resets. When a crash occurs, it isolates the register dump, analyzes the root cause, and formats the debug backtrace for instant symbol resolution.
+The **Crash & Panic Alerts Deck** (window title *Hardware Crash Trigger & Audio Alert Watcher*) monitors the serial stream for text that matches a list of crash signatures: fatal errors, panics, aborts, and watchdog resets. When one matches, it logs the incident with the received text, plays an alarm, and can pause the terminal so the dump is not scrolled away. It does not decode the dump itself.
 
 ---
 
@@ -334,7 +330,7 @@ EXCVADDR: 0x00000000  LBEG    : 0x4000c2e0  LEND    : 0x4000c2f6  LCOUNT  : 0x00
 
 Hexadecimal addresses in register dumps (e.g. \`PC: 0x400d1820\`) are difficult to correlate with source code without the compiler's symbol table.
 
-Skon's USB Tool automatically parses the addresses and generates the exact command line to resolve them using GNU Binutils:
+The deck does not parse addresses or build this command for you. Copy the dump with **COPY DUMP**, pick out the addresses, and resolve them yourself with GNU Binutils:
 
 \`\`\`bash
 xtensa-esp32-elf-addr2line -pfiaC -e build/my_project.elf 0x400d1820 0x400d195c
@@ -349,12 +345,20 @@ Directly pinpointing line 84 of \`network.c\` as the exact crash site!
 
 ---
 
-### 2. Automated Diagnostic Actions
+### 2. What the Deck Does
 
-When a panic arrives:
-1. The deck flashes an amber emergency banner and emits an optional audio alert chime.
-2. Isolates the exception cause and presents plain-English troubleshooting advice.
-3. Provides a 1-click **Copy addr2line Command** button populated with all backtrace addresses.
+**Default watch patterns** (matched as case-insensitive substrings): \`Guru Meditation Error\`, \`Kernel panic\`, \`wdt reset\`, \`Watchdog Reset\`, \`assert failed\`, \`HardFault\`, \`abort() was called\`, \`CORRUPT HEAP\`.
+
+When a pattern appears in newly received serial text:
+1. The incident is added to **Detected Crash Incidents** with a timestamp, the matched signature and the received text (the newest 50 incidents are kept; **Clear Log** empties the list).
+2. If **Audio Chime** is on (default), an alarm sound plays.
+3. If **Auto-Pause Terminal** is on (default), the main terminal is paused.
+4. A line is written to the session log.
+5. **COPY DUMP** copies the stored text of that incident to the clipboard.
+
+The Deck keeps a rolling buffer of the last ~4 KB of received text and matches against it, so a signature split across two serial chunks is still caught, and one panic fires only once even though it stays in the buffer. Only the first matching pattern counts per received chunk. The stored text starts a little before the match and runs to the end of the buffer.
+
+**Editing the watch list**: remove a pattern with its x, or type a new one in the **+ text or /regex/i** box and press Enter. Plain entries are matched as case-insensitive text; an entry written as \`/pattern/flags\` (for example \`/guru\s+meditation/i\`) is treated as a regular expression. If the regex is invalid, it is matched as plain text and a small warning is shown. The list resets to the defaults when the window is reopened.
 
 ---
 
@@ -371,69 +375,46 @@ When a panic arrives:
     toolId: 'automation',
     category: 'utilities',
     title: 'Automated Test Runner & Scripts — Bench Testing Engine',
-    summary: 'Write sandboxed JavaScript automation routines, send timed serial sequences, assert responses, and automate quality control.',
-    tags: ['Automation', 'Test Runner', 'Scripting', 'JavaScript', 'Regression Testing', 'Bench Test', 'QA'],
+    summary: 'Build a table of send / expect / timeout steps, run them against the connected serial device, and export a JSON pass/fail report.',
+    tags: ['Automation', 'Test Runner', 'Scripting', 'Expect', 'Regression Testing', 'Bench Test', 'QA'],
     readTime: '18 min read',
     content: `
 # Automated Test Runner & Scripts — Bench Testing Engine
 
-The **Automated Test Runner** enables hardware engineers, quality control technicians, and embedded developers to write and execute automated test suites against physical hardware over WebSerial. It is designed for repetitive functional testing, burn-in validation, calibration verification, and factory QA.
+The **Automated Test Runner** (window title *Automated Serial Test Runner & Scripting*) lets you define a short sequence of steps, each of which sends text to the connected serial device and waits for a response containing an expected string. It suits repetitive functional checks, modem or bootloader handshakes, and simple factory QA. It is a step table, not a JavaScript scripting environment.
 
 ---
 
-### 1. Scripting API & Execution Sandbox
+### 1. Steps, Presets & Execution
 
-Test routines are written in standard JavaScript and execute in a protected asynchronous sandbox with access to a dedicated \`session\` object:
+Each step has three fields:
 
-\`\`\`javascript
-async function runTest(session) {
-  session.log("Initiating hardware loopback test...");
-  
-  // Send AT command
-  await session.write("AT+GMR\\r\\n");
-  
-  // Assert response within 1000ms timeout
-  const res = await session.expect(/VERSION:([\\d\\.]+)/, 1000);
-  session.assert(res !== null, "Firmware version query failed!");
-  session.log("Detected firmware version: " + res[1]);
-  
-  // Wait for sensor settling
-  await session.delay(250);
-  
-  // Check voltage reading
-  await session.write("GET_VBUS\\r\\n");
-  const vbus = await session.expect(/VBUS:([\\d\\.]+)/, 500);
-  const voltage = parseFloat(vbus[1]);
-  session.assert(voltage >= 3.25 && voltage <= 3.35, "VBUS out of tolerance: " + voltage + "V");
-  
-  session.pass("Device passed all electrical and communication tests!");
-}
-\`\`\`
+| Field | Meaning |
+| :--- | :--- |
+| **Send** | The text transmitted to the device. It is sent exactly as stored, with no line ending added. |
+| **Expect** | A plain substring (not a regular expression) that must appear in the received serial text. |
+| **Timeout** | How long to wait for the substring, in milliseconds. |
 
-<details>
-<summary>Deep-Dive: Full Async Session API Method Reference</summary>
+Use **Add Step** to append a step (default \`AT\r\n\` expecting \`OK\`, 1000 ms) and the trash icon to remove one (the last remaining step cannot be removed). Fields are locked while a suite is running.
 
-| Session Method | Parameters | Return Type | Description |
-| :--- | :--- | :---: | :--- |
-| **\`session.write(str)\`** | \`string\` or \`Uint8Array\` | \`Promise<void>\` | Transmits raw text or binary bytes over the active serial port. |
-| **\`session.expect(pattern, timeoutMs)\`**| \`RegExp | string\`, \`number\` | \`Promise<Match | null>\` | Accumulates incoming serial bytes until the regex matches or timeout expires. |
-| **\`session.delay(ms)\`** | \`number\` | \`Promise<void>\` | Non-blocking asynchronous delay. |
-| **\`session.assert(condition, message)\`**| \`boolean\`, \`string\` | \`void\` | Throws test assertion failure if condition evaluates to false. |
-| **\`session.log(message)\`** | \`string\` | \`void\` | Outputs timestamped entry to test console. |
-| **\`session.pass(summary)\`** | \`string\` | \`void\` | Marks test case as PASSED (Green badge). |
-| **\`session.fail(summary)\`** | \`string\` | \`void\` | Marks test case as FAILED (Red badge). |
+> The preset steps contain real control characters (carriage return, line feed, Ctrl+C). The Send box shows them as whitespace. Typing a backslash followed by the letter r sends those two characters literally; it is not converted to a carriage return.
 
-</details>
+**Presets** (the buttons in the header) replace the step list:
+- **AT**: *AT Command Modem Test* (\`AT\`, \`ATE0\`, \`AT+CSQ\`).
+- **MicroPython**: *MicroPython REPL Handshake* (Ctrl+C twice expecting \`>>>\`, then print \`sys.platform\`).
+- **U-Boot**: *U-Boot Bootloader Interrupt* (three spaces expecting \`=>\`, then \`version\`).
+
+**RUN TEST SUITE** executes the steps in order: clear the receive buffer, send, then keep collecting everything the device sends after that step's transmit and pass as soon as the expected text shows up in it, or fail when the timeout elapses (text received before the step was sent is not counted). A step shows **PASSED** or **FAILED** with the time taken. The suite keeps going after a failure, pauses 200 ms between steps, and plays a success chime or a warning chirp at the end. The button turns into **ABORT SUITE** while running. Results are also written to the session log.
 
 ---
 
-### 2. Exporting Audit Reports
+### 2. Exporting Reports
 
-Click **Export Audit Report** to generate standardized JSON or CSV logs containing:
-- Test suite execution timestamp.
-- Serial port VID/PID and baud rate.
-- Individual test case results with exact execution durations in milliseconds.
-- Complete bidirectional communication transcripts for regulatory compliance records.
+Click **Export Audit Report** to download \`test_report_<timestamp>.json\` containing:
+- The suite name and an ISO timestamp.
+- Every step (send, expect, timeout) with its result status and duration, or \`untested\` if it has not run.
+
+It does not include port VID/PID, baud rate, a CSV format, or a transcript of the serial traffic.
 
 ---
 
@@ -450,13 +431,13 @@ Click **Export Audit Report** to generate standardized JSON or CSV logs containi
     toolId: 'autopsy',
     category: 'utilities',
     title: 'USB Recon & Device Autopsy — Descriptor Analysis & Clones',
-    summary: 'Inspect USB Device, Configuration, Interface, and Endpoint descriptors, identify counterfeit bridge chips, and analyze USB capabilities.',
-    tags: ['USB Recon', 'Autopsy', 'Descriptors', 'WebUSB', 'VID/PID', 'Counterfeit Chips', 'FTDI Clone'],
+    summary: 'Interrogate any USB device over WebUSB: identify the silicon from its VID/PID, claim interfaces, send and listen on raw endpoints, and trigger bootloader entry sequences.',
+    tags: ['USB Recon', 'Autopsy', 'Descriptors', 'WebUSB', 'VID/PID', 'Bootloader', 'DFU', '1200-baud'],
     readTime: '20 min read',
     content: `
 # USB Recon & Device Autopsy — Descriptor Analysis & Clones
 
-The **USB Device Autopsy Workbench** utilizes the **W3C WebUSB API** to perform low-level enumeration and descriptor reverse engineering directly against physical USB hardware. It inspects Chapter 9 USB descriptors, analyzes device capabilities, and detects counterfeit bridge silicon (such as non-genuine FTDI, Prolific, or WCH ICs).
+The **USB Recon & Autopsy** tab (in the *USB Explorer & Autopsy* window, next to the **Descriptor Explorer** tab covered in the USB Descriptors article) uses the **W3C WebUSB API** to open any USB device you pick, show what the browser reports about it, look its VID/PID up in a built-in chip database, and let you talk to its endpoints directly. A second tab holds bootloader-entry sequences and a third a smart-vape / PCB teardown guide. It does not detect counterfeit chips.
 
 ---
 
@@ -478,6 +459,8 @@ When a USB device is plugged in, the host controller issues standard \`GET_DESCR
                                +---> [Endpoint 2: Bulk OUT (Tx Data)]
                                +---> [Endpoint 3: Bulk IN  (Rx Data)]
 \`\`\`
+
+The Recon tab shows the parts of this tree that WebUSB exposes (VID/PID, names, serial, USB version, class codes, and for each interface of the active configuration its first alternate setting's class/subclass/protocol and endpoints). For the full raw descriptor dump use the **Descriptor Explorer** tab.
 
 <details>
 <summary>Deep-Dive: Complete 18-Byte Device Descriptor Bitfield Mapping</summary>
@@ -502,29 +485,32 @@ When a USB device is plugged in, the host controller issues standard \`GET_DESCR
 </details>
 
 <details>
-<summary>Deep-Dive: Counterfeit Chip Heuristics & Identification Rules</summary>
+<summary>Deep-Dive: Chip Identification & Bootloader Forcers</summary>
 
-Counterfeit and clone USB-to-UART bridge ICs are widespread on low-cost development boards. The autopsy engine tests specific silicon quirks:
-1. **FTDI FT232R Clones**:
-   - Authentic FTDI chips store a unique, randomized 8-character serial number (e.g. \`A104K8RZ\`).
-   - Many clones implement a hardcoded static serial number (\`A50285BI\`) across thousands of produced units.
-   - Genuine FT232R silicon correctly acknowledges non-standard FTDI latency timer requests (\`0x0A\`); cheap clones return a protocol stall!
-2. **Prolific PL2303 Clones**:
-   - Clones fail on modern Windows 11 drivers with Error Code 10 because Prolific introduced an authentication handshake in revised silicon.
-3. **CH340 Variations (CH340G vs CH340C vs Clones)**:
-   - Authentic CH340G requires an external 12 MHz crystal; CH340C integrates an internal oscillator.
-   - Non-genuine clones drop bytes at baud rates exceeding 115,200 bps due to imprecise internal RC timing clocks.
+**Silicon fingerprint.** The VID/PID pair is looked up in a built-in table (\`usbDatabase\`) of common USB-to-UART bridges, native-USB microcontrollers and similar parts. A match shows the chip name, notes and operating-logic voltage under **CHIP ANALYSIS**. This is a lookup by ID only: it does not probe the silicon, check serial numbers or latency timers, and cannot tell a genuine FTDI/CH340/PL2303 from a clone.
 
+**BOOTLOADER FORCERS tab** (most need the app's serial port connected and use its DTR/RTS lines and baud rate):
+| Button | What it does |
+| :--- | :--- |
+| **PULSE 1200-BAUD KNOCK** | Sets 1200 baud, toggles DTR, then restores 115200. Works on boards that enter their bootloader on the 1200-baud touch (Pico BOOTSEL/UF2, Arduino Leonardo, SAMD21). |
+| **EXECUTE ESP32 STRAPPING** | Toggles RTS (to EN) and DTR (to GPIO0) so an ESP32/ESP8266 with the usual auto-reset circuit boots into ROM download mode. |
+| **SEND DFU_DETACH REQUEST** | Sends the DFU class \`DFU_DETACH\` control transfer through WebUSB. Requires a device selected with **INTERROGATE ANY USB DEVICE**. |
+| **FIRE AUTOBOOT ABORT STORM** | Sends Space / Ctrl+C / Enter about 26 times at 40 ms intervals; power-cycle the target while it runs to stop U-Boot's autoboot countdown. |
+| **TRANSMIT REBOOT STRINGS** | Sends eight command strings 80 ms apart (\`reboot bootloader\`, \`reboot edl\`, \`reboot fastboot\`, \`machine.bootloader()\`, \`sys bootloader\`, \`boot\`, \`B\`, \`AT+REBOOT\`). |
+
+The sequences are generic; whether any of them works depends on the target firmware. A status line under the cards reports what was done.
 </details>
 
 ---
 
 ### 2. Step-by-Step Reconnaissance
 
-1. Connect any mystery USB device and click **Interrogate USB Device**.
-2. Select the device in the browser's WebUSB permission dialog.
-3. The autopsy workbench constructs the complete descriptor hierarchy tree on screen.
-4. Claim raw interfaces and stream raw bulk or interrupt packets in real-time!
+1. Connect any mystery USB device and click **INTERROGATE ANY USB DEVICE** (**DEVICE AUTOPSY** tab).
+2. Select the device in the browser's WebUSB permission dialog (the request has no filters, so any device the browser can access is listed; devices held by an OS driver may fail to open or claim).
+3. The **SILICON FINGERPRINT** panel shows product, manufacturer, VID/PID and the chip analysis. The right panel lists the enumerated interfaces with their endpoints and a USB version / serial header.
+4. Click **CLAIM** on an interface to claim it (this fails if the OS or another program owns it).
+5. Pick an **ENDPOINT** and click **LISTEN** to read IN transfers (64 bytes per read, last 50 shown with timestamp, hex and ASCII), or type hex bytes (for example \`41 54 0D 0A\`) and click **SEND BYTES** to write to an OUT endpoint.
+6. **BOOTLOADER FORCERS** and **VAPE & PCB TEARDOWN** (a collapsible step-by-step guide to opening disposable vapes and finding GND, 3.3 V, UART and SWD pads) are the other two tabs.
 
 ---
 
@@ -542,13 +528,17 @@ Counterfeit and clone USB-to-UART bridge ICs are widespread on low-cost developm
     toolId: 'esp-dump',
     category: 'utilities',
     title: 'Silicon Memory Dump — Hardware eFuses & Flash Geometry',
-    summary: 'Read hardware eFuses, chip security states, MAC addresses, silicon revisions, and SPI flash geometries without flashing firmware.',
-    tags: ['Silicon Dump', 'eFuses', 'Flash Geometry', 'Security State', 'ROM Bootloader', 'MAC Address', 'JEDEC'],
+    summary: 'Identify an ESP chip and read its eFuse MAC address through the ROM bootloader, then dump any range of SPI flash to a .bin file via the esptool-js RAM stub.',
+    tags: ['Silicon Dump', 'eFuses', 'Flash Dump', 'esptool', 'ROM Bootloader', 'MAC Address', 'ESP32'],
     readTime: '18 min read',
     content: `
 # Silicon Memory Dump — eFuse & Flash Geometry
 
-The **Silicon Memory Dump** workbench leverages low-level ESP-IDF ROM bootloader register commands (\`READ_REG\` 0x0A) to inspect hardware eFuses and physical flash chip attributes without modifying or overwriting on-chip flash memory.
+The **Silicon Memory Dump** workbench (window title *ESP32 Silicon Inspection & Flash Memory Dump*) has two functions, neither of which writes to the chip's flash:
+- **READ CHIP EFUSES**: uses the ROM bootloader's register-read command (\`READ_REG\`) on the app's connected serial port to identify the chip family and read the factory **MAC address** from eFuse registers. The MAC is only decoded for ESP32, ESP32-S3 and ESP32-C3; for other chips only the family is shown.
+- **DUMP FLASH TO .BIN**: reads a flash range and downloads it as a file, using the esptool-js RAM stub.
+
+It does not read or display the other eFuse blocks, security flags, silicon revision or the flash chip's JEDEC ID.
 
 ---
 
@@ -557,9 +547,9 @@ The **Silicon Memory Dump** workbench leverages low-level ESP-IDF ROM bootloader
 eFuses are microscopic, one-time programmable (OTP) physical electronic fuses inside the silicon die. Once burned (blown from 0 to 1), an eFuse can **never** be reset or restored. They store permanent hardware characteristics and cryptographic security configurations.
 
 <details>
-<summary>Deep-Dive: ESP32 eFuse Memory Map (BLOCK0 to BLOCK3) & Silicon Errata</summary>
+<summary>Background: ESP32 eFuse Memory Map (BLOCK0 to BLOCK3) & SPI Flash IDs</summary>
 
-The ESP32 family divides its eFuse controller into 4 physical blocks:
+For reference, the original ESP32 divides its eFuse controller into 4 physical blocks (the workbench itself only reads the MAC words in BLOCK0):
 
 | Block | Name | Bit Length | Function & Security Significance |
 | :--- | :--- | :---: | :--- |
@@ -568,8 +558,8 @@ The ESP32 family divides its eFuse controller into 4 physical blocks:
 | **BLOCK2** | Secure Boot Key | 256 bits | 256-bit SHA-256 digest or RSA public key hash for cryptographically signed boot verification. |
 | **BLOCK3** | Custom User Data | 256 bits | Free space for OEM serial numbers and device certificates. |
 
-#### SPI Flash Silicon Geometry (JEDEC ID)
-By issuing SPI command \`0x9F\` directly through the ROM bootloader SPI engine:
+#### SPI Flash JEDEC ID (background only; not read by this tool)
+SPI flash chips answer the JEDEC command \`0x9F\` with a manufacturer byte and a capacity byte:
 - **Manufacturer Byte**:
   - \`0xEF\`: Winbond Electronics
   - \`0xC8\`: GigaDevice
@@ -584,12 +574,14 @@ By issuing SPI command \`0x9F\` directly through the ROM bootloader SPI engine:
 
 ---
 
-### 2. Cryptographic Security Auditing
+### 2. Using the Tool
 
-The inspector verifies whether physical devices are protected against hardware tampering:
-- **Flash Encryption**: Confirms whether flash contents are readable if desoldered with a hot air gun.
-- **Secure Boot Status**: Confirms whether unsigned custom firmwares can be flashed.
-- **JTAG Debug Disable**: Confirms whether physical silicon hardware debugging is locked out.
+1. **READ CHIP EFUSES**: connect the board's serial port in the app first (the button is disabled otherwise). The workbench borrows the port from the terminal, talks to the ROM bootloader, and shows **Target MAC Address** and **Chip Architecture**. The board may need to be in download mode (see the Bootloader Forcers). The workbench does not report Secure Boot, flash encryption or JTAG state; the earlier fixed "Security Flags" label was removed because it was not a measurement.
+2. **Pick a range**: click a **Quick Backup Targets** preset (Bootloader Partition 0x1000 / 28 KB, Partition Table 0x8000 / 4 KB, NVS Storage 0x9000 / 20 KB, Full 4MB Flash Backup 0x0 / 4 MB) or type a **Start Offset (Hex)** and **Dump Size (Bytes)**.
+3. Click **DUMP FLASH TO .BIN**. This does not use the port already connected in the app: the browser asks you to choose a serial port, then esptool-js (loaded from a CDN, so internet access is needed) opens it at 115200 baud, uploads the RAM stub, and reads flash with a progress bar. Because the stub is used, it works on newer ESP chips (S2, S3, C2, C3, C6, H2) as well as the ESP8266 and ESP32.
+4. The result downloads as \`esp_flash_dump_0x<offset>_<length>B.bin\`. If the port is busy, disconnect it in the Terminal and close other serial tabs first.
+
+Dumps from a chip with flash encryption enabled are read as stored (ciphertext).
 
 ---
 
@@ -653,8 +645,7 @@ Known triples it names on sight include SCSI Bulk-Only mass storage (\`8/6/50\`)
 
 | UI Element | Purpose |
 | :--- | :--- |
-| **Inspect a USB device** | Opens the browser picker; the chosen device's tree is rendered. |
-| **Example** | Loads an illustrative composite (CDC + Mass Storage) device so you can explore the view with no hardware (labeled as an example). |
+| **INSPECT A USB DEVICE** | Opens the browser picker; the chosen device's tree is rendered. |
 | **Previously allowed devices** | Re-inspect a device the page was already granted, without the picker. |
 | **Copy report** | Copies a plain-text, \`lsusb\`-style dump for pasting into a bug report. |
 
@@ -690,7 +681,7 @@ Known triples it names on sight include SCSI Bulk-Only mass storage (\`8/6/50\`)
 
 The **HID Inspector** opens a Human Interface Device over WebHID and shows two things: the **report descriptor** (what fields the device defines, decoded from USB HID usage codes into names like "X", "Button 2", "Caps Lock") and the **live input reports** (each movement or keypress decoded into those named fields in real time). It's the quickest way to understand an unfamiliar controller, macro pad, or vendor gadget.
 
-It is read-only for input; it only ever writes to a device if you explicitly send an output report.
+It only ever writes to a device when you explicitly send an output or feature report.
 
 ---
 
@@ -713,10 +704,14 @@ When the device sends an input report, WebHID hands you the report id and a \`Da
 
 | UI Element | Purpose |
 | :--- | :--- |
-| **Open HID device** | Browser picker; opens the device and subscribes to its input reports. |
-| **Demo** | A simulated mouse emitting random reports, to explore the live view with no hardware (labeled as simulated). |
-| **Live input** | The most recent report as raw hex and as decoded, named fields. |
-| **Report descriptor** | Every collection's input / output / feature reports and their fields. |
+| **OPEN HID DEVICE** | Browser picker; opens the device and subscribes to its input reports. **CLOSE** disconnects. |
+| **LIVE INPUT** | The most recent report as raw hex and as decoded, named fields (array items such as pressed keys list the active usages). |
+| **REPORT DESCRIPTOR** | Every collection's input / output / feature reports with their sizes and fields (constant padding shows as \`pad\`). |
+| **SEND REPORTS** | Pick an output report, enter hex bytes and press **SEND**; if the device exposes keyboard LED usages, toggle buttons for them appear. For feature reports, **GET** reads one and **SET** writes the hex bytes you typed (after a confirmation). A small log shows what was sent and received. |
+| **REPORT RATE** | Rate (Hz), mean interval, jitter, min, max and sample count over the last 3 seconds of input reports. |
+| **RECORD & PLAY BACK** | **RECORD** / **STOP** capture input reports with timing; **SAVE** downloads them as JSON and **OPEN** loads a saved file; **PLAY** feeds them back through the decoder with their original timing. Playback only drives the on-screen decoder; nothing is typed or clicked on your computer. |
+
+There is no simulated demo device: the tool needs a real HID device.
 
 ---
 
@@ -742,13 +737,13 @@ When the device sends an input report, WebHID hands you the report id and a \`Da
     toolId: 'mass-storage',
     category: 'utilities',
     title: 'USB Mass Storage Inspector — SCSI Identity, Capacity & Raw Sectors',
-    summary: 'Read a USB drive at the block level over the Bulk-Only Transport: its SCSI INQUIRY identity, READ CAPACITY geometry, and raw sectors via READ(10). Strictly read-only — no WRITE command is implemented.',
-    tags: ['Mass Storage', 'SCSI', 'BOT', 'INQUIRY', 'READ CAPACITY', 'Sector', 'WebUSB', 'Forensics', 'Read-only'],
+    summary: 'Read a USB drive at the block level over the Bulk-Only Transport: SCSI identity and capacity, MBR/GPT partitions, FAT/exFAT file browsing with deleted-file recovery, raw sectors, and full images with SHA-256. Strictly read-only: no WRITE command is implemented.',
+    tags: ['Mass Storage', 'SCSI', 'BOT', 'INQUIRY', 'READ CAPACITY', 'Sector', 'WebUSB', 'Forensics', 'FAT', 'exFAT', 'GPT', 'Disk Image', 'Read-only'],
     readTime: '12 min read',
     content: `
 # USB Mass Storage Inspector (Read-Only)
 
-The **Mass Storage Inspector** talks to a USB drive the way the operating system does — at the block level — but only to *read*. It reports what the drive says it is (SCSI **INQUIRY**), how big it is (**READ CAPACITY**), and lets you dump any **sector** (**READ(10)**). No WRITE command exists in the driver, so it cannot change the drive.
+The **Mass Storage Inspector** talks to a USB drive the way the operating system does — at the block level — but only to *read*. It reports what the drive says it is (SCSI **INQUIRY**), how big it is (**READ CAPACITY**), lists its **MBR / GPT partitions** and filesystems, lets you browse FAT12/16/32 and exFAT volumes (including deleted entries), dump any **sector** (**READ(10)**), and save a whole drive or partition as a disk image with its SHA-256. No WRITE command exists in the driver, so it cannot change the drive.
 
 > **It claims the drive.** WebUSB takes exclusive control of the interface for the tab, so the OS loses access to that drive until you disconnect. Use a drive that is **not mounted / in use**, and never one with data you cannot afford to disturb. Reading is safe; yanking a mounted disk out from under the OS is not.
 
@@ -770,18 +765,21 @@ The SCSI commands used here are **INQUIRY** (0x12), **READ CAPACITY(10)** (0x25)
 
 | UI Element | Purpose |
 | :--- | :--- |
-| **Inspect a drive (WebUSB)** | Claims the drive (after a warning) and reads INQUIRY + capacity. |
-| **Demo** | A simulated 8 MiB drive with a boot-signature sector 0 (labeled as simulated). |
-| **Identity panel** | Vendor, product, revision, device type, removable flag. |
-| **Capacity panel** | Block size, block count, total capacity. |
-| **Sector viewer** | Enter an LBA and dump that 512-byte sector as hex + ASCII. |
+| **INSPECT A DRIVE (WEBUSB)** | Claims the drive (after a confirmation warning) and reads INQUIRY, capacity and the partition table. **DISCONNECT** releases it. |
+| **Identity / capacity fields** | Vendor, Product, Revision, Type, Removable, Block size, Blocks, Capacity. |
+| **PARTITIONS** | Table of partitions (scheme, start LBA, size, detected filesystem). Per row: **BROWSE** (FAT12/16/32 and exFAT only), **LBA** (puts the partition's first sector into the sector viewer), **IMAGE** (saves that partition). **IMAGE WHOLE DRIVE** saves the entire drive. |
+| **Imaging progress** | Shows bytes done, speed and time left, with **CANCEL**; the finished image's SHA-256 is displayed. Where the browser supports it (Chrome/Edge) it streams straight to a file you choose; otherwise it buffers in memory and images over 1 GB are refused. Files are named \`<name>.img\`. |
+| **File browser** | Breadcrumb navigation, name / size / modified (UTC) / attributes. Deleted entries are listed and marked; **VIEW** previews the first 64 KB (text or hex), **SAVE** downloads a file, and **RECOVER** replaces SAVE for deleted ones. Files over 512 MB are not extracted this way (use a full image). |
+| **SECTOR VIEWER** | Enter an LBA and press **READ SECTOR** (or Enter) to dump that one block (the drive's block size, normally 512 bytes) as hex + ASCII. |
+
+Deleted-file recovery reads contiguous clusters from the file's first cluster, so it works for files that were not fragmented and whose space has not been reused. There is no simulated demo drive in the UI.
 
 ---
 
 ### 3. Implementation & Architecture
 
 - **Driver:** [\`src/utils/massStorageDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/massStorageDriver.js) — \`buildCbw\`/\`parseCsw\`, \`parseInquiry\`/\`parseCapacity\`, and \`MassStorageDevice\` with \`testUnitReady\`/\`inquiry\`/\`readCapacity\`/\`read\`. No write path exists.
-- **Workbench:** [\`src/components/tools/MassStorageWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/MassStorageWorkbench.jsx) — identity, capacity and a hex sector viewer, behind a claim-the-drive confirmation.
+- **Workbench:** [\`src/components/tools/MassStorageWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/MassStorageWorkbench.jsx) — identity, capacity, partitions, file browser, imaging and a hex sector viewer, behind a claim-the-drive confirmation. Partition and filesystem parsing live in \`src/utils/diskImage.js\`.
 - **Tests:** [\`tests/massStorage.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/massStorage.test.js) checks CBW/CSW framing and INQUIRY/capacity/sector reads against a simulated drive.
 
 > SMART and ATA pass-through (SAT) are not included; this is a block-level inspector, not a health tool.
@@ -802,13 +800,13 @@ The SCSI commands used here are **INQUIRY** (0x12), **READ CAPACITY(10)** (0x25)
     toolId: 'ptp',
     category: 'utilities',
     title: 'PTP / MTP Camera — Pull Photos & Metadata over WebUSB',
-    summary: 'Connect a camera or phone in PTP mode and browse its files: device info, storages, object handles with filenames, formats, dimensions and dates, and one-click download of any object.',
+    summary: 'Connect a camera or phone in PTP mode and browse its files: device info, storage and battery, thumbnails, filenames, formats, dimensions and dates, single or bulk download, and (where the device allows) delete and remote capture.',
     tags: ['PTP', 'MTP', 'Camera', 'Photos', 'WebUSB', 'Still Image', 'PIMA 15740', 'Object Info'],
     readTime: '12 min read',
     content: `
 # PTP / MTP Camera
 
-The **PTP** workbench pulls photos and their metadata off a camera or phone using the **Picture Transfer Protocol** — the standard "camera" USB mode (MTP is PTP with vendor extensions). Put the device in PTP mode (on a phone, choose **Transfer photos / PTP** from the USB notification) and you can list every file, read its info, and download it. Browsing is read-only.
+The **PTP** workbench pulls photos and their metadata off a camera or phone using the **Picture Transfer Protocol** — the standard "camera" USB mode (MTP is PTP with vendor extensions). Put the device in PTP mode (on a phone, choose **Transfer photos / PTP** from the USB notification) and you can list every file, read its info, preview thumbnails, and download it. Deleting files and triggering the shutter are also available when the device advertises those operations; the file listing itself is read-only.
 
 ---
 
@@ -822,7 +820,7 @@ PTP is a transaction protocol over bulk endpoints. Everything is a **container**
 
 A read like \`GetObjectInfo\` is: send the Command (with the object handle), read the Data container (the ObjectInfo dataset), read the Response. Datasets use PTP's own encoding — little-endian integers, length-prefixed UTF-16 strings, and count-prefixed arrays.
 
-Key operations: \`OpenSession\`, \`GetDeviceInfo\`, \`GetStorageIDs\`, \`GetObjectHandles\`, \`GetObjectInfo\`, \`GetObject\`, \`GetThumb\`, \`CloseSession\`.
+Key operations: \`OpenSession\`, \`GetDeviceInfo\`, \`GetStorageIDs\`, \`GetStorageInfo\`, \`GetObjectHandles\`, \`GetObjectInfo\`, \`GetObject\`, \`GetThumb\`, \`DeleteObject\`, \`InitiateCapture\`, \`CloseSession\`.
 
 ---
 
@@ -830,11 +828,16 @@ Key operations: \`OpenSession\`, \`GetDeviceInfo\`, \`GetStorageIDs\`, \`GetObje
 
 | UI Element | Purpose |
 | :--- | :--- |
-| **Connect Camera (WebUSB)** | Opens the device, opens a session, reads device info, and lists files. |
-| **Demo** | A simulated camera with two JPEGs (labeled as simulated). |
-| **Device panel** | Manufacturer, model, firmware, serial. |
-| **Files table** | Filename, format, size, pixel dimensions, capture date, and a **get** button to download. |
-| **Refresh** | Re-list the files (after taking a new photo, say). |
+| **CONNECT CAMERA (WEBUSB)** | Opens the device, opens a session, reads device info, storage and battery, and lists files. **DISCONNECT** closes the session. |
+| **Device panel** | Manufacturer, Model, Firmware, Serial, Battery (if reported), and one field per storage with free / total space. |
+| **FILES table** | Checkbox, thumbnail, Filename, Format, Size, Dimensions, Date, and a per-row download button. The header shows the object count and how many are selected. |
+| **THUMBNAILS** | Fetches embedded thumbnails for the listed files. |
+| **DOWNLOAD SELECTED / DOWNLOAD ALL** | Saves several files into a folder you pick (Chrome/Edge), or as a single zip if the browser cannot pick a folder. |
+| **DELETE** | Appears only if the device supports \`DeleteObject\`; deletes the selected files after a confirmation. This cannot be undone. |
+| **CAPTURE** | Appears only if the device supports \`InitiateCapture\`; fires the shutter, then re-lists files and selects the new ones. |
+| **REFRESH** | Re-list the files (after taking a new photo, say). |
+
+There is no simulated demo camera.
 
 ---
 
@@ -898,9 +901,10 @@ FIDO2 commands are **CBOR**-encoded. \`authenticatorGetInfo\` is CTAP2 command \
 
 | UI Element | Purpose |
 | :--- | :--- |
-| **Read Security Key (WebHID)** | INIT + authenticatorGetInfo; shows versions, AAGUID, options and limits. |
-| **Demo** | A simulated FIDO 2.1 key (labeled as simulated). |
-| **PING** | A CTAPHID_PING round-trip that checks the echoed bytes match. |
+| **READ SECURITY KEY (WEBHID)** | INIT + authenticatorGetInfo; shows CTAPHID and device version, AAGUID, max message size, versions, options, transports and PIN/UV protocols. **DISCONNECT** closes it. |
+| **PING** | A CTAPHID_PING round-trip with 32 bytes; shows "echo matched" or "echo mismatch". |
+
+> **Browser blocklist.** Chrome and Edge hide security keys (HID usage page \`F1D0\`) from web pages, so the device chooser normally shows nothing. The page warns about this: to read a key you own you must start the browser with \`--disable-hid-blocklist\` for that session only, which lets every site you visit request blocked HID devices, so close the browser afterwards. There is no simulated demo key.
 
 ---
 
@@ -919,6 +923,70 @@ FIDO2 commands are **CBOR**-encoded. \`authenticatorGetInfo\` is CTAP2 command \
 | CTAP | FIDO Alliance Client to Authenticator Protocol 2.1 |
 | CBOR | RFC 8949 |
 | WebHID | W3C WebHID specification |
+`
+  },
+  {
+    id: 'usb-rea',
+    toolId: 'usb-rea',
+    category: 'utilities',
+    title: 'USB Protocol RE — Turn a Labeled Capture into a Driver',
+    summary: 'Load a usbmon or USBPcap capture plus a list of what you clicked in the vendor app, and get the device protocol inferred: a Markdown report, a Python driver scaffold and a Wireshark Lua dissector. An in-browser port of usb-rea.',
+    tags: ['USB', 'Reverse Engineering', 'usbmon', 'USBPcap', 'pcapng', 'Wireshark', 'Dissector', 'Protocol Inference', 'usb-rea'],
+    readTime: '8 min read',
+    content: `
+# USB Protocol RE (usb-rea)
+
+Vendor apps for RGB controllers, AIO coolers, lamps and LCD panels talk to their device over a private USB protocol. This tool works the protocol out from a recording. Run the vendor app, capture the USB traffic, note what you clicked and when, and the analyzer lines up each action with the bytes that changed.
+
+It is a browser port of [usb-rea](https://github.com/emirmrkaljevic/usb-rea) by Emir Mrkaljević (MIT). Analysis runs entirely in the page and the capture never leaves your computer. The only network use is an optional OpenDeviceDB lookup that sends just a VID:PID.
+
+---
+
+### 1. Workflow
+
+1. **Look it up first.** The **VID:PID lookup** tab checks a bundled table of devices already supported by liquidctl, rivalcfg, OpenRGB, turing-smart-screen and others. A checkbox adds an online OpenDeviceDB query (it sends only the VID:PID).
+2. **Capture** with Wireshark + USBPcap (Windows) or usbmon (Linux) while the vendor app drives the device. The **How to capture** tab has the steps. The analyzer reads pcap or pcapng files (gzip is fine); there is no live capture in the browser.
+3. **Mark actions.** In the **Action marker** tab, type a label such as \`brightness 50%\` and press Enter (or **Mark**) just before you click it in the app. Start the capture on the same computer: the timestamps use this PC's clock. **End current action**, **Undo last**, **Download .actions.json**, **Clear** and **Use in Analyze →** manage the list. Record at least 3 values per setting. Labels starting with \`seen\` (\`seen rpm 1180, temp 34\`) record what the app displayed, which is used to decode device replies.
+4. **Analyze.** In **Analyze capture**, load the capture, optionally pick the **Target device** (default: the device with the most host-to-device data), load or paste the markers JSON, and click **3. Infer protocol**. **Try the demo (synthetic lamp capture)** runs the whole pipeline on a generated capture with no files.
+
+If you have no markers, click each action with a pause between them, switch to **Labels only (split on pauses)** and list the labels in order, one per line. The traffic is split at the pauses.
+
+---
+
+### 2. What it infers
+
+| Role | Example |
+| :--- | :--- |
+| Command IDs / constant headers | \`5a 10 …\` vs \`5a 20 …\` |
+| Linear values, 8/16/32-bit LE/BE | \`fan 2650\` → \`0a 5a\` |
+| Bitfields, lookup tables | DPI 250→\`08\`, 500→\`07\` |
+| Rolling counters, checksums | sum8, xor8, CRC8, CRC16 (CCITT, XMODEM, MODBUS, KERMIT) |
+| Device replies and readings | RPM \`u16le\`, temperature \`(raw - 40) / 2\` |
+| Handshakes, session tokens, state-gated commands | step 2 echoes bytes of the reply to step 1 |
+| Image streams to a screen | JPEG/PNG/BMP/WebP/RGB565 frames, kept apart from the commands |
+
+Linear fits must survive a leave-one-out check; otherwise the result falls back to a lookup table and says so.
+
+---
+
+### 3. Outputs
+
+| Output | Use |
+| :--- | :--- |
+| **Report (.md)** | Every command with its byte layout, value formulas, replies and caveats. |
+| **Python driver** | A standalone pyusb scaffold with one function per command. Run it on your own machine. |
+| **Wireshark dissector** | Drop the \`.lua\` into Wireshark's plugins folder to name the fields in future captures. |
+| **Protocol JSON** | The raw inferred model. |
+
+Each output has **Copy** and **Download** buttons.
+
+---
+
+### 4. Limits
+
+- The browser cannot sniff USB, so capture with the OS tools.
+- You still need the vendor app during the recording. Document a device's protocol before the vendor drops support.
+- A matching VID:PID in the lookup is a hint, not proof. Vendors reuse IDs.
 `
   }
 ];

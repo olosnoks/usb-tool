@@ -24,6 +24,7 @@ import {
   Package,
   Search
 } from 'lucide-react';
+import { pyStr, buildReadScript, buildWriteScript, buildDeleteScript, parseFileOutput } from '../utils/micropythonFiles';
 import { MICROPYTHON_DRIVERS } from '../utils/microPythonDrivers';
 
 export default function MicroPythonFileManager({
@@ -96,7 +97,7 @@ try:
 except:
     pass
 items = []
-target_dir = '${dirToScan}'
+target_dir = ${pyStr(dirToScan)}
 try:
     for entry in os.ilistdir(target_dir):
         name = entry[0]
@@ -152,16 +153,7 @@ print("__PY_DATA_END__")
     const fullPath = getFullPath(fileName);
     onLogMessage?.(`[MICROPYTHON] Reading file "${fullPath}"...`, 'sys');
 
-    const readPython = `
-import ubinascii
-try:
-    with open('${fullPath}', 'rb') as f:
-        print("__FILE_DATA_START__")
-        print(ubinascii.b2a_base64(f.read()).decode().strip())
-        print("__FILE_DATA_END__")
-except Exception as e:
-    print("__FILE_DATA_ERROR__", str(e))
-`.trim();
+    const readPython = buildReadScript(fullPath);
 
     try {
       const output = await executeInRawRepl(readPython);
@@ -172,8 +164,7 @@ except Exception as e:
       const eIdx = output.indexOf(endMarker);
 
       if (sIdx !== -1 && eIdx !== -1) {
-        const b64 = output.substring(sIdx + startMarker.length, eIdx).trim();
-        const textContent = atob(b64);
+        const textContent = new TextDecoder().decode(parseFileOutput(output));
         setEditingFile({ name: fullPath, content: textContent });
         onLogMessage?.(`[MICROPYTHON] Successfully loaded "${fullPath}" (${textContent.length} chars)`, 'sys');
       } else {
@@ -193,16 +184,7 @@ except Exception as e:
     const fullPath = getFullPath(fileName);
     onLogMessage?.(`[MICROPYTHON] Downloading "${fullPath}" to PC...`, 'sys');
 
-    const readPython = `
-import ubinascii
-try:
-    with open('${fullPath}', 'rb') as f:
-        print("__FILE_DATA_START__")
-        print(ubinascii.b2a_base64(f.read()).decode().strip())
-        print("__FILE_DATA_END__")
-except Exception as e:
-    print("__FILE_DATA_ERROR__", str(e))
-`.trim();
+    const readPython = buildReadScript(fullPath);
 
     try {
       const output = await executeInRawRepl(readPython);
@@ -213,9 +195,7 @@ except Exception as e:
       const eIdx = output.indexOf(endMarker);
 
       if (sIdx !== -1 && eIdx !== -1) {
-        const b64 = output.substring(sIdx + startMarker.length, eIdx).trim();
-        const rawContent = atob(b64);
-        const blob = new Blob([rawContent], { type: 'application/octet-stream' });
+        const blob = new Blob([parseFileOutput(output)], { type: 'application/octet-stream' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -237,16 +217,7 @@ except Exception as e:
     setIsExecuting(true);
     onLogMessage?.(`[MICROPYTHON] Writing file "${targetFilePath}" to flash...`, 'sys');
 
-    const b64 = btoa(content);
-    const writePython = `
-import ubinascii
-try:
-    with open('${targetFilePath}', 'wb') as f:
-        f.write(ubinascii.a2b_base64('${b64}'))
-    print("__FILE_WRITE_SUCCESS__")
-except Exception as e:
-    print("__FILE_WRITE_ERROR__", str(e))
-`.trim();
+    const writePython = buildWriteScript(targetFilePath, content);
 
     try {
       const output = await executeInRawRepl(writePython);
@@ -273,14 +244,7 @@ except Exception as e:
     setIsExecuting(true);
     onLogMessage?.(`[MICROPYTHON] Removing "${fullPath}"...`, 'sys');
 
-    const delPython = `
-import os
-try:
-    os.remove('${fullPath}')
-    print("__FILE_DEL_SUCCESS__")
-except Exception as e:
-    print("__FILE_DEL_ERROR__", str(e))
-`.trim();
+    const delPython = buildDeleteScript(fullPath);
 
     try {
       const output = await executeInRawRepl(delPython);
@@ -305,11 +269,10 @@ except Exception as e:
     const target = getFullPath(file.name);
     const reader = new FileReader();
     reader.onload = async (event) => {
-      const content = event.target.result;
-      await handleSaveFileContent(target, content);
+      await handleSaveFileContent(target, new Uint8Array(event.target.result));
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   };
 
   // Run Quick One-liner

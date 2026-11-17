@@ -352,6 +352,35 @@ export default function SerialPlotter({
             <option value={500}>500 Samples</option>
           </select>
 
+          {/* Y-axis range: auto-scale or fixed Min/Max */}
+          <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoScale}
+              onChange={(e) => setAutoScale(e.target.checked)}
+              aria-label="Auto-scale Y axis"
+            />
+            <span>Auto-scale</span>
+          </label>
+          <input
+            type="number"
+            value={customMinY}
+            disabled={autoScale}
+            onChange={(e) => setCustomMinY(Number(e.target.value))}
+            aria-label="Y axis minimum"
+            title="Y min"
+            className="w-16 bg-slate-950 border border-slate-800 text-[11px] text-slate-300 rounded px-2 py-1 outline-none disabled:opacity-40"
+          />
+          <input
+            type="number"
+            value={customMaxY}
+            disabled={autoScale}
+            onChange={(e) => setCustomMaxY(Number(e.target.value))}
+            aria-label="Y axis maximum"
+            title="Y max"
+            className="w-16 bg-slate-950 border border-slate-800 text-[11px] text-slate-300 rounded px-2 py-1 outline-none disabled:opacity-40"
+          />
+
           {/* Pause / Resume */}
           <button
             onClick={() => setIsPaused(!isPaused)}

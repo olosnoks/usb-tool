@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { searchTools } from '../utils/toolSearch';
 import { 
   Search, 
   Terminal, 
@@ -236,6 +237,116 @@ export default function CommandPalette({
         desc: 'ESP32-2432S028R & Piglet board pin assignments, GPS UART wiring & SD pinouts',
         keywords: ['warhog', 'piglet', 'pinouts', 'wiring', 'gps pins', 'gpio', 'cyd'],
         action: () => onSelectTab('warhog-pinouts')
+      },
+      {
+        id: 'sub-adb',
+        name: 'Open ADB (Android Debug Bridge) over WebUSB',
+        category: 'HARDWARE & PAYLOADS',
+        icon: Smartphone,
+        toolId: 'adb',
+        desc: 'Android device info, shell, file push/pull, apps, logcat, screen mirror and wireless ADB',
+        keywords: ['adb', 'android debug bridge', 'adb shell', 'logcat', 'apk', 'install apk', 'push', 'pull', 'screen mirror', 'wireless adb', 'android'],
+        action: () => onSelectTab('adb')
+      },
+      {
+        id: 'sub-fastboot',
+        name: 'Open Fastboot Flasher (Android bootloader)',
+        category: 'HARDWARE & PAYLOADS',
+        icon: Smartphone,
+        toolId: 'fastboot',
+        desc: 'Bootloader unlock, sparse image flashing, A/B slots, factory zips and reboot modes',
+        keywords: ['fastboot', 'bootloader', 'oem unlock', 'unlock bootloader', 'flash partition', 'sparse', 'a/b slots', 'factory zip', 'factory image', 'reboot bootloader', 'android'],
+        action: () => onSelectTab('fastboot')
+      },
+      {
+        id: 'sub-usb-descriptors',
+        name: 'Open USB Descriptor Explorer (lsusb -v)',
+        category: 'DEVICE UTILITIES',
+        icon: Usb,
+        toolId: 'usb-descriptors',
+        desc: 'Browse a USB device\'s configurations, interfaces and endpoints like lsusb -v',
+        keywords: ['usb-descriptors', 'lsusb', 'lsusb -v', 'descriptors', 'usb tree', 'endpoints', 'interfaces', 'configurations', 'vid pid', 'usbview'],
+        action: () => onSelectTab('usb-descriptors')
+      },
+      {
+        id: 'sub-autopsy',
+        name: 'Open USB Autopsy (mystery chip recon & baud hunter)',
+        category: 'DEVICE UTILITIES',
+        icon: Usb,
+        toolId: 'autopsy',
+        desc: 'Interrogate an unknown USB device: identify the chip and hunt for its baud rate',
+        keywords: ['autopsy', 'recon', 'mystery chip', 'unknown device', 'baud hunter', 'baud scan', 'autobaud', 'reverse engineering', 'vid pid', 'vape'],
+        action: () => onSelectTab('autopsy')
+      },
+      {
+        id: 'sub-burp-proxy',
+        name: 'Open Burp-style Repeater (HTTP Workbench)',
+        category: 'WEB APP TESTING',
+        icon: Activity,
+        toolId: 'burp-proxy',
+        desc: 'Send and replay HTTP requests: repeater, intruder, comparer and decoder',
+        keywords: ['burp', 'burp suite', 'burp-proxy', 'repeater', 'intruder', 'comparer', 'decoder', 'http request', 'web proxy'],
+        action: () => onSelectTab('burp-proxy')
+      },
+      {
+        id: 'sub-api-client',
+        name: 'Open OpenAPI / Swagger API Client',
+        category: 'WEB APP TESTING',
+        icon: Activity,
+        toolId: 'api-client',
+        desc: 'Load an OpenAPI/Swagger spec, call endpoints and fuzz the schema',
+        keywords: ['api-client', 'api client', 'openapi', 'swagger', 'postman', 'rest', 'endpoint', 'schema fuzz', 'fuzz', 'api testing'],
+        action: () => onSelectTab('api-client')
+      },
+      {
+        id: 'sub-nikto-scanner',
+        name: 'Open Sensitive Path Scanner (Nikto-style)',
+        category: 'WEB APP TESTING',
+        icon: ShieldAlert,
+        toolId: 'nikto-scanner',
+        desc: 'Probe a site for sensitive files and paths (Web Analyzer, paths tab)',
+        keywords: ['nikto', 'nikto-scanner', 'paths', 'content discovery', 'dirb', 'dirbuster', 'directory brute force', 'sensitive paths', 'web scanner'],
+        action: () => onSelectTab('nikto-scanner')
+      },
+      {
+        id: 'sub-owasp-zap',
+        name: 'Open Passive Web Scan (OWASP ZAP-style)',
+        category: 'WEB APP TESTING',
+        icon: ShieldAlert,
+        toolId: 'owasp-zap',
+        desc: 'Passive header, cookie, CORS and TLS checks for a URL (Web Analyzer, passive tab)',
+        keywords: ['owasp', 'zap', 'owasp-zap', 'passive scan', 'security headers', 'cookies', 'cors', 'tls', 'web scanner', 'vulnerability scanner'],
+        action: () => onSelectTab('owasp-zap')
+      },
+      {
+        id: 'sub-url-inspector',
+        name: 'Open URL Inspector (links, resources & forms)',
+        category: 'WEB APP TESTING',
+        icon: Search,
+        toolId: 'url-inspector',
+        desc: 'Extract links, resources, forms and meta tags from a URL (Web Analyzer, links tab)',
+        keywords: ['url-inspector', 'url inspector', 'links', 'link extractor', 'resources', 'forms', 'crawl', 'scrape', 'meta tags'],
+        action: () => onSelectTab('url-inspector')
+      },
+      {
+        id: 'sub-dns-enumerator',
+        name: 'Open DNS Records & Subdomain Enumerator',
+        category: 'WEB APP TESTING',
+        icon: Radar,
+        toolId: 'dns-enumerator',
+        desc: 'DNS record lookup (A/AAAA/MX/TXT/NS...) over DoH and subdomain brute force',
+        keywords: ['dns-enumerator', 'dns enumerator', 'dig', 'nslookup', 'dns records', 'subdomain', 'subdomain brute force', 'doh', 'mx', 'txt'],
+        action: () => onSelectTab('dns-enumerator')
+      },
+      {
+        id: 'sub-dns-mail-doctor',
+        name: 'Open Email DNS Doctor (SPF / DKIM / DMARC / DNSBL)',
+        category: 'WEB APP TESTING',
+        icon: Radar,
+        toolId: 'dns-mail-doctor',
+        desc: 'Check a domain\'s email authentication records and blacklist status',
+        keywords: ['dns-mail-doctor', 'mail doctor', 'mxtoolbox', 'spf', 'dkim', 'dmarc', 'dnsbl', 'blacklist', 'email deliverability', 'email security'],
+        action: () => onSelectTab('dns-mail-doctor')
       }
     ];
 
@@ -320,17 +431,7 @@ export default function CommandPalette({
 
   const filtered = useMemo(() => {
     if (!query) return ALL_ACTIONS;
-    const tokens = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-    return ALL_ACTIONS.filter((item) => {
-      const searchCorpus = [
-        item.name,
-        item.category,
-        item.desc || '',
-        item.toolId || '',
-        ...(item.keywords || [])
-      ].join(' ').toLowerCase();
-      return tokens.every((tok) => searchCorpus.includes(tok));
-    });
+    return searchTools(ALL_ACTIONS, query);
   }, [ALL_ACTIONS, query]);
 
   useEffect(() => {

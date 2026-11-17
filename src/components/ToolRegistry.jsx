@@ -59,6 +59,7 @@ const FastbootWorkbench = React.lazy(() => import('./tools/FastbootWorkbench'));
 const UsbInspectorWorkbench = React.lazy(() => import('./tools/UsbInspectorWorkbench'));
 const AdbWorkbench = React.lazy(() => import('./tools/AdbWorkbench'));
 const AndroidWorkbench = React.lazy(() => import('./tools/AndroidWorkbench'));
+const UsbReaWorkbench = React.lazy(() => import('./tools/UsbReaWorkbench'));
 const HidInspectorWorkbench = React.lazy(() => import('./tools/HidInspectorWorkbench'));
 const UsbTmcWorkbench = React.lazy(() => import('./tools/UsbTmcWorkbench'));
 const MassStorageWorkbench = React.lazy(() => import('./tools/MassStorageWorkbench'));
@@ -96,7 +97,7 @@ export const KNOWN_TOOL_IDS = [
   'flasher', 'terminal', 'hardware', 'setup', 'plotter', 'packet-analyzer', 'hex', 'packets', 'kismet', 'bridge',
   'micropython', 'improv', 'telemetry', 'wardrive', 'ubx', 'alerts', 'automation', 'autopsy', 'esp-dump',
   'programmers', 'ch341a', 'cmsis-dap', 'jtag-programmer', 'avr-isp', 'can-bus', 'logic-analyzer', 'usb-pd', 'dfu',
-  'android', 'fastboot', 'adb', 'usb-inspector', 'usb-descriptors', 'hid', 'usbtmc', 'mass-storage', 'ptp', 'fido2', 'session-log', 'ble',
+  'android', 'fastboot', 'adb', 'usb-inspector', 'usb-descriptors', 'usb-rea', 'hid', 'usbtmc', 'mass-storage', 'ptp', 'fido2', 'session-log', 'ble',
   'bus-explorer', 'modbus-rtu', 'alfa-wifi', 'wifi-scanner', 'warhog-piglet', 'mayhem', 'flipper', 'proxmark', 'rfid-nfc',
   'ducky', 'cyberchef', 'wardrive-generator',
   // New hacker tools
@@ -172,6 +173,7 @@ export function renderTool(toolId, serial) {
     case 'android': return <AndroidWorkbench />;
     case 'fastboot': return <AndroidWorkbench initialMode="fastboot" />;
     case 'adb': return <AndroidWorkbench initialMode="adb" />;
+    case 'usb-rea': return <UsbReaWorkbench onLogMessage={addLog} />;
     case 'hid': return <HidInspectorWorkbench />;
     case 'usbtmc': return <UsbTmcWorkbench />;
     case 'mass-storage': return <MassStorageWorkbench />;

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { WIKI_ARTICLES, WIKI_CATEGORIES } from '../src/wiki/wikiArticles.js';
 import { TOOL_TO_ARTICLE_MAP, resolveArticleForTool } from '../src/wiki/WikiApp.jsx';
 import { SIDEBAR_SECTIONS } from '../src/components/layout/Sidebar.jsx';
+import { searchTools } from '../src/utils/toolSearch.js';
 import { KNOWN_TOOL_IDS, toolMeta } from '../src/components/ToolRegistry.jsx';
 
 describe('Wiki Article Index & Tool Deep-Linking', () => {
@@ -113,21 +114,9 @@ describe('Sidebar & Search Filter Index', () => {
 
   it('searches by keyword accurately matching expected tools', () => {
     const searchSidebar = (query) => {
-      const q = query.toLowerCase().trim();
-      const tokens = q.split(/\s+/).filter(Boolean);
       const matches = [];
       for (const section of SIDEBAR_SECTIONS) {
-        for (const item of section.items) {
-          const searchCorpus = [
-            item.name,
-            item.desc,
-            item.id,
-            ...(item.keywords || [])
-          ].join(' ').toLowerCase();
-          if (tokens.every((tok) => searchCorpus.includes(tok))) {
-            matches.push(item.id);
-          }
-        }
+        for (const item of searchTools(section.items, query)) matches.push(item.id);
       }
       return matches;
     };

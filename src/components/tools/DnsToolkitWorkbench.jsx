@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Globe, Mail, Search, RefreshCw, ShieldCheck, ShieldAlert, Server, FileDown, Play, Square } from 'lucide-react';
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
@@ -23,16 +23,20 @@ async function doh(name, type) {
 }
 const unquote = (s) => String(s).replace(/^"|"$/g, '').replace(/"\s+"/g, '');
 
-function Section({ icon: Icon, title, children, accent = 'text-cyan-400' }) {
+function Section({ icon: Icon, title, children, accent = 'text-cyan-400', id }) {
   return (
-    <section className="mb-3">
+    <section id={id} className="mb-3">
       <h3 className={`text-xs font-semibold uppercase tracking-wide mb-1 flex items-center gap-1.5 ${accent}`}><Icon size={13} /> {title}</h3>
       <div className="bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono">{children}</div>
     </section>
   );
 }
 
-export default function DnsToolkitWorkbench({ onLogMessage }) {
+// initialTab -> section to scroll to: records (lookup results) | email | brute (subdomains).
+export const DNS_TOOLKIT_TABS = { records: 'dns-records', email: 'dns-email', brute: 'dns-brute' };
+
+export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
+  const scrolledRef = useRef(false);
   const [domain, setDomain] = useState('');
   const [dkimSelector, setDkimSelector] = useState('default');
   const [busy, setBusy] = useState(false);
@@ -94,6 +98,13 @@ export default function DnsToolkitWorkbench({ onLogMessage }) {
     } catch (e) { setError(describeNetworkError(e)); }
     setBusy(false);
   };
+
+  useEffect(() => {
+    if (scrolledRef.current) return;
+    const id = DNS_TOOLKIT_TABS[initialTab];
+    const el = id && document.getElementById(id);
+    if (el) { scrolledRef.current = true; el.scrollIntoView?.({ block: 'start' }); }
+  }, [initialTab, info]);
 
   const flushVerbose = () => setVlog(vbufRef.current.slice(-400));
 
@@ -217,7 +228,7 @@ export default function DnsToolkitWorkbench({ onLogMessage }) {
 
       {i && (
         <>
-          <Section icon={Mail} title="Email authentication" accent="text-emerald-400">
+          <Section id="dns-email" icon={Mail} title="Email authentication" accent="text-emerald-400">
             <div className="mb-2">
               <span className={spf ? 'text-emerald-300' : 'text-red-300'}>SPF: {spf ? 'present' : 'MISSING'}</span>
               {spf && (
@@ -250,7 +261,7 @@ export default function DnsToolkitWorkbench({ onLogMessage }) {
             {i.dnsbl.map((d, idx) => (<div key={idx} className="text-red-300 flex items-center gap-1"><ShieldAlert size={13} /> {d.ip} ({d.host}) listed on {d.zone} → {d.code}</div>))}
           </Section>
 
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(16rem,1fr))]">
+          <div id="dns-records" className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(16rem,1fr))]">
             <Section icon={Server} title="Mail servers (MX)">
               {i.mx.length === 0 && <div className="text-slate-500">none</div>}
               {[...i.mx].sort((a, b) => Number(a.data.split(/\s+/)[0]) - Number(b.data.split(/\s+/)[0])).map((r, idx) => (<div key={idx} className="text-gray-300">{r.data}</div>))}
@@ -274,7 +285,7 @@ export default function DnsToolkitWorkbench({ onLogMessage }) {
       )}
 
       {/* Subdomain brute-force */}
-      <div className="mt-4 pt-3 border-t border-slate-800">
+      <div id="dns-brute" className="mt-4 pt-3 border-t border-slate-800">
         <h3 className="text-xs font-semibold uppercase tracking-wide mb-2 text-indigo-300 flex items-center gap-1.5"><Search size={13} /> Subdomain brute-force</h3>
         <div className="text-[11px] text-slate-500 mb-1">Resolves <span className="font-mono">{'{word}'}.{cleanDomain() || 'domain'}</span> via DoH</div>
         <WordlistPicker category="subdomains" max={20000} label="Subdomain list" onLoad={(lines, meta) => { setSubList(lines); log(`Subdomain list: ${lines.length} (${meta.name})`); }} />

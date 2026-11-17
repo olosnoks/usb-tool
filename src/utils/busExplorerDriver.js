@@ -3,7 +3,8 @@
  *
  * Real hardware: a Bus Pirate v3/v4 in binary (BBIO) mode over Web Serial.
  * I2C address scan, register read/write, and SPI full-duplex transfers.
- * Simulation: five common sensors on a virtual I2C bus.
+ * There is no simulation; everything talks to real hardware. Also includes an
+ * I2C chip database used to identify scanned addresses.
  */
 
 import { SerialLink } from './serialLink';

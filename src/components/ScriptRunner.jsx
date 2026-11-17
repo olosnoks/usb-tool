@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Play, 
   Square, 
@@ -13,6 +13,8 @@ import {
   Bot
 } from 'lucide-react';
 import { alertSynth } from '../utils/audioAlert';
+import { useSerial } from '../context/SerialContext';
+import { createRxBuffer, waitForExpect } from '../utils/serialExpect';
 
 const TEMPLATE_SUITES = [
   {
@@ -52,12 +54,19 @@ export default function ScriptRunner({
   const [results, setResults] = useState({}); // { [stepId]: { status: 'pass'|'fail'|'timeout', timeMs } }
 
   const isRunningRef = useRef(false);
-  const rxBufferRef = useRef('');
+  const rxBufferRef = useRef(null);
+  if (!rxBufferRef.current) rxBufferRef.current = createRxBuffer();
+  const { subscribeRx } = useSerial();
 
-  // Accumulate RX text for assertions
-  const handleRxAccumulator = (newText) => {
-    rxBufferRef.current += newText;
-  };
+  // Accumulate every received chunk (unbatched) for assertions; the buffer is
+  // cleared at the start of each step.
+  useEffect(() => {
+    if (!subscribeRx) return undefined;
+    const dec = new TextDecoder();
+    return subscribeRx((bytes) => {
+      rxBufferRef.current.append(dec.decode(bytes, { stream: true }));
+    });
+  }, [subscribeRx]);
 
   const runSuite = async () => {
     if (!isConnected) {
@@ -80,24 +89,17 @@ export default function ScriptRunner({
       setCurrentStepIndex(i);
       setResults(prev => ({ ...prev, [step.id]: { status: 'running', timeMs: 0 } }));
 
-      rxBufferRef.current = '';
+      rxBufferRef.current.clear();
       const startTime = Date.now();
 
       // Transmit test step command
       await onSendString(step.send, '');
 
-      // Wait for expected response with timeout
-      let passed = false;
-      const deadline = Date.now() + step.timeoutMs;
-
-      while (Date.now() < deadline && isRunningRef.current) {
-        // Check if latest received text matches
-        if (latestRxText.includes(step.expect) || rxBufferRef.current.includes(step.expect)) {
-          passed = true;
-          break;
-        }
-        await new Promise(r => setTimeout(r, 50));
-      }
+      // Wait (up to the step timeout) for the expected text to arrive
+      const passed = await waitForExpect(
+        rxBufferRef.current, step.expect, step.timeoutMs,
+        { isActive: () => isRunningRef.current }
+      );
 
       const elapsed = Date.now() - startTime;
       if (passed) {

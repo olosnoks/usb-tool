@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSerial } from '../context/SerialContext';
 import { dumpUbootMemory } from '../utils/ubootDump';
+import { matchPrompt } from '../utils/consoleShortcuts';
 import { 
   Terminal, 
   Flame, 
@@ -51,15 +52,12 @@ export default function UBootTriage({
   useEffect(() => {
     if (!isInterrupting || !latestRxText) return;
 
-    const lower = latestRxText.toLowerCase().trim();
-    for (const p of COMMON_PROMPTS) {
-      if (lower.endsWith(p)) {
-        // Prompt captured!
-        setCapturedPrompt(p);
-        stopInterrupt();
-        onLogMessage?.(`[U-BOOT TRIAGE] Autoboot successfully halted! Caught prompt: "${p}"`, 'sys');
-        break;
-      }
+    // matchPrompt trims both sides, so prompts with a trailing space ('# ', '$ ') still match
+    const p = matchPrompt(latestRxText, COMMON_PROMPTS);
+    if (p) {
+      setCapturedPrompt(p);
+      stopInterrupt();
+      onLogMessage?.(`[U-BOOT TRIAGE] Autoboot successfully halted! Caught prompt: "${p}"`, 'sys');
     }
   }, [latestRxText, isInterrupting, onLogMessage]);
 

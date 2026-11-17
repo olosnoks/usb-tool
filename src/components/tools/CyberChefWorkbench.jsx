@@ -1064,6 +1064,8 @@ export default function CyberChefWorkbench() {
       exportHtmlSession();
     } else if (actionId === 'pipe_hardware') {
       setShowHardwareModal(true);
+    } else if (actionId === 'toggle_presentation') {
+      setIsPresentationMode((prev) => !prev);
     } else if (actionId.startsWith('view_')) {
       const fmt = actionId.replace('view_', '');
       updateActiveTab({ outputFormat: fmt });
@@ -1197,6 +1199,20 @@ export default function CyberChefWorkbench() {
               <span className="hidden @sm:inline">Light</span>
             </button>
           </div>
+          <button
+            onClick={() => setIsPresentationMode((prev) => !prev)}
+            className={`px-2 py-1 rounded-lg border transition font-mono text-[11px] flex items-center gap-1 ${
+              isPresentationMode
+                ? 'bg-purple-500/20 text-purple-300 font-bold border-purple-500/40'
+                : 'bg-[#14161d] text-slate-400 hover:text-slate-200 border-[#2b303c]'
+            }`}
+            title="Toggle presentation mode (hide sidebars)"
+            aria-pressed={isPresentationMode}
+            type="button"
+          >
+            <Maximize2 className="w-3 h-3 text-purple-400" />
+            <span className="hidden @sm:inline">Presentation mode</span>
+          </button>
         </div>
       </div>
 

@@ -18,6 +18,8 @@ export const REFERENCE_ARTICLES = [
 
 This guide details the physical and operating system level setup required to establish low-latency, uninterrupted WebSerial communication across **Linux, Windows, and macOS**.
 
+The app's own **Linux Setup & Drivers** tab (tool id \`setup\`) is a set of three collapsed panels you click to expand: **How to configure Linux USB permissions & udev rules** (two copy buttons: \`sudo usermod -a -G dialout $USER\`, and a one-line wildcard rule written to \`/etc/udev/rules.d/99-serial.rules\` that sets \`MODE="0666"\` on every tty followed by \`sudo udevadm control --reload-rules\`), **How to identify & install USB-to-UART bridge drivers** (cards for CH340/CH341/CH9102, CP210x, FTDI, Prolific PL2303, Espressif native USB and RP2040, each with VID/PID, notes and a driver download link), and **How to troubleshoot serial connectivity & flasher errors** (access denied, packet header timeout, garbage characters, browser compatibility). The sections below go further than the in-app cards: per-chip udev rules that also tell ModemManager to ignore the device, and Windows and macOS notes.
+
 ---
 
 ### 1. Linux Setup (Ubuntu, Debian, Fedora, Arch)
@@ -56,8 +58,8 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6010", MODE="0666"
 # Espressif ESP32-S2 / S3 / C3 / C6 Native USB CDC
 SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
 
-# Flipper Zero CDC
-SUBSYSTEM=="tty", ATTRS{idVendor}=="20a0", ATTRS{idProduct}=="415a", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
+# Flipper Zero CDC (STM32 virtual COM port)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
 
 # Proxmark3 RDV4 / Easy
 SUBSYSTEM=="tty", ATTRS{idVendor}=="9ac4", ATTRS{idProduct}=="4b8f", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"
@@ -83,6 +85,8 @@ Modern Windows includes a native Microsoft USB CDC ACM driver (\`usbser.sys\`) t
   - Windows Update usually installs this automatically. If missing, download the CP210x Universal Windows Driver from Silicon Labs.
 - **FTDI FT232R / FT2232**:
   - Uses the FTDI D2XX / VCP driver package.
+- **Prolific PL2303**:
+  - Needs the official Prolific driver on Windows 11 (the in-app card lists it); counterfeit chips may be refused by it.
 
 ---
 
@@ -105,7 +109,7 @@ On macOS, WebSerial displays devices with paths like \`/dev/cu.usbserial-*\` and
   },
   {
     id: 'troubleshooting',
-    toolId: 'troubleshooting',
+    toolId: 'setup',
     category: 'reference',
     title: 'Troubleshooting & Error Matrix — Root Causes & Exact Fixes',
     summary: 'Comprehensive diagnostics matrix resolving packet header timeouts, access denied errors, framing gibberish, brownouts, and port lockups.',
@@ -123,9 +127,9 @@ When working with microcontrollers and embedded serial protocols, communication 
 | Error Message in Browser | Physical / Electrical Root Cause | Exact Engineering Fix |
 | :--- | :--- | :--- |
 | **\`Failed to open serial port: Access denied\`** | The COM port is locked by another process (Arduino IDE, VS Code Serial Monitor, Cura, PuTTY). | Close all other IDEs and terminal monitors. In Windows PowerShell, run: \`Get-Process \| Where-Object {$_.Path -like "*serial*"}\`. |
-| **\`Timed out waiting for packet header (0x08)\`** | The microcontroller failed to enter ROM download mode during auto-reset. | 1. Increase auto-reset pulse width to **250ms**.<br>2. Perform manual button dance: Hold BOOT, press and release RESET, release BOOT. |
-| **\`MD5 of file does not match byte written\`** | Power supply voltage sag (brownout) during high-current flash write cycles. | Connect board to a powered USB hub or short, shielded USB-C data cable. Avoid unpowered USB keyboard pass-through ports. |
-| **\`Framing Error / Continuous \`x?x\` characters\`** | Baud rate mismatch or crystal oscillator clock drift. | Click **Baud Hunter** in the terminal toolbar to automatically identify the target's transmission frequency. |
+| **\`Timed out waiting for packet header (0x08)\`** (esptool wording; the in-app flasher reports \`The chip did not answer SYNC...\`) | The microcontroller failed to enter ROM download mode during auto-reset. | 1. In the Flasher (ESP ROM mode) raise the **Reset Pulse Duration** slider (50-500 ms) towards **250ms**.<br>2. Perform manual button dance: Hold BOOT, press and release RESET, release BOOT. |
+| **\`verify failed at 0x...: flash MD5 ..., image MD5 ...\`** (esptool: \`MD5 of file does not match data in flash\`) | Power supply voltage sag (brownout) during high-current flash write cycles, or a bad cable. | Connect board to a powered USB hub or short, shielded USB-C data cable. Avoid unpowered USB keyboard pass-through ports. |
+| **\`Framing Error / Continuous \`x?x\` characters\`** | Baud rate mismatch or crystal oscillator clock drift. | Open the **Baud Hunter** panel in the Terminal tab and start a scan: it tries 9 standard baud rates and scores the output. (ESP8266 ROM boot messages use 74880 baud.) |
 | **\`Brownout detector was triggered\`** | 3.3V power rail dropped below 2.80V when the Wi-Fi/Bluetooth radio calibrated its PA amplifier. | Solder a 100uF to 470uF low-ESR electrolytic capacitor directly across the board's 3.3V and GND pins. |
 | **\`flash read err, 1000\`** | Microcontroller booted in Quad I/O (QIO) mode, but WP and HOLD pins are floating. | Re-flash firmware setting SPI Transfer Mode to **DIO (Dual I/O)**. |
 
@@ -170,14 +174,23 @@ Before plugging an unknown or custom-soldered microcontroller development board 
     id: 'pinouts-reference',
     toolId: 'pinouts-modal',
     category: 'reference',
-    title: 'Pinouts Reference — ESP32, S3, C3, C6 & USB Wiring Maps',
-    summary: 'Hardware pinout diagrams, SPI/I2C/UART pin assignments, strapping pins, and USB Type-A / Type-C CC resistor specifications.',
-    tags: ['Pinouts', 'Wiring', 'ESP32', 'ESP32-S3', 'ESP32-C3', 'ESP32-C6', 'USB-C', 'Hardware'],
+    title: 'Pinouts Reference — ESP32, ESP32-S3, Pico, FTDI & USB-C Wiring',
+    summary: 'The in-app pinout cheat sheet (ESP32, ESP32-S3, Raspberry Pi Pico, 6-pin FTDI header, 5V to 3.3V divider) plus an ESP32 DevKit pin map and USB Type-C CC resistor rules.',
+    tags: ['Pinouts', 'Wiring', 'ESP32', 'ESP32-S3', 'RP2040', 'FTDI', 'USB-C', 'Hardware'],
     readTime: '20 min read',
     content: `
 # Pinouts Reference — Microcontrollers & USB Wiring
 
 This reference compiles physical pinout maps, bus assignments, hardware strapping pins, and USB wiring standards across the most common embedded hardware targets.
+
+The app's **Hardware Pinout & Safety Cheat Sheet** (opened from the pinouts button) has five tabs:
+- **ESP32-WROOM**: UART0 flashing pins (TXD0 GPIO1, RXD0 GPIO3, common GND), boot strapping pins (EN, GPIO0 held low on boot for ROM download, GPIO2), and a note that many boards wire DTR to IO0 and RTS to EN through two NPN transistors.
+- **ESP32-S3**: native USB Serial/JTAG on D+ GPIO20 / D- GPIO19 (no bridge chip) and hardware UART0 on TX GPIO43 / RX GPIO44 (used on dual-USB devkits).
+- **Raspberry Pi Pico**: UART0 default TX GP0 (pin 1) / RX GP1 (pin 2), UART1 default TX GP4 (pin 6) / RX GP5 (pin 7), and the 1200-baud touch that reboots into BOOTSEL.
+- **FTDI / CP2102 6-Pin**: header order GND, CTS, VCC, TXD, RXD, DTR, with a warning to set VCC to 3.3V, not 5V, for ESP32 and modern ARM chips.
+- **5V → 3.3V Divider**: a 1 kΩ / 2 kΩ divider (5V × 2000/3000 = 3.33V) for a 5V TX into a 3.3V RX.
+
+There are no ESP32-C3 or ESP32-C6 pages in the app; the sections below are background material.
 
 ---
 
@@ -209,7 +222,8 @@ This reference compiles physical pinout maps, bus assignments, hardware strappin
 \`\`\`
 
 > **Input-Only Pins (No Internal Pull-Up/Pull-Down)**:
-> **GPIO 34, 35, 36 (VP), 39 (VN)** have no internal pull-up or pull-down resistors and cannot be used as digital outputs. They are strictly ADC analog inputs!
+> **GPIO 34, 35, 36 (VP), 39 (VN)** have no internal pull-up or pull-down resistors and cannot be used as outputs. They can be read as digital inputs or ADC inputs, but you must add any pull resistor externally.
+> **GPIO 6 to 11** connect to the module's SPI flash on most boards; do not use them.
 
 ---
 
@@ -253,7 +267,7 @@ Many beginner designs tie CC1 and CC2 together to a single shared 5.1kΩ resisto
     content: `
 # Chip Intelligence — USB Hardware Identification
 
-Every USB device announces a 16-bit **Vendor ID (VID)** and 16-bit **Product ID (PID)** during USB enumeration. The **Chip Intelligence Engine** inspects these identifiers against an embedded database of over 1,000 silicon definitions to identify mystery development boards, bridge chips, and RF instruments.
+Every USB device announces a 16-bit **Vendor ID (VID)** and 16-bit **Product ID (PID)** during USB enumeration. The **Hardware Intelligence** window (*USB Chip & VID:PID Specifications*) looks these identifiers up in an embedded table of **41 entries** (USB-UART bridges, native-USB microcontrollers, bootloader/DFU modes, SDR hardware and Wi-Fi adapters). When a serial port is connected, a **Currently connected USB hardware** banner shows the match with its operating logic voltage, auto-reset / strapping behaviour and engineer notes; if only the vendor ID matches, the vendor's first entry is used as a fallback. Below it a search box filters the whole table by VID:PID, chip name, manufacturer or notes, and each card shows voltage, notes and auto-reset support. The same lookup powers the chip analysis in USB Recon & Autopsy.
 
 ---
 
@@ -267,12 +281,12 @@ Every USB device announces a 16-bit **Vendor ID (VID)** and 16-bit **Product ID 
 | **\`0x10C4\`** | **\`0xEA60\`** | Silicon Labs | CP2102 / CP2104 | High-stability VCP bridge used on official Espressif DevKits & LilyGO |
 | **\`0x0403\`** | **\`0x6001\`** | FTDI | FT232R | Classic industrial USB-to-UART transceiver |
 | **\`0x0403\`** | **\`0x6010\`** | FTDI | FT2232D / FT2232H | Dual-channel high-speed bridge used on JTAG and SWD hardware |
-| **\`0x303A\`** | **\`0x1001\`** | Espressif Systems | ESP32-S3 / C3 / C6 | Built-in native USB CDC / JTAG controller on the SoC die |
+| **\`0x303A\`** | **\`0x1001\`** | Espressif Systems | ESP32-S2 / S3 / C3 / C6 | Built-in native USB CDC / JTAG controller on the SoC die |
 | **\`0x2E8A\`** | **\`0x000A\`** | Raspberry Pi Ltd | RP2040 / Pico | Official Raspberry Pi dual-core ARM microcontroller CDC |
-| **\`0x0483\`** | **\`0x5740\`** | STMicroelectronics | STM32F103 / F401 / F411 | Virtual COM Port on BluePill and BlackPill development boards |
-| **\`0x1D50\`** | **\`0x6089\`** | Great Scott Gadgets | HackRF One | PortaPack SDR radio transceiver USB interface |
-| **\`0x20A0\`** | **\`0x415A\`** | Flipper Devices Inc. | Flipper Zero | Flipper Zero USB virtual communication port & RPC interface |
-| **\`0x9AC4\`** | **\`0x4B8F\`** | RFID Research Group | Proxmark3 RDV4 / Easy | RFID & NFC research and emulation instrument |
+| **\`0x0483\`** | **\`0x5740\`** | STMicroelectronics / Flipper | STM32 Virtual COM Port / Flipper Zero CLI | Virtual COM port on STM32 boards; also how the Flipper Zero enumerates |
+| **\`0x1D50\`** | **\`0x6089\`** | Great Scott Gadgets | HackRF One & PortaPack Mayhem | SDR radio transceiver USB interface |
+
+The table has further entries for other bridges (CP2105/CP2108, FT4232H/FT232H/FT-X, PL2303, CH340K), Arduino Uno/Mega, ST-LINK, boot modes (STM32 DFU, RP2040/RP2350 BOOTSEL, Qualcomm EDL 9008, MediaTek preloader, Allwinner FEL, Amlogic, SAM-BA, nRF52840 DFU, CH32V ISP), HackRF DFU and Wi-Fi adapters (RT5572, RT5370, RTL8812AU). The Proxmark3 is not in the table.
 
 ---
 
@@ -282,7 +296,6 @@ Every USB device announces a 16-bit **Vendor ID (VID)** and 16-bit **Product ID 
 | :--- | :--- | :--- |
 | **USB Implementers Forum (USB-IF) Vendor ID Registry** | USB-IF Board of Directors | [usb.org/developers](https://www.usb.org/developers) |
 | **The Linux USB ID Repository (\`usb.ids\`)** | Stephen J. Gowdy & The Linux Kernel Organization | [linux-usb.org/usb.ids](http://www.linux-usb.org/usb.ids) |
-| **Silicon Decapping & Reverse Engineering Archives** | Zeptobars Silicon Photography & SparkFun Electronics Counterfeit IC Archives | [zeptobars.com](https://zeptobars.com) / [sparkfun.com](https://www.sparkfun.com) |
 `
   },
   {
@@ -290,63 +303,67 @@ Every USB device announces a 16-bit **Vendor ID (VID)** and 16-bit **Product ID 
     toolId: 'session-log',
     category: 'reference',
     title: 'Session Log & Audit Report — Hardware Telemetry & Export',
-    summary: 'A deterministic, tamper-evident audit log of all hardware actions performed in the workspace: connected devices, firmware writes, register reads, errors, and exports to Markdown and JSON.',
-    tags: ['Session Log', 'Audit Report', 'Telemetry', 'Forensics', 'Markdown', 'JSON', 'Compliance', 'Security'],
+    summary: 'A running log of what the hardware tools did in this browser tab: devices you picked, confirmed or declined destructive actions, errors and tool log lines, filterable and exportable to Markdown or JSON.',
+    tags: ['Session Log', 'Audit Report', 'Export', 'Markdown', 'JSON', 'Device Picker', 'Notes'],
     readTime: '12 min read',
     content: `
 # Session Log & Audit Report — Workspace Telemetry & Verification
 
-The **Session Log & Audit Report** panel maintains a real-time, chronological record of every hardware transaction conducted within Skon's USB Tool. Designed for firmware engineers, penetration testers, and hardware security auditors, it provides a transparent paper trail of serial port connections, flash operations, logic captures, register reads, and critical errors.
+The **Session Log** panel keeps one chronological record of what the hardware tools did in this browser tab. It is meant for attaching to a ticket or keeping with a firmware dump. It is a plain log: entries are not signed or hashed, so it is not tamper-evident.
 
 ---
 
 ### 1. What Gets Recorded?
 
-The session logging subsystem (\`src/utils/sessionLog.js\`) captures events generated across all workbenches without requiring manual note-taking:
+The session logging module (\`src/utils/sessionLog.js\`) records:
 
-| Event Category | Logged Metadata | Example Recorded Action |
+| Event Category | Level | Example |
 | :--- | :--- | :--- |
-| **Device Lifecycle** | Port VID/PID, serial number, baud rate changes, connect/disconnect timestamps. | Connected CP2102 at 115,200 baud on COM3. |
-| **Flash & ROM Writes** | Image offsets, byte counts, partition labels, verification checksums (MD5/SHA-256). | Programmed 0x10000 bytes at offset 0x10000 (verified by MD5). |
-| **Logic & Bus Operations** | Decoder transactions, I2C addresses detected, SPI chip IDs read, CAN frame IDs. | Scanned I2C bus: ACK at 0x3C (SSD1306) and 0x68 (MPU6050). |
-| **Security & Exploits** | DuckyScript compilations, BadUSB HID payloads generated, RFID UID clones. | Cloned Mifare Classic 1K UID 0xDEADBEEF via Proxmark3. |
-| **Errors & Exceptions** | Frame timeouts, NACK errors, parity failures, WebUSB/WebSerial access denials. | STUSB4500 NACK received at address 0x28. |
+| **Device pickers** | \`device\` | Every USB, HID, serial or Bluetooth device you choose in the browser's picker is noted with its VID:PID and name (\`Selected USB ... (1a86:7523)\`), and USB/HID unplug events are noted too. |
+| **Confirmations** | \`action\` | Destructive actions that ask for confirmation log \`Confirmed: ...\` or \`Declined: ...\`. |
+| **Errors** | \`error\` | Errors shown by tools (and picker failures other than cancelling, as \`warn\`). |
+| **Tool log lines** | \`info\`, \`ok\`, \`warn\` | The lines tools write to the app log, attributed to the tool that was active. |
+| **Your notes** | \`info\` | Free text you add yourself, listed under the tool name \`Note\`. |
+
+Repeats of the same line from the same tool within 2 seconds fold into one entry with a count. The log keeps the newest 2,000 entries, survives a page reload (it is held in the tab's session storage) and is lost when the tab is closed. It does not automatically capture every flash write, register read or decoder transaction; only what each tool chooses to log.
 
 ---
 
-### 2. Export Formats & Reporting
+### 2. Using the Panel & Export Formats
 
-The panel offers instant one-click export into two primary industry formats:
+| Control | Purpose |
+| :--- | :--- |
+| **REPORT (.MD)** | Downloads a Markdown report. |
+| **JSON** | Downloads the log as JSON. |
+| **COPY REPORT** | Copies the Markdown report to the clipboard. |
+| **OPEN JSON LOG** | Loads a previously exported JSON log for read-only viewing; **BACK TO THIS SESSION** returns. |
+| **CLEAR** | Empties the log after a confirmation (hidden while viewing an imported log). |
+| Tool selector, level buttons (\`info\`, \`ok\`, \`warn\`, \`error\`, \`action\`, \`device\`), **search** | Filter the table. Exports contain only the entries matching the current filters. |
+| Note box + **ADD** | Appends a note (for example "swapped to the 3.3 V supply"). |
 
-#### Markdown Technical Audit Report (\`.md\`)
-Formatted with headers, tabular device summaries, chronological event bullet points, and code blocks ready for inclusion in client deliverables, pull requests, or security vulnerability assessments.
+#### Markdown report (\`.md\`)
+A title, a summary (time span, tools used, entry counts, browser user agent), a **Devices** list, an **Actions and errors** list, and a full **Timeline** code block with one line per entry.
 
-#### Structured Machine-Readable JSON (\`.json\`)
-Emits a structured JSON document conforming to modern logging schemas:
+#### JSON (\`.json\`)
 \`\`\`json
 {
-  "sessionStart": "2026-11-06T09:30:00.000Z",
-  "clientVersion": "1.0.0",
-  "devices": [
-    { "vid": "0x10C4", "pid": "0xEA60", "name": "Silicon Labs CP2102" }
-  ],
+  "format": "skon-session-log",
+  "version": 1,
+  "exported": "2026-11-06T09:30:00.000Z",
+  "userAgent": "...",
   "entries": [
-    {
-      "timestamp": "2026-11-06T09:30:15.120Z",
-      "tool": "Firmware Flasher",
-      "level": "INFO",
-      "message": "Flashed partition bootloader at 0x1000 (MD5: e4d909c290d0fb1ca068ffaddf22cbd0)"
-    }
+    { "seq": 1, "t": 1793957400000, "tool": "app", "level": "device", "text": "Selected USB CP2102 (10c4:ea60)", "data": { "kind": "usb", "vid": "10c4", "pid": "ea60" } }
   ]
 }
 \`\`\`
+Entries use millisecond timestamps (\`t\`), an optional \`data\` object (device IDs) and an optional repeat \`count\`.
 
 ---
 
 ### 3. Implementation & Architecture
 
-- **Subsystem:** [\`src/utils/sessionLog.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/sessionLog.js) — pure in-memory event bus, subscriber notify hooks, and Markdown/JSON serialization engine.
-- **Component:** [\`src/components/tools/SessionLogPanel.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/SessionLogPanel.jsx) — filterable event table, level badges (INFO, WARN, ERROR), and export triggers.
+- **Subsystem:** [\`src/utils/sessionLog.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/sessionLog.js) — in-memory entry list persisted to session storage, subscriber notify hooks, device-picker capture, and Markdown/JSON export and import.
+- **Component:** [\`src/components/tools/SessionLogPanel.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/SessionLogPanel.jsx) — filterable event table, level filters, notes, import/export controls.
 - **Tests:** [\`tests/sessionLog.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/sessionLog.test.js).
 `
   }

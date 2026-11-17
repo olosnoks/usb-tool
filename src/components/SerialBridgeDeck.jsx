@@ -12,7 +12,9 @@ import {
   Clock, 
   Share2, 
   Sliders,
-  Cpu
+  Cpu,
+  Plus,
+  Plug
 } from 'lucide-react';
 
 export default function SerialBridgeDeck({
@@ -54,10 +56,21 @@ export default function SerialBridgeDeck({
 
   const logContainerRef = useRef(null);
 
+  const { subscribeRx, sendRawToBoard, addNewBoard, connectBoard, updateBoard } = useSerial();
+
+  // Default the selectors as boards appear (e.g. after "+ Add serial port").
+  useEffect(() => {
+    if (parentBridgeConfig) return;
+    const ids = boards.map((b) => b.id);
+    if (!ids.includes(internalBoardAId)) setInternalBoardAId(ids[0] || '');
+    if (!ids.includes(internalBoardBId) || internalBoardBId === internalBoardAId) {
+      setInternalBoardBId(ids.find((id) => id !== (ids.includes(internalBoardAId) ? internalBoardAId : ids[0])) || '');
+    }
+  }, [boards, parentBridgeConfig, internalBoardAId, internalBoardBId]);
+
   // The relay: while active, every chunk received on one board is written to
   // the other and logged with its direction. (Used when no parent drives the
   // bridge; nothing else in the app forwards bytes between ports.)
-  const { subscribeRx, sendRawToBoard } = useSerial();
   const sendToRef = useRef(sendRawToBoard);
   sendToRef.current = sendRawToBoard;
   const lastTsRef = useRef(0);
@@ -92,11 +105,21 @@ export default function SerialBridgeDeck({
     }
   }, [bridgeLog, autoScroll]);
 
+  const boardAx = boards.find(b => b.id === boardAId);
+  const boardBx = boards.find(b => b.id === boardBId);
+  const hasTwoBoards = !!boardAId && !!boardBId && boardAId !== boardBId;
+  const canStart = hasTwoBoards || isBridgeActive;
+  const notConnected = [boardAx, boardBx].filter((b) => b && !b.isConnected);
+  const guidance = boards.length < 2
+    ? 'Only one port is available. Click "+ Add serial port" and pick the second device in the browser prompt.'
+    : !hasTwoBoards
+      ? 'Choose two different boards for PORT A and PORT B.'
+      : notConnected.length > 0
+        ? `Not connected yet: ${notConnected.map((b) => b.name).join(', ')}. Use Connect below before starting.`
+        : '';
+
   const toggleBridge = () => {
-    if (!boardAId || !boardBId || boardAId === boardBId) {
-      alert('Please select two distinct connected boards to create a MitM serial bridge.');
-      return;
-    }
+    if (!canStart) return;
     if (parentToggleBridge) {
       parentToggleBridge(boardAId, boardBId, !isBridgeActive);
     } else {
@@ -163,7 +186,18 @@ export default function SerialBridgeDeck({
           </div>
 
           <button
+            onClick={() => addNewBoard?.()}
+            disabled={isBridgeActive}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs disabled:opacity-40"
+            title="Open the browser serial picker and add another board"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>+ Add serial port</span>
+          </button>
+
+          <button
             onClick={toggleBridge}
+            disabled={!canStart}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-xs transition-all border ${
               isBridgeActive
                 ? 'bg-emerald-500/20 text-cyber-emerald border-emerald-500/50 shadow-emerald-glow animate-pulse'
@@ -175,6 +209,41 @@ export default function SerialBridgeDeck({
           </button>
         </div>
       </div>
+
+      {/* Per-board connection state + baud */}
+      <div className="flex flex-wrap gap-2" data-testid="bridge-board-status">
+        {boards.map((b) => (
+          <div key={b.id} className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px]">
+            <span className={`w-2 h-2 rounded-full ${b.isConnected ? 'bg-emerald-400' : b.isConnecting ? 'bg-amber-400 animate-pulse' : 'bg-slate-600'}`} />
+            <span className="text-slate-200">{b.name}</span>
+            <span className="text-slate-500">{b.isConnected ? 'connected' : b.isConnecting ? 'connecting' : 'disconnected'}</span>
+            <select
+              aria-label={`Baud rate for ${b.name}`}
+              value={b.baudRate}
+              disabled={b.isConnected || b.isConnecting}
+              onChange={(e) => updateBoard?.(b.id, { baudRate: Number(e.target.value) })}
+              className="bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-slate-200 text-[11px]"
+            >
+              {[...new Set([300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, Number(b.baudRate)])]
+                .filter(Boolean).sort((x, y) => x - y).map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {!b.isConnected && (
+              <button
+                onClick={() => connectBoard?.(b.id)}
+                disabled={b.isConnecting}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyber-cyan border border-cyan-500/40 disabled:opacity-40"
+              >
+                <Plug className="w-3 h-3" /><span>Connect</span>
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {guidance && !isBridgeActive && (
+        <div className="text-[11px] text-amber-300 bg-amber-950/20 border border-amber-500/30 rounded px-2 py-1" role="status">
+          {guidance}
+        </div>
+      )}
 
       {/* Control / Filter Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-[#030712] border border-slate-800 rounded-lg p-2">
