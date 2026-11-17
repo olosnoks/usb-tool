@@ -58,9 +58,13 @@ function makeFakeRom({ chip = 'ESP32-S3', silent = false, corruptWrite = false, 
         dev.chipBaud = failBaud ? 0 : w(data, 0);
         return;
       case ESP_CMD.FLASH_DEFL_BEGIN: {
+        // ROM: 16 bytes on ESP32/ESP8266, 20 (extra "encrypted" word) on newer chips.
+        // size = uncompressed length rounded UP to the 1 KB write size; blocks = ceil(compressed / 1 KB).
         const wantLen = (chip === 'ESP32' || esp8266) ? 16 : 20;
         if (esp8266 || data.length !== wantLen || !dev.attached) return reply(op, undefined, 0, 1, 0x05);
         dev.defl = { size: w(data, 0), blocks: w(data, 1), bs: w(data, 2), off: w(data, 3), next: 0, parts: [] };
+        dev.deflBegin = { ...dev.defl, encrypted: wantLen === 20 ? w(data, 4) : null };
+        if (dev.defl.bs !== 0x400 || dev.defl.size % dev.defl.bs !== 0) return reply(op, undefined, 0, 1, 0x05);
         flash.fill(0xff, dev.defl.off, dev.defl.off + dev.defl.size);
         return reply(op);
       }
@@ -68,19 +72,24 @@ function makeFakeRom({ chip = 'ESP32-S3', silent = false, corruptWrite = false, 
         const len = w(data, 0), seq = w(data, 1);
         const block = data.subarray(16, 16 + len);
         let c = 0xef; for (const b of block) c ^= b;
-        if (!dev.defl || seq !== dev.defl.next || c !== chk) return reply(op, undefined, 0, 1, 0x07);
+        if (!dev.defl || seq !== dev.defl.next || c !== chk || len > dev.defl.bs || w(data, 2) !== 0 || w(data, 3) !== 0) return reply(op, undefined, 0, 1, 0x07);
         dev.defl.parts.push(Uint8Array.from(block));
         dev.deflBytes += len;
         dev.defl.next++;
+        if (dev.defl.next === dev.defl.blocks) {
+          // The ROM inflates and writes as the data arrives; END is not needed.
+          const all = new Uint8Array(dev.defl.parts.reduce((n, p) => n + p.length, 0));
+          let o = 0; for (const p of dev.defl.parts) { all.set(p, o); o += p.length; }
+          let out;
+          try { out = inflate(all); } catch (e) { return reply(op, undefined, 0, 1, 0x0b); }
+          flash.set(out, dev.defl.off);
+          if (corruptWrite) flash[dev.defl.off] ^= 0xff;
+        }
         return reply(op);
       }
       case ESP_CMD.FLASH_DEFL_END: {
-        if (!dev.defl || dev.defl.next !== dev.defl.blocks) return reply(op, undefined, 0, 1, 0x0b);
-        const all = new Uint8Array(dev.defl.parts.reduce((n, p) => n + p.length, 0));
-        let o = 0; for (const p of dev.defl.parts) { all.set(p, o); o += p.length; }
-        const out = inflate(all);
-        flash.set(out, dev.defl.off);
-        if (corruptWrite) flash[dev.defl.off] ^= 0xff;
+        // flag 1 = stay in the loader, 0 = reboot (the ROM leaves the bootloader either way).
+        dev.deflEnd = w(data, 0);
         return reply(op);
       }
       case ESP_CMD.FLASH_BEGIN: {
@@ -264,6 +273,10 @@ describe('ESP ROM flasher: baud, compression and flash size', () => {
     expect(c.lastWrite.bytesSent).toBe(dev.deflBytes);
     expect(dev.ops).toContain(ESP_CMD.FLASH_DEFL_BEGIN);
     expect(dev.ops).not.toContain(ESP_CMD.FLASH_DATA);
+    // esptool never sends FLASH_DEFL_END to a ROM that is to stay in the loader.
+    expect(dev.ops).not.toContain(ESP_CMD.FLASH_DEFL_END);
+    // BEGIN: uncompressed size rounded up to 1 KB, ceil(compressed/1 KB) blocks, 1 KB block size, offset, encrypted = 0.
+    expect(dev.deflBegin).toMatchObject({ size: 65536, blocks: Math.ceil(dev.deflBytes / 1024), bs: 1024, off: 0x10000, encrypted: 0 });
     expect(Array.from(dev.flash.subarray(0x10000, 0x20000))).toEqual(Array.from(img));
     expect(logs.join('\n')).toMatch(/Verified 0x10000/);
   }, 20000);

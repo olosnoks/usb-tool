@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   readBytes, writeBytes, findRttControlBlock, RttClient, ItmParser, itmText, configureSwoTarget, TRACE,
   Breakpoints, Watchpoints, FPB, DWT, parseElf, parseFlm, flmSectors, parsePdsc, loadFirmwareImage, programFlash, FlashAlgoRunner,
-  buildSymbolTable, formatSymbol, symbolAddress, eraseChipWithAlgorithm, nrf52EraseAll
+  buildSymbolTable, formatSymbol, symbolAddress, eraseChipWithAlgorithm, nrf52EraseAll, NRF52_CTRL_AP
 } from '../src/utils/cortexDebug';
 import { CmsisDapClient } from '../src/utils/cmsisDapDriver';
 import { DapProbe } from '../src/utils/dapLink';
@@ -470,6 +470,17 @@ describe('mass erase and unlock', () => {
     const t = fakeCtrlAp();
     await nrf52EraseAll(t, { sleepMs: 0 });
     expect(t.log).toEqual(['r1:fc', 'w1:4=1', 'r1:8', 'r1:8', 'r1:8', 'w1:0=1', 'w1:0=0', 'w1:4=0']);
+  });
+
+  it('uses the CTRL-AP register map from the nRF52 spec / pyOCD', () => {
+    expect(NRF52_CTRL_AP).toMatchObject({ APSEL: 1, RESET: 0x00, ERASEALL: 0x04, ERASEALLSTATUS: 0x08, APPROTECTSTATUS: 0x0c, IDR: 0xfc, IDR_VALUE: 0x02880000 });
+  });
+
+  it('accepts any revision nibble in the CTRL-AP IDR', async () => {
+    const t = fakeCtrlAp({ idr: 0x12880000 });
+    await nrf52EraseAll(t, { sleepMs: 0 });
+    expect(t.log[0]).toBe('r1:fc');
+    expect(t.log).toContain('w1:4=1');
   });
 
   it('refuses a target that has no nRF52 CTRL-AP', async () => {

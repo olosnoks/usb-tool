@@ -482,6 +482,8 @@ If your Proxmark3 is bricked or stuck in bootloader mode (e.g. following a faile
     content: `
 # PortaPack Mayhem SDR — Tactical Radar & Spectrum Studio
 
+> **Where to find it.** The PortaPack workbench has three tabs: **Mayhem Mobile SDR** (the embedded RocketGod Mayhem Mobile app), **Built-in Receiver** (the native WebUSB receiver this article documents: Receiver, Tactical Map (ADS-B), FREQMAN and Console & Log) and **SPI Flasher & Unbrick**.
+
 The **PortaPack Mayhem SDR** workbench is a browser companion for the HackRF One software-defined radio equipped with a PortaPack H1/H2 running Mayhem firmware. Sourced directly from the native \`mayhemDriver.js\` (libhackrf over WebUSB), the DSP worker (\`hackrfDsp.js\`, \`hackrfDemod.js\`), \`adsbDecoder.js\`, and the \`ReceiverDeck\` / \`TacticalMapDeck\` implementations, this guide documents every radio feature in the toolkit. The receiver follows the bring-up and DSP design of RocketGod's mayhem-mobile.
 
 ---

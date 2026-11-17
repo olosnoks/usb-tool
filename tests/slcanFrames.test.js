@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  parseSlcanFrame, buildSlcanFrame, SlcanLineReader, buildSlcanOpenSequence, createSlcanClock,
+  CAN_FD_DATA_RATES, parseSlcanFrame, buildSlcanFrame, SlcanLineReader, buildSlcanOpenSequence, createSlcanClock,
   autoDetectBitrate, isSlcanError, COMMON_DTCS, CAN_FD_LENGTHS
 } from '../src/utils/canBusDriver';
 
@@ -139,7 +139,13 @@ describe('open sequence, clock and bitrate detection', () => {
     expect(buildSlcanOpenSequence()).toEqual(['C', 'S6', 'O']);
     expect(buildSlcanOpenSequence({ baudCode: 'S4', mode: 'listen', timestamps: true })).toEqual(['C', 'S4', 'Z1', 'L']);
     expect(buildSlcanOpenSequence({ baudCode: 'S6', fdRateCode: 'Y2' })).toEqual(['C', 'S6', 'Y2', 'O']);
+    expect(buildSlcanOpenSequence({ baudCode: 'S6', mode: 'silent' })).toEqual(['C', 'S6', 'M1', 'O']);
     expect(() => buildSlcanOpenSequence({ mode: 'bogus' })).toThrow(RangeError);
+  });
+
+  it('offers only the FD data rates the CANable 2.0 firmware accepts (Y2, Y5)', () => {
+    expect(CAN_FD_DATA_RATES.map((r) => r.code)).toEqual(['Y2', 'Y5']);
+    expect(CAN_FD_DATA_RATES.map((r) => r.baud)).toEqual([2000000, 5000000]);
   });
 
   it('unwraps the 60000 ms timestamp counter', () => {

@@ -774,8 +774,11 @@ export async function eraseChipWithAlgorithm(target, flm, { ramBase, ramSize, on
   log('Erased the whole chip.');
 }
 
-// Nordic nRF52 CTRL-AP: access port 1, registers RESET 0x00, ERASEALL 0x04, ERASEALLSTATUS 0x08, IDR 0xFC.
-export const NRF52_CTRL_AP = { APSEL: 1, RESET: 0x00, ERASEALL: 0x04, ERASEALLSTATUS: 0x08, IDR_VALUE: 0x02880000 };
+// Nordic nRF52 CTRL-AP (AP index 1; the AHB-AP is AP 0). Registers per Nordic's product
+// specification and pyOCD target_nRF52.py: RESET 0x00, ERASEALL 0x04, ERASEALLSTATUS 0x08
+// (0 = ready, 1 = busy), APPROTECTSTATUS 0x0C (0 = protected, 1 = open), IDR 0xFC.
+// The IDR's top nibble is a revision field and is ignored when matching 0x02880000.
+export const NRF52_CTRL_AP = { APSEL: 1, RESET: 0x00, ERASEALL: 0x04, ERASEALLSTATUS: 0x08, APPROTECTSTATUS: 0x0c, IDR: 0xfc, IDR_VALUE: 0x02880000, IDR_REVISION_MASK: 0xf0000000 };
 
 /**
  * Unlock a read-protected nRF52 by erasing it through the CTRL-AP (flash,
@@ -783,8 +786,8 @@ export const NRF52_CTRL_AP = { APSEL: 1, RESET: 0x00, ERASEALL: 0x04, ERASEALLST
  */
 export async function nrf52EraseAll(target, { timeoutMs = 30000, sleepMs = 20 } = {}) {
   const C = NRF52_CTRL_AP;
-  const idr = await target.readApRegister(C.APSEL, 0xfc);
-  if ((idr >>> 0) !== C.IDR_VALUE) {
+  const idr = await target.readApRegister(C.APSEL, C.IDR);
+  if (((idr & ~C.IDR_REVISION_MASK) >>> 0) !== C.IDR_VALUE) {
     throw new Error(`Access port ${C.APSEL} is not an nRF52 CTRL-AP (IDR 0x${(idr >>> 0).toString(16).toUpperCase()}, expected 0x${C.IDR_VALUE.toString(16).toUpperCase()}). This is not an nRF52 target.`);
   }
   await target.writeApRegister(C.APSEL, C.ERASEALL, 1);

@@ -7,9 +7,10 @@ import {
   Sparkles
 } from 'lucide-react';
 import HackRfFlasherWorkbench from './HackRfFlasherWorkbench';
+import NativeReceiver from './portapack/NativeReceiver';
 
 export default function PortapackWorkbench() {
-  const [activeTab, setActiveTab] = useState('app'); // 'app' | 'flasher'
+  const [activeTab, setActiveTab] = useState('app'); // 'app' | 'receiver' | 'flasher'
   const [iframeKey, setIframeKey] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const iframeRef = useRef(null);
@@ -52,6 +53,18 @@ export default function PortapackWorkbench() {
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>Mayhem Mobile SDR</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('receiver')}
+              title="Built-in WebUSB receiver: waterfall, demod, sweep, IQ capture, FREQMAN, ADS-B map"
+              className={`px-2.5 py-1 rounded text-xs font-bold transition-all flex items-center gap-1.5 ${
+                activeTab === 'receiver'
+                  ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/50'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>Built-in Receiver</span>
             </button>
             <button
               onClick={() => setActiveTab('flasher')}
@@ -116,6 +129,10 @@ export default function PortapackWorkbench() {
               {' · '}
               <a href="./mayhem/LICENSE.txt" className="text-purple-300 hover:underline" target="_blank" rel="noreferrer">License</a>
             </div>
+          </div>
+        ) : activeTab === 'receiver' ? (
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+            <NativeReceiver />
           </div>
         ) : (
           <div className="flex-1 min-h-0 overflow-auto p-4 bg-slate-950">

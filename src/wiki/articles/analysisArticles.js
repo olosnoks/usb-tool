@@ -255,14 +255,14 @@ The **WIDS Intrusion Alerts** tab lists the alerts Kismet itself raises (the too
     id: 'logic-analyzer',
     toolId: 'logic-analyzer',
     category: 'analysis',
-    title: '24MHz Logic Analyzer — 8-Channel Waveforms & Protocol Decoders',
-    summary: 'Hardware digital signal analysis up to 24 MSps, SUMP and fx2lafw capture, protocol decoders (I2C, UART, SPI, 1-Wire, CAN, WS2812, IR, SWD), edge/pattern search, and VCD / PulseView .sr export and import.',
+    title: '24MHz Logic Analyzer — Multi-Channel Waveforms & Protocol Decoders',
+    summary: 'Hardware digital signal analysis up to 24 MSps, SUMP (channel count from the device, level and edge triggers, pre-trigger) and fx2lafw (8 or 16 channels) capture, protocol decoders (I2C, UART, SPI, 1-Wire, CAN, WS2812, IR, SWD) with stacked decoders, edge/pattern search, sessions, and VCD / PulseView .sr export and import.',
     tags: ['Logic Analyzer', '24MHz', 'Waveforms', 'Protocol Decoder', 'Sigrok', 'VCD', 'SPI', 'I2C', 'UART'],
     readTime: '22 min read',
     content: `
 # 24MHz Logic Analyzer — Digital Signal Workbench
 
-The **Logic Analyzer** workbench is an 8-channel digital logic analyzer and protocol decoder in your browser. It captures from low-cost logic hardware (SUMP-protocol devices over Web Serial, such as Arduino / Raspberry Pi Pico sketches and the Open Bench Logic Sniffer, or Cypress FX2LP boards running sigrok's fx2lafw firmware over WebUSB), or opens existing \`.vcd\` / PulseView \`.sr\` files. It decodes I2C, UART, SPI, 1-Wire, CAN, WS2812, IR (NEC / RC-5) and SWD directly over the waveform.
+The **Logic Analyzer** workbench is a multi-channel digital logic analyzer (8 channels on most hardware; the count comes from the device) and protocol decoder in your browser. It captures from low-cost logic hardware (SUMP-protocol devices over Web Serial, such as Arduino / Raspberry Pi Pico sketches and the Open Bench Logic Sniffer, or Cypress FX2LP boards running sigrok's fx2lafw firmware over WebUSB), or opens existing \`.vcd\` / PulseView \`.sr\` files. It decodes I2C, UART, SPI, 1-Wire, CAN, WS2812, IR (NEC / RC-5) and SWD directly over the waveform.
 
 ---
 
@@ -353,15 +353,20 @@ Every value change records a timestamp (\`#41\`, in the file's timescale unit) f
 | **OPEN .VCD / .SR** | Button | Loads a VCD or PulseView \`.sr\` file into the buffer for decoding. |
 | **CAPTURE SIGNAL** | Button | Acquires one buffer from the connected device (shows progress for FX2). Disabled without a device. |
 | **RATE** | Dropdown | 20 kHz up to 24 MHz (the device may use a nearby achievable rate, shown as "capture is ..."). |
-| **SAMPLES** | Dropdown | 1,024 up to 1M samples. |
-| **HW TRIGGER MASK / VALUE** | Hex inputs | SUMP only: channels in the mask must match the value to start capture; mask \`00\` starts immediately. |
+| **SAMPLES** | Dropdown | 1,024 up to 1M samples. For a SUMP device the list only offers depths up to the sample memory the device reports; a larger request is refused instead of returning a short or wrapped buffer. |
+| **HW TRIGGER MASK / VALUE** | Hex inputs | SUMP only, level trigger: channels in the mask must match the value to start capture; mask \`00\` starts immediately. |
+| **EDGE** | Dropdown | SUMP only: **none**, **rising** or **falling** on the masked channel. SUMP has no native edge trigger, so it is programmed as two trigger stages (old level, then new level); the device must support multi-stage triggers. |
+| **PRE-TRIGGER** | Slider | SUMP only, 0–90 %: how much of the buffer is kept from before the trigger. The trigger point is drawn as a red dashed marker and cursor A is placed on it. |
+| **16-bit wide mode** | Checkbox | FX2 (fx2lafw) only: captures 16 channels instead of 8. fx2lafw cannot report how many inputs a board has, so only tick it on 16-channel boards; on an 8-input board the upper channels are meaningless. |
 | **Zoom out / Zoom in / Fit whole capture** | Buttons | Zoom the waveform; also mouse wheel pans and Ctrl+wheel zooms. |
-| **Waveform canvas** | Viewport | 8-channel timing diagram. Click sets cursor A, Shift-click cursor B; ΔT and 1/ΔT are shown. **TIMELINE PAN** slider scrolls. |
+| **Waveform canvas** | Viewport | Timing diagram with one row per channel: the channel count comes from the device (SUMP metadata reports up to 32 channels; FX2 gives 8, or 16 in wide mode), labelled **CHANNELS (D0 - Dn)**. Click sets cursor A, Shift-click cursor B; ΔT and 1/ΔT are shown. **TIMELINE PAN** slider scrolls. |
 | **FIND** | Dropdown + PREV / NEXT | Searches from cursor A for a rising edge, falling edge, any edge, glitch (short pulse) or pattern (mask/value) on a channel. |
 | **VCD / PULSEVIEW .SR** | Buttons | Export the capture as a Value Change Dump or a PulseView/sigrok session file. |
 | **Protocol Decoder buttons** | Buttons | Pick I2C, UART, SPI, 1-Wire, CAN, WS2812, IR or SWD; role dropdowns map decoder signals to D0-D7 and parameter fields (baud, parity, SPI mode...) appear. |
 | **AUTO-BAUD** | Button | UART only: estimates the baud rate from the shortest pulses. |
+| **STACK** | Dropdown | Adds a second decoder on top of the protocol decoder's output, drawn in its own annotation lane and listed in the table: **SPI flash commands** (names JEDEC commands and identifies the chip from a JEDEC ID read, e.g. Winbond W25Q128), **EEPROM / register names** for I2C (with an address-bytes field), **NMEA 0183 (GPS)** for UART (with checksum check) and **UDS / OBD / J1939 names** for CAN. Commands cut off by the end of the capture are marked "cut short". |
 | **CSV** | Button | Exports the decoded items. |
+| **OPEN SESSION / SAVE SESSION** | Buttons | Save the capture, channel names, decoder and stack settings to a JSON session file and open it again later (wide captures included). |
 | **Channel Measurements** | Table | Per channel name (editable), edges, frequency, duty and min/max pulse. |
 
 ---
@@ -395,13 +400,15 @@ Every value change records a timestamp (\`#41\`, in the file's timescale unit) f
 
 ### Implementation & Architecture
 
-> **Capture hardware.** SUMP devices over Web Serial (115200 baud): the tool programs the
-> divider, sample count and hardware trigger (mask/value on D0-D7), then reads the buffer
-> (newest sample first, reversed for display). FX2 boards over WebUSB with
+> **Capture hardware.** SUMP devices over Web Serial (115200 baud): the tool reads the
+> device metadata (channel count, sample memory), enables only the channel groups the device
+> has, programs the divider, sample count, pre-trigger and trigger stages, then reads the
+> buffer (newest sample first, reversed for display). FX2 boards over WebUSB with
 > fx2lafw: samples stream from bulk endpoint 2 at up to 24 MS/s (USB gaps are
-> possible above ~12 MS/s). There is no demo / simulated capture mode in the tool; without hardware you can open a \`.vcd\` or PulseView \`.sr\` file instead.
+> possible above ~12 MS/s), 8 channels or 16 in wide mode. There is no demo / simulated capture mode in the tool; without hardware you can open a \`.vcd\` or PulseView \`.sr\` file instead.
 
-- **Component:** [\`src/components/tools/LogicAnalyzerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/LogicAnalyzerWorkbench.jsx) holds the sample rate (up to 24 MHz), eight named channels (D0–D7, renameable in the Channel Measurements table), and a **packed digital sample buffer** — a \`Uint8Array\` where each byte encodes all 8 channels as individual bits.
+- **Component:** [\`src/components/tools/LogicAnalyzerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/LogicAnalyzerWorkbench.jsx) holds the sample rate (up to 24 MHz), the named channels (renameable in the Channel Measurements table), and a **packed digital sample buffer** with one bit per channel: a \`Uint8Array\` for up to 8 channels, \`Uint16Array\` for 16 and \`Uint32Array\` for up to 32.
+- **Stacked decoders:** [\`src/utils/logicStacks.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/logicStacks.js) runs the second-level decoders (SPI flash, I2C EEPROM, UART NMEA, CAN UDS/OBD/J1939) on the protocol decoder's items; each entry in \`DECODERS\` declares which stacks it supports.
 - **Decoders:** [\`src/utils/logicDecoders.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/logicDecoders.js) holds the edge-walking decoders (I2C, UART, SPI, 1-Wire, CAN, WS2812, IR NEC / RC-5, SWD), the trigger/pattern search, per-channel measurements and the VCD / \`.sr\` import and export. Decoded items are drawn as annotations under the waveforms and listed in a table (click a row to jump to it).
 - **Capture:** [\`src/utils/logicAnalyzerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/logicAnalyzerDriver.js) provides \`SumpAnalyzer\` (serial) and \`Fx2LogicAnalyzer\` (WebUSB, including firmware upload through the FX2's 0xA0 vendor request). Both fill the packed buffer; imported files fill it too.
 
@@ -422,8 +429,8 @@ Every value change records a timestamp (\`#41\`, in the file's timescale unit) f
     toolId: 'can-bus',
     category: 'analysis',
     title: 'CAN Bus & OBD-II Scanner — Automotive Diagnostics & Reverse Engineering',
-    summary: 'Comprehensive vehicle network reverse engineering, SLCAN packet monitor, standard 11-bit and extended 29-bit CAN IDs, live OBD-II PID polling, and DTC clearing.',
-    tags: ['CAN Bus', 'OBD-II', 'Automotive', 'SLCAN', 'TWAI', 'Vehicle Diagnostics', 'ECU', 'DTC', 'PID'],
+    summary: 'SLCAN packet monitor for classic CAN and CAN FD (11-/29-bit IDs, RTR, hardware timestamps, listen-only, bit-rate auto-detect), OBD-II PIDs and DTCs, UDS diagnostics with confirmation-gated services, J1939 decoding, and candump record/replay.',
+    tags: ['CAN Bus', 'CAN FD', 'OBD-II', 'UDS', 'J1939', 'Automotive', 'SLCAN', 'Vehicle Diagnostics', 'ECU', 'DTC', 'PID'],
     readTime: '24 min read',
     content: `
 # CAN Bus & OBD-II Scanner — Automotive Workbench
@@ -533,30 +540,38 @@ transmits SLCAN ASCII over that port. All data is live; there is no simulation o
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
 | **(Top-bar Connect)** | Button | Attaches the SLCAN adapter via the shared Web Serial transport; the deck reads/writes through it. |
-| **CAN Bus Sniffer / OBD-II Scanner & Gauges / UDS Diagnostics / Record & Replay** | Mode buttons | Switch between the four views. |
+| **CAN Bus Sniffer / OBD-II Scanner & Gauges / UDS Diagnostics / J1939 / Record & Replay** | Mode buttons | Switch between the five views. |
 | **CAN BAUD** | Dropdown | 100 kbps, 125 kbps (low-speed / body), 250 kbps, 500 kbps (standard automotive high-speed, default) or 1000 kbps. |
-| **START SNIFFER / PAUSE** | Button | Opens the SLCAN channel (\`C\`, \`S<n>\`, \`O\`) and starts listening; PAUSE sends \`C\` to close it. |
+| **AUTO-DETECT** | Button | Tries each bit rate in listen-only mode and keeps the first one that receives valid frames without errors. |
+| **Adapter** | Dropdown | **SLCAN (Lawicel / CANable 1.x)** or **CANable 2.0 (FD firmware)**. The two firmwares speak different dialects, so the options below change with it. |
+| **listen-only** | Checkbox | The adapter receives but never transmits or ACKs, so it cannot disturb the bus. Lawicel adapters open with \`L\`; CANable 2.0 uses silent mode (\`M1\`, then \`O\`). AUTO-DETECT uses the same silent open. |
+| **FD data rate** | Dropdown | CANable 2.0 only: **Classic CAN**, or a CAN FD data-phase rate. The canable2 firmware accepts only the \`Y2\` (2 Mbps) and \`Y5\` (5 Mbps) presets. |
+| **HW timestamps** | Checkbox | Lawicel adapters only: asks the adapter to append its own receive timestamp to each frame (\`Z1\`); the sniffer shows it in the **HW time** column, unwrapped across the 60 s rollover. CANable 2.0 firmware does not send timestamps, so the option is hidden for it. |
+| **START SNIFFER / PAUSE** | Button | Opens the SLCAN channel (\`C\`, \`S<n>\`, optional \`Y<n>\` / \`Z1\`, then \`O\` or \`L\`) and starts listening; PAUSE sends \`C\` to close it. |
 | **Clear captured packets** | Icon button | Empties the sniffer table. |
 | **LOAD DBC** | Button | Loads a \`.dbc\` file so known frames show their name and decoded signals (**×** unloads it). |
 | **IDs: 1DC, 200-2FF, !7DF** | Input | Comma-separated IDs or ranges to show; prefix \`!\` to hide. |
 | **changing only** | Checkbox | Hides frames whose data has not changed. |
-| **CAN Sniffer Table** | Table | CAN ID (hex), Type (STD 11b / EXT 29b), DLC, data bytes (changed bytes highlighted), Delta (ms) and Count. |
-| **TRANSMIT CAN FRAME** | Inputs + Button | Hex ID, **29-bit** checkbox, data bytes and **SEND FRAME**; **PERIODIC** repeats it every N ms. |
+| **CAN Sniffer Table** | Table | CAN ID (hex), Type (STD 11b / EXT 29b, plus an **FD** or **RTR** tag), DLC, data bytes (changed bytes highlighted), Delta (ms), **HW time** and Count. Malformed adapter lines are dropped instead of showing invented bytes. |
+| **TRANSMIT CAN FRAME** | Inputs + Button | Hex ID, **29-bit**, **RTR**, **FD** and **BRS** checkboxes, data bytes and **SEND FRAME**; **PERIODIC** repeats it every N ms. A payload the frame type cannot carry (more than 8 bytes on classic CAN, or an FD length that is not a valid DLC size up to 64) is rejected before sending. |
 | **START LIVE GAUGES (MODE 01)** | Button | Polls Mode 01 PIDs for RPM, speed, coolant, load, throttle and module voltage. |
 | **READ VIN (09)** / **SCAN SUPPORTED PIDS** | Buttons | Read the VIN and list the PIDs the vehicle answers. |
 | **READ CODES (03)** | Button | Sends a live Mode 03 request and lists stored DTCs with descriptions where known. |
 | **CLEAR CODES (04)** | Button | Appears when codes are listed; asks for confirmation, then sends Mode 04 (clears codes and freeze-frame data). |
-| **UDS Diagnostics** | Panel | REQUEST ID / RESPONSE ID, **29-bit IDs**, **TesterPresent keep-alive**, DEFAULT / EXTENDED SESSION, READ IDENTIFICATION, READ DTCs (19 02), CLEAR DTCs (14), ECU RESET (11 01), READ DID and a RAW REQUEST box. |
-| **START RECORDING / STOP** | Button | Records frames; export as **CANDUMP .LOG** or **CSV**, or open a candump log with **OPEN CANDUMP LOG**. |
-| **REPLAY ONTO BUS** | Button | Replays recorded frames with original timing (**REPLAY SPEED** 0.25x to 10x, optional **loop**); **VIEW IN SNIFFER TABLE** shows a loaded log. |
+| **UDS Diagnostics** | Panel | REQUEST ID / RESPONSE ID, **29-bit IDs**, **TesterPresent keep-alive**, DEFAULT / EXTENDED SESSION, READ IDENTIFICATION, READ DTCs (19 02), CLEAR DTCs (14), ECU RESET (11 01), READ DID and a RAW REQUEST box. Negative responses are shown with their NRC name (e.g. \`0x31 requestOutOfRange\`). |
+| **SERVICES THAT ACT ON THE ECU** | Panel | **ROUTINE (31)** start / stop / results, **WRITE DID (2E)**, **SECURITY ACCESS (27)** with **REQUEST SEED** and **SEND KEY**, **READ MEMORY (23)**, **COMM CONTROL (28)** **ENABLE (00)** / **DISABLE (03)** and **DTC SETTING (85)**. Every service that changes the ECU asks for confirmation first. The key for Security Access is one you supply (from the vehicle documentation); the tool only performs the standard seed/key exchange and never computes or guesses a key. |
+| **J1939** | Tab | Decodes 29-bit J1939 IDs into priority, PGN, source and destination, names ~56 common PGNs and decodes signals for the common ones (engine speed from EEC1, vehicle speed from CCVS, DM1/DM2 diagnostic messages, Address Claimed, VIN). Values the sender marks "not available" or "error" are shown as text, not numbers. **REQUEST PGN** sends a PGN request to a destination address from a chosen source address. Multi-packet transport (BAM / RTS-CTS) is not reassembled. |
+| **START RECORDING / STOP** | Button | Records frames; export as **CANDUMP .LOG** or **CSV**, or open a candump log with **OPEN CANDUMP LOG**. The candump format carries the RTR marker; FD flags are kept in recorded sessions but not in candump files. |
+| **REPLAY ONTO BUS** | Button | Replays recorded frames with original timing (**REPLAY SPEED** 0.25x to 10x, optional **loop**), keeping RTR, FD and BRS flags; **VIEW IN SNIFFER TABLE** shows a loaded log. |
 
 ---
 
 ### 3b. Implementation & Architecture
 
-- **Component:** [\`src/components/tools/CanBusWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/CanBusWorkbench.jsx) uses \`useSerial()\` for \`isConnected\`/\`sendString\`, keeps a \`messages\` map keyed by CAN ID (for the de-duplicated sniffer table with delta/count and per-byte change highlighting), and four modes: \`sniffer\`, \`obd2\`, \`uds\` and \`log\`.
-- **Framing:** \`buildSlcanFrame(id, bytes, isExtended)\` in [\`src/utils/canBusDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/canBusDriver.js) encodes the Lawicel \`t<id><len><data>\` (11-bit) / \`T<id><len><data>\` (29-bit) ASCII form, which is written over the shared serial port. Starting the sniffer sends \`C\`, the bitrate code (e.g. \`S6\`) and \`O\`.
-- **Diagnostics and tools:** \`src/utils/canTools.js\` provides the DBC parser, ID filter, candump/CSV logging, replay, the ISO-TP channel and the UDS client. All traffic is real: there is no simulation mode, so a connected adapter and bus are required.
+- **Component:** [\`src/components/tools/CanBusWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/CanBusWorkbench.jsx) uses \`useSerial()\` for \`isConnected\`/\`sendString\`, keeps a \`messages\` map keyed by CAN ID (for the de-duplicated sniffer table with delta/count and per-byte change highlighting), and five modes: \`sniffer\`, \`obd2\`, \`uds\`, \`j1939\` and \`log\`.
+- **Framing:** \`buildSlcanFrame\` and \`parseSlcanFrame\` in [\`src/utils/canBusDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/canBusDriver.js) handle the Lawicel ASCII forms: \`t\` / \`T\` (data, 11-/29-bit), \`r\` / \`R\` (remote / RTR), and the CAN FD letters \`d\` / \`D\` (FD) and \`b\` / \`B\` (FD with bit-rate switch), with an optional trailing 4-hex-digit timestamp. The parser validates every character and the DLC and returns nothing for a malformed line. \`buildSlcanOpenSequence\` produces the open sequence (\`C\`, \`S<n>\`, optional \`Y<n>\` and \`Z1\`, then \`O\` or \`L\`).
+- **Diagnostics and tools:** \`src/utils/canTools.js\` provides the DBC parser, ID filter, candump/CSV logging, replay, the ISO-TP channel, the UDS client (including the confirmation-gated services above) and the J1939 decoder (\`decodeJ1939Id\`, \`decodeJ1939Frame\`, the PGN table). All traffic is real: there is no simulation mode, so a connected adapter and bus are required.
+- **Adapter dialects:** checked against the canable2-fw source (\`src/slcan.c\`): CANable 2.0 accepts FD frames (\`d\` / \`D\` / \`b\` / \`B\`), the \`Y2\` / \`Y5\` data-rate presets and \`M1\` silent mode, and rejects \`L\`, \`l\` and \`Z\`. Lawicel-style adapters use \`L\` and \`Z1\` and have no FD. Classic CAN frames work on both.
 - **Transport reuse:** because it shares \`SerialContext\`, the CAN deck inherits the same connection, RX loop, and byte-stats as the Terminal and other serial tools rather than opening its own port.
 
 ---

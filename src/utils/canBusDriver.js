@@ -216,25 +216,31 @@ export function buildSlcanFrame(id, dataBytes, isExtended = false, { rtr = false
   return `${type}${idStr}${dlcChar}${hexData}\r`;
 }
 
-/** CAN FD data-phase bit rates (CANable 2.0 / candleLight-FD "Y" command). Confirm against your firmware. */
+/**
+ * CAN FD data-phase bit rates for the CANable 2.0 firmware (normaldotcom/canable2-fw,
+ * src/slcan.c): the "Y" command accepts only Y2 (2 Mbps preset) and Y5 (5 Mbps preset);
+ * any other digit is rejected. (Y1 and Y4 do not exist there.)
+ */
 export const CAN_FD_DATA_RATES = [
-  { code: 'Y1', baud: 1000000, label: '1 Mbps data phase' },
   { code: 'Y2', baud: 2000000, label: '2 Mbps data phase' },
-  { code: 'Y4', baud: 4000000, label: '4 Mbps data phase' },
   { code: 'Y5', baud: 5000000, label: '5 Mbps data phase' }
 ];
 
 /**
- * Commands (without the "\r") that open an SLCAN channel:
+ * Commands (without the "") that open an SLCAN channel:
  * C (close), S<n> (nominal bit rate), Y<n> (FD data rate), Z1 (timestamps),
  * then O (normal), L (listen-only: never transmits or ACKs) or l (loopback).
+ * Lawicel-style adapters understand L, l and Z1; the stock CANable 2.0 firmware does NOT
+ * (it rejects L, l and Z, and appends no timestamps to received frames). For it use
+ * mode 'silent', which sends its non-standard "M1" (silent mode) before O.
  */
 export function buildSlcanOpenSequence({ baudCode = 'S6', fdRateCode = null, mode = 'normal', timestamps = false } = {}) {
-  const open = { normal: 'O', listen: 'L', loopback: 'l' }[mode];
+  const open = { normal: 'O', listen: 'L', loopback: 'l', silent: 'O' }[mode];
   if (!open) throw new RangeError(`Unknown SLCAN open mode "${mode}".`);
   const seq = ['C', baudCode];
   if (fdRateCode) seq.push(fdRateCode);
   if (timestamps) seq.push('Z1');
+  if (mode === 'silent') seq.push('M1');
   seq.push(open);
   return seq;
 }

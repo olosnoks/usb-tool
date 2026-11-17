@@ -146,7 +146,7 @@ const ROM_ERRORS = {
 
 const ROM_BLOCK_SIZE = 0x400;          // FLASH_WRITE_SIZE in ROM mode
 const FLASH_SECTOR = 0x1000;
-const ERASE_MS_PER_MB = 30000;         // esptool ERASE_REGION_TIMEOUT_PER_MB
+const ERASE_MS_PER_MB = 40000;         // esptool ERASE_REGION_TIMEOUT_PER_MB (40 s per 1e6 bytes; the ROM erases up front)
 const MD5_MS_PER_MB = 8000;            // esptool MD5_TIMEOUT_PER_MB
 
 function md5Hex(bytes) {
@@ -478,7 +478,7 @@ export class EspBootloaderClient {
       const begin = this.chip === 'ESP32'
         ? u32(writeSize, blocks, bs, flashOffset)
         : u32(writeSize, blocks, bs, flashOffset, 0);
-      await this.command(ESP_CMD.FLASH_DEFL_BEGIN, begin, 0, Math.max(3000, ERASE_MS_PER_MB * Math.max(writeSize / (1024 * 1024), 0.1)));
+      await this.command(ESP_CMD.FLASH_DEFL_BEGIN, begin, 0, Math.max(3000, ERASE_MS_PER_MB * Math.max(writeSize / 1e6, 0.1)));   // ROM erases the whole region on BEGIN
       for (let seq = 0; seq < blocks; seq++) {
         if (signal?.aborted) throw new FlashAbortedError(`Flash aborted by user after ${seq} of ${blocks} blocks.`);
         const block = compressed.subarray(seq * bs, Math.min((seq + 1) * bs, compressed.length));   // last block is not padded
@@ -492,11 +492,10 @@ export class EspBootloaderClient {
         const written = Math.min(Math.round(frac * binaryData.length), binaryData.length);
         if (onProgress) onProgress(Math.min(100, Number((frac * 100).toFixed(1))), written, binaryData.length, seq + 1, blocks);
       }
-      try {
-        await this.command(ESP_CMD.FLASH_DEFL_END, u32(1), 0, 5000);   // 1 = stay in the loader
-      } catch (e) {
-        this.log(`FLASH_DEFL_END not acknowledged (${e.message}); relying on the MD5 check.`);
-      }
+      // esptool does not send FLASH_DEFL_END to the ROM when it is to stay in the loader
+      // (flag 1 = do not reboot): the ROM treats it as leaving the bootloader. The ROM has
+      // already written every block, and the MD5 check below confirms it. A reboot is a
+      // hardware reset, not a FLASH_DEFL_END(0).
     } else {
       const blocks = Math.ceil(image.length / bs);
       const eraseSize = this.isEsp8266 ? esp8266EraseSize(flashOffset, image.length) : image.length;

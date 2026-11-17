@@ -101,6 +101,10 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   // Channel options: listen-only never transmits or ACKs; FD and timestamps need adapter firmware support.
   const [listenOnly, setListenOnly] = useState(false);
   const [fdRate, setFdRate] = useState('');           // '' = classic CAN only
+  // Adapter firmware dialect. Lawicel / CANable 1.x slcan: listen-only is 'L', timestamps 'Z1', no FD.
+  // CANable 2.0 (canable2-fw): listen-only is 'M1' (silent), no 'L'/'Z1', FD via 'Y2'/'Y5'.
+  const [adapter, setAdapter] = useState('lawicel');
+  const isCanable2 = adapter === 'canable2';
   const [hwTimestamps, setHwTimestamps] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const detectRef = useRef(null);                     // { frames, errors } while auto-detecting
@@ -292,7 +296,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   // SLCAN: close, set bitrate, open (listen + transmit).
   const openChannel = async () => {
     clockRef.current = createSlcanClock();
-    const seq = buildSlcanOpenSequence({ baudCode: canBaud, fdRateCode: fdRate || null, mode: listenOnly ? 'listen' : 'normal', timestamps: hwTimestamps });
+    const seq = buildSlcanOpenSequence({ baudCode: canBaud, mode: listenOnly ? (isCanable2 ? 'silent' : 'listen') : 'normal', timestamps: hwTimestamps && !isCanable2, fdRateCode: isCanable2 ? (fdRate || null) : null });
     for (const cmd of seq) await sendString(cmd, '\r');
     return seq;
   };
@@ -323,7 +327,9 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
         detectRef.current = { frames: 0, errors: 0 };
         await sendString('C', '\r');
         await sendString(code, '\r');
-        await sendString('L', '\r');
+        // silent open in this adapter's dialect: CANable 2.0 uses M1 + O, Lawicel uses L
+        if (isCanable2) { await sendString('M1', '\r'); await sendString('O', '\r'); }
+        else await sendString('L', '\r');
         await new Promise((r) => setTimeout(r, 700));
         const res = detectRef.current;
         detectRef.current = null;
@@ -716,12 +722,20 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
             <button onClick={handleAutoDetect} disabled={detecting || !isConnected || isSniffing} className={btn} title="Listen-only sweep over 500/250/1000/125/100 kbps to find the bus bit rate (stop the sniffer first)">
               {detecting ? 'LISTENING...' : 'AUTO-DETECT'}
             </button>
-            <label className="flex items-center gap-1 text-slate-400" title="Open with L: the adapter never transmits or ACKs, so it cannot disturb the bus"><input type="checkbox" checked={listenOnly} disabled={isSniffing} onChange={(e) => setListenOnly(e.target.checked)} className="accent-emerald-500" /> listen-only</label>
-            <select value={fdRate} disabled={isSniffing} onChange={(e) => setFdRate(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-300 outline-none" title="CAN FD data-phase rate (Y command). Needs CANable 2.0 / candleLight-FD style firmware.">
-              <option value="">Classic CAN</option>
-              {CAN_FD_DATA_RATES.map((r) => <option key={r.code} value={r.code}>FD: {r.label}</option>)}
+            <select value={adapter} disabled={isSniffing} onChange={(e) => { setAdapter(e.target.value); if (e.target.value !== 'canable2') setFdRate(''); }} className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-300 outline-none" title="Adapter firmware: the two speak different SLCAN dialects">
+              <option value="lawicel">SLCAN (Lawicel / CANable 1.x)</option>
+              <option value="canable2">CANable 2.0 (FD firmware)</option>
             </select>
-            <label className="flex items-center gap-1 text-slate-400" title="Z1: the adapter appends a millisecond timestamp (16 bit, wraps at 60 s) to each received frame"><input type="checkbox" checked={hwTimestamps} disabled={isSniffing} onChange={(e) => setHwTimestamps(e.target.checked)} className="accent-emerald-500" /> HW timestamps</label>
+            <label className="flex items-center gap-1 text-slate-400" title={isCanable2 ? 'Open in silent mode (M1): the adapter never transmits or ACKs' : 'Open with L: the adapter never transmits or ACKs, so it cannot disturb the bus'}><input type="checkbox" checked={listenOnly} disabled={isSniffing} onChange={(e) => setListenOnly(e.target.checked)} className="accent-emerald-500" /> listen-only</label>
+            {isCanable2 && (
+              <select value={fdRate} disabled={isSniffing} onChange={(e) => setFdRate(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-300 outline-none" title="CAN FD data-phase rate (Y2 / Y5 in canable2-fw)">
+                <option value="">Classic CAN</option>
+                {CAN_FD_DATA_RATES.map((r) => <option key={r.code} value={r.code}>FD: {r.label}</option>)}
+              </select>
+            )}
+            {!isCanable2 && (
+              <label className="flex items-center gap-1 text-slate-400" title="Z1: the adapter appends a millisecond timestamp (16 bit, wraps at 60 s) to each received frame. Not supported by CANable 2.0 firmware."><input type="checkbox" checked={hwTimestamps} disabled={isSniffing} onChange={(e) => setHwTimestamps(e.target.checked)} className="accent-emerald-500" /> HW timestamps</label>
+            )}
             {!isSniffing ? (
               <button onClick={startSniffing} className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/50 text-xs font-bold transition-all">
                 <Play className="w-3.5 h-3.5 fill-current" /><span>START SNIFFER</span>

@@ -292,14 +292,14 @@ export class AvrIspClient {
   }
 
   /**
-   * Read the high fuse and say what a chip erase will do to the EEPROM.
+   * Read the fuses and say what a chip erase will do to the EEPROM.
    * Returns { status: 'preserved' | 'wiped' | 'unknown', text, hfuse }.
    */
   async eraseImpact() {
     if (!this.isConnected) throw new Error('Programmer not connected.');
     if (!this.chip) throw new Error('Read the signature first.');
     const f = await this.readFuses();
-    return { ...eepromAfterErase(this.chip, f.hfuse), hfuse: f.hfuse };
+    return { ...eepromAfterErase(this.chip, f), hfuse: f.hfuse };
   }
 
   /**

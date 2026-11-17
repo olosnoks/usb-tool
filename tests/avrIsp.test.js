@@ -217,7 +217,12 @@ describe('chip erase and the EEPROM', () => {
     const chip = AVR_CHIP_DATABASE[0x1e950f];
     expect(eepromAfterErase(chip, 0xd9).status).toBe('wiped');
     expect(eepromAfterErase(chip, 0xd1).status).toBe('preserved'); // bit 3 cleared = programmed
-    expect(eepromAfterErase(AVR_CHIP_DATABASE[0x1e9007], 0xff).status).toBe('unknown'); // ATtiny13A: position not listed
+    // ATtiny13A keeps EESAVE in the low fuse (bit 6); a bare high-fuse byte can't answer it
+    const t13 = AVR_CHIP_DATABASE[0x1e9007];
+    expect(eepromAfterErase(t13, 0xff).status).toBe('unknown');
+    expect(eepromAfterErase(t13, { lfuse: 0x6a, hfuse: 0xff }).status).toBe('wiped');
+    expect(eepromAfterErase(t13, { lfuse: 0x2a, hfuse: 0xff }).status).toBe('preserved');
+    expect(eepromAfterErase(chip, { lfuse: 0xff, hfuse: 0xd1 }).status).toBe('preserved');
     expect(eepromAfterErase(chip, 0xd9).text).toMatch(/wipes the EEPROM/);
   });
 
