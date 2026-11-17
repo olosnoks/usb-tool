@@ -6,6 +6,7 @@ import { setCurrentTool, record } from './utils/sessionLog';
 import TerminalDrawer from './components/layout/TerminalDrawer';
 import { WORKSPACE_PRESETS } from './components/layout/WorkspacePresets';
 import { renderTool, toolMeta } from './components/ToolRegistry';
+import useIsMobile from './hooks/useIsMobile';
 import {
   createInitialState, openWindow, closeWindow, closeAll, focusWindow, minimizeWindow, toggleMaximize,
   moveWindow, resizeWindow, tileWindows, cascadeWindows, focusedWindow, clampToViewport, saveState, zoomStep, toggleFit,
@@ -39,6 +40,11 @@ function AppContent() {
   const serial = useSerial();
   const { isConnected, connect, disconnect, clearLogs, setBaudRate, portInfo, boards } = serial;
 
+  // Phone-width sessions open tools at 70% and show the sidebar as an overlay.
+  const isMobile = useIsMobile();
+  const mobileZoomRef = useRef(isMobile ? 0.7 : 1);
+  mobileZoomRef.current = isMobile ? 0.7 : 1;
+
   // ---- window manager --------------------------------------------------------
   const viewportRef = useRef(guessViewport());
   const [viewport, setViewportState] = useState(viewportRef.current);
@@ -48,7 +54,7 @@ function AppContent() {
     // Fresh visit / hard refresh: start with an empty workspace (no tools open).
     // An explicit ?tool= or #tool= link opens that specific tool.
     let s = createInitialState();
-    if (urlTool) s = openWindow(s, urlTool, toolMeta(urlTool), vp);
+    if (urlTool) s = openWindow(s, urlTool, toolMeta(urlTool), vp, { zoom: mobileZoomRef.current });
     return s;
   });
 
@@ -79,7 +85,7 @@ function AppContent() {
     return () => clearTimeout(t);
   }, [wm]);
 
-  const open = useCallback((toolId, opts) => setWm((s) => openWindow(s, toolId, toolMeta(toolId), viewportRef.current, opts)), []);
+  const open = useCallback((toolId, opts) => setWm((s) => openWindow(s, toolId, toolMeta(toolId), viewportRef.current, { zoom: mobileZoomRef.current, ...opts })), []);
   // Start-menu launcher (the old sidebar handler): the full terminal makes the drawer redundant.
   const launchTool = useCallback((toolId, opts) => {
     open(toolId, opts);
