@@ -18,6 +18,10 @@ concurrency:
 
 jobs:
   test:
+    # Opt-in like the jobs below: without CI_BUILDS_ENABLED=true nothing in this workflow
+    # runs (a skipped job uses no runner minutes). Releases go out from a PC with
+    # scripts/release-local.py --deploy.
+    if: ${{ vars.CI_BUILDS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
