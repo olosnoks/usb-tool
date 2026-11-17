@@ -49,7 +49,13 @@ export default defineConfig({
   },
   test: {
     // The WASM toolchain checkouts (emsdk, aircrack-*) carry their own *.test.js; never ours.
-    exclude: [...configDefaults.exclude, 'emsdk/**', 'aircrack-ng/**', 'aircrack-js/**']
+    exclude: [...configDefaults.exclude, 'emsdk/**', 'aircrack-ng/**', 'aircrack-js/**'],
+    // With ~270 test files, one worker per core starves the slower component renders
+    // and they hit the 5 s default at random. Half the cores plus a 20 s ceiling keeps
+    // the full run (and release-local.py) reliable.
+    maxWorkers: '50%',
+    minWorkers: 1,
+    testTimeout: 20000
   }
 
 });
