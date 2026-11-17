@@ -1,26 +1,27 @@
 import React, { useState } from 'react';
-import { searchTools } from '../../utils/toolSearch';
+import {
+  searchTools } from '../../utils/toolSearch';
 import { 
-  Terminal, 
-  HardDrive, 
-  Sliders, 
-  Binary, 
-  Activity, 
-  Layers, 
-  ArrowLeftRight, 
-  Navigation, 
-  FileCode, 
-  Wifi, 
-  Gauge, 
-  Compass, 
-  ShieldAlert, 
-  Bot, 
-  Usb, 
-  HelpCircle, 
-  Cpu, 
-  BookOpen, 
-  Search, 
-  ChevronLeft, 
+  Terminal,
+  HardDrive,
+  Sliders,
+  Binary,
+  Activity,
+  Layers,
+  ArrowLeftRight,
+  Navigation,
+  FileCode,
+  Wifi,
+  Gauge,
+  Compass,
+  ShieldAlert,
+  Bot,
+  Usb,
+  HelpCircle,
+  Cpu,
+  BookOpen,
+  Search,
+  ChevronLeft,
   ChevronRight,
   Flame,
   Radio,
@@ -42,7 +43,16 @@ import {
   Hash,
   Radar,
   Link2,
-  ScanSearch
+  ScanSearch,
+  Ruler,
+  Bug,
+  Plane,
+  FileSearch,
+  Printer,
+  Gamepad2,
+  Music,
+  CreditCard,
+  Nfc
 } from 'lucide-react';
 
 import { windowKeyFor } from '../../utils/windowManager';
@@ -54,7 +64,12 @@ export const SIDEBAR_SECTIONS = [
     items: [
       { id: 'terminal', name: 'Terminal & Console', icon: Terminal, accent: 'cyan', desc: 'Real-time serial log & baud hunter', keywords: ['console', 'uart', 'baud', 'serial', 'com', 'monitor', 'log', 'echo', 'terminal', 'putty', 'minicom', 'picocom', 'serial monitor', 'baud rate', 'autobaud', 'baud scan', 'serial terminal', 'uart console', 'serial port', 'com port', 'tty'] },
       { id: 'flasher', name: 'Firmware Flasher', icon: HardDrive, accent: 'amber', desc: 'Multi-binary partition flashing', keywords: ['esp32', 'esp8266', 'esptool', 'bin', 'rom', 'partitions', 'flash', 'bootloader', 'ota', 'flasher', 'firmware', 'firmware flash', 'flash firmware', 'write flash', 'upload firmware', 'burn', 'uf2', 'rp2040', 'esp-idf', 'bin file', 'merge bin', 'meshtastic', 'esp flasher', 'esp web tools'] },
-      { id: 'hardware', name: 'Hardware Controls', icon: Sliders, accent: 'emerald', desc: 'Strapping timers, DTR/RTS, U-Boot', keywords: ['strapping', 'gpio0', 'reset', 'dtr', 'rts', 'uboot', 'bootloader', 'timers', 'hardware', 'boot mode', 'download mode', 'enter bootloader', 'hard reset', 'auto reset', 'gpio', 'dtr rts'] }
+      { id: 'hardware', name: 'Hardware Controls', icon: Sliders, accent: 'emerald', desc: 'Strapping timers, DTR/RTS, U-Boot', keywords: ['strapping', 'gpio0', 'reset', 'dtr', 'rts', 'uboot', 'bootloader', 'timers', 'hardware', 'boot mode', 'download mode', 'enter bootloader', 'hard reset', 'auto reset', 'gpio', 'dtr rts'] },
+      { id: 'arduino-uploader', name: "Arduino Bootloader Uploader", icon: Cpu, accent: 'cyan', desc: "Upload a sketch through an Uno, Nano, Pro Mini, Leonardo, Micro or Pro Micro bootloader; verify and read flash back", keywords: ["arduino","arduino uploader","bootloader","optiboot","caterina","stk500","avr109","uno","nano","pro mini","leonardo","micro","pro micro","upload sketch","flash arduino","read flash","1200 baud","hex upload","avrdude"] },
+      { id: 'esp-backtrace', name: "ESP Backtrace", icon: Bug, accent: 'rose', desc: "Decode ESP32/ESP8266 crash text against the firmware ELF: function names and file:line, offline", keywords: ["esp backtrace","esp32 crash","guru meditation","backtrace decoder","addr2line","exception decoder","esp exception","crash decoder","panic decoder","stack trace","backtrace","elf","file line","esp8266 exception","riscv crash","xtensa backtrace","idf monitor","abort decoder","stack dump","dwarf"] },
+      { id: 'esp-partition-editor', name: "ESP Partition & NVS Editor", icon: Layers, accent: 'amber', desc: "Offline ESP32 partition table (CSV, flash map, MD5 binary) and NVS value editor for dumps and .bin files", keywords: ["esp32","esp-idf","partition table","partitions.bin","gen_esp32part","nvs","nvs.bin","nvs editor","flash dump","flash map","wifi password","sta.pswd","esptool","offline","partition csv","md5","ota partition"] },
+      { id: 'firmware-converter', name: "Firmware Converter", icon: FileCode, accent: 'cyan', desc: "Inspect firmware (BIN, HEX, S-record, UF2, ELF) and convert, relocate, split or merge it. Offline.", keywords: ["firmware converter","firmware inspector","hex to bin","bin to hex","intel hex","srec","s-record","s19","uf2","uf2 converter","uf2 family id","elf to bin","elf","segment map","crc32","sha256","merge firmware","split firmware","relocate firmware","hex viewer","offline"] },
+      { id: 'picoboot', name: "Picoboot (RP2040/RP2350)", icon: Cpu, accent: 'cyan', desc: "Read, write and verify RP2040/RP2350 flash over PICOBOOT (WebUSB) in BOOTSEL mode; parses binary_info.", keywords: ["picoboot","rp2040","rp2350","raspberry pi pico","pico 2","bootsel","picotool","uf2","flash","webusb","reboot","binary_info","firmware","pico w","flash read","flash write"] }
     ]
   },
   {
@@ -69,7 +84,15 @@ export const SIDEBAR_SECTIONS = [
       { id: 'plotter', name: 'Oscilloscope Plotter', icon: Activity, accent: 'rose', desc: 'Multi-channel live waveforms', keywords: ['scope', 'oscilloscope', 'waveform', 'analog', 'adc', 'graph', 'telemetry', 'channels', 'plotter', 'serial plotter', 'arduino plotter', 'plot', 'chart', 'live graph', 'adc plot'] },
       { id: 'bridge', name: 'MitM Serial Bridge', icon: ArrowLeftRight, accent: 'cyan', desc: 'Dual-port pass-through sniffer', keywords: ['mitm', 'man in the middle', 'bridge', 'dual-port', 'pass-through', 'sniffer', 'uart', 'serial bridge', 'uart sniffer', 'uart tap', 'passthrough', 'pass through', 'serial proxy', 'intercept', 'two ports'] },
       { id: 'usbtmc', name: 'USBTMC Instrument', icon: Gauge, accent: 'cyan', desc: 'SCPI console, scope waveforms & screenshots, DMM logging and scripts over WebUSB', keywords: ['usbtmc', 'scpi', 'scope', 'multimeter', 'dmm', 'rigol', 'sigrok', 'visa', 'instrument', 'oscilloscope', 'siglent', 'keysight', 'tektronix', 'screenshot', 'waveform', 'multimeter logging', 'scpi console', 'lab instrument', 'test equipment'] },
-      { id: 'cyberchef', name: 'CyberChef Workbench', icon: Sparkles, accent: 'purple', desc: 'Cyber Swiss Army Knife: 200+ crypto, encoding, compression & parsing operations', keywords: ['cyberchef', 'chef', 'crypto', 'base64', 'hex', 'deobfuscate', 'magic', 'entropy', 'hash', 'recipe', 'pipeline', 'gchq', 'xor', 'rot13', 'decode', 'encode', 'encrypt', 'decrypt', 'aes', 'gzip', 'compress', 'sha3', 'hexdump', 'bake', 'data converter', 'url decode', 'deobfuscation'] }
+      { id: 'cyberchef', name: 'CyberChef Workbench', icon: Sparkles, accent: 'purple', desc: 'Cyber Swiss Army Knife: 200+ crypto, encoding, compression & parsing operations', keywords: ['cyberchef', 'chef', 'crypto', 'base64', 'hex', 'deobfuscate', 'magic', 'entropy', 'hash', 'recipe', 'pipeline', 'gchq', 'xor', 'rot13', 'decode', 'encode', 'encrypt', 'decrypt', 'aes', 'gzip', 'compress', 'sha3', 'hexdump', 'bake', 'data converter', 'url decode', 'deobfuscation'] },
+      { id: 'binary-decoder', name: "Binary Payload Decoder", icon: Binary, accent: 'indigo', desc: "Offline schema-less decoder: protobuf, CBOR, MessagePack, BSON, COBS/COBS-R/SLIP/HDLC framing, JSON encode", keywords: ["protobuf","protoc","decode_raw","protocol buffers","cbor","rfc 8949","messagepack","msgpack","bson","mongodb","cobs","cobs/r","slip","hdlc","framing","deserialize","binary decoder","payload","hex","base64","base32","serialization","json to cbor","json to msgpack","wire format"] },
+      { id: 'bit-converter', name: "Bits & Numbers", icon: Binary, accent: 'indigo', desc: "Offline number, bit-field + C macro, IEEE float, Q-format, hex data inspector and bitwise converter.", keywords: ["bits","binary","hex","hexadecimal","two's complement","bitfield","bit field","register","bit mask","c macro","endian","endianness","float","ieee 754","float16","bfloat16","fixed point","q15","q format","bitwise","rotate","shift","hex dump","data inspector","unix timestamp"] },
+      { id: 'bt-hci-log', name: "BT HCI Log", icon: Bluetooth, accent: 'indigo', desc: "Offline Bluetooth HCI log viewer: btsnoop_hci.log, pcap/pcapng; decodes HCI, L2CAP, ATT, SMP and GATT.", keywords: ["bluetooth","bt","hci","btsnoop","btsnoop_hci","hci log","snoop","ble","gatt","att","l2cap","smp","pcap","pcapng","bluetooth log","advertising","android bluetooth","bug report"] },
+      { id: 'crc-reverse', name: "CRC Reverse", icon: Hash, accent: 'amber', desc: "Calculate every RevEng CRC and common sum, recover a CRC model from sample frames, or locate a checksum's range.", keywords: ["crc","crc16","crc32","crc8","checksum","reverse crc","crc calculator","crc reverse","reveng","modbus crc","fletcher","adler32","lrc","xor checksum","frame checksum","poly","polynomial","crc catalogue","internet checksum","protocol reverse engineering"] },
+      { id: 'elf-size', name: "ELF / Map Size", icon: Ruler, accent: 'cyan', desc: "Offline firmware size analyzer: FLASH/RAM totals, symbols, objects, treemap and build-to-build compare from ELF and GNU ld maps.", keywords: ["elf","map file","map","firmware size","flash usage","ram usage","bss","size","symbols","objects","treemap","memory map","linker map","gnu ld","arm-none-eabi-size","size -A","diff","compare builds","csv","section size","mcu flash"] },
+      { id: 'firmware-analyzer', name: "Firmware Analyzer", icon: FileSearch, accent: 'amber', desc: "Binwalk-style offline firmware scan: signatures, header checks, entropy, strings, hex, carving, decompress", keywords: ["firmware","firmware analyzer","binwalk","signature scan","firmware image","uboot","uimage","squashfs","ubi","ubifs","jffs2","esp32 image","entropy","carve","extract","strings","hex viewer","gzip","decompress","trx","elf","tar","cpio","pem","intel hex"] },
+      { id: 'power-profiler', name: "Power Profiler (PPK2)", icon: Zap, accent: 'amber', desc: "Nordic PPK2 power profiler: source/ampere meter, live current chart, D0-D7 lanes, charge and energy stats, CSV export.", keywords: ["ppk2","power profiler","power profiler kit","nordic","nrf","current","current measurement","power analysis","source meter","ampere meter","energy","battery life","charge","mah","power consumption","microamp","nrf connect","current draw","csv export","power"] },
+      { id: 'usb-power-meter', name: "USB Power Meter", icon: Gauge, accent: 'amber', desc: "Live V/A/W, temperature, mAh/mWh and CSV from RuiDeng UM24C/UM25C/UM34C and FNIRSI FNB48/FNB58/C1 meters", keywords: ["usb power meter","usb tester","power meter","usb voltmeter","usb ammeter","ruideng","um24c","um25c","um34c","fnirsi","fnb58","fnb48","fnirsi c1","usb charger test","mah","mwh","power logger","watt meter","usb power logging"] }
     ]
   },
   {
@@ -87,7 +110,13 @@ export const SIDEBAR_SECTIONS = [
       // Wireless / crypto / packet security
       { id: 'hashcat-cracker', name: 'Hash Cracker', icon: Zap, accent: 'amber', desc: 'Dictionary, rule-based & mask attacks; MD5/SHA/NTLM/MySQL/salted modes; multi-hash potfile, live H/s & ETA, optional WebGPU for MD5 masks', keywords: ['hashcat', 'crack', 'hash', 'md5', 'sha', 'ntlm', 'mysql', 'salt', 'password', 'rules', 'mask', 'bruteforce', 'potfile', 'wordlist', 'password cracker', 'crack hash', 'hash cracker', 'md5 crack', 'sha1 crack', 'dictionary attack', 'rule', 'webgpu', 'gpu', 'brute force', 'mask attack', 'rockyou'] },
       { id: 'aircrack-wifi', name: 'WPA PMKID Cracker', icon: Wifi, accent: 'cyan', desc: 'Offline WPA/WPA2 PMKID dictionary attack', keywords: ['aircrack', 'wifi', 'wpa', 'pmkid', 'crack', 'aircrack-ng', 'wpa2', 'handshake', 'hashcat 22000', 'wifi password', 'crack wifi', 'wordlist', 'dictionary', 'psk', '4-way handshake', 'eapol'] },
-      { id: 'tcpdump-viewer', name: 'PCAP Viewer', icon: ShieldAlert, accent: 'rose', desc: 'Parse and filter .pcap captures in-browser', keywords: ['tcpdump', 'pcap', 'viewer', 'packet', 'pcap viewer', 'pcapng', 'wireshark', 'tshark', 'packet capture', 'capture file', 'network capture', 'packet filter', 'analyze pcap', 'open pcap'] }
+      { id: 'tcpdump-viewer', name: 'PCAP Viewer', icon: ShieldAlert, accent: 'rose', desc: 'Parse and filter .pcap captures in-browser', keywords: ['tcpdump', 'pcap', 'viewer', 'packet', 'pcap viewer', 'pcapng', 'wireshark', 'tshark', 'packet capture', 'capture file', 'network capture', 'packet filter', 'analyze pcap', 'open pcap'] },
+      { id: 'elrs-crsf', name: "ELRS / CRSF", icon: Radio, accent: 'cyan', desc: "Decode ExpressLRS/Crossfire telemetry, link stats and RC channels; ping devices and read or write parameters.", keywords: ["elrs","expresslrs","crsf","crossfire","tbs crossfire","elrs tx","tx module","rc link","link quality","lq","rssi","rc telemetry","telemetry","parameters","elrs parameters","rc channels","radio link","uart","serial","lora rc"] },
+      { id: 'ism-decoder', name: "ISM Signal Decoder", icon: Radio, accent: 'amber', desc: "Offline 433/868/915 MHz decoder for IQ files (.cu8/.cs8/.cs16/.cf32): pulse analyzer and sensor decodes.", keywords: ["433","868","915","ism","rtl_433","rtl-sdr","iq","cu8","cs8","cs16","cf32","ook","fsk","pulse analyzer","weather sensor","acurite","ambient weather","fine offset","ev1527","pt2262","manchester","pwm","remote decoder"] },
+      { id: 'meshtastic', name: "Meshtastic", icon: Radio, accent: 'cyan', desc: "Meshtastic client over serial: sync node DB, nodes map, channels, text messages, telemetry, read-only config", keywords: ["meshtastic","lora","mesh","mesh radio","meshtastic serial","meshtastic client","lora mesh","node map","mesh nodes","mesh chat","meshtastic messages","lora messages","protobuf","long fast","channel psk","node database","mesh telemetry","heltec","t-beam","rak wireless"] },
+      { id: 'rnode-lora', name: "RNode & LoRa", icon: Radio, accent: 'cyan', desc: "RNode (Reticulum) serial control: detect, EEPROM, radio settings, RSSI/SNR, and a LoRa airtime calculator.", keywords: ["rnode","reticulum","lora","kiss","rnodeconf","lora calculator","time on air","time-on-air","airtime","spreading factor","sf7","duty cycle","eu868","rssi","snr","link budget","sensitivity","lora modem","rns","meshchat"] },
+      { id: 'rtl-sdr', name: "RTL-SDR Receiver", icon: Radio, accent: 'cyan', desc: "RTL-SDR (RTL2832U + R820T) over WebUSB: spectrum, waterfall, WFM/NFM/AM audio, ADS-B 1090, .cu8 recording", keywords: ["rtl-sdr","rtlsdr","rtl2832u","r820t","r828d","sdr","software defined radio","dongle","spectrum","waterfall","fm radio","am radio","adsb","ads-b","1090","cu8","iq recording","zadig","winusb"] },
+      { id: 'web-nfc', name: "Web NFC Reader / Writer", icon: Nfc, accent: 'emerald', desc: "Phone NFC (NDEF) read, write and lock via Web NFC, plus an offline NDEF parser and builder", keywords: ["nfc","web nfc","ndef","ndefreader","ntag","ntag213","ntag215","ntag216","phone nfc","android nfc","nfc writer","nfc reader","wifi nfc","wi-fi tag","wsc","vcard nfc","ndef parser","ndef builder","type 2 tag","nfc tag","smart poster","nfc lock"] }
     ]
   },
   {
@@ -108,6 +137,7 @@ export const SIDEBAR_SECTIONS = [
       { id: 'ip-calculator', name: 'IP / CIDR Calculator', icon: Calculator, accent: 'purple', desc: 'IPv4 & IPv6 subnet math: network, broadcast, mask, host range & counts (fully offline)', keywords: ['ip', 'cidr', 'subnet', 'netmask', 'wildcard', 'ipv4', 'ipv6', 'calculator', 'network', 'broadcast', 'range', 'ipcalc', 'subnet calculator', 'wildcard mask', 'network address', 'usable hosts', 'subnetting', 'supernet', 'ip range'] },
       { id: 'hash-calculator', name: 'Hash & HMAC Calculator', icon: Hash, accent: 'amber', desc: 'MD5 / SHA-1 / SHA-256/384/512 + HMAC for text and files via Web Crypto (fully offline)', keywords: ['hash', 'md5', 'sha', 'sha256', 'sha1', 'sha512', 'hmac', 'checksum', 'digest', 'fingerprint', 'file hash', 'md5sum', 'sha256sum', 'sha1sum', 'sha384', 'file checksum', 'verify checksum', 'hash file', 'hash text', 'web crypto', 'integrity'] },
       { id: 'osint-clients', name: 'OSINT API Clients', icon: Radar, accent: 'cyan', desc: 'Shodan, urlscan.io & HackerTarget clients — bring your own API key (via proxy)', keywords: ['osint', 'shodan', 'urlscan', 'hackertarget', 'recon', 'intelligence', 'api', 'host lookup', 'reverse ip', 'query builder', 'facets', 'exploits', 'urlscan.io', 'search engine for devices', 'internet scan', 'exposed devices', 'banner', 'shodan query', 'shodan dork', 'dork', 'port search', 'vulns', 'cve', 'exploit search', 'reverse dns', 'iot search'] },
+      { id: 'mqtt-client', name: "MQTT Client", icon: Radio, accent: 'emerald', desc: "MQTT 3.1.1 client over WebSocket (ws/wss): subscribe, topic tree, payload views, publish at QoS 0-2.", keywords: ["mqtt","mqtt client","mqtt over websocket","websocket mqtt","wss","mosquitto","hivemq","broker","pubsub","publish subscribe","topic tree","home assistant mqtt","tasmota","zigbee2mqtt","iot","qos","retained message","last will","mqtt explorer"] }
     ]
   },
   {
@@ -118,7 +148,9 @@ export const SIDEBAR_SECTIONS = [
       { id: 'programmers', name: 'Hardware Programmers', icon: Cpu, accent: 'cyan', desc: 'CH341A SPI flash, CMSIS-DAP debugger (RTT, SWO, flash), JTAG / SVF and AVR ISP', keywords: ['programmers', 'ch341a', 'cmsis-dap', 'cmsis', 'dap', 'swd', 'rtt', 'swo', 'jtag', 'svf', 'cpld', 'avr', 'isp', 'atmega', 'spi flash', 'bios', 'ch341a programmer', 'jtag-programmer', 'avr-isp', 'flashrom', 'bios chip', 'bios flash', '25xx', '24cxx', 'eeprom', 'soic8', 'daplink', 'usbasp', 'fuses', 'lock bits', 'stm32', 'nrf52', 'rp2040', 'debugger', 'read flash', 'dump firmware', 'firmware dump', 'write flash', 'chip programmer', 'cortex-m', 'idcode'] },
       { id: 'usb-pd', name: 'USB-PD Trigger (STUSB4500)', icon: Zap, accent: 'amber', desc: 'STUSB4500 sink: contract readout, voltage requests and verified NVM (power-up PDOs)', keywords: ['usb-pd', 'power delivery', 'pd', 'type-c', 'stusb4500', 'pdo', 'voltage trigger', '9v', '12v', '15v', '20v', 'e-marker', 'usb pd', 'usb-c', 'type c', 'pd sink', 'pps', 'trigger board', 'usb c power', 'fixed pdo', 'contract', 'nvm', 'emarker'] },
       { id: 'dfu', name: 'WebUSB DFU Flasher', icon: Download, accent: 'cyan', desc: 'USB DFU 1.1 & ST DfuSe firmware download: STM32, nRF & more', keywords: ['dfu', 'dfuse', 'stm32', 'bootloader', 'flash', 'firmware update', 'gd32', 'arm', 'dfu-util', 'dfu mode', 'st dfuse', 'stm32 bootloader', 'nrf dfu', 'flash stm32', 'dfu flasher', 'bootloader mode', 'dfu 1.1', 'upload bin', 'download bin', 'dfu file'] },
-      { id: 'android', name: 'Android (ADB & Fastboot)', icon: Smartphone, accent: 'emerald', desc: 'One Android tool over WebUSB: ADB (device info, shell, files, apps, logcat, screen, wireless) and Fastboot (unlock, sparse flashing, A/B slots, factory zips, reboot)', keywords: ['android', 'adb', 'fastboot', 'bootloader', 'unlock', 'partitions', 'sparse', 'recovery', 'reboot', 'shell', 'logcat', 'screen mirror', 'tap', 'file manager', 'wireless adb', 'apk', 'android debug bridge', 'platform-tools', 'adb shell', 'adb push', 'adb pull', 'adb install', 'install apk', 'sideload', 'screencap', 'bootloader unlock', 'oem unlock', 'flash partition', 'a/b slots', 'factory image', 'factory zip', 'sparse image', 'reboot bootloader', 'reboot recovery', 'adb connect', 'device info', 'package list', 'getprop', 'dumpsys', 'fastboot flash'] }
+      { id: 'android', name: 'Android (ADB & Fastboot)', icon: Smartphone, accent: 'emerald', desc: 'One Android tool over WebUSB: ADB (device info, shell, files, apps, logcat, screen, wireless) and Fastboot (unlock, sparse flashing, A/B slots, factory zips, reboot)', keywords: ['android', 'adb', 'fastboot', 'bootloader', 'unlock', 'partitions', 'sparse', 'recovery', 'reboot', 'shell', 'logcat', 'screen mirror', 'tap', 'file manager', 'wireless adb', 'apk', 'android debug bridge', 'platform-tools', 'adb shell', 'adb push', 'adb pull', 'adb install', 'install apk', 'sideload', 'screencap', 'bootloader unlock', 'oem unlock', 'flash partition', 'a/b slots', 'factory image', 'factory zip', 'sparse image', 'reboot bootloader', 'reboot recovery', 'adb connect', 'device info', 'package list', 'getprop', 'dumpsys', 'fastboot flash'] },
+      { id: 'fpga-programmer', name: "FPGA Programmer (iCE40)", icon: Cpu, accent: 'cyan', desc: "Program Lattice iCE40 FPGAs (iCEstick, iCEBreaker, UPduino, Alchitry Cu) over FTDI MPSSE via WebUSB", keywords: ["fpga","ice40","icestick","icebreaker","upduino","alchitry","alchitry cu","ftdi","mpsse","ft2232h","ft232h","iceprog","bitstream","spi flash","sram","cdone","icepack","program fpga","flash fpga","lattice"] },
+      { id: 'smartcard', name: "Smart Card Toolkit", icon: CreditCard, accent: 'indigo', desc: "Offline ATR, APDU, trace and TLV analysis for smart card data captured elsewhere. Cannot drive a reader.", keywords: ["smart card","smartcard","atr","apdu","iso 7816","7816","tlv","ber-tlv","emv","piv","pcsc","pcsc-tools","status word","sw1 sw2","trace","globalplatform","openpgp","select aid","read record","contactless"] }
     ]
   },
   {
@@ -135,7 +167,13 @@ export const SIDEBAR_SECTIONS = [
       { id: 'hid', name: 'HID Inspector', icon: Keyboard, accent: 'purple', desc: 'Decode live reports, report rate, record/playback, output & feature reports (WebHID)', keywords: ['hid', 'webhid', 'reports', 'gamepad', 'keyboard', 'mouse', 'input reports', 'hid report', 'report descriptor', 'hid descriptor', 'report rate', 'polling rate', 'joystick', 'output report', 'feature report', 'record playback', 'macro pad', 'controller test', 'mouse polling rate', 'hid usage', 'hid inspector'] },
       { id: 'mass-storage', name: 'Mass Storage Inspector', icon: HardDrive, accent: 'amber', desc: 'Read-only: partitions, FAT/exFAT browsing, deleted-file recovery, imaging with SHA-256', keywords: ['mass storage', 'usb drive', 'flash drive', 'fat32', 'exfat', 'forensics', 'carving', 'mbr', 'scsi', 'msc', 'bot', 'thumb drive', 'pen drive', 'usb stick', 'fat16', 'gpt', 'partition table', 'file recovery', 'undelete', 'deleted files', 'data recovery', 'disk image', 'imaging', 'file carving', 'sha-256', 'read only', 'bulk only', 'disk dump'] },
       { id: 'ptp', name: 'PTP / MTP Camera', icon: Camera, accent: 'purple', desc: 'Storage, thumbnails, bulk download, delete and remote capture over WebUSB', keywords: ['ptp', 'mtp', 'camera', 'dslr', 'photos', 'canon', 'nikon', 'sony', 'tether', 'mirrorless', 'tethering', 'remote capture', 'remote shutter', 'thumbnails', 'download photos', 'android file transfer', 'phone files', 'media transfer', 'picture transfer'] },
-      { id: 'fido2', name: 'FIDO2 Security Key', icon: KeyRound, accent: 'emerald', desc: 'Read a security key: versions, AAGUID, options (WebHID, read-only)', keywords: ['fido2', 'webauthn', 'u2f', 'security key', 'yubikey', 'ctap2', 'aaguid', 'fido', 'ctap', 'passkey', 'authenticator', 'hardware key', '2fa', 'mfa', 'getinfo', 'clientpin', 'key info'] }
+      { id: 'fido2', name: 'FIDO2 Security Key', icon: KeyRound, accent: 'emerald', desc: 'Read a security key: versions, AAGUID, options (WebHID, read-only)', keywords: ['fido2', 'webauthn', 'u2f', 'security key', 'yubikey', 'ctap2', 'aaguid', 'fido', 'ctap', 'passkey', 'authenticator', 'hardware key', '2fa', 'mfa', 'getinfo', 'clientpin', 'key info'] },
+      { id: 'at-modem', name: "AT Modem", icon: Radio, accent: 'emerald', desc: "AT console for SIMCom, Quectel and u-blox cellular modules: identify, signal, registration, APN, SMS, GNSS, raw console.", keywords: ["at modem","at commands","at console","cellular","modem","sim7600","sim800","simcom","quectel","ec25","bg96","u-blox","sara","lte","rssi","csq","rsrp","sms","apn","cgdcont","gnss","gps modem","imei","sim card"] },
+      { id: 'fc-configurator', name: "Flight Controller", icon: Plane, accent: 'cyan', desc: "Betaflight/INAV flight controller over MSP at 115200: identify, status, live telemetry, read-only motors, CLI with diff/dump.", keywords: ["flight controller","fc configurator","betaflight","inav","msp","multiwii","drone","quadcopter","fc","flight controller telemetry","attitude","imu","rc channels","cli","diff all","dump","betaflight cli","inav cli","fpv","flight stack"] },
+      { id: 'gcode-sender', name: "G-code Sender", icon: Printer, accent: 'amber', desc: "Stream G-code to Marlin 3D printers or GRBL 1.1 CNC: jog, home, temps, status, file streaming.", keywords: ["gcode","g-code","gcode sender","marlin","grbl","3d printer","3d printing","cnc","cnc sender","printer","stream gcode","jog","homing","hotend","bed temperature","feed hold","ngc","serial printer"] },
+      { id: 'input-tester', name: "Gamepad & Mouse Tester", icon: Gamepad2, accent: 'emerald', desc: "Test gamepad sticks, drift, circularity, triggers, rumble; mouse rate, clicks, chatter, wheel and DPI.", keywords: ["gamepad","controller","joystick","stick drift","circularity","gamepad tester","input tester","mouse tester","polling rate","mouse dpi","dpi test","double click","chatter","scroll wheel","dualsense","dualshock","ds4","webhid","rumble","vibration"] },
+      { id: 'keyboard-tester', name: "Keyboard Tester & VIA", icon: Keyboard, accent: 'cyan', desc: "Key event tester (rollover, chatter, event log) plus VIA keymap read/write and live matrix test over WebHID", keywords: ["keyboard","keyboard tester","key tester","rollover","nkro","6kro","chatter","bounce","key events","keycode","via","qmk","keymap","vial","webhid","key matrix","switch matrix","layer","mod-tap","layer-tap"] },
+      { id: 'midi-monitor', name: "MIDI Monitor", icon: Music, accent: 'rose', desc: "Web MIDI monitor and decoder, note/CC/SysEx sender, .syx dump library and loopback latency test", keywords: ["midi","web midi","midi monitor","sysex","syx","midi dump","sysex librarian","midi sender","midi decoder","rpn","nrpn","midi clock","bpm","mtc","timecode","identity request","midi latency","midi loopback","manufacturer id","pitch bend","control change","synth tester"] }
     ]
   },
   {
@@ -147,7 +185,9 @@ export const SIDEBAR_SECTIONS = [
       { id: 'setup', name: 'Linux Setup & Drivers', icon: HelpCircle, accent: 'purple', desc: 'udev rules & USB-UART drivers', keywords: ['setup', 'drivers', 'udev', 'linux', 'zadig', 'winusb', 'ch340', 'cp2102', 'linux setup', 'udev rules', 'permission denied', 'dialout', 'driver install', 'libusb', 'ch341', 'cp210x', 'ftdi', 'pl2303', 'device not found', 'cannot open port', 'troubleshooting', 'windows driver', 'permissions', 'usb permission', 'plugdev'] },
       { id: 'esp-dump', name: 'Silicon Memory Dump', icon: Cpu, accent: 'amber', desc: 'Direct eFuse and flash reader', keywords: ['esp-dump', 'efuse', 'silicon', 'flash dump', 'rom', 'mac address', 'efuses', 'read flash', 'firmware dump', 'dump firmware', 'backup firmware', 'chip id', 'chip info', 'flash id', 'esp32 dump', 'read mac', 'secure boot', 'flash encryption', 'memory dump', 'nvs', 'partition table', 'spiffs', 'littlefs'] },
       { id: 'pinouts-modal', name: 'Pinouts Reference', icon: BookOpen, isModal: true, accent: 'cyan', desc: 'ESP32 & USB wiring diagrams', keywords: ['pinouts', 'wiring', 'diagrams', 'esp32', 'level shift', 'pinout', 'pin diagram', 'esp32 pinout', 'strapping pins', 'level shifter', '5v', '3.3v', 'uart wiring', 'gpio map'] },
-      { id: 'intel-modal', name: 'Chip Intelligence', icon: Cpu, isModal: true, accent: 'cyan', desc: 'VID/PID device identification', keywords: ['chip', 'intel', 'vid', 'pid', 'lookup', 'usb id', 'chip intelligence', 'vid pid lookup', 'usb id lookup', 'usb ids', 'vendor lookup', 'device identification', 'identify chip', 'usb vendor', 'usb database'] }
+      { id: 'intel-modal', name: 'Chip Intelligence', icon: Cpu, isModal: true, accent: 'cyan', desc: 'VID/PID device identification', keywords: ['chip', 'intel', 'vid', 'pid', 'lookup', 'usb id', 'chip intelligence', 'vid pid lookup', 'usb id lookup', 'usb ids', 'vendor lookup', 'device identification', 'identify chip', 'usb vendor', 'usb database'] },
+      { id: 'electronics-calc', name: "Electronics Calc", icon: Calculator, accent: 'amber', desc: "Offline calculators: UART baud error, I2C pull-ups, resistors and E-series, RC/RLC, battery life, PCB trace width, ADC LSB.", keywords: ["electronics","calculator","uart","baud rate","baud error","ubrr","stm32 brr","esp32 baud","i2c pull-up","pull up resistor","resistor","voltage divider","led resistor","colour code","color code","e24","e96","rc time constant","lc resonance","rlc","battery life","ipc-2221","trace width","ohms law","adc lsb","adc resolution"] },
+      { id: 'i2c-address-ref', name: "I2C Address Reference", icon: Cpu, accent: 'cyan', desc: "Offline I2C address map, ~190 common parts with ID registers, scan-output decoder, 7/8-bit converter, conflict checker", keywords: ["i2c","i2c address","i2c addresses","i2cdetect","i2c scan","scan result","address map","7-bit","8-bit","address conflict","bme280","mpu6050","ssd1306","oled address","who am i","device id","i2c reference","address lookup","bus address","adafruit i2c"] }
     ]
   }
 ];

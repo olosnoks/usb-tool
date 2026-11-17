@@ -46,6 +46,10 @@ Grouped as in the Start menu. Descriptions are taken from the app's tool registr
 | Modbus RTU & RS-485 | Industrial holding registers and inverter telemetry |
 | MicroPython Files | On-chip filesystem explorer |
 | Improv Wi-Fi | Standard serial Wi-Fi provisioner |
+| AT Modem | AT console for SIMCom, Quectel and u-blox cellular modules: identify, signal, registration, APN, SMS, GNSS, raw console. |
+| G-code Sender | Stream G-code to Marlin 3D printers or GRBL 1.1 CNC: jog, home, temps, status, file streaming. |
+| Flight Controller | Betaflight/INAV flight controller over MSP at 115200: identify, status, live telemetry, read-only motors, CLI with diff/dump. |
+| ELRS / CRSF | Decode ExpressLRS/Crossfire telemetry, link stats and RC channels; ping devices and read or write parameters. |
 
 ### Flash & Program
 
@@ -55,6 +59,14 @@ Grouped as in the Start menu. Descriptions are taken from the app's tool registr
 | WebUSB DFU Flasher | USB DFU 1.1 and ST DfuSe firmware download: STM32, nRF and others |
 | Hardware Programmers | CH341A SPI flash, CMSIS-DAP debugger (RTT, SWO, flash), JTAG / SVF and AVR ISP |
 | Silicon Memory Dump | Direct eFuse and flash reader |
+| Arduino Bootloader Uploader | Upload a sketch through an Uno, Nano, Pro Mini, Leonardo, Micro or Pro Micro bootloader; verify and read flash back |
+| Picoboot (RP2040/RP2350) | Read, write and verify RP2040/RP2350 flash over PICOBOOT (WebUSB) in BOOTSEL mode; parses binary_info. |
+| FPGA Programmer (iCE40) | Program Lattice iCE40 FPGAs (iCEstick, iCEBreaker, UPduino, Alchitry Cu) over FTDI MPSSE via WebUSB |
+| Firmware Converter | Inspect firmware (BIN, HEX, S-record, UF2, ELF) and convert, relocate, split or merge it. Offline. |
+| Firmware Analyzer | Binwalk-style offline firmware scan: signatures, header checks, entropy, strings, hex, carving, decompress |
+| ESP Partition & NVS Editor | Offline ESP32 partition table (CSV, flash map, MD5 binary) and NVS value editor for dumps and .bin files |
+| ELF / Map Size | Offline firmware size analyzer: FLASH/RAM totals, symbols, objects, treemap and build-to-build compare from ELF and GNU ld maps. |
+| ESP Backtrace | Decode ESP32/ESP8266 crash text against the firmware ELF: function names and file:line, offline |
 
 ### USB Devices
 
@@ -70,6 +82,10 @@ Grouped as in the Start menu. Descriptions are taken from the app's tool registr
 | PTP / MTP Camera | Storage, thumbnails, bulk download, delete and remote capture over WebUSB |
 | FIDO2 Security Key | Read a security key: versions, AAGUID, options (WebHID, read-only) |
 | BadUSB & Payload Studio | DuckyScript keystroke compiler, syntax validator and live simulator |
+| Smart Card Toolkit | Offline ATR, APDU, trace and TLV analysis for smart card data captured elsewhere. Cannot drive a reader. |
+| Keyboard Tester & VIA | Key event tester (rollover, chatter, event log) plus VIA keymap read/write and live matrix test over WebHID |
+| Gamepad & Mouse Tester | Test gamepad sticks, drift, circularity, triggers, rumble; mouse rate, clicks, chatter, wheel and DPI. |
+| MIDI Monitor | Web MIDI monitor and decoder, note/CC/SysEx sender, .syx dump library and loopback latency test |
 
 ### Buses & Instruments
 
@@ -79,6 +95,8 @@ Grouped as in the Start menu. Descriptions are taken from the app's tool registr
 | I2C & SPI Bus Explorer | I2C scan, registers, live sensor readouts, OLED test and SPI flash dumps via Bus Pirate |
 | CAN Bus & OBD-II Scanner | Sniffer with DBC decoding, replay, OBD-II and UDS diagnostics |
 | USBTMC Instrument | SCPI console, scope waveforms and screenshots, DMM logging and scripts over WebUSB |
+| Power Profiler (PPK2) | Nordic PPK2 power profiler: source/ampere meter, live current chart, D0-D7 lanes, charge and energy stats, CSV export. |
+| USB Power Meter | Live V/A/W, temperature, mAh/mWh and CSV from RuiDeng UM24C/UM25C/UM34C and FNIRSI FNB48/FNB58/C1 meters |
 
 ### Radio & Wireless
 
@@ -93,6 +111,11 @@ Grouped as in the Start menu. Descriptions are taken from the app's tool registr
 | Proxmark3 / PM5 Suite | 13.56 MHz and 125 kHz RFID cloner, raw NG framing, WebFlash |
 | Flipper Zero Suite | qFlipper companion: 128x64 LCD, BadUSB, Sub-GHz, NFC and SD |
 | Bluetooth LE Explorer | Web Bluetooth GATT client: services, notify, typed writes, Nordic DFU updates |
+| RTL-SDR Receiver | RTL-SDR (RTL2832U + R820T) over WebUSB: spectrum, waterfall, WFM/NFM/AM audio, ADS-B 1090, .cu8 recording |
+| ISM Signal Decoder | Offline 433/868/915 MHz decoder for IQ files (.cu8/.cs8/.cs16/.cf32): pulse analyzer and sensor decodes. |
+| Web NFC Reader / Writer | Phone NFC (NDEF) read, write and lock via Web NFC, plus an offline NDEF parser and builder |
+| Meshtastic | Meshtastic client over serial: sync node DB, nodes map, channels, text messages, telemetry, read-only config |
+| RNode & LoRa | RNode (Reticulum) serial control: detect, EEPROM, radio settings, RSSI/SNR, and a LoRa airtime calculator. |
 
 ### Network & Web
 
@@ -108,6 +131,8 @@ Grouped as in the Start menu. Descriptions are taken from the app's tool registr
 | IP / CIDR Calculator | IPv4 and IPv6 subnet math, offline |
 | Packet & Protocol Lab | Wi-Fi 802.11, PCAP, hex stream and packet framer |
 | PCAP Viewer | Parse and filter `.pcap` captures in the browser |
+| MQTT Client | MQTT 3.1.1 client over WebSocket (ws/wss): subscribe, topic tree, payload views, publish at QoS 0-2. |
+| BT HCI Log | Offline Bluetooth HCI log viewer: btsnoop_hci.log, pcap/pcapng; decodes HCI, L2CAP, ATT, SMP and GATT. |
 
 ### Crypto & Data
 
@@ -121,6 +146,9 @@ Grouped as in the Start menu. Descriptions are taken from the app's tool registr
 | CyberChef Workbench | 200+ crypto, encoding, compression and parsing operations |
 | Regex Tester | Live match highlighting, capture groups and replace preview, offline |
 | DB Browser (SQLite) | SQLite studio (browse, edit, query, import/export, combine) plus DB/REST endpoints (PostgREST, CouchDB, Elasticsearch, Datasette) |
+| Binary Payload Decoder | Offline schema-less decoder: protobuf, CBOR, MessagePack, BSON, COBS/COBS-R/SLIP/HDLC framing, JSON encode |
+| Bits & Numbers | Offline number, bit-field + C macro, IEEE float, Q-format, hex data inspector and bitwise converter. |
+| CRC Reverse | Calculate every RevEng CRC and common sum, recover a CRC model from sample frames, or locate a checksum's range. |
 
 ### Reference & Setup
 
@@ -130,6 +158,8 @@ Grouped as in the Start menu. Descriptions are taken from the app's tool registr
 | Pinouts Reference | ESP32 and USB wiring diagrams |
 | Knowledge Base Wiki | Standalone documentation and firmware manual |
 | Session Log & Report | Devices, actions and errors from the current session; export as Markdown or JSON |
+| Electronics Calc | Offline calculators: UART baud error, I2C pull-ups, resistors and E-series, RC/RLC, battery life, PCB trace width, ADC LSB. |
+| I2C Address Reference | Offline I2C address map, ~190 common parts with ID registers, scan-output decoder, 7/8-bit converter, conflict checker |
 
 ## Browser requirements
 

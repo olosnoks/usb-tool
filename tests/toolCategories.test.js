@@ -48,7 +48,7 @@ describe('toolCategories', () => {
 
   it('findCategoryPath resolves tools', () => {
     expect(findCategoryPath('terminal')).toEqual(['serial-console', 'console-control']);
-    expect(findCategoryPath('flasher')).toEqual(['flash-program']);
+    expect(findCategoryPath('flasher')).toEqual(['flash-program', 'flash-upload']);
     expect(findCategoryPath('nope')).toBeNull();
     for (const id of sidebarIds) expect(findCategoryPath(id)).not.toBeNull();
   });
