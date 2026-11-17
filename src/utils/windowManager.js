@@ -120,9 +120,12 @@ export function openWindow(state, toolId, meta = {}, viewport, opts = {}) {
   const id = instance === 1 ? baseId : `${baseId}#${instance}`;
   const { z, nextZ } = bump(state);
   const geo = clampToViewport({ ...defaultGeometry(viewport, state.windows.length) }, viewport);
+  // Phone-sized sessions open tools at 70% so the whole tool fits the screen;
+  // callers pass opts.zoom for that. Desktop keeps the default 100%.
+  const initialZoom = Number.isFinite(opts.zoom) ? clamp(opts.zoom, ZOOM_MIN, ZOOM_MAX) : 1;
   const win = {
     id, toolId, baseId, instance, title: meta.title || toolId, accent: meta.accent || 'cyan',
-    ...geo, z, minimized: false, maximized: false, restore: null, openedAt: Date.now(), zoom: 1, fit: false
+    ...geo, z, minimized: false, maximized: false, restore: null, openedAt: Date.now(), zoom: initialZoom, fit: false
   };
   return { ...state, nextZ, focusedId: id, windows: [...state.windows, win] };
 }
@@ -131,7 +134,7 @@ export function openWindow(state, toolId, meta = {}, viewport, opts = {}) {
 export function duplicateWindow(state, id, viewport) {
   const w = state.windows.find((x) => x.id === id);
   if (!w) return state;
-  return openWindow(state, w.toolId, { title: w.title, accent: w.accent }, viewport, { forceNew: true });
+  return openWindow(state, w.toolId, { title: w.title, accent: w.accent }, viewport, { forceNew: true, zoom: w.zoom });
 }
 
 export function closeWindow(state, id) {

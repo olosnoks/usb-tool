@@ -153,6 +153,7 @@ export const SIDEBAR_SECTIONS = [
 ];
 
 export default function Sidebar({
+  isMobile = false,
   activeTool,
   openTools = [],          // window ids currently open on the desktop
   onSelectTool,
@@ -169,9 +170,7 @@ export default function Sidebar({
         ? (activeTool ? `./wiki/?tool=${activeTool}` : './wiki/?article=workspace')
         : item.href;
       window.open(targetUrl, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    if (item.id === 'pinouts-modal') {
+    } else if (item.id === 'pinouts-modal') {
       onOpenPinouts?.();
     } else if (item.id === 'intel-modal') {
       onOpenHardwareIntel?.();
@@ -180,6 +179,9 @@ export default function Sidebar({
       // focusing the one that's already open.
       onSelectTool(item.id, (ev && (ev.altKey || ev.ctrlKey || ev.metaKey)) ? { forceNew: true } : undefined);
     }
+    // On phones the sidebar is an overlay drawer; close it after a pick so the
+    // tool's window isn't hidden behind it.
+    if (isMobile) onToggleCollapse?.(true);
   };
 
   const getAccentStyles = (item, isActive) => {
@@ -202,11 +204,25 @@ export default function Sidebar({
     }
   };
 
+  // On phones the sidebar floats over the workspace as a slide-in drawer, so a
+  // tool window gets the full screen width underneath. On larger screens it
+  // stays an in-flow rail that collapses to an icon strip.
+  const layoutCls = isMobile
+    ? `absolute inset-y-0 left-0 w-72 max-w-[85vw] shadow-2xl shadow-black/70 ${isCollapsed ? '-translate-x-full' : 'translate-x-0'}`
+    : `relative shrink-0 ${isCollapsed ? 'w-14 sm:w-16' : 'w-60 lg:w-64'}`;
+
   return (
+    <>
+    {/* Dim/backdrop behind the open drawer on mobile — tap to close */}
+    {isMobile && !isCollapsed && (
+      <div
+        onClick={() => onToggleCollapse?.(true)}
+        className="absolute inset-0 z-[9998] bg-black/60 backdrop-blur-sm"
+        aria-hidden="true"
+      />
+    )}
     <aside
-      className={`border-r border-cyber-border bg-[#030712] flex flex-col shrink-0 transition-all duration-200 z-30 font-mono select-none ${
-        isCollapsed ? 'w-14 sm:w-16' : 'w-60 lg:w-64'
-      }`}
+      className={`border-r border-cyber-border bg-[#030712] flex flex-col transition-all duration-200 ${isMobile ? 'z-[9999]' : 'z-30'} font-mono select-none ${layoutCls}`}
     >
       {/* Sidebar Header & Search */}
       <div className="p-2.5 border-b border-slate-900 flex items-center justify-between gap-2">
@@ -236,7 +252,7 @@ export default function Sidebar({
         <button
           onClick={() => onToggleCollapse(!isCollapsed)}
           title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 shrink-0 hidden sm:block"
+          className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 shrink-0"
         >
           {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
         </button>
@@ -317,5 +333,6 @@ export default function Sidebar({
         </button>
       </div>
     </aside>
+    </>
   );
 }

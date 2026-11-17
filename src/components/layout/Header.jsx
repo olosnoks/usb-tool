@@ -15,6 +15,8 @@ import {
   Download,
   Smartphone,
   PanelBottom,
+  PanelLeftOpen,
+  PanelLeftClose,
   Bluetooth
 } from 'lucide-react';
 import { useSerial } from '../../context/SerialContext';
@@ -26,6 +28,9 @@ export default function Header({
   activeTool = 'flasher',
   activePreset,
   onSelectPreset,
+  isMobile = false,
+  isSidebarCollapsed = false,
+  onToggleSidebar,
   isDrawerOpen,
   onToggleDrawer,
   onOpenCommandPalette,
@@ -65,6 +70,22 @@ export default function Header({
       <div className="w-full flex flex-wrap items-center justify-between gap-2.5">
         {/* Brand & System Title */}
         <div className="flex items-center gap-2.5">
+          {/* Mobile-only sidebar toggle — always visible so the tool list is
+              reachable on a phone where the sidebar lives off-canvas. */}
+          {isMobile && onToggleSidebar && (
+            <button
+              onClick={() => onToggleSidebar(!isSidebarCollapsed)}
+              title={isSidebarCollapsed ? 'Open tool sidebar' : 'Close tool sidebar'}
+              aria-label={isSidebarCollapsed ? 'Open tool sidebar' : 'Close tool sidebar'}
+              className={`p-2 rounded-lg border text-xs transition-all shrink-0 ${
+                isSidebarCollapsed
+                  ? 'bg-slate-900 text-cyan-300 border-slate-700 hover:bg-slate-800'
+                  : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-cyan-glow'
+              }`}
+            >
+              {isSidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            </button>
+          )}
           <div className="relative flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-cyan-500/20 to-amber-500/10 border border-cyan-500/40 shadow-cyan-glow flex-shrink-0">
             <Usb className="w-4 h-4 text-cyan-400" />
             <span className="absolute -bottom-1 -right-1 flex h-2 w-2">
