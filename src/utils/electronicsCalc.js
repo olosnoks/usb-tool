@@ -599,3 +599,118 @@ export function dividerAdcVoltage({ vin, r1, r2 }) {
 export function dividerFullScaleInput({ vref, r1, r2 }) {
   return vref * (r1 + r2) / r2;
 }
+
+// ---------------------------------------------------------------------------
+// 555 timer
+// ---------------------------------------------------------------------------
+
+const LN2 = Math.LN2;
+
+/** Classic NE555 astable: f = 1 / (ln2 (R1 + 2 R2) C). Duty is always above 50 %. */
+export function timer555Astable({ r1, r2, c }) {
+  if (!(r1 > 0 && r2 > 0 && c > 0)) throw new Error('R1, R2 and C must be positive.');
+  const tHigh = LN2 * (r1 + r2) * c;
+  const tLow = LN2 * r2 * c;
+  const period = tHigh + tLow;
+  return { tHigh, tLow, period, freq: 1 / period, dutyPct: (tHigh / period) * 100 };
+}
+
+/** Monostable pulse width: t = ln(3) R C (about 1.1 RC). */
+export function timer555Monostable({ r, c }) {
+  if (!(r > 0 && c > 0)) throw new Error('R and C must be positive.');
+  return { width: Math.log(3) * r * c };
+}
+
+/**
+ * Pick R1/R2 for a target frequency, a chosen C and a duty cycle (> 50 %, the astable limit).
+ * Returns the exact ideal values and the nearest standard pair with the resulting frequency/duty.
+ */
+export function timer555Design({ freq, c, dutyPct = 60, series = 'E24' }) {
+  if (!(freq > 0 && c > 0)) throw new Error('Frequency and C must be positive.');
+  if (!(dutyPct > 50 && dutyPct < 100)) throw new Error('A standard 555 astable needs a duty cycle above 50 % and below 100 %.');
+  const period = 1 / freq;
+  const tHigh = (dutyPct / 100) * period;
+  const tLow = period - tHigh;
+  const r2 = tLow / (LN2 * c);
+  const r1 = tHigh / (LN2 * c) - r2;
+  if (!(r1 > 0 && r2 > 0)) throw new Error('No positive R1/R2 for these inputs.');
+  const s1 = nearestESeries(r1, series, 'nearest').value;
+  const s2 = nearestESeries(r2, series, 'nearest').value;
+  return { r1, r2, stdR1: s1, stdR2: s2, actual: timer555Astable({ r1: s1, r2: s2, c }) };
+}
+
+// ---------------------------------------------------------------------------
+// Adjustable regulator feedback (LM317, LM1117-ADJ, TL431 style)
+// ---------------------------------------------------------------------------
+
+export const REGULATOR_PRESETS = {
+  lm317: { label: 'LM317 / LM1117-ADJ (1.25 V)', vref: 1.25, iadj: 50e-6 },
+  tl431: { label: 'TL431 (2.495 V)', vref: 2.495, iadj: 2e-6 },
+  fb08: { label: 'Buck FB pin (0.8 V)', vref: 0.8, iadj: 0 },
+  fb06: { label: 'Buck FB pin (0.6 V)', vref: 0.6, iadj: 0 },
+};
+
+/** Vout = Vref (1 + Rtop/Rbot) + Iadj * Rtop. Rtop runs output-to-feedback, Rbot feedback-to-ground. */
+export function regulatorVout({ vref, rtop, rbot, iadj = 0 }) {
+  if (!(vref > 0 && rtop > 0 && rbot > 0 && iadj >= 0)) throw new Error('Vref, Rtop and Rbot must be positive.');
+  return vref * (1 + rtop / rbot) + iadj * rtop;
+}
+
+/** Ideal Rtop for a target Vout and chosen Rbot. */
+export function regulatorRtop({ vref, vout, rbot, iadj = 0 }) {
+  if (!(vref > 0 && vout > vref && rbot > 0 && iadj >= 0)) throw new Error('Need Vout > Vref > 0 and Rbot > 0.');
+  return (vout - vref) / (vref / rbot + iadj);
+}
+
+/** Best E-series (Rtop, Rbot) pairs for a target output voltage. */
+export function regulatorPairs({ vref, vout, iadj = 0, series = 'E96', count = 6, rMin = 100, rMax = 1e6 }) {
+  if (!(vout > vref && vref > 0)) throw new Error('Need Vout > Vref > 0.');
+  const vals = eSeriesValues(series, { minDecade: 0, maxDecade: 6 }).filter((r) => r >= rMin && r <= rMax);
+  const seen = new Set();
+  const out = [];
+  for (const rbot of vals) {
+    const ideal = regulatorRtop({ vref, vout, rbot, iadj });
+    const i = lowerBound(vals, ideal);
+    for (const rtop of [vals[i - 1], vals[i]]) {
+      if (rtop === undefined) continue;
+      const key = `${rtop}/${rbot}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const vo = regulatorVout({ vref, rtop, rbot, iadj });
+      out.push({ rtop, rbot, vout: vo, errorPct: ((vo - vout) / vout) * 100 });
+    }
+  }
+  out.sort((a, b) => Math.abs(a.errorPct) - Math.abs(b.errorPct) || (a.rtop + a.rbot) - (b.rtop + b.rbot));
+  return out.slice(0, count);
+}
+
+// ---------------------------------------------------------------------------
+// Reactance and divider tolerance
+// ---------------------------------------------------------------------------
+
+/** Xc = 1 / (2 pi f C). */
+export function capReactance({ f, c }) {
+  if (!(f > 0 && c > 0)) throw new Error('Frequency and C must be positive.');
+  return 1 / (2 * Math.PI * f * c);
+}
+
+/** Xl = 2 pi f L. */
+export function indReactance({ f, l }) {
+  if (!(f > 0 && l > 0)) throw new Error('Frequency and L must be positive.');
+  return 2 * Math.PI * f * l;
+}
+
+/** Series R + reactance X (positive inductive, negative capacitive): |Z| and phase in degrees. */
+export function seriesImpedance({ r, x }) {
+  return { mag: Math.hypot(r, x), phaseDeg: (Math.atan2(x, r) * 180) / Math.PI };
+}
+
+/** Worst-case divider output with resistor tolerance (percent): Vout range over all corners. */
+export function dividerTolerance({ vin, r1, r2, tolPct }) {
+  if (!(vin > 0 && r1 > 0 && r2 > 0 && tolPct >= 0 && tolPct < 100)) throw new Error('Need positive Vin, R1, R2 and a tolerance of 0..100 %.');
+  const t = tolPct / 100;
+  const nominal = (vin * r2) / (r1 + r2);
+  const min = (vin * r2 * (1 - t)) / (r1 * (1 + t) + r2 * (1 - t));
+  const max = (vin * r2 * (1 + t)) / (r1 * (1 - t) + r2 * (1 + t));
+  return { nominal, min, max, minPct: ((min - nominal) / nominal) * 100, maxPct: ((max - nominal) / nominal) * 100 };
+}

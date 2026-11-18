@@ -358,3 +358,68 @@ describe('ADC', () => {
     expect(dividerFullScaleInput({ vref: 3.3, r1: 10e3, r2: 10e3 })).toBeCloseTo(6.6, 9);
   });
 });
+
+import {
+  timer555Astable, timer555Monostable, timer555Design, regulatorVout, regulatorRtop, regulatorPairs,
+  capReactance, indReactance, seriesImpedance, dividerTolerance, REGULATOR_PRESETS,
+} from '../src/utils/electronicsCalc.js';
+
+describe('555 timer', () => {
+  it('astable 1k/10k/100n is about 686 Hz at 52.4 % duty', () => {
+    const r = timer555Astable({ r1: 1e3, r2: 10e3, c: 100e-9 });
+    expect(r.freq).toBeCloseTo(1 / (Math.LN2 * 21e3 * 100e-9), 6);
+    expect(r.freq).toBeGreaterThan(680);
+    expect(r.freq).toBeLessThan(690);
+    expect(r.dutyPct).toBeCloseTo((11 / 21) * 100, 6);
+  });
+  it('monostable is ln3 RC', () => {
+    expect(timer555Monostable({ r: 100e3, c: 10e-6 }).width).toBeCloseTo(1.0986, 3);
+  });
+  it('design round-trips and rejects duty <= 50', () => {
+    const d = timer555Design({ freq: 1000, c: 100e-9, dutyPct: 60 });
+    expect(timer555Astable({ r1: d.r1, r2: d.r2, c: 100e-9 }).freq).toBeCloseTo(1000, 6);
+    expect(d.actual.freq / 1000).toBeGreaterThan(0.9);
+    expect(d.actual.freq / 1000).toBeLessThan(1.1);
+    expect(() => timer555Design({ freq: 1000, c: 1e-7, dutyPct: 50 })).toThrow();
+    expect(() => timer555Astable({ r1: 0, r2: 1, c: 1 })).toThrow();
+  });
+});
+
+describe('regulator feedback', () => {
+  it('LM317 240/720 style gives 5 V with Iadj ignored', () => {
+    expect(regulatorVout({ vref: 1.25, rtop: 720, rbot: 240 })).toBeCloseTo(5, 6);
+  });
+  it('adds the adjust-pin current term', () => {
+    expect(regulatorVout({ vref: 1.25, rtop: 720, rbot: 240, iadj: 50e-6 })).toBeCloseTo(5.036, 6);
+  });
+  it('regulatorRtop inverts regulatorVout', () => {
+    const rtop = regulatorRtop({ vref: 0.8, vout: 3.3, rbot: 10e3, iadj: 0 });
+    expect(regulatorVout({ vref: 0.8, rtop, rbot: 10e3 })).toBeCloseTo(3.3, 9);
+  });
+  it('E96 pairs land within 1 % of the target', () => {
+    const list = regulatorPairs({ vref: REGULATOR_PRESETS.fb08.vref, vout: 3.3, iadj: 0 });
+    expect(list.length).toBe(6);
+    expect(Math.abs(list[0].errorPct)).toBeLessThan(1);
+    expect(() => regulatorPairs({ vref: 1.25, vout: 1, iadj: 0 })).toThrow();
+  });
+});
+
+describe('reactance and tolerance', () => {
+  it('reactances at 1 kHz', () => {
+    expect(capReactance({ f: 1000, c: 1e-6 })).toBeCloseTo(159.155, 2);
+    expect(indReactance({ f: 1000, l: 1e-3 })).toBeCloseTo(6.2832, 3);
+  });
+  it('series impedance magnitude and phase', () => {
+    const z = seriesImpedance({ r: 100, x: -100 });
+    expect(z.mag).toBeCloseTo(141.42, 2);
+    expect(z.phaseDeg).toBeCloseTo(-45, 6);
+  });
+  it('divider worst case brackets nominal', () => {
+    const t = dividerTolerance({ vin: 5, r1: 10e3, r2: 10e3, tolPct: 1 });
+    expect(t.nominal).toBeCloseTo(2.5, 9);
+    expect(t.min).toBeLessThan(2.5);
+    expect(t.max).toBeGreaterThan(2.5);
+    expect(t.max).toBeCloseTo(2.5 * 1.01 / 1, 1);
+    expect(dividerTolerance({ vin: 5, r1: 1, r2: 1, tolPct: 0 }).min).toBeCloseTo(2.5, 9);
+  });
+});
