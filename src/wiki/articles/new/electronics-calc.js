@@ -2,9 +2,9 @@ export default {
   id: 'electronics-calc',
   toolId: 'electronics-calc',
   category: 'reference',
-  title: 'Electronics Calculators — UART baud, I2C pull-ups, resistors, RC/RLC, battery, PCB traces, ADC',
-  summary: 'Offline engineering calculators: UART baud-rate error for AVR, STM32, ESP32 and generic dividers, I2C pull-up sizing per NXP UM10204, resistor divider/LED/colour-code/E-series tools, RC and RLC, battery runtime, IPC-2221 trace width, Ohm’s law and ADC LSB maths. Nothing is sent anywhere and no hardware is needed.',
-  tags: ['Calculator', 'UART', 'Baud rate', 'I2C', 'Pull-up', 'Resistor', 'Colour code', 'E-series', 'RC', 'RLC', 'Battery life', 'IPC-2221', 'Trace width', 'ADC', 'LSB', 'Ohm'],
+  title: 'Electronics Calculators — UART baud, I2C pull-ups, resistors, RC/RLC, 555 timer, regulator feedback, battery, PCB traces, ADC',
+  summary: 'Offline engineering calculators: UART baud-rate error for AVR, STM32, ESP32 and generic dividers, I2C pull-up sizing per NXP UM10204, resistor divider/LED/colour-code/E-series tools, RC and RLC, reactance, 555 timer and adjustable-regulator resistor design, battery runtime, IPC-2221 trace width, Ohm’s law and ADC LSB maths. Nothing is sent anywhere and no hardware is needed.',
+  tags: ['Calculator', 'UART', 'Baud rate', 'I2C', 'Pull-up', 'Resistor', 'Colour code', 'E-series', 'RC', 'RLC', '555 timer', 'Regulator', 'Reactance', 'Battery life', 'IPC-2221', 'Trace width', 'ADC', 'LSB', 'Ohm'],
   readTime: '8 min read',
   content: `
 # Electronics Calculators
@@ -15,7 +15,7 @@ Values accept SI suffixes anywhere a number is expected: \`4.7k\` = 4700, \`100n
 
 ## Tabs
 
-The tool has seven tabs across the top of the window.
+The tool has eight tabs across the top of the window.
 
 ### 1. UART baud
 
@@ -44,7 +44,7 @@ The tool reports whether a window exists, picks the E24 value closest to the mid
 
 Five sub-tools:
 
-- **Voltage divider**: Vout = Vin × R2 / (R1 + R2). Leave exactly one of Vin, R1, R2 or Vout blank and it is solved. Leave both R1 and R2 blank with Vin and Vout filled in and the tool lists the best E-series pairs (E6 to E48 selectable) with their error.
+- **Voltage divider**: Vout = Vin × R2 / (R1 + R2). Leave exactly one of Vin, R1, R2 or Vout blank and it is solved. Leave both R1 and R2 blank with Vin and Vout filled in and the tool lists the best E-series pairs (E6 to E48 selectable) with their error. When all four boxes are filled, a **worst-case tolerance** check shows the lowest and highest Vout for a resistor tolerance you enter (default 1 %), taking R1 and R2 at opposite extremes.
 - **LED series resistor**: R = (Vs − Vf) / I, rounded up to the next standard value so the current does not exceed the target. It reports the actual current, the power in the resistor, and a suggested power rating with a 2× margin.
 - **Colour code**: decode 4, 5 or 6 bands by choosing each band's colour, or encode a resistance into bands. Encoding reports when the value needs rounding for the band count.
 - **E-series**: the nearest standard value in E6, E12, E24, E48, E96 or E192, with the next value above and below.
@@ -57,13 +57,20 @@ Five sub-tools:
 - **LC resonance**: f0 = 1 / (2π√(LC)), ω0 and characteristic impedance √(L/C).
 - **Series RLC**: damping ratio ζ = (R/2)√(C/L), with underdamped, critically damped or overdamped classification, and the damped ringing frequency when underdamped.
 
-### 5. Battery
+**Reactance at a frequency** (in the same tab) uses the R, C and L fields above plus a frequency. It shows Xc = 1/(2πfC), Xl = 2πfL, and the magnitude and phase of R in series with C and of R in series with L (|Z| = √(R² + X²)).
+
+### 5. 555 / Reg
+
+- **555 timer** uses the ideal NE555 equations. Astable: f = 1 / (ln2 × (R1 + 2R2) × C), high time = ln2 × (R1 + R2) × C, low time = ln2 × R2 × C, so the duty cycle is always above 50 %. Monostable: pulse width = ln3 × R × C (about 1.1 RC). The **design** row takes a target frequency, a duty cycle above 50 % and a capacitor value, then gives the ideal R1 and R2, the nearest E24 pair, and the frequency and duty those standard values actually give. CMOS 555 parts (TLC555, LMC555) and real tolerances shift the result a little.
+- **Adjustable regulator feedback** solves a two-resistor feedback divider: Vout = Vref × (1 + Rtop/Rbot) + Iadj × Rtop. Rtop goes from the output to the feedback pin, Rbot from the feedback pin to ground. Presets fill Vref and the adjust-pin current for LM317 / LM1117-ADJ (1.25 V, 50 µA), TL431 (2.495 V), and 0.8 V or 0.6 V buck feedback pins; you can edit both. Pick a target Vout and series (E6 to E96) and the tool lists the best Rtop/Rbot pairs with their error. A check row computes Vout for any two resistors you enter. Adjust-pin current varies between parts, so confirm Vref and Iadj in the datasheet.
+
+### 6. Battery
 
 Enter the capacity in mAh, the active and sleep currents in amps (use the m or u suffix for milliamps and microamps), the duty cycle as the percentage of time active, and a derating percentage. The average current is I = d × I_active + (1 − d) × I_sleep. The usable capacity is the capacity less the derating, and the runtime is that usable capacity divided by the average current.
 
 The model is a simple duty-cycle calculation. It does not model self-discharge, temperature curves, Peukert effect or voltage cut-off, so use the derating field to allow for those.
 
-### 6. PCB & Ohm
+### 7. PCB & Ohm
 
 **Trace width (IPC-2221)** solves for one of three things:
 
@@ -75,7 +82,7 @@ The equation is I = k × ΔT^0.44 × A^0.725, with the area A in square mils. k 
 
 **Ohm's law and power** takes any two of V, I, R and P and solves the other two using V = IR, P = VI, P = I²R and P = V²/R. Fill exactly two boxes.
 
-### 7. ADC
+### 8. ADC
 
 - **LSB** = Vref / 2^N. The full-scale code is 2^N − 1. The tool reports the LSB, the number of levels and the quantisation error, which is ±LSB/2 for rounding or up to 1 LSB for truncation.
 - **Voltage → code** uses floor(V / LSB), the ideal truncating converter, clamped to the valid code range.
@@ -91,6 +98,10 @@ Actual ADCs have offset, gain error and noise, so the ideal values here are a lo
 - **E192 is generated.** E48, E96 and E192 are produced from the IEC 60063 geometric rule (rounded to three significant figures). Check any E192 value against a catalogue before ordering.
 - **Trace width is the IPC-2221 closed form.** It does not model layer stackup, plane heat sinking or the newer IPC-2152 figures.
 - **Battery runtime is a first-order duty-cycle estimate** as described above.
+
+## Similar tools
+
+The feature set was compared with Digi-Key's online calculators (Ohm's law, divider, 555 timer, time constant), the KiCad PCB Calculator (E-series, regulator and colour-code tools), and Saturn PCB Toolkit (trace width, reactance, Ohm's law). This tool has no field solver or impedance calculators for PCB stackups, so use Saturn or KiCad for those.
 
 ## Browser requirements
 

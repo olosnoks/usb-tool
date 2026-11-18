@@ -8,6 +8,8 @@ import {
   rcTimeConstant, chargeTimeToPercent, lcResonance, rlcSeries,
   batteryLife, traceWidth, traceCurrent, traceTempRise, solveOhm,
   adcLsb, voltageToCode, codeToVoltage, dividerAdcVoltage, dividerFullScaleInput,
+  timer555Astable, timer555Monostable, timer555Design, REGULATOR_PRESETS, regulatorVout, regulatorPairs,
+  capReactance, indReactance, seriesImpedance, dividerTolerance,
 } from '../../utils/electronicsCalc.js';
 
 /**
@@ -22,12 +24,13 @@ const TABS = [
   ['i2c', 'I2C pull-up'],
   ['res', 'Resistors'],
   ['rc', 'RC / RLC'],
+  ['tim', '555 / Reg'],
   ['batt', 'Battery'],
   ['pcb', 'PCB & Ohm'],
   ['adc', 'ADC'],
 ];
 
-const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono text-gray-200 w-full focus:outline-none focus:border-amber-600';
+const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-gray-200 w-full focus:outline-none focus:border-amber-600';
 const btnCls = 'px-2.5 py-1 rounded text-xs border border-slate-700 text-slate-300 hover:border-amber-600 hover:text-amber-300';
 const TONE = { ok: 'text-emerald-400', marginal: 'text-amber-400', bad: 'text-rose-400' };
 const TONE_BG = { ok: 'bg-emerald-950/40 border-emerald-800 text-emerald-300', marginal: 'bg-amber-950/40 border-amber-800 text-amber-300', bad: 'bg-rose-950/40 border-rose-800 text-rose-300' };
@@ -51,7 +54,7 @@ function optional(s) {
 
 function Field({ label, value, onChange, hint, placeholder, disabled = false }) {
   return (
-    <label className={`flex flex-col gap-1 text-[11px] min-w-0 ${disabled ? 'text-slate-700' : 'text-slate-400'}`}>
+    <label className={`flex flex-col gap-0.5 text-[11px] min-w-0 ${disabled ? 'text-slate-700' : 'text-slate-400'}`}>
       <span>{label}</span>
       <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} disabled={disabled} className={`${inputCls} disabled:opacity-40`} spellCheck={false} />
       {hint && <span className="text-[10px] text-slate-600">{hint}</span>}
@@ -61,7 +64,7 @@ function Field({ label, value, onChange, hint, placeholder, disabled = false }) 
 
 function Pick({ label, value, onChange, options }) {
   return (
-    <label className="flex flex-col gap-1 text-[11px] text-slate-400 min-w-0">
+    <label className="flex flex-col gap-0.5 text-[11px] text-slate-400 min-w-0">
       <span>{label}</span>
       <select value={value} onChange={(e) => onChange(e.target.value)} className={inputCls}>
         {options.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
@@ -72,7 +75,7 @@ function Pick({ label, value, onChange, options }) {
 
 function Card({ title, formula, children }) {
   return (
-    <section className="bg-slate-950 border border-slate-800 rounded p-3 space-y-3">
+    <section className="bg-slate-950 border border-slate-800 rounded p-2.5 space-y-2">
       <header>
         <h3 className="text-xs font-semibold text-amber-300 uppercase tracking-wide">{title}</h3>
         {formula && <p className="text-[10px] text-slate-500 font-mono mt-0.5">{formula}</p>}
@@ -82,7 +85,7 @@ function Card({ title, formula, children }) {
   );
 }
 
-function Grid({ children, cols = 'sm:grid-cols-3' }) {
+function Grid({ children, cols = '@md:grid-cols-3' }) {
   return <div className={`grid grid-cols-1 gap-2 ${cols}`}>{children}</div>;
 }
 
@@ -173,9 +176,9 @@ function UartTab() {
   );
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <Card title="Inputs" formula="Error = (actual − target) / target. Limits: ±2 % ok, ±3.5 % marginal.">
-        <Grid cols="sm:grid-cols-3">
+        <Grid cols="@md:grid-cols-3">
           <Field label="MCU clock (Hz)" value={clock} onChange={setClock} hint="e.g. 16M, 8M, 72M" />
           <Field label="Target baud" value={baud} onChange={setBaud} hint="e.g. 115200" />
           <Field label="ESP32 APB clock (Hz)" value={esp} onChange={setEsp} hint="default 80M" />
@@ -187,7 +190,7 @@ function UartTab() {
 
       {r && (
         <Card title="Results" formula="AVR: UBRR = fosc/(16·baud) − 1 (U2X: /8). STM32: BRR = mantissa<<4 | fraction. ESP32: CLKDIV + FRAG/16.">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 @md:grid-cols-2 gap-2">
             <Method title="AVR USART, normal" sub="UBRRn = fosc/(16·baud) − 1" res={r.avrN} extraLabel="UBRR" extra={(x) => x.ubrr} />
             <Method title="AVR USART, U2X" sub="UBRRn = fosc/(8·baud) − 1" res={r.avrU} extraLabel="UBRR" extra={(x) => x.ubrr} />
             <Method title={`STM32 USART (${stmOver}x)`} sub="USARTDIV = fck/(oversample·baud); BRR holds mantissa and fraction" res={r.stm} extraLabel="BRR (hex)" extra={(x) => `0x${x.brr.toString(16).toUpperCase()} (${x.mantissa} + ${x.fraction}/${x.oversample})`} />
@@ -252,9 +255,9 @@ function I2cTab() {
     return i2cPullup({ vdd: v, cb: c, mode, vol: volV ?? undefined, iol: iolA ?? undefined });
   });
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <Card title="Pull-up window" formula="Rp min = (Vdd − VOL) / IOL     Rp max = tr / (0.8473 · Cb)     (NXP UM10204)">
-        <Grid cols="sm:grid-cols-2 lg:grid-cols-5">
+        <Grid cols="@md:grid-cols-2 @lg:grid-cols-5">
           <Field label="Vdd (V)" value={vdd} onChange={setVdd} />
           <Field label="Bus capacitance Cb (F)" value={cb} onChange={setCb} hint="e.g. 100p" />
           <Pick label="Mode" value={mode} onChange={setMode} options={Object.entries(I2C_MODES).map(([k, x]) => [k, x.label])} />
@@ -291,6 +294,12 @@ function DividerPart() {
     const parts = { vin: optional(vin), r1: optional(r1), r2: optional(r2), vout: optional(vout) };
     return solveDivider(parts);
   }) : null;
+  const [tolPct, setTolPct] = useState('1');
+  const tolRes = blanks === 0 ? calc(() => {
+    const t = parseSI(tolPct);
+    need([['tolerance', t]]);
+    return dividerTolerance({ vin: parseSI(vin), r1: parseSI(r1), r2: parseSI(r2), tolPct: t });
+  }) : null;
   const pairsWanted = String(r1).trim() === '' && String(r2).trim() === '' && String(vout).trim() !== '' && String(vin).trim() !== '';
   const pairs = pairsWanted ? calc(() => {
     const vi = parseSI(vin); const vo = parseSI(vout);
@@ -299,7 +308,7 @@ function DividerPart() {
   }) : null;
   return (
     <Card title="Voltage divider" formula="Vout = Vin · R2 / (R1 + R2). R1 on top, R2 to ground. Leave exactly one field blank to solve it.">
-      <Grid cols="sm:grid-cols-4">
+      <Grid cols="@md:grid-cols-4">
         <Field label="Vin (V)" value={vin} onChange={setVin} />
         <Field label="R1 (top, Ω)" value={r1} onChange={setR1} />
         <Field label="R2 (bottom, Ω)" value={r2} onChange={setR2} />
@@ -313,6 +322,19 @@ function DividerPart() {
           <Out label="Vout" value={`${r.v.vout.toPrecision(4)} V (ratio ${r.v.ratio.toFixed(4)})`} />
         </div>
       ))}
+      {blanks === 0 && (
+        <div className="space-y-1">
+          <Notice tone="marginal">All four boxes are filled. Clear one to solve it, or use the worst-case check below on Vin, R1 and R2.</Notice>
+          <div className="max-w-[10rem]"><Field label="Resistor tolerance (%)" value={tolPct} onChange={setTolPct} /></div>
+          <Result r={tolRes}>{(v) => (
+            <div>
+              <Out label="Nominal Vout" value={formatSI(v.nominal, 'V')} />
+              <Out label="Worst-case low" value={`${formatSI(v.min, 'V')} (${v.minPct.toFixed(2)} %)`} tone="marginal" />
+              <Out label="Worst-case high" value={`${formatSI(v.max, 'V')} (+${v.maxPct.toFixed(2)} %)`} tone="marginal" />
+            </div>
+          )}</Result>
+        </div>
+      )}
       {blanks === 2 && pairsWanted && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -335,7 +357,7 @@ function DividerPart() {
           )}</Result>
         </div>
       )}
-      {blanks !== 1 && !pairsWanted && <Notice tone="marginal">Leave exactly one of R1, R2, Vout, Vin blank to solve it, or leave both R1 and R2 blank to search E-series pairs for Vin and Vout.</Notice>}
+      {blanks !== 1 && blanks !== 0 && !pairsWanted && <Notice tone="marginal">Leave exactly one of R1, R2, Vout, Vin blank to solve it, or leave both R1 and R2 blank to search E-series pairs for Vin and Vout.</Notice>}
     </Card>
   );
 }
@@ -352,7 +374,7 @@ function LedPart() {
   });
   return (
     <Card title="LED series resistor" formula="R = (Vs − Vf) / I, rounded up to a standard value. P = I²·R.">
-      <Grid cols="sm:grid-cols-4">
+      <Grid cols="@md:grid-cols-4">
         <Field label="Supply Vs (V)" value={vs} onChange={setVs} />
         <Field label="LED Vf (V)" value={vf} onChange={setVf} />
         <Field label="Current (A)" value={ma} onChange={setMa} hint="20m = 20 mA" />
@@ -436,7 +458,7 @@ function ESeriesPart() {
   });
   return (
     <Card title="E-series nearest value" formula="Nearest value by relative error, plus the standard value just above and just below.">
-      <Grid cols="sm:grid-cols-3">
+      <Grid cols="@md:grid-cols-3">
         <Field label="Value (Ω, F or other)" value={val} onChange={setVal} />
         <Pick label="Series" value={series} onChange={setSeries} options={E_SERIES_NAMES.map((s) => [s, s])} />
       </Grid>
@@ -466,7 +488,7 @@ function CombosPart() {
     : null;
   return (
     <Card title="Series / parallel" formula="Series: Σ R.   Parallel: 1 / Σ(1/R).   Combos use up to two standard values.">
-      <Grid cols="sm:grid-cols-2">
+      <Grid cols="@md:grid-cols-2">
         <Field label="Your values (comma separated)" value={list} onChange={setList} hint="e.g. 100, 220, 1k" />
         <div className="text-xs space-y-1 pt-5">
           {listRes ? (
@@ -503,7 +525,7 @@ function ResistorsTab() {
   const [sub, setSub] = useState('divider');
   const items = [['divider', 'Divider'], ['led', 'LED'], ['colour', 'Colour code'], ['eseries', 'E-series'], ['combos', 'Series / parallel']];
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <SubTabs value={sub} onChange={setSub} items={items} />
       {sub === 'divider' && <DividerPart />}
       {sub === 'led' && <LedPart />}
@@ -517,6 +539,30 @@ function ResistorsTab() {
 // ---------------------------------------------------------------------------
 // 4. RC / RLC
 // ---------------------------------------------------------------------------
+
+function ReactanceCard({ r, c, l }) {
+  const [f, setF] = useState('1k');
+  const res = calc(() => {
+    const fv = parseSI(f); const rv = parseSI(r); const cv = parseSI(c); const lv = parseSI(l);
+    need([['frequency', fv], ['R', rv], ['C', cv], ['L', lv]]);
+    const xc = capReactance({ f: fv, c: cv });
+    const xl = indReactance({ f: fv, l: lv });
+    return { xc, xl, rc: seriesImpedance({ r: rv, x: -xc }), rl: seriesImpedance({ r: rv, x: xl }) };
+  });
+  return (
+    <Card title="Reactance at a frequency" formula="Xc = 1/(2π·f·C)   Xl = 2π·f·L   |Z| = √(R² + X²). Uses R, C and L above.">
+      <div className="max-w-[10rem]"><Field label="Frequency (Hz)" value={f} onChange={setF} /></div>
+      <Result r={res}>{(v) => (
+        <div>
+          <Out label="Xc (capacitor)" value={formatSI(v.xc, 'Ω')} />
+          <Out label="Xl (inductor)" value={formatSI(v.xl, 'Ω')} />
+          <Out label="Series R + C: |Z|, phase" value={`${formatSI(v.rc.mag, 'Ω')}, ${v.rc.phaseDeg.toFixed(1)}°`} />
+          <Out label="Series R + L: |Z|, phase" value={`${formatSI(v.rl.mag, 'Ω')}, +${v.rl.phaseDeg.toFixed(1)}°`} />
+        </div>
+      )}</Result>
+    </Card>
+  );
+}
 
 function RcTab() {
   const [r, setR] = useState('1k');
@@ -545,8 +591,8 @@ function RcTab() {
     return { t: chargeTimeToPercent({ r: rv, c: cv, percent: p }), tau: rv * cv };
   });
   return (
-    <div className="space-y-3">
-      <Grid cols="sm:grid-cols-4">
+    <div className="space-y-2">
+      <Grid cols="@md:grid-cols-4">
         <Field label="R (Ω)" value={r} onChange={setR} />
         <Field label="C (F)" value={c} onChange={setC} hint="1u = 1 µF" />
         <Field label="L (H)" value={l} onChange={setL} hint="1m = 1 mH" />
@@ -561,8 +607,9 @@ function RcTab() {
           </div>
         )}</Result>
       </Card>
+      <ReactanceCard r={r} c={c} l={l} />
       <Card title="Capacitor charge to a percentage" formula="t = −R·C·ln(1 − p) from 0 toward the source. 63.2 % = 1τ, 99.3 % ≈ 5τ.">
-        <Grid cols="sm:grid-cols-2">
+        <Grid cols="@md:grid-cols-2">
           <Field label="Target % of final voltage" value={pct} onChange={setPct} />
           <div />
         </Grid>
@@ -597,6 +644,133 @@ function RcTab() {
 }
 
 // ---------------------------------------------------------------------------
+// 4b. 555 timer and regulator feedback
+// ---------------------------------------------------------------------------
+
+function TimerCard() {
+  const [r1, setR1] = useState('1k');
+  const [r2, setR2] = useState('10k');
+  const [c, setC] = useState('100n');
+  const [rm, setRm] = useState('100k');
+  const [freq, setFreq] = useState('1k');
+  const [duty, setDuty] = useState('60');
+  const [dc, setDc] = useState('100n');
+  const astable = calc(() => {
+    const a = parseSI(r1); const b = parseSI(r2); const cv = parseSI(c);
+    need([['R1', a], ['R2', b], ['C', cv]]);
+    return timer555Astable({ r1: a, r2: b, c: cv });
+  });
+  const mono = calc(() => {
+    const rv = parseSI(rm); const cv = parseSI(c);
+    need([['R', rv], ['C', cv]]);
+    return timer555Monostable({ r: rv, c: cv });
+  });
+  const design = calc(() => {
+    const f = parseSI(freq); const d = parseSI(duty); const cv = parseSI(dc);
+    need([['frequency', f], ['duty', d], ['C', cv]]);
+    return timer555Design({ freq: f, c: cv, dutyPct: d });
+  });
+  return (
+    <Card title="555 timer (NE555, ln2 model)" formula="Astable f = 1/(ln2·(R1 + 2·R2)·C), high = ln2·(R1+R2)·C. Monostable t = ln3·R·C. CMOS 555s differ slightly.">
+      <Grid cols="@md:grid-cols-4">
+        <Field label="R1 (Ω)" value={r1} onChange={setR1} />
+        <Field label="R2 (Ω)" value={r2} onChange={setR2} />
+        <Field label="C (F)" value={c} onChange={setC} />
+        <Field label="Monostable R (Ω)" value={rm} onChange={setRm} hint="uses C" />
+      </Grid>
+      <Result r={astable}>{(v) => (
+        <div>
+          <Out label="Astable frequency" value={formatSI(v.freq, 'Hz')} tone="ok" />
+          <Out label="High / low time" value={`${formatDuration(v.tHigh)} / ${formatDuration(v.tLow)}`} />
+          <Out label="Duty cycle" value={`${v.dutyPct.toFixed(2)} %`} />
+        </div>
+      )}</Result>
+      <Result r={mono}>{(v) => <Out label="Monostable pulse width" value={formatDuration(v.width)} tone="ok" />}</Result>
+      <div className="border-t border-slate-900 pt-2 space-y-2">
+        <Grid cols="@md:grid-cols-3">
+          <Field label="Design: target freq (Hz)" value={freq} onChange={setFreq} />
+          <Field label="Duty (% high, above 50)" value={duty} onChange={setDuty} />
+          <Field label="Chosen C (F)" value={dc} onChange={setDc} />
+        </Grid>
+        <Result r={design}>{(v) => (
+          <div>
+            <Out label="Ideal R1 / R2" value={`${formatSI(v.r1, 'Ω')} / ${formatSI(v.r2, 'Ω')}`} />
+            <Out label="Nearest E24 R1 / R2" value={`${formatSI(v.stdR1, 'Ω')} / ${formatSI(v.stdR2, 'Ω')}`} tone="ok" />
+            <Out label="Resulting freq, duty" value={`${formatSI(v.actual.freq, 'Hz')}, ${v.actual.dutyPct.toFixed(1)} %`} />
+          </div>
+        )}</Result>
+      </div>
+    </Card>
+  );
+}
+
+function RegulatorCard() {
+  const [preset, setPreset] = useState('lm317');
+  const [vref, setVref] = useState('1.25');
+  const [iadj, setIadj] = useState('50u');
+  const [vout, setVout] = useState('5');
+  const [series, setSeries] = useState('E96');
+  const [rtop, setRtop] = useState('');
+  const [rbot, setRbot] = useState('');
+  const pick = (k) => {
+    setPreset(k);
+    if (REGULATOR_PRESETS[k]) { setVref(String(REGULATOR_PRESETS[k].vref)); setIadj(String(REGULATOR_PRESETS[k].iadj)); }
+  };
+  const pairs = calc(() => {
+    const vr = parseSI(vref); const ia = parseSI(iadj); const vo = parseSI(vout);
+    need([['Vref', vr], ['adjust current', ia], ['target Vout', vo]]);
+    return regulatorPairs({ vref: vr, vout: vo, iadj: ia, series, count: 6 });
+  });
+  const check = String(rtop).trim() && String(rbot).trim() ? calc(() => {
+    const vr = parseSI(vref); const ia = parseSI(iadj); const a = parseSI(rtop); const b = parseSI(rbot);
+    need([['Vref', vr], ['adjust current', ia], ['Rtop', a], ['Rbot', b]]);
+    return regulatorVout({ vref: vr, rtop: a, rbot: b, iadj: ia });
+  }) : null;
+  return (
+    <Card title="Adjustable regulator feedback" formula="Vout = Vref·(1 + Rtop/Rbot) + Iadj·Rtop. Rtop: output to feedback pin. Rbot: feedback pin to ground.">
+      <Grid cols="@md:grid-cols-4">
+        <Pick label="Preset" value={preset} onChange={pick} options={[...Object.entries(REGULATOR_PRESETS).map(([k, x]) => [k, x.label]), ['custom', 'Custom']]} />
+        <Field label="Vref (V)" value={vref} onChange={(v) => { setVref(v); setPreset('custom'); }} />
+        <Field label="Adjust pin current (A)" value={iadj} onChange={(v) => { setIadj(v); setPreset('custom'); }} hint="typical, check datasheet" />
+        <Field label="Target Vout (V)" value={vout} onChange={setVout} />
+      </Grid>
+      <Pick label="Series" value={series} onChange={setSeries} options={E_SERIES_NAMES.slice(0, 5).map((x) => [x, x])} />
+      <Result r={pairs}>{(list) => (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs font-mono">
+            <thead><tr className="text-slate-500 text-left"><th className="py-0.5 pr-3 font-normal">Rtop</th><th className="py-0.5 pr-3 font-normal">Rbot</th><th className="py-0.5 pr-3 font-normal">Vout</th><th className="py-0.5 font-normal">Error</th></tr></thead>
+            <tbody>{list.map((p) => (
+              <tr key={`${p.rtop}/${p.rbot}`} className="border-t border-slate-900">
+                <td className="py-0.5 pr-3">{formatSI(p.rtop, 'Ω')}</td>
+                <td className="py-0.5 pr-3">{formatSI(p.rbot, 'Ω')}</td>
+                <td className="py-0.5 pr-3">{p.vout.toFixed(4)} V</td>
+                <td className={`py-0.5 ${Math.abs(p.errorPct) <= 1 ? 'text-emerald-400' : 'text-amber-400'}`}>{`${p.errorPct >= 0 ? '+' : ''}${p.errorPct.toFixed(2)} %`}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}</Result>
+      <div className="border-t border-slate-900 pt-2 space-y-2">
+        <Grid cols="@md:grid-cols-3">
+          <Field label="Check: Rtop (Ω)" value={rtop} onChange={setRtop} />
+          <Field label="Check: Rbot (Ω)" value={rbot} onChange={setRbot} />
+        </Grid>
+        {check && <Result r={check}>{(v) => <Out label="Resulting Vout" value={formatSI(v, 'V')} tone="ok" />}</Result>}
+      </div>
+    </Card>
+  );
+}
+
+function TimerRegTab() {
+  return (
+    <div className="space-y-2">
+      <TimerCard />
+      <RegulatorCard />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 5. Battery life
 // ---------------------------------------------------------------------------
 
@@ -613,9 +787,9 @@ function BatteryTab() {
     return batteryLife({ capacityMah: c, activeA: a, sleepA: s, dutyPct: d, deratePct: dr });
   });
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <Card title="Battery runtime" formula="I_avg = d·I_active + (1 − d)·I_sleep     runtime = C·(1 − derate) / I_avg">
-        <Grid cols="sm:grid-cols-5">
+        <Grid cols="@md:grid-cols-5">
           <Field label="Capacity (mAh)" value={cap} onChange={setCap} />
           <Field label="Active current (A)" value={act} onChange={setAct} hint="20m = 20 mA" />
           <Field label="Sleep current (A)" value={slp} onChange={setSlp} hint="10u = 10 µA" />
@@ -662,7 +836,7 @@ function TraceCard() {
   });
   return (
     <Card title="PCB trace width (IPC-2221)" formula="I = k · ΔT^0.44 · A^0.725, A in mil². k = 0.048 external, 0.024 internal. 1 oz copper = 1.37 mil.">
-      <Grid cols="sm:grid-cols-5">
+      <Grid cols="@md:grid-cols-5">
         <Pick label="Solve for" value={mode} onChange={setMode} options={[['width', 'Width'], ['current', 'Current'], ['temp', 'Temperature rise']]} />
         <Field label="Current (A)" value={current} onChange={setCurrent} disabled={mode === 'current'} />
         <Field label="Temp rise (°C)" value={rise} onChange={setRise} disabled={mode === 'temp'} />
@@ -700,7 +874,7 @@ function OhmCard() {
   }) : null;
   return (
     <Card title="Ohm's law & power" formula="V = I·R    P = V·I = I²·R = V²/R. Fill exactly two boxes.">
-      <Grid cols="sm:grid-cols-4">
+      <Grid cols="@md:grid-cols-4">
         {OHM_FIELDS.map(([k, label]) => <Field key={k} label={label} value={vals[k]} onChange={set(k)} />)}
       </Grid>
       {given.length !== 2 && <Notice tone="marginal">Fill exactly two of V, I, R, P ({given.length} filled).</Notice>}
@@ -718,7 +892,7 @@ function OhmCard() {
 
 function PcbOhmTab() {
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <TraceCard />
       <OhmCard />
     </div>
@@ -761,8 +935,8 @@ function AdcTab() {
     return { pin, maxIn, code: c.code, clipped: c.clipped };
   });
   return (
-    <div className="space-y-3">
-      <Grid cols="sm:grid-cols-2">
+    <div className="space-y-2">
+      <Grid cols="@md:grid-cols-2">
         <Pick label="ADC resolution (bits)" value={bits} onChange={setBits} options={[8, 10, 12, 14, 16, 24].map((b) => [String(b), `${b}-bit`])} />
         <Field label="Vref (V)" value={vref} onChange={setVref} />
       </Grid>
@@ -775,7 +949,7 @@ function AdcTab() {
         </Card>
       )}</Result>
       <Card title="Voltage → code" formula="code = floor(V / LSB), clamped to 0..max">
-        <Grid cols="sm:grid-cols-2">
+        <Grid cols="@md:grid-cols-2">
           <Field label="Voltage at pin (V)" value={volt} onChange={setVolt} />
           <div />
         </Grid>
@@ -787,7 +961,7 @@ function AdcTab() {
         )}</Result>
       </Card>
       <Card title="Code → voltage" formula="V = code · LSB (bottom of the bin); centre = (code + 0.5) · LSB">
-        <Grid cols="sm:grid-cols-2">
+        <Grid cols="@md:grid-cols-2">
           <Field label="Code (integer)" value={code} onChange={setCode} />
           <div />
         </Grid>
@@ -799,7 +973,7 @@ function AdcTab() {
         )}</Result>
       </Card>
       <Card title="Divider-scaled input" formula="V_pin = Vin · R2 / (R1 + R2). Full-scale input = Vref · (R1 + R2) / R2.">
-        <Grid cols="sm:grid-cols-3">
+        <Grid cols="@md:grid-cols-3">
           <Field label="Input voltage Vin (V)" value={vin} onChange={setVin} />
           <Field label="R1 top (Ω)" value={r1} onChange={setR1} />
           <Field label="R2 bottom (Ω)" value={r2} onChange={setR2} />
@@ -825,21 +999,19 @@ export default function ElectronicsCalcWorkbench() {
   const [tab, setTab] = useState('uart');
   return (
     <div className="h-full flex flex-col bg-slate-950 text-gray-200 text-sm">
-      <div className="px-3 py-2 border-b border-slate-800 flex items-center gap-2">
-        <Calculator size={14} className="text-amber-400" />
-        <span className="text-xs font-semibold text-amber-300">Electronics Calculators</span>
-        <span className="text-[10px] text-slate-500">offline · values accept SI suffixes (4.7k, 100n, 10u)</span>
-      </div>
-      <div className="px-3 py-2 border-b border-slate-800 flex flex-wrap gap-1">
+      <div className="px-2 py-1.5 border-b border-slate-800 flex flex-wrap items-center gap-1" role="tablist" aria-label="Electronics Calculators">
+        <Calculator size={14} className="text-amber-400 mr-1" aria-hidden="true" />
         {TABS.map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)} className={`px-2.5 py-1 rounded text-xs border ${tab === id ? 'border-amber-600 bg-amber-950/40 text-amber-300' : 'border-slate-800 text-slate-400 hover:text-slate-200'}`}>{label}</button>
+          <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`px-2 py-0.5 rounded text-xs border ${tab === id ? 'border-amber-600 bg-amber-950/40 text-amber-300' : 'border-slate-800 text-slate-400 hover:text-slate-200'}`}>{label}</button>
         ))}
+        <span className="text-[10px] text-slate-500 ml-auto" title="Offline. Values accept SI suffixes: 4.7k, 100n, 10u, 2M2, 1e3">SI suffixes ok: 4.7k 100n 10u</span>
       </div>
-      <div className="flex-1 overflow-auto p-3">
+      <div className="flex-1 overflow-auto p-0.5">
         {tab === 'uart' && <UartTab />}
         {tab === 'i2c' && <I2cTab />}
         {tab === 'res' && <ResistorsTab />}
         {tab === 'rc' && <RcTab />}
+        {tab === 'tim' && <TimerRegTab />}
         {tab === 'batt' && <BatteryTab />}
         {tab === 'pcb' && <PcbOhmTab />}
         {tab === 'adc' && <AdcTab />}
