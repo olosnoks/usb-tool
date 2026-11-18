@@ -1255,6 +1255,7 @@ export function reportToMarkdown(report) {
   const lines = [];
   lines.push(`# Firmware analysis: ${report.file.name}`, '');
   lines.push(`- File size: ${report.file.size} bytes`);
+  if (report.file.hash) lines.push(`- ${report.file.hash.algorithm}: ${report.file.hash.hex}`);
   lines.push(`- Generated: ${report.generatedAt}`);
   lines.push(`- Tool: ${report.tool} v${report.version} (offline, client-side)`, '');
   lines.push('## Signatures', '');

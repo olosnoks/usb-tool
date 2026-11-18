@@ -5,6 +5,7 @@ import {
   extractStrings, hexRows, carveRangeForHit, carveBytes, decompressStream, buildReport, reportToMarkdown,
   formatOffset, HIGH_ENTROPY, DECOMPRESS_FORMATS
 } from '../../utils/firmwareAnalyzer.js';
+import { byteHistogram, digestHex, HASH_ALGOS, STRING_RULES, classifyStrings, countByRule, signaturesToText } from '../../utils/firmwareExtras.js';
 
 /**
  * Firmware Image Analyzer: binwalk-style signature scan, entropy profile, strings,
@@ -31,7 +32,7 @@ const CATEGORY_TONE = {
   image: 'text-sky-300 border-sky-900',
   text: 'text-slate-300 border-slate-700'
 };
-const btn = 'px-2.5 py-1 rounded border border-slate-700 bg-slate-900 text-xs text-gray-200 hover:border-cyan-600 hover:text-cyan-300 disabled:opacity-40 disabled:cursor-not-allowed';
+const btn = 'px-2 py-0.5 rounded border border-slate-700 bg-slate-900 text-xs text-gray-200 hover:border-cyan-600 hover:text-cyan-300 disabled:opacity-40 disabled:cursor-not-allowed';
 const input = 'bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-gray-100';
 
 /** "0x1F", "0X1f", or decimal. Returns null when it is not a valid offset. */
@@ -55,9 +56,9 @@ const fmtBytes = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFix
 
 function Stat({ label, value, tone = 'text-gray-100' }) {
   return (
-    <div className="bg-slate-950 border border-slate-800 rounded px-3 py-2 min-w-[7rem]">
+    <div className="bg-slate-950 border border-slate-800 rounded px-2 py-1 min-w-[5.5rem] max-w-full">
       <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className={`font-mono text-sm ${tone}`}>{value}</div>
+      <div className={`font-mono text-xs break-all ${tone}`}>{value}</div>
     </div>
   );
 }
@@ -100,6 +101,29 @@ function EntropyCanvas({ profile, onPick }) {
   return <canvas ref={ref} width={1000} height={160} onClick={pick} className="w-full h-40 cursor-crosshair rounded border border-slate-800" aria-label="Entropy profile" />;
 }
 
+function HistogramCanvas({ hist }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || !hist) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.fillStyle = '#0f1015';
+    ctx.fillRect(0, 0, W, H);
+    // Log scale so a few huge bins (0x00, 0xFF) do not hide the rest.
+    const max = Math.log1p(Math.max(1, ...hist.counts));
+    const bw = W / 256;
+    for (let i = 0; i < 256; i++) {
+      const h = Math.round((Math.log1p(hist.counts[i]) / max) * (H - 4));
+      ctx.fillStyle = i === 0 ? '#64748b' : i === 255 ? '#f43f5e' : i >= 0x20 && i < 0x7f ? '#22d3ee' : '#10b981';
+      ctx.fillRect(i * bw, H - h - 2, Math.max(1, bw - 0.5), h);
+    }
+  }, [hist]);
+  return <canvas ref={ref} width={768} height={96} className="w-full h-24 rounded border border-slate-800" role="img" aria-label="Byte value histogram, log scale" />;
+}
+
 export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
   const log = (text, level) => onLogMessage?.(text, level);
   const [file, setFile] = useState(null); // { name, size, bytes }
@@ -122,6 +146,11 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
   const [dFormat, setDFormat] = useState('gzip');
   const [dOffset, setDOffset] = useState('0');
   const [dResult, setDResult] = useState(null);
+  const [fileHash, setFileHash] = useState(null); // { algo, hex }
+  const [hashAlgo, setHashAlgo] = useState('SHA-256');
+  const [histScope, setHistScope] = useState('file'); // 'file' | 'selection'
+  const [onlyInteresting, setOnlyInteresting] = useState(false);
+  const [copyNote, setCopyNote] = useState('');
   const abortRef = useRef(null);
 
   const hits = scan?.hits ?? [];
@@ -135,6 +164,8 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
     setSelected(null);
     setCarveNote('');
     setError('');
+    setFileHash(null);
+    setCopyNote('');
   };
 
   const runAnalysis = async (f) => {
@@ -192,14 +223,36 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
     return hits.filter((h) => `${h.name} ${h.id} ${h.categoryLabel} ${h.fields.map((f) => f.join(' ')).join(' ')}`.toLowerCase().includes(q));
   }, [hits, filter]);
 
-  const onCarve = (hit) => {
+  const onHashFile = async () => {
+    if (!bytes) return;
+    try {
+      setFileHash({ algo: hashAlgo, hex: await digestHex(bytes, hashAlgo) });
+    } catch (e) {
+      setError(`Hashing failed: ${e?.message || e}`);
+    }
+  };
+
+  const onCopyListing = async () => {
+    const text = signaturesToText(visibleHits);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyNote(`Copied ${visibleHits.length} row(s).`);
+    } catch {
+      download(`${file.name}.signatures.txt`, text, 'text/plain');
+      setCopyNote('Clipboard unavailable; downloaded as a text file instead.');
+    }
+  };
+
+  const onCarve = async (hit) => {
     if (!bytes) return;
     const r = carveRangeForHit(hit, hits, bytes.length);
     const data = carveBytes(bytes, r.start, r.end);
     if (data.length === 0) return;
     const safe = hit.id.replace(/[^a-z0-9-]/gi, '');
     download(`${file.name}.${formatOffset(hit.offset).toLowerCase()}.${safe}.bin`, data);
-    setCarveNote(`Carved ${fmtBytes(data.length)} from ${formatOffset(hit.offset)} to ${formatOffset(r.end)} (end set by ${r.basis}).`);
+    let sum = '';
+    try { sum = ` SHA-256 ${await digestHex(data, 'SHA-256')}.`; } catch { /* hashing is optional */ }
+    setCarveNote(`Carved ${fmtBytes(data.length)} from ${formatOffset(hit.offset)} to ${formatOffset(r.end)} (end set by ${r.basis}).${sum}`);
   };
 
   const onRunStrings = async () => {
@@ -219,12 +272,14 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
     }
   };
 
+  const tagged = useMemo(() => (strings ? classifyStrings(strings.strings) : []), [strings]);
+  const tagCounts = useMemo(() => countByRule(tagged), [tagged]);
   const visibleStrings = useMemo(() => {
     if (!strings) return [];
     const q = stringFilter.trim().toLowerCase();
-    const list = q ? strings.strings.filter((s) => s.text.toLowerCase().includes(q)) : strings.strings;
-    return list;
-  }, [strings, stringFilter]);
+    const base = onlyInteresting ? tagged : strings.strings;
+    return q ? base.filter((s) => s.text.toLowerCase().includes(q)) : base;
+  }, [strings, stringFilter, onlyInteresting, tagged]);
 
   const onDecompress = async () => {
     if (!bytes) return;
@@ -244,9 +299,19 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
     }
   };
 
+  const selectedRange = useMemo(() => {
+    if (!bytes || selected == null) return null;
+    const hit = hits.find((h) => h.offset === selected);
+    return hit ? carveRangeForHit(hit, hits, bytes.length) : null;
+  }, [bytes, hits, selected]);
+  const hist = useMemo(() => {
+    if (!bytes) return null;
+    return histScope === 'selection' && selectedRange ? byteHistogram(bytes, selectedRange.start, selectedRange.end) : byteHistogram(bytes);
+  }, [bytes, histScope, selectedRange]);
+
   const report = useMemo(() => {
     if (!file || !scan) return null;
-    return buildReport({
+    const r = buildReport({
       fileName: file.name,
       size: file.size,
       hits,
@@ -254,7 +319,9 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
       entropy: profile,
       strings: strings ? { count: strings.strings.length, truncated: strings.truncated, minLength: strings.minLength } : null
     });
-  }, [file, scan, hits, profile, strings]);
+    if (fileHash) r.file.hash = { algorithm: fileHash.algo, hex: fileHash.hex };
+    return r;
+  }, [file, scan, hits, profile, strings, fileHash]);
 
   const entropyInfo = useMemo(() => (profile ? entropySummary(profile) : null), [profile]);
   const hotRegions = useMemo(() => (profile ? highEntropyRegions(profile).slice(0, 50) : []), [profile]);
@@ -266,28 +333,31 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
   const dumpRows = useMemo(() => (dResult?.data ? hexRows(dResult.data, 0, 256) : []), [dResult]);
 
   return (
-    <div className="flex flex-col gap-3 p-3 text-gray-200 font-sans text-sm">
-      <div className="flex flex-wrap items-center gap-3 justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-cyan-300 font-semibold">
-            <FileSearch size={16} /> Firmware Image Analyzer
-          </div>
-          <div className="text-xs text-slate-500">Signature scan, entropy, strings, hex, carving and decompression. Runs offline on the file you pick.</div>
-        </div>
-        <label className={`${btn} inline-flex items-center gap-1.5 cursor-pointer`}>
+    <div className="flex flex-col gap-2 text-gray-200 font-sans text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className={`${btn} inline-flex items-center gap-1.5 cursor-pointer`} title="Everything runs in this browser; nothing is uploaded">
           <Upload size={12} /> {file ? 'Choose another file' : 'Choose firmware file'}
           <input type="file" className="hidden" onChange={(e) => { loadFile(e.target.files?.[0]); e.target.value = ''; }} />
         </label>
+        {file && (
+          <>
+            <select className={input} value={hashAlgo} onChange={(e) => { setHashAlgo(e.target.value); setFileHash(null); }} aria-label="Hash algorithm">
+              {HASH_ALGOS.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+            <button className={btn} onClick={onHashFile} disabled={!!busy} title="Compute a digest of the whole file in this browser">Hash file</button>
+          </>
+        )}
+        <span className="text-[11px] text-slate-500">Offline: nothing is uploaded.</span>
       </div>
 
       {!file && (
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={onDrop}
-          className="border border-dashed border-slate-700 rounded-lg p-8 text-center bg-slate-950"
+          className="border border-dashed border-slate-700 rounded-lg p-4 text-center bg-slate-950"
         >
           <div className="text-slate-300">Drop a firmware image here, or choose a file.</div>
-          <div className="text-xs text-slate-500 mt-1">Any binary: .bin, .img, .trx, .squashfs, .ubi, .elf, .hex and so on. Up to {fmtBytes(MAX_BYTES)}. Nothing is uploaded.</div>
+          <div className="text-[11px] text-slate-500 mt-1">Any binary: .bin, .img, .trx, .squashfs, .ubi, .elf, .hex and so on. Up to {fmtBytes(MAX_BYTES)}. Nothing is uploaded.</div>
         </div>
       )}
 
@@ -308,20 +378,21 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
 
       {file && (
         <>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             <Stat label="File" value={file.name} />
             <Stat label="Size" value={`${fmtBytes(file.size)} (${file.size} B)`} />
+            {fileHash && <Stat label={fileHash.algo} value={fileHash.hex} tone="text-emerald-300" />}
             <Stat label="Signatures" value={scan ? hits.length : '...'} tone="text-cyan-300" />
             <Stat label="Mean entropy" value={entropyInfo ? `${entropyInfo.mean} bits/B` : '...'} />
             <Stat label="High-entropy blocks" value={entropyInfo ? `${entropyInfo.highBlocks} / ${entropyInfo.blocks}` : '...'} tone={entropyInfo?.highBlocks ? 'text-rose-300' : 'text-gray-100'} />
           </div>
 
-          <div className="flex flex-wrap gap-1 border-b border-slate-800 pb-1">
+          <div className="flex flex-wrap gap-0.5 border-b border-slate-800 pb-0.5">
             {TABS.map(([id, label, Icon]) => (
               <button
                 key={id}
                 onClick={() => setTab(id)}
-                className={`px-2.5 py-1.5 rounded-t text-xs inline-flex items-center gap-1.5 ${tab === id ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-gray-200'}`}
+                className={`px-2 py-1 rounded-t text-xs inline-flex items-center gap-1.5 ${tab === id ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-gray-200'}`}
               >
                 <Icon size={12} /> {label}
               </button>
@@ -331,23 +402,25 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
           {tab === 'signatures' && (
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2">
-                <input className={`${input} w-64`} placeholder="Filter by type, field or value" value={filter} onChange={(e) => setFilter(e.target.value)} />
+                <input className={`${input} w-full @md:w-64`} placeholder="Filter by type, field or value" value={filter} onChange={(e) => setFilter(e.target.value)} />
                 <span className="text-xs text-slate-500">{visibleHits.length} shown</span>
+                <button className={btn} onClick={onCopyListing} disabled={visibleHits.length === 0} title="Copy the shown rows as a binwalk-style DECIMAL / HEXADECIMAL / DESCRIPTION listing">Copy listing</button>
+                {copyNote && <span className="text-xs text-emerald-300">{copyNote}</span>}
                 {scan?.truncated?.length > 0 && (
                   <span className="text-xs text-amber-300">Capped: {scan.truncated.map((t) => `${t.name} (${t.limit})`).join(', ')}</span>
                 )}
               </div>
               {carveNote && <div className="text-xs text-emerald-300">{carveNote}</div>}
               {scan && hits.length === 0 && <div className="text-xs text-slate-400 p-3 border border-slate-800 rounded bg-slate-950">No known signature matched. The entropy and strings tabs may still show structure.</div>}
-              <div className="overflow-auto max-h-[420px] border border-slate-800 rounded">
+              <div className="overflow-auto max-h-[360px] border border-slate-800 rounded">
                 <table className="w-full text-xs font-mono">
                   <thead className="sticky top-0 bg-slate-900 text-slate-400">
                     <tr>
-                      <th className="text-left p-2">Offset</th>
-                      <th className="text-left p-2">Type</th>
-                      <th className="text-right p-2">Size</th>
-                      <th className="text-left p-2">Details</th>
-                      <th className="text-left p-2">Actions</th>
+                      <th className="text-left p-1.5">Offset</th>
+                      <th className="text-left p-1.5">Type</th>
+                      <th className="text-right p-1.5">Size</th>
+                      <th className="text-left p-1.5">Details</th>
+                      <th className="text-left p-1.5">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -356,18 +429,18 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
                       const isSel = selected === h.offset;
                       return (
                         <tr key={`${h.offset}-${h.id}-${i}`} onClick={() => setSelected(h.offset)} className={`border-t border-slate-900 align-top cursor-pointer ${isSel ? 'bg-slate-800/60' : 'hover:bg-slate-900/60'}`}>
-                          <td className="p-2 text-cyan-300 whitespace-nowrap">{formatOffset(h.offset)}<div className="text-slate-500">{h.offset}</div></td>
-                          <td className="p-2">
+                          <td className="p-1.5 text-cyan-300 whitespace-nowrap">{formatOffset(h.offset)}<div className="text-slate-500">{h.offset}</div></td>
+                          <td className="p-1.5">
                             <span className={`inline-block border rounded px-1.5 py-0.5 text-[10px] mr-1 ${tone}`}>{h.categoryLabel}</span>
                             <span className="text-gray-100">{h.name}</span>
                             {h.heuristic && <span className="ml-1 text-amber-400">heuristic</span>}
                           </td>
-                          <td className="p-2 text-right whitespace-nowrap">{h.size ?? '-'}</td>
-                          <td className="p-2 text-slate-300">
+                          <td className="p-1.5 text-right whitespace-nowrap">{h.size ?? '-'}</td>
+                          <td className="p-1.5 text-slate-300">
                             {h.fields.map(([k, v]) => <div key={k}><span className="text-slate-500">{k}:</span> {String(v)}</div>)}
                             {h.notes.map((n, j) => <div key={j} className="text-amber-300">{n}</div>)}
                           </td>
-                          <td className="p-2 whitespace-nowrap">
+                          <td className="p-1.5 whitespace-nowrap">
                             <div className="flex flex-col gap-1">
                               <button className={btn} onClick={(e) => { e.stopPropagation(); jumpHex(h.offset); }}>Hex</button>
                               <button className={btn} onClick={(e) => { e.stopPropagation(); onCarve(h); }}>
@@ -412,6 +485,18 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
                   {[256, 1024, 4096, 16384, 65536].map((b) => <option key={b} value={b}>{b}</option>)}
                 </select>
               </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-slate-400">Byte histogram (log scale)</span>
+                <select className={input} value={histScope} onChange={(e) => setHistScope(e.target.value)} aria-label="Histogram scope">
+                  <option value="file">Whole file</option>
+                  <option value="selection" disabled={!selectedRange}>Selected signature row</option>
+                </select>
+                {hist && (
+                  <span className="font-mono text-slate-400">{hist.distinct}/256 values, 0x00 {hist.zeroPct}%, 0xFF {hist.ffPct}%, printable {hist.printablePct}%</span>
+                )}
+              </div>
+              <HistogramCanvas hist={hist} />
+              <div className="text-[11px] text-slate-500">Grey 0x00, cyan printable ASCII, red 0xFF, green other. A flat bar chart means random-looking (compressed or encrypted) data; long 0x00 or 0xFF bars mean padding or erased flash.</div>
               <div className="text-xs text-slate-400">High-entropy regions ({hotRegions.length}{hotRegions.length === 50 ? '+' : ''} shown)</div>
               <div className="max-h-40 overflow-auto border border-slate-800 rounded font-mono text-xs">
                 {hotRegions.length === 0 && <div className="p-2 text-slate-500">None at or above {HIGH_ENTROPY} bits per byte.</div>}
@@ -440,19 +525,26 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
               {strings && (
                 <>
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <input className={`${input} w-64`} placeholder="Filter strings" value={stringFilter} onChange={(e) => setStringFilter(e.target.value)} />
+                    <label className="flex items-center gap-1" title="URLs, IPs, e-mails, key markers, credential-like and version strings"><input type="checkbox" checked={onlyInteresting} onChange={(e) => setOnlyInteresting(e.target.checked)} /> Interesting only ({tagged.length})</label>
+                    <input className={`${input} w-full @md:w-64`} placeholder="Filter strings" value={stringFilter} onChange={(e) => setStringFilter(e.target.value)} />
                     <span className="text-slate-500">{strings.strings.length} found{strings.truncated ? ' (limit reached)' : ''}, {visibleStrings.length} match, first 1000 shown</span>
                   </div>
                   <div className="max-h-[360px] overflow-auto border border-slate-800 rounded font-mono text-xs bg-slate-950">
                     {visibleStrings.slice(0, 1000).map((s, i) => (
-                      <div key={`${s.offset}-${i}`} className="px-2 py-0.5 border-b border-slate-900 flex gap-3">
+                      <div key={`${s.offset}-${i}`} className="px-2 py-0.5 border-b border-slate-900 flex flex-wrap gap-x-3">
                         <button className="text-cyan-400 hover:underline whitespace-nowrap" onClick={() => jumpHex(s.offset)}>{formatOffset(s.offset)}</button>
                         <span className="text-slate-500 w-14">{s.encoding}</span>
+                        {s.label && <span className="text-amber-300 whitespace-nowrap">{s.label}</span>}
                         <span className="text-gray-200 break-all">{s.text}</span>
                       </div>
                     ))}
                   </div>
                 </>
+              )}
+              {strings && tagged.length > 0 && (
+                <div className="text-[11px] text-slate-500 font-mono">
+                  {STRING_RULES.filter((r) => tagCounts[r.id]).map((r) => `${r.label}: ${tagCounts[r.id]}`).join(' | ')}. Pattern matches only; they are leads to check, not findings.
+                </div>
               )}
               {!strings && <div className="text-xs text-slate-500">Strings are extracted on demand (ASCII runs and UTF-16LE runs of at least the minimum length).</div>}
             </div>
@@ -469,7 +561,7 @@ export default function FirmwareAnalyzerWorkbench({ onLogMessage }) {
                   {[256, 512, 1024, 4096].map((n) => <option key={n} value={n}>{n} bytes</option>)}
                 </select>
               </div>
-              <div className="overflow-auto max-h-[420px] border border-slate-800 rounded bg-slate-950 p-2 font-mono text-[11px] leading-5">
+              <div className="overflow-auto max-h-[360px] border border-slate-800 rounded bg-slate-950 p-2 font-mono text-[11px] leading-5">
                 {hexList.map((r) => (
                   <div key={r.offset} className="whitespace-pre">
                     <span className="text-cyan-400">{r.offset.toString(16).toUpperCase().padStart(8, '0')}</span>  <span className="text-gray-200">{r.hex.padEnd(47, ' ')}</span>  <span className="text-slate-400">{r.ascii}</span>
