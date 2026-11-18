@@ -108,7 +108,7 @@ The **Packet Framer** supports three framing modes: **Start / End Byte** (custom
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Wi-Fi & PCAP Analyzer** | Tab | Sample-frame viewer (802.11, EAPOL, NMEA, Modbus examples). |
+| **Wi-Fi & PCAP Analyzer** | Tab | Capture viewer: opens radiotap pcap files, follows a serial stream, and offers sample frames. |
 | **Kismet Studio (Alfa / 802.11)** | Tab | Live client for a Kismet server. |
 | **Hex Stream Viewer** | Tab | Live hex/ASCII view of the shared serial byte stream. |
 | **Packet Framer (SLIP / COBS)** | Tab | Frames the byte stream by start/end bytes, fixed length or SLIP. |
@@ -120,14 +120,15 @@ The **Packet Framer** supports three framing modes: **Start / End Byte** (custom
 | **Open capture** | File button | Opens a radiotap \`.pcap\` / \`.cap\` file and dissects every packet (802.11 type/subtype, addresses, SSID, channel, RSSI). An unreadable file shows "Could not open ...". |
 | **Clear** | Button | Empties the packet table. |
 | **Load demo frames** | Button | Loads five built-in example frames (beacon, probe request, EAPOL message 1, NMEA sentence, Modbus response). They are not captured from anything: a **DEMO DATA** badge is shown while they are in the table. |
-| **Export CSV** | Button | Downloads the table as \`skons_packet_capture.csv\`. |
-| **Export .pcap** | Button | Writes the frames that came from an opened capture as a real radiotap \`skons_packet_capture.pcap\` for Wireshark. Disabled when no pcap-origin frames are loaded (serial and demo rows are not packets). |
-| **Filter by MAC, SSID, protocol...** | Text Input | Live filter on protocol, source, destination or SSID. |
+| **Export CSV** | Button | Downloads the frames that match the current filter as \`skons_packet_capture.csv\`. |
+| **Export .pcap** | Button | Writes the filtered frames that came from an opened capture as a real radiotap \`skons_packet_capture.pcap\` for Wireshark. Disabled when no pcap-origin frames are loaded (serial and demo rows are not packets). |
+| **Display filter** | Text Input | Free text matches protocol, MAC, SSID, type or subtype. It also accepts Wireshark-style terms \`field op value\` with \`==\`, \`!=\`, \`~\` (contains), \`<\`, \`>\`, \`<=\`, \`>=\`, joined by \`&&\` (and) and \`||\` (or, lower precedence); a leading \`!\` negates a term. Fields: \`type\`, \`subtype\`, \`proto\`, \`src\`, \`dst\`, \`bssid\`, \`ssid\`, \`ch\`, \`rssi\`, \`len\`, \`origin\`. Example: \`type==Data && rssi>-70 || ssid~cafe\`. An invalid expression shows a red message and the table is left unfiltered. This is a small subset, not Wireshark's full display-filter language. |
 | **ALL / Management / Data / Serial** | Buttons | Filter by frame type. |
 | **Follow serial stream** | Checkbox | Turns newly received serial lines (split at LF, or every 512 bytes) into "Serial" rows; NMEA sentences are labelled as such. It ignores data received before you ticked it, and removes demo frames. **Status** shows LIVE while data arrived in the last 5 seconds, otherwise IDLE. |
 | **Frames** | Counter | Number of rows matching the filter. Only the first 1,000 are listed; narrow the filter to see the rest. |
-| **Packet Capture Stream** | Table | Time, Protocol, Source, Destination / SSID and RSSI per frame. |
-| **Frame Details & Hex Inspector** | Panel | Frame type, channel, addresses (Addr1-3 for 802.11), BSSID, payload length and raw hex of the selected row. |
+| **Capture summary** | Collapsible | Shown once frames are loaded. The header gives frame count, bytes, capture duration, number of access points and handshakes. Inside: protocol counts for the filtered frames, access points seen in beacons and probe responses (SSID, BSSID, channel, strongest RSSI), and EAPOL 4-way handshakes grouped by AP and station with the message numbers seen (complete = M1-M4; partial = two consecutive messages such as M1+M2 or M2+M3). Click a handshake to select its first message. It only reports what is in the capture; it does not crack or verify anything. |
+| **Packet capture stream** | Table | Time, Protocol, Source, Destination / SSID and RSSI per frame. |
+| **Frame details & hex inspector** | Panel | Frame type, channel, addresses (Addr1-3 for 802.11), BSSID, payload length and a 16-bytes-per-line hex and ASCII dump of the selected row, with a **Copy** button for the dump. |
 
 **Hex Stream Viewer**
 
@@ -163,9 +164,9 @@ The **Packet Framer** supports three framing modes: **Start / End Byte** (custom
 #### Walkthrough C: Inspecting a Capture File
 1. Open the **Wi-Fi & PCAP Analyzer** sub-tab. It starts empty.
 2. Click **Open capture** and pick a radiotap \`.pcap\` / \`.cap\` file (for example one saved by Kismet or Wireshark).
-3. Filter with the search box or the **ALL / Management / Data / Serial** buttons.
+3. Filter with the display filter box (for example \`type==Management && ssid~guest\`) or the **ALL / Management / Data / Serial** buttons. Expand **Capture summary** to see the protocol mix, access points and any EAPOL handshakes.
 4. Click a row to see its addresses, BSSID, SSID, channel, length and raw hex in the details pane.
-5. **Export CSV** saves the table; **Export .pcap** writes the opened packets back out as a radiotap \`.pcap\`.
+5. **Export CSV** saves the filtered rows; **Export .pcap** writes the filtered opened packets back out as a radiotap \`.pcap\`, so you can cut a large capture down before opening it in Wireshark.
 6. No capture handy? **Load demo frames** shows five labelled example rows (a **DEMO DATA** badge is displayed) so you can try the filters.
 
 <details>
@@ -233,10 +234,15 @@ The **WIDS Intrusion Alerts** tab lists the alerts Kismet itself raises (the too
 ### Implementation & Architecture
 
 - **Component:** [\`src/components/tools/ProtocolPacketLab.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/ProtocolPacketLab.jsx) is a thin tab router. The sub-tabs are **Wi-Fi & PCAP Analyzer** (\`PacketAnalyzerWorkbench\`), **Kismet Studio (Alfa / 802.11)** (\`KismetStudioWorkbench\`), **Hex Stream Viewer** (\`HexViewer\`) and **Packet Framer (SLIP / COBS)** (\`PacketFramer\`). The tool IDs \`packet-analyzer\`, \`hex\`, \`packets\` and \`kismet\` all open this same lab on the matching sub-tab.
-- **Wi-Fi & PCAP Analyzer:** \`PacketAnalyzerWorkbench\` starts empty. **Open capture** reads a radiotap pcap with \`src/utils/pcapReader.js\` and turns each record into a row with \`src/utils/packetFrames.js\` (802.11 type/subtype, addresses, SSID, channel, RSSI); **Follow serial stream** adds LF-split serial lines from the shared \`hexByteStream\` (only bytes received after it is ticked). It ships five clearly labelled demo frames (**Load demo frames**, shown with a **DEMO DATA** badge). It does not detect handshakes. **Export CSV** writes the table and **Export .pcap** writes only the frames that came from an opened capture.
+- **Wi-Fi & PCAP Analyzer:** \`PacketAnalyzerWorkbench\` starts empty. **Open capture** reads a radiotap pcap with \`src/utils/pcapReader.js\` and turns each record into a row with \`src/utils/packetFrames.js\` (802.11 type/subtype, addresses, SSID, channel, RSSI); **Follow serial stream** adds LF-split serial lines from the shared \`hexByteStream\` (only bytes received after it is ticked). It ships five clearly labelled demo frames (**Load demo frames**, shown with a **DEMO DATA** badge). The display filter, capture statistics, access-point list, EAPOL handshake grouping and hex dump formatting are pure functions in \`src/utils/packetAnalysis.js\`. **Export CSV** and **Export .pcap** write the frames that match the filter; the pcap export includes only frames that came from an opened capture.
 - **Hex stream:** \`HexViewer\` renders \`hexByteStream\` straight from the shared \`SerialContext\` (every RX/TX byte, color-coded by direction, newest 4096 bytes shown in the lab), so it reflects whatever the Terminal is connected to.
 - **Framing:** \`PacketFramer\` slices that same byte stream into packets using Start / End byte, Fixed Length or SLIP (0xC0) framing, and shows a CRC-16/Modbus value for the selected packet.
 - **Kismet:** \`KismetStudioWorkbench\` talks to a Kismet server's REST API through \`src/utils/kismetClient.js\` (optionally via the local \`cors-proxy\` Docker backend). Kismet does all the radio capture.
+
+---
+
+#### Similar tools
+Wireshark (display filters, protocol hierarchy, hex pane), Kismet (device and AP lists), tshark and Aircrack-ng suite (handshake detection) and CommView for WiFi. This lab covers a small browser-side subset for quick looks at a capture; use those tools for deep dissection, decryption or long captures.
 
 ---
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layers, Binary, Activity, Wifi, Filter, Terminal, Radio } from 'lucide-react';
+import { Layers, Binary, Wifi, Radio } from 'lucide-react';
 import PacketAnalyzerWorkbench from './PacketAnalyzerWorkbench';
 import KismetStudioWorkbench from './KismetStudioWorkbench';
 import HexViewer from '../common/HexViewer';
@@ -23,68 +23,36 @@ export default function ProtocolPacketLab({
     }
   }, [initialTab]);
 
-  return (
-    <div className="w-full space-y-4">
-      {/* Suite Header & Sub-Navigation */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-purple-500/10 border border-purple-500/30 rounded-lg text-purple-400">
-            <Activity className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-400">
-              802.11 Wi-Fi frames, PCAP exporter, real-time hex inspection & SLIP/COBS packet framing
-            </p>
-          </div>
-        </div>
+  const tabs = [
+    { id: 'analyzer', label: 'Wi-Fi & PCAP Analyzer', Icon: Wifi, active: 'purple', title: 'Open and inspect radiotap .pcap captures' },
+    { id: 'kismet', label: 'Kismet Studio (Alfa / 802.11)', Icon: Radio, active: 'purple', title: 'Kismet server client for 802.11 monitor setups' },
+    { id: 'hex', label: 'Hex Stream Viewer', Icon: Binary, active: 'cyan', title: 'Live hex/ASCII view of the serial stream' },
+    { id: 'packets', label: 'Packet Framer (SLIP / COBS)', Icon: Layers, active: 'emerald', title: 'Frame the serial stream into packets' },
+  ];
+  const activeClass = {
+    purple: 'bg-purple-500/20 text-purple-300 border border-purple-500/40',
+    cyan: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40',
+    emerald: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
+  };
 
-        {/* Tab Switcher */}
-        <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
+  return (
+    <div className="w-full space-y-2">
+      <div role="tablist" aria-label="Protocol Packet Lab views" className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+        {tabs.map(({ id, label, Icon, active, title }) => (
           <button
-            onClick={() => setActiveSubTab('analyzer')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'analyzer'
-                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+            key={id}
+            role="tab"
+            aria-selected={activeSubTab === id}
+            title={title}
+            onClick={() => setActiveSubTab(id)}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold transition focus:outline-none focus-visible:ring-1 focus-visible:ring-purple-400 ${
+              activeSubTab === id ? activeClass[active] : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Wifi className="w-3.5 h-3.5" />
-            <span>Wi-Fi & PCAP Analyzer</span>
+            <Icon className="w-3.5 h-3.5" />
+            <span>{label}</span>
           </button>
-          <button
-            onClick={() => setActiveSubTab('kismet')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'kismet'
-                ? 'bg-gradient-to-r from-purple-500/30 to-indigo-500/30 text-purple-200 border border-purple-500/50 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5 text-purple-400" />
-            <span>Kismet Studio (Alfa / 802.11)</span>
-          </button>
-          <button
-            onClick={() => setActiveSubTab('hex')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'hex'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Binary className="w-3.5 h-3.5" />
-            <span>Hex Stream Viewer</span>
-          </button>
-          <button
-            onClick={() => setActiveSubTab('packets')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'packets'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Packet Framer (SLIP / COBS)</span>
-          </button>
-        </div>
+        ))}
       </div>
 
       {/* Active Tab View */}

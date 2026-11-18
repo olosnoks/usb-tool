@@ -322,7 +322,7 @@ kismet -c ${monIface} --no-ncurses`;
   };
 
   return (
-    <div className="flex flex-col gap-4 font-mono text-slate-100">
+    <div className="flex flex-col gap-2 font-mono text-slate-100">
       <ProxyConfig onLogMessage={log} backend="cors-proxy" />
       {isConnected && (
         <div role="note" className={`p-2.5 rounded-lg border text-xs ${kismetError ? 'border-rose-500/40 bg-rose-500/10 text-rose-200' : 'border-sky-500/40 bg-sky-500/10 text-sky-200'}`}>
@@ -331,29 +331,15 @@ kismet -c ${monIface} --no-ncurses`;
             : `Live from Kismet at ${serverUrl}: ${devices.length} device${devices.length === 1 ? '' : 's'} seen in the last 10 minutes, ${alerts.length} alert${alerts.length === 1 ? '' : 's'}${lastUpdate ? ` · updated ${lastUpdate.toLocaleTimeString()}` : ' · loading…'}.`}
         </div>
       )}
-      {/* Top Banner Card */}
-      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 shadow-xl flex flex-col @md:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-xl text-purple-400 shadow-inner">
-            <Radio className="w-6 h-6 animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                802.11 Monitor Lab
-              </span>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                Dual-Band 2.4 / 5GHz
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Integrated Kismet REST/WebSocket engine for Alfa Wi-Fi adapters, 802.11 frame monitor mode, device catalogs & WIDS IDS alerts
-            </p>
-          </div>
+      {/* Server bar */}
+      <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-[11px] text-slate-400" title="Kismet REST/WebSocket client for 802.11 monitor setups: device catalog and WIDS alerts">
+          <Radio className="w-4 h-4 text-purple-400" />
+          <span>Kismet server</span>
         </div>
 
         {/* Server & Demo Mode Controller */}
-        <div className="flex flex-wrap items-center gap-2 w-full @md:w-auto justify-end">
+        <div className="flex flex-wrap items-center gap-2 justify-end">
           <div className="flex items-center bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800 text-xs gap-2">
             <Server className="w-3.5 h-3.5 text-slate-400" />
             <input
@@ -397,8 +383,8 @@ kismet -c ${monIface} --no-ncurses`;
       </div>
 
       {/* Live Capture Stats Bar */}
-      <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3 text-xs">
-        <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-3 flex items-center justify-between">
+      <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2 text-xs">
+        <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2 flex items-center justify-between">
           <div>
             <div className="text-[10px] uppercase text-slate-400 font-semibold">Active Hardware</div>
             <div className="text-sm font-bold text-cyan-400 mt-0.5">{selectedAlfa.name}</div>
@@ -407,7 +393,7 @@ kismet -c ${monIface} --no-ncurses`;
           <Cpu className="w-5 h-5 text-cyan-400/40" />
         </div>
 
-        <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-3 flex items-center justify-between">
+        <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2 flex items-center justify-between">
           <div>
             <div className="text-[10px] uppercase text-slate-400 font-semibold">Packet Telemetry</div>
             <div className="text-sm font-bold text-purple-400 mt-0.5">
@@ -418,7 +404,7 @@ kismet -c ${monIface} --no-ncurses`;
           <Activity className="w-5 h-5 text-purple-400/40" />
         </div>
 
-        <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-3 flex items-center justify-between">
+        <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2 flex items-center justify-between">
           <div>
             <div className="text-[10px] uppercase text-slate-400 font-semibold">Discovered Devices</div>
             <div className="text-sm font-bold text-emerald-400 mt-0.5">{devices.length} Nodes</div>
@@ -429,7 +415,7 @@ kismet -c ${monIface} --no-ncurses`;
           <Wifi className="w-5 h-5 text-emerald-400/40" />
         </div>
 
-        <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-3 flex items-center justify-between">
+        <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2 flex items-center justify-between">
           <div>
             <div className="text-[10px] uppercase text-slate-400 font-semibold">WIDS IDS Alerts</div>
             <div className="text-sm font-bold text-amber-400 mt-0.5">
@@ -444,11 +430,11 @@ kismet -c ${monIface} --no-ncurses`;
       </div>
 
       {/* Main Workbench Navigation Tabs */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-[#171920] border border-[#2b303c] rounded-xl p-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-[#171920] border border-[#2b303c] rounded-xl p-1.5">
         <div className="flex items-center gap-1">
           <button
             onClick={() => setActiveTab('inventory')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+            className={`flex items-center gap-2 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${
               activeTab === 'inventory'
                 ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
@@ -460,7 +446,7 @@ kismet -c ${monIface} --no-ncurses`;
 
           <button
             onClick={() => setActiveTab('spectrum')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+            className={`flex items-center gap-2 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${
               activeTab === 'spectrum'
                 ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
@@ -472,7 +458,7 @@ kismet -c ${monIface} --no-ncurses`;
 
           <button
             onClick={() => setActiveTab('alerts')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+            className={`flex items-center gap-2 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${
               activeTab === 'alerts'
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
@@ -484,7 +470,7 @@ kismet -c ${monIface} --no-ncurses`;
 
           <button
             onClick={() => setActiveTab('hardware')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+            className={`flex items-center gap-2 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${
               activeTab === 'hardware'
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
@@ -520,7 +506,7 @@ kismet -c ${monIface} --no-ncurses`;
       {activeTab === 'inventory' && (
         <div className="space-y-3">
           {/* Filter Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-[#171920] border border-[#2b303c] rounded-xl p-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-[#171920] border border-[#2b303c] rounded-xl p-2 text-xs">
             <div className="flex items-center bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 w-full @sm:w-72">
               <Search className="w-3.5 h-3.5 text-slate-400 mr-2" />
               <input
@@ -648,7 +634,7 @@ kismet -c ${monIface} --no-ncurses`;
 
           {/* Modal / Detail Drawer for Selected Device */}
           {selectedDevice && (
-            <div className="bg-slate-900 border border-purple-500/40 rounded-xl p-4 shadow-2xl relative animate-in fade-in">
+            <div className="bg-slate-900 border border-purple-500/40 rounded-xl p-2.5 shadow-2xl relative animate-in fade-in">
               <button
                 onClick={() => setSelectedDevice(null)}
                 className="absolute top-3 right-3 text-slate-400 hover:text-white text-sm"
@@ -704,8 +690,8 @@ kismet -c ${monIface} --no-ncurses`;
 
       {/* TAB 2: SPECTRUM & CHANNELS */}
       {activeTab === 'spectrum' && (
-        <div className="space-y-4">
-          <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-4">
+        <div className="space-y-2">
+          <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2.5">
             <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider mb-2 flex items-center gap-2">
               <Signal className="w-4 h-4 text-emerald-400" />
               2.4 GHz ISM Band Spectrum Congestion (Channels 1–13)
@@ -739,7 +725,7 @@ kismet -c ${monIface} --no-ncurses`;
             </div>
           </div>
 
-          <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-4">
+          <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2.5">
             <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider mb-2 flex items-center gap-2">
               <Signal className="w-4 h-4 text-indigo-400" />
               5 GHz UNII-1 / UNII-2 / UNII-3 Band Distribution
@@ -775,7 +761,7 @@ kismet -c ${monIface} --no-ncurses`;
       {/* TAB 3: WIDS INTRUSION ALERTS */}
       {activeTab === 'alerts' && (
         <div className="space-y-3">
-          <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-4">
+          <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2.5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 text-amber-400" />
@@ -826,9 +812,9 @@ kismet -c ${monIface} --no-ncurses`;
 
       {/* TAB 4: ALFA HARDWARE PROFILES & CLI ASSISTANT */}
       {activeTab === 'hardware' && (
-        <div className="space-y-4">
+        <div className="space-y-2">
           {/* Alfa Model Selector */}
-          <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-4">
+          <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2.5">
             <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider mb-3 flex items-center gap-2">
               <Cpu className="w-4 h-4 text-cyan-400" />
               Select Alfa Wi-Fi Adapter Model
@@ -867,7 +853,7 @@ kismet -c ${monIface} --no-ncurses`;
           </div>
 
           {/* Launch Script Generator */}
-          <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-4">
+          <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2.5">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
               <div>
                 <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
