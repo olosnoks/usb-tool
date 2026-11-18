@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
-  Activity,
   Play,
   Pause,
   Trash2,
@@ -14,7 +13,8 @@ import {
   Image as ImageIcon,
   Save,
   FolderOpen,
-  Crosshair
+  Crosshair,
+  Ruler
 } from 'lucide-react';
 import { useSerial } from '../context/SerialContext';
 import {
@@ -28,6 +28,9 @@ import {
   spectrum,
   dominantBin,
   estimateSampleRate,
+  movingAverage,
+  estimateFrequency,
+  measureCursors,
   buildPlotCsv,
   serializePlotConfig,
   parsePlotConfig
@@ -94,6 +97,8 @@ export default function SerialPlotter({
   const [showSketchModal, setShowSketchModal] = useState(false);
   const [activeCodeTab, setActiveCodeTab] = useState('arduino');
   const [copiedCode, setCopiedCode] = useState(false);
+  const [smooth, setSmooth] = useState(1); // moving-average length for the drawn trace
+  const [cursors, setCursors] = useState({ a: null, b: null }); // sample timestamps (ms)
 
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -101,6 +106,7 @@ export default function SerialPlotter({
   const frozenRef = useRef(null);   // snapshot while paused
   const geomRef = useRef({ start: 0, n: 0, plotW: 1 }); // set by the draw effect for mouse mapping
   const dragRef = useRef(null);
+  const movedRef = useRef(false);
   const flushTimerRef = useRef(null);
   const pausedRef = useRef(false);
   pausedRef.current = isPaused;
@@ -183,8 +189,29 @@ export default function SerialPlotter({
     return out;
   }, [slice, maxChannels, channelCfg]);
 
+  // Drawn traces can be smoothed; statistics, cursors and the FFT keep using the unsmoothed data.
+  const plotSeries = useMemo(() => series.map((arr) => movingAverage(arr, smooth)), [series, smooth]);
+
   const measuredRate = useMemo(() => estimateSampleRate(slice), [slice]);
   const sampleRate = sampleRateInput > 0 ? sampleRateInput : measuredRate;
+
+  // Cursors are stored as sample timestamps so they stay on their sample while data scrolls.
+  const cursorIndex = (k) => {
+    const t = cursors[k];
+    if (t === null || t === undefined) return -1;
+    let lo = 0; let hi = slice.length - 1;
+    if (hi < 0 || t < slice[0].t || t > slice[hi].t) return -1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (slice[m].t < t) lo = m + 1; else hi = m; }
+    return lo;
+  };
+  const cursorCh = Math.max(0, Array.from({ length: maxChannels }, (_, i) => i).find((i) => visibleChannels[i] !== false) ?? 0);
+  const curA = cursorIndex('a');
+  const curB = cursorIndex('b');
+  const cursorMeasure = useMemo(() => {
+    if (curA < 0 || curB < 0) return null;
+    return measureCursors(slice, series[cursorCh] || [], curA, curB);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slice, series, curA, curB, cursorCh]);
 
   // Canvas drawing
   useEffect(() => {
@@ -246,7 +273,7 @@ export default function SerialPlotter({
     };
 
     if (view === 'time') {
-      const shownSeries = series.filter((_, ch) => isShown(ch));
+      const shownSeries = plotSeries.filter((_, ch) => isShown(ch));
       const [minY, maxY] = rangeOf(shownSeries, autoScale, customMinY, customMaxY);
       const yRange = maxY - minY || 1;
       const yOf = (v) => PAD.top + plotH - ((v - minY) / yRange) * plotH;
@@ -259,11 +286,11 @@ export default function SerialPlotter({
         ctx.setLineDash([]);
       }
 
-      for (let ch = 0; ch < series.length; ch++) {
+      for (let ch = 0; ch < plotSeries.length; ch++) {
         if (!isShown(ch)) continue;
         const color = CHANNEL_COLORS[ch % CHANNEL_COLORS.length];
         ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-        const pts = decimateMinMax(series[ch], Math.floor(plotW));
+        const pts = decimateMinMax(plotSeries[ch], Math.floor(plotW));
         ctx.beginPath();
         pts.forEach((p, k) => { if (k === 0) ctx.moveTo(xOf(p.i), yOf(p.v)); else ctx.lineTo(xOf(p.i), yOf(p.v)); });
         ctx.stroke();
@@ -290,6 +317,16 @@ export default function SerialPlotter({
           ctx.setLineDash([]);
         }
       }
+      // Measurement cursors
+      [['a', '#fbbf24'], ['b', '#34d399']].forEach(([k, color]) => {
+        const ci = cursorIndex(k);
+        if (ci < 0) return;
+        ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash([5, 3]);
+        ctx.beginPath(); ctx.moveTo(xOf(ci), PAD.top); ctx.lineTo(xOf(ci), PAD.top + plotH); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = color; ctx.textAlign = 'left';
+        ctx.fillText(k.toUpperCase(), xOf(ci) + 3, PAD.top + 10);
+      });
       // Hover cursor
       if (hoverIdx !== null && hoverIdx >= 0 && hoverIdx < n) {
         ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1;
@@ -339,7 +376,7 @@ export default function SerialPlotter({
       axisLabel(`Y: ${labels[xyY] || `CH ${xyY}`}`, PAD.left + 6, PAD.top + 12);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slice, series, view, visibleChannels, autoScale, customMinY, customMaxY, hoverIdx, fftChannel, xyX, xyY, sampleRate, captureShown, range.start]);
+  }, [slice, series, plotSeries, cursors, view, visibleChannels, autoScale, customMinY, customMaxY, hoverIdx, fftChannel, xyX, xyY, sampleRate, captureShown, range.start]);
 
   // Wheel zoom needs a non-passive listener so the page does not scroll.
   useEffect(() => {
@@ -357,18 +394,25 @@ export default function SerialPlotter({
     const r = canvasRef.current.getBoundingClientRect();
     return e.clientX - r.left - PAD.left;
   };
-  const onMouseDown = (e) => { dragRef.current = { x: e.clientX, pan }; };
+  const onMouseDown = (e) => { dragRef.current = { x: e.clientX, pan }; movedRef.current = false; };
   const onMouseUp = () => { dragRef.current = null; };
   const onMouseMove = (e) => {
     const g = geomRef.current;
     if (dragRef.current && view === 'time' && !captureShown) {
       const dx = e.clientX - dragRef.current.x;
+      if (Math.abs(dx) > 3) movedRef.current = true;
       setPan(Math.max(0, dragRef.current.pan + Math.round((dx / g.plotW) * g.n)));
       return;
     }
     if (view !== 'time' || g.n === 0) { setHoverIdx(null); return; }
     const frac = Math.min(1, Math.max(0, localX(e) / g.plotW));
     setHoverIdx(Math.round(frac * (g.n - 1)));
+  };
+  // A click (no drag) places cursor A, then B, then clears both.
+  const onCanvasClick = () => {
+    if (movedRef.current || view !== 'time' || hoverIdx === null || !slice[hoverIdx]) return;
+    const t = slice[hoverIdx].t;
+    setCursors((c) => (c.a === null ? { a: t, b: null } : c.b === null ? { ...c, b: t } : { a: null, b: null }));
   };
   const resetView = () => { setZoom(1); setPan(0); };
 
@@ -377,11 +421,12 @@ export default function SerialPlotter({
     for (let ch = 0; ch < maxChannels; ch++) {
       const st = channelStats(series[ch] || []);
       if (!st) continue;
-      out.push({ ch, label: labels[ch] || `CH ${ch}`, color: CHANNEL_COLORS[ch % CHANNEL_COLORS.length], ...st });
+      const fr = estimateFrequency(series[ch] || [], slice.map((p) => p.t));
+      out.push({ ch, label: labels[ch] || `CH ${ch}`, color: CHANNEL_COLORS[ch % CHANNEL_COLORS.length], ...st, freq: fr ? fr.freq : null });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [series, maxChannels, version]);
+  }, [series, slice, maxChannels, version]);
 
   const hoverPoint = hoverIdx !== null && slice[hoverIdx] ? slice[hoverIdx] : null;
 
@@ -434,111 +479,92 @@ export default function SerialPlotter({
   const setTrig = (patch) => setTrigCfg((prev) => ({ ...prev, ...patch }));
 
   return (
-    <div className="bg-cyber-darkest border border-cyber-border rounded-xl shadow-xl p-4 flex flex-col gap-3 font-mono text-xs">
-      {/* Title Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-cyber-border">
-        <div className="flex items-center gap-2">
-          <Activity className="w-4 h-4 text-cyber-cyan" />
-          <h2 className="font-bold text-slate-100 tracking-wider">REAL-TIME SERIAL OSCILLOSCOPE & PLOTTER</h2>
-          <span className="text-[10px] text-slate-500">{engine.points.length.toLocaleString()} / {MAX_POINTS.toLocaleString()} samples</span>
-        </div>
-
-        {/* Top Controls */}
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setShowSketchModal(true)}
-            className="flex items-center gap-1 text-[11px] bg-slate-900 hover:bg-slate-800 text-cyber-cyan px-2.5 py-1 rounded-lg border border-slate-800 transition-colors"
-          >
-            <Code className="w-3.5 h-3.5 text-cyber-cyan" />
-            <span>Firmware Sketches</span>
-          </button>
-
-          <select
-            value={windowSize}
-            onChange={(e) => setWindowSize(Number(e.target.value))}
-            aria-label="Window size"
-            className="bg-slate-950 border border-slate-800 text-[11px] text-slate-300 rounded px-2 py-1 outline-none cursor-pointer"
-          >
-            {[50, 100, 150, 300, 500, 1000, 5000].map((n) => <option key={n} value={n}>{n} Samples</option>)}
-          </select>
-
-          <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoScale}
-              onChange={(e) => setAutoScale(e.target.checked)}
-              aria-label="Auto-scale Y axis"
-            />
-            <span>Auto-scale</span>
-          </label>
-          <input
-            type="number"
-            value={customMinY}
-            disabled={autoScale}
-            onChange={(e) => setCustomMinY(Number(e.target.value))}
-            aria-label="Y axis minimum"
-            title="Y min"
-            className="w-16 bg-slate-950 border border-slate-800 text-[11px] text-slate-300 rounded px-2 py-1 outline-none disabled:opacity-40"
-          />
-          <input
-            type="number"
-            value={customMaxY}
-            disabled={autoScale}
-            onChange={(e) => setCustomMaxY(Number(e.target.value))}
-            aria-label="Y axis maximum"
-            title="Y max"
-            className="w-16 bg-slate-950 border border-slate-800 text-[11px] text-slate-300 rounded px-2 py-1 outline-none disabled:opacity-40"
-          />
-
-          <button
-            onClick={togglePause}
-            title={isPaused ? "Resume (display catches up)" : "Freeze the display (samples keep recording)"}
-            className={`p-1.5 rounded border transition-colors ${
-              isPaused ? 'bg-amber-500/20 text-cyber-amber border-amber-500/40 animate-pulse' : 'bg-slate-900 text-slate-400 border-slate-800'
-            }`}
-          >
-            {isPaused ? <Play className="w-3.5 h-3.5 text-cyber-amber" /> : <Pause className="w-3.5 h-3.5" />}
-          </button>
-
-          <button onClick={handleExportCSV} title="Export CSV (true per-sample timestamps)" className="p-1.5 rounded bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800">
-            <Download className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={handleExportPng} title="Export the plot as PNG" className="p-1.5 rounded bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800">
-            <ImageIcon className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={handleSaveConfig} title="Save plot config" className="p-1.5 rounded bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800">
-            <Save className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={() => fileInputRef.current && fileInputRef.current.click()} title="Load plot config" className="p-1.5 rounded bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800">
-            <FolderOpen className="w-3.5 h-3.5" />
-          </button>
-          <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleLoadConfig} className="hidden" aria-label="Load plot config file" />
-
-          <button onClick={clearAll} title="Clear Waveform Data" className="p-1.5 rounded bg-slate-900 text-slate-400 hover:text-rose-400 border border-slate-800">
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Analysis toolbar: view, parser, trigger */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-slate-400">
+    <div className="flex flex-col gap-2 font-mono text-xs">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-1.5">
         <div className="flex items-center gap-1" role="group" aria-label="View mode">
           {['time', 'fft', 'xy'].map((m) => (
             <button
               key={m}
               onClick={() => setView(m)}
-              className={`px-2 py-0.5 rounded border uppercase ${view === m ? 'bg-cyan-500/20 text-cyber-cyan border-cyan-500/40' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
+              className={`px-2 py-0.5 rounded border uppercase text-[11px] ${view === m ? 'bg-cyan-500/20 text-cyber-cyan border-cyan-500/40' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
             >{m}</button>
           ))}
         </div>
 
-        <label className="flex items-center gap-1">Delimiter
-          <input value={delimiter} onChange={(e) => setDelimiter(e.target.value)} placeholder="auto" aria-label="Custom delimiter" className={`${numInput} w-14`} />
-        </label>
-        <label className="flex items-center gap-1">Columns
-          <input value={columnsText} onChange={(e) => setColumnsText(e.target.value)} placeholder="all (0,2,3)" aria-label="Column mapping" className={`${numInput} w-24`} />
-        </label>
+        <select
+          value={windowSize}
+          onChange={(e) => setWindowSize(Number(e.target.value))}
+          aria-label="Window size"
+          className={`${numInput} cursor-pointer`}
+        >
+          {[50, 100, 150, 300, 500, 1000, 5000].map((n) => <option key={n} value={n}>{n} Samples</option>)}
+        </select>
 
+        <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={autoScale}
+            onChange={(e) => setAutoScale(e.target.checked)}
+            aria-label="Auto-scale Y axis"
+          />
+          <span>Auto</span>
+        </label>
+        <input
+          type="number"
+          value={customMinY}
+          disabled={autoScale}
+          onChange={(e) => setCustomMinY(Number(e.target.value))}
+          aria-label="Y axis minimum"
+          title="Y min"
+          className={`${numInput} w-14 disabled:opacity-40`}
+        />
+        <input
+          type="number"
+          value={customMaxY}
+          disabled={autoScale}
+          onChange={(e) => setCustomMaxY(Number(e.target.value))}
+          aria-label="Y axis maximum"
+          title="Y max"
+          className={`${numInput} w-14 disabled:opacity-40`}
+        />
+
+        <span className="flex-1" />
+        <span className="text-[10px] text-slate-500">{engine.points.length.toLocaleString()} / {MAX_POINTS.toLocaleString()} samples</span>
+
+        <button
+          onClick={togglePause}
+          title={isPaused ? 'Resume (display catches up)' : 'Freeze the display (samples keep recording)'}
+          aria-label={isPaused ? 'Resume' : 'Pause'}
+          className={`p-1 rounded border transition-colors ${
+            isPaused ? 'bg-amber-500/20 text-cyber-amber border-amber-500/40 animate-pulse' : 'bg-slate-900 text-slate-400 border-slate-800'
+          }`}
+        >
+          {isPaused ? <Play className="w-3.5 h-3.5 text-cyber-amber" /> : <Pause className="w-3.5 h-3.5" />}
+        </button>
+        <button onClick={handleExportCSV} title="Export CSV (true per-sample timestamps)" aria-label="Export CSV" className="p-1 rounded bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800">
+          <Download className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={handleExportPng} title="Export the plot as PNG" aria-label="Export PNG" className="p-1 rounded bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800">
+          <ImageIcon className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={handleSaveConfig} title="Save plot config" aria-label="Save plot config" className="p-1 rounded bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800">
+          <Save className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={() => fileInputRef.current && fileInputRef.current.click()} title="Load plot config" aria-label="Load plot config" className="p-1 rounded bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800">
+          <FolderOpen className="w-3.5 h-3.5" />
+        </button>
+        <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleLoadConfig} className="hidden" aria-label="Load plot config file" />
+        <button onClick={() => setShowSketchModal(true)} title="Firmware sketches (Arduino / MicroPython)" aria-label="Firmware Sketches" className="p-1 rounded bg-slate-900 text-cyber-cyan hover:text-slate-200 border border-slate-800">
+          <Code className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={clearAll} title="Clear waveform data" aria-label="Clear waveform data" className="p-1 rounded bg-slate-900 text-slate-400 hover:text-rose-400 border border-slate-800">
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* View-specific controls + trigger */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
         {view === 'fft' && (
           <>
             <label className="flex items-center gap-1">Channel
@@ -560,7 +586,7 @@ export default function SerialPlotter({
           </>
         )}
 
-        <span className="flex items-center gap-1.5 pl-2 border-l border-slate-800">
+        <span className="flex flex-wrap items-center gap-1.5">
           <Crosshair className="w-3.5 h-3.5 text-slate-500" />
           <label className="flex items-center gap-1">
             <input type="checkbox" checked={trigCfg.enabled} onChange={(e) => setTrig({ enabled: e.target.checked })} aria-label="Enable trigger" />
@@ -599,14 +625,31 @@ export default function SerialPlotter({
         {configMsg && <span className="text-slate-500">{configMsg}</span>}
       </div>
 
+      {/* Parser and filter settings (rarely changed) */}
+      <details className="text-[11px] text-slate-400">
+        <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-300">Parser and filter</summary>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1.5">
+          <label className="flex items-center gap-1">Delimiter
+            <input value={delimiter} onChange={(e) => setDelimiter(e.target.value)} placeholder="auto" aria-label="Custom delimiter" className={`${numInput} w-14`} />
+          </label>
+          <label className="flex items-center gap-1">Columns
+            <input value={columnsText} onChange={(e) => setColumnsText(e.target.value)} placeholder="all (0,2,3)" aria-label="Column mapping" className={`${numInput} w-24`} />
+          </label>
+          <label className="flex items-center gap-1" title="Trailing moving average applied to the drawn trace only; 1 = off">Smooth
+            <input type="number" min={1} max={200} value={smooth} onChange={(e) => setSmooth(Math.min(200, Math.max(1, Math.floor(Number(e.target.value)) || 1)))} aria-label="Smoothing window (samples)" className={`${numInput} w-14`} />
+          </label>
+        </div>
+      </details>
+
       {/* Canvas Viewport */}
-      <div className="relative w-full h-64 bg-[#030712] rounded-xl border border-slate-800 overflow-hidden shadow-inner">
+      <div className="relative w-full h-56 @lg:h-72 bg-[#030712] rounded-lg border border-slate-800 overflow-hidden shadow-inner">
         <canvas
           ref={canvasRef}
           className="w-full h-full block cursor-crosshair"
           onMouseDown={onMouseDown}
           onMouseUp={onMouseUp}
           onMouseMove={onMouseMove}
+          onClick={onCanvasClick}
           onMouseLeave={() => { dragRef.current = null; setHoverIdx(null); }}
           onDoubleClick={resetView}
         />
@@ -622,10 +665,31 @@ export default function SerialPlotter({
         )}
       </div>
 
+      {/* Cursor measurement */}
+      {view === 'time' && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400" aria-label="Cursor measurement">
+          <Ruler className="w-3.5 h-3.5 text-slate-500" />
+          {cursorMeasure ? (
+            <>
+              <span>{'Δ'}t <strong className="text-slate-200">{fmtNum(cursorMeasure.dtMs)} ms</strong></span>
+              <span>{'Δ'}{labels[cursorCh] || `CH ${cursorCh}`} <strong className="text-slate-200">{cursorMeasure.dv === null ? '--' : fmtNum(cursorMeasure.dv)}{channelCfg[cursorCh]?.unit ? ` ${channelCfg[cursorCh].unit}` : ''}</strong></span>
+              <span>1/{'Δ'}t <strong className="text-slate-200">{cursorMeasure.freq === null ? '--' : `${fmtNum(cursorMeasure.freq)} Hz`}</strong></span>
+            </>
+          ) : (
+            <span className="text-slate-600">
+              {cursors.a === null ? 'Click the plot to place cursor A, click again for B.' : 'Click again to place cursor B (a third click clears).'}
+            </span>
+          )}
+          {(cursors.a !== null || cursors.b !== null) && (
+            <button onClick={() => setCursors({ a: null, b: null })} className="px-1.5 py-0.5 rounded border bg-slate-900 border-slate-800 text-slate-300">Clear cursors</button>
+          )}
+        </div>
+      )}
+
       {/* Live Channel Telemetry Cards */}
-      <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2 pt-1">
+      <div className="grid grid-cols-2 @lg:grid-cols-4 gap-2">
         {stats.length === 0 ? (
-          <div className="col-span-full text-center text-slate-600 py-2 text-[11px]">
+          <div className="col-span-full text-center text-slate-600 py-1 text-[11px]">
             No active numeric channels detected. Stream numbers like <code>25.4, 102.1</code> over serial to plot live waveforms.
           </div>
         ) : (
@@ -634,7 +698,7 @@ export default function SerialPlotter({
             return (
               <div
                 key={st.ch}
-                className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 flex flex-col justify-between"
+                className="bg-slate-950 border border-slate-800 rounded-lg p-2 flex flex-col justify-between"
               >
                 <div className="flex items-center justify-between">
                   <span className="font-bold flex items-center gap-1.5" style={{ color: st.color }}>
@@ -650,7 +714,7 @@ export default function SerialPlotter({
                   </button>
                 </div>
 
-                <div className="text-lg font-bold text-slate-100 my-1">
+                <div className="text-base font-bold text-slate-100 my-0.5">
                   {fmtNum(st.last)}{cfg.unit ? <span className="text-xs text-slate-500"> {cfg.unit}</span> : null}
                 </div>
 
@@ -659,9 +723,11 @@ export default function SerialPlotter({
                   <span>Max: <strong className="text-slate-400">{fmtNum(st.max)}</strong></span>
                   <span>Mean: <strong className="text-slate-400">{fmtNum(st.mean)}</strong></span>
                   <span>RMS: <strong className="text-slate-400">{fmtNum(st.rms)}</strong></span>
+                  <span>Pk-Pk: <strong className="text-slate-400">{fmtNum(st.max - st.min)}</strong></span>
+                  <span title="Estimated from mean crossings in the visible window">Freq: <strong className="text-slate-400">{st.freq === null ? '--' : `${fmtNum(st.freq)} Hz`}</strong></span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-1 mt-1.5">
+                <div className="grid grid-cols-3 gap-1 mt-1">
                   <input type="number" step="any" value={cfg.scale ?? ''} placeholder="x1" onChange={(e) => updateChannelCfg(st.ch, { scale: e.target.value === '' ? undefined : Number(e.target.value) })} aria-label={`Scale for ${st.label}`} title="Scale" className={numInput} />
                   <input type="number" step="any" value={cfg.offset ?? ''} placeholder="+0" onChange={(e) => updateChannelCfg(st.ch, { offset: e.target.value === '' ? undefined : Number(e.target.value) })} aria-label={`Offset for ${st.label}`} title="Offset" className={numInput} />
                   <input value={cfg.unit || ''} placeholder="unit" onChange={(e) => updateChannelCfg(st.ch, { unit: e.target.value })} aria-label={`Unit for ${st.label}`} title="Unit" className={numInput} />

@@ -207,6 +207,75 @@ export function applyChannelScale(v, cfg) {
   return v * scale + offset;
 }
 
+/** Trailing moving average over `n` samples; gaps (undefined / NaN) stay gaps and are skipped in the average. n<=1 returns the input. */
+export function movingAverage(values, n) {
+  const w = Math.floor(n);
+  if (!(w > 1)) return values;
+  const out = new Array(values.length);
+  const q = [];
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v === undefined || !Number.isFinite(v)) { out[i] = v; continue; }
+    q.push(v); sum += v;
+    if (q.length > w) sum -= q.shift();
+    out[i] = sum / q.length;
+  }
+  return out;
+}
+
+/**
+ * Signal frequency from rising crossings of the mean (with hysteresis of 10% of the peak-to-peak
+ * span), using the real sample timestamps. Returns { freq, periods } or null when fewer than
+ * two rising crossings are found or the signal is flat.
+ */
+export function estimateFrequency(values, times) {
+  let lo = Infinity; let hi = -Infinity; let sum = 0; let cnt = 0;
+  for (const v of values) {
+    if (v === undefined || !Number.isFinite(v)) continue;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+    sum += v; cnt += 1;
+  }
+  if (cnt < 4 || !(hi - lo > 0)) return null;
+  const mid = sum / cnt;
+  const h = (hi - lo) * 0.1;
+  const crossings = [];
+  let below = false;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v === undefined || !Number.isFinite(v)) continue;
+    if (v < mid - h) below = true;
+    else if (below && v > mid + h) {
+      // interpolate the crossing time between the previous finite sample and this one
+      let j = i - 1;
+      while (j >= 0 && !(Number.isFinite(values[j]))) j--;
+      const t0 = times[j >= 0 ? j : i];
+      const v0 = j >= 0 ? values[j] : v;
+      const frac = v === v0 ? 0 : Math.min(1, Math.max(0, (mid - v0) / (v - v0)));
+      crossings.push(t0 + (times[i] - t0) * frac);
+      below = false;
+    }
+  }
+  if (crossings.length < 2) return null;
+  const periodMs = (crossings[crossings.length - 1] - crossings[0]) / (crossings.length - 1);
+  if (!(periodMs > 0)) return null;
+  return { freq: 1000 / periodMs, periods: crossings.length - 1 };
+}
+
+/** Delta readout between two cursor positions (indices into the visible slice). */
+export function measureCursors(points, seriesValues, a, b) {
+  if (!Number.isInteger(a) || !Number.isInteger(b)) return null;
+  if (a < 0 || b < 0 || a >= points.length || b >= points.length) return null;
+  const dtMs = points[b].t - points[a].t;
+  const dv = seriesValues[b] - seriesValues[a];
+  return {
+    dtMs,
+    dv: Number.isFinite(dv) ? dv : null,
+    freq: dtMs !== 0 ? 1000 / Math.abs(dtMs) : null
+  };
+}
+
 // ---------------------------------------------------------------------------------------
 // Spectrum
 // ---------------------------------------------------------------------------------------

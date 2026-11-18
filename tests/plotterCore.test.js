@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createPlotterEngine, createTrigger, detectEdge, decimateMinMax, channelStats, visibleRange,
   spectrum, dominantBin, estimateSampleRate, buildPlotCsv, parseColumns, applyChannelScale,
-  serializePlotConfig, parsePlotConfig
+  serializePlotConfig, parsePlotConfig, movingAverage, estimateFrequency, measureCursors
 } from '../src/utils/plotterCore.js';
 
 const enc = (s) => new TextEncoder().encode(s);
@@ -186,5 +186,43 @@ describe('export and config', () => {
     expect(parseColumns('0, 2;3')).toEqual([0, 2, 3]);
     expect(parseColumns('')).toBeNull();
     expect(parseColumns('a')).toBeNull();
+  });
+});
+
+describe('moving average, frequency and cursor measurement', () => {
+  it('movingAverage is a trailing mean, skips gaps and is the identity for n<=1', () => {
+    const v = [1, 2, 3, 4];
+    expect(movingAverage(v, 1)).toBe(v);
+    expect(movingAverage(v, 2)).toEqual([1, 1.5, 2.5, 3.5]);
+    const g = movingAverage([2, undefined, 4], 3);
+    expect(g[0]).toBe(2);
+    expect(g[1]).toBeUndefined();
+    expect(g[2]).toBe(3);
+  });
+
+  it('estimateFrequency recovers a 5 Hz sine sampled at 100 Hz from timestamps', () => {
+    const times = Array.from({ length: 300 }, (_, i) => 1000 + i * 10);
+    const vals = times.map((t) => 2 + Math.sin((2 * Math.PI * 5 * (t - 1000)) / 1000));
+    const r = estimateFrequency(vals, times);
+    expect(r.freq).toBeGreaterThan(4.9);
+    expect(r.freq).toBeLessThan(5.1);
+    expect(r.periods).toBeGreaterThanOrEqual(13);
+  });
+
+  it('estimateFrequency returns null for flat or too-short signals', () => {
+    expect(estimateFrequency([1, 1, 1, 1, 1], [0, 1, 2, 3, 4])).toBeNull();
+    expect(estimateFrequency([1, 2], [0, 1])).toBeNull();
+  });
+
+  it('measureCursors reports delta time, delta value and 1/dt', () => {
+    const pts = [{ t: 1000 }, { t: 1010 }, { t: 1040 }];
+    const m = measureCursors(pts, [1, 2, 5], 0, 2);
+    expect(m.dtMs).toBe(40);
+    expect(m.dv).toBe(4);
+    expect(m.freq).toBeCloseTo(25, 6);
+    expect(measureCursors(pts, [1, 2, 5], 2, 0).dtMs).toBe(-40);
+    expect(measureCursors(pts, [1, 2, 5], 1, 1).freq).toBeNull();
+    expect(measureCursors(pts, [1, 2, 5], 0, 9)).toBeNull();
+    expect(measureCursors(pts, [1, undefined, 5], 0, 1).dv).toBeNull();
   });
 });
