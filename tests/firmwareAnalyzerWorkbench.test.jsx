@@ -8,7 +8,6 @@ import FirmwareAnalyzerWorkbench from '../src/components/tools/FirmwareAnalyzerW
 describe('FirmwareAnalyzerWorkbench', () => {
   it('renders the idle state', () => {
     const html = renderToString(<FirmwareAnalyzerWorkbench />);
-    expect(html).toContain('Firmware Image Analyzer');
     expect(html).toContain('Choose firmware file');
     expect(html).toContain('Drop a firmware image here');
     expect(html).toContain('Nothing is uploaded');

@@ -4,7 +4,7 @@ export default {
   category: 'analysis',
   title: 'Firmware Image Analyzer — signature scan, entropy, strings, hex and carving',
   summary: 'A binwalk-style offline analyzer. It finds known headers (U-Boot, device tree and FIT, SquashFS, UBI/UBIFS, JFFS2, ext, gzip, xz, zstd, ELF, PE, ESP32 and more) in a firmware image, parses and checks them, and gives an entropy profile, strings, a hex view, carving and gzip/zlib decompression. Nothing is uploaded.',
-  tags: ['firmware', 'binwalk', 'signature scan', 'entropy', 'carving', 'U-Boot', 'uImage', 'SquashFS', 'UBI', 'JFFS2', 'ESP32', 'hex viewer', 'strings', 'decompress'],
+  tags: ['firmware', 'histogram', 'sha-256', 'binwalk', 'signature scan', 'entropy', 'carving', 'U-Boot', 'uImage', 'SquashFS', 'UBI', 'JFFS2', 'ESP32', 'hex viewer', 'strings', 'decompress'],
   readTime: '8 min read',
   content: `
 # Firmware Image Analyzer
@@ -35,17 +35,23 @@ Each hit shows its offset in hex and decimal, its type, its parsed size where th
 2. The scan runs in chunks so the page stays responsive. **Cancel** stops it.
 3. Read the **Signatures** tab. Filter by any text. Click a row to select it, then:
    - **Hex** opens the hex view at that offset.
-   - **Carve** downloads the bytes of the hit. The end is the parsed size when the header states one, otherwise the next hit, otherwise the end of the file. The status line says which rule applied.
+   - **Carve** downloads the bytes of the hit. The end is the parsed size when the header states one, otherwise the next hit, otherwise the end of the file. The status line says which rule applied and shows the SHA-256 of the carved bytes.
+   - **Copy listing** (above the table) copies the shown rows as a binwalk-style text listing (decimal offset, hex offset, description). It is this tool's own format, not binwalk's exact output. If the clipboard is blocked it downloads a text file instead.
    - **Decompress** (gzip and zlib hits) opens the Decompress tab at that offset.
-4. **Entropy** draws the entropy of each block: green is structured data, amber is mixed, red (7.5 bits per byte and above) is likely compressed or encrypted. Click the plot, or a red region, to open that block in the hex view.
-5. **Strings** extracts ASCII runs and UTF-16LE runs of at least the minimum length (default 6). Filter the list, export all of it as text, or click an offset to jump to it.
+4. **Entropy** draws the entropy of each block: green is structured data, amber is mixed, red (7.5 bits per byte and above) is likely compressed or encrypted. Click the plot, or a red region, to open that block in the hex view. Below it, a **byte histogram** (log scale) shows how often each byte value 0x00 to 0xFF occurs, for the whole file or for the signature row you selected, with the share of 0x00, 0xFF and printable bytes. A flat histogram means random-looking data; tall 0x00 or 0xFF bars mean padding or erased flash.
+5. **Strings** extracts ASCII runs and UTF-16LE runs of at least the minimum length (default 6). Filter the list, export all of it as text, or click an offset to jump to it. **Interesting only** keeps strings that match a pattern: URLs, IPv4 addresses, e-mail addresses, PEM key or certificate markers, credential-like assignments (such as \`password=\`), version banners (Linux, U-Boot, BusyBox, OpenSSL and similar) and system paths. These are plain pattern matches, so treat them as leads, not findings.
 6. **Hex view** shows 256 to 4096 bytes at any offset. Type an offset as decimal or with a 0x prefix.
 7. **Decompress** runs gzip, zlib or raw deflate from an offset, using the browser's built-in decompressor. If the stream is damaged or has trailing bytes you still get the output produced so far, with the reason it stopped. Download it to inspect it.
-8. **Report** downloads the analysis as JSON or Markdown. The report has the hits, their fields and notes, the entropy summary and high-entropy regions, and the string count. It does not include the image bytes or the string text.
+8. **Hash file** (top bar) computes SHA-256, SHA-1 or SHA-512 of the whole file with the browser's Web Crypto. Use it to compare against the vendor's published digest. The digest is added to the report once computed.
+9. **Report** downloads the analysis as JSON or Markdown. The report has the hits, their fields and notes, the entropy summary and high-entropy regions, and the string count. It does not include the image bytes or the string text.
+
+## Similar tools
+
+This tool covers the read-only inspection part of binwalk (signature scan, entropy plot, carving), the byte histogram of binGraph and the entropy view of binvis.io, and the string and key hunting of EMBA. It does not extract filesystems or emulate firmware like binwalk \`-e\`, unblob, EMBA or FACT do. For that, use those tools on a carved region of your own firmware.
 
 ## Browser requirements
 
-- Any current Chromium, Firefox or Safari. Decompression uses \`DecompressionStream\`, which needs a recent browser (Chromium 80+, Firefox 113+, Safari 16.4+). The rest of the tool works without it.
+- Any current Chromium, Firefox or Safari. Hashing needs Web Crypto, which browsers only provide on secure pages (HTTPS or localhost). Decompression uses \`DecompressionStream\`, which needs a recent browser (Chromium 80+, Firefox 113+, Safari 16.4+). The rest of the tool works without it.
 - No hardware, drivers, or special permissions are needed. The file is read with the normal file picker or drag and drop.
 
 ## Limits: what it does NOT do
