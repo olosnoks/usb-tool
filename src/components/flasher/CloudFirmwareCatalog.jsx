@@ -183,7 +183,7 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Search & Filter Header (Compact) */}
       <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2.5 @sm:p-3 space-y-2">
         <div className="flex flex-col @sm:flex-row items-stretch @sm:items-center justify-between gap-2">
@@ -278,7 +278,7 @@ export default function CloudFirmwareCatalog({ onSelectFirmwareForFlashing }) {
           No firmware matched your search criteria.
         </div>
       ) : (
-        <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-3.5">
+        <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-2">
           {filteredSuites.map((suite, idx) => {
             if (suite.isPigletSuite) {
               return (

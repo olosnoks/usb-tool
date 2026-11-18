@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { 
   HardDrive, 
   Upload, 
@@ -14,7 +14,9 @@ import {
   RotateCcw,
   Sparkles,
   Layers,
-  Info
+  Info,
+  Copy,
+  ShieldAlert
 } from 'lucide-react';
 import { useSerial } from '../../context/SerialContext';
 import { loadFirmwareFile } from '../../utils/firmwareParser';
@@ -25,7 +27,17 @@ import {
   formatHexOffset, 
   calculateTotalPayloadSize 
 } from '../../utils/partitionPresets';
+import { md5Hex } from '../../utils/md5';
+import { describeImage, checkLayout, buildEsptoolCommand } from '../../utils/flashPlan';
 import CloudFirmwareCatalog from '../flasher/CloudFirmwareCatalog';
+
+// MD5 of each loaded image, cached by its byte array so typing in other fields does not rehash.
+const md5Cache = new WeakMap();
+const cachedMd5 = (data) => {
+  if (!data) return '';
+  if (!md5Cache.has(data)) md5Cache.set(data, md5Hex(data));
+  return md5Cache.get(data);
+};
 
 export default function FlasherTab() {
   const {
@@ -187,6 +199,24 @@ export default function FlasherTab() {
   const totalPayloadSize = calculateTotalPayloadSize(slots);
   const enabledSlotsWithFiles = slots.filter(s => s.enabled && s.fileInfo?.data?.length > 0);
 
+  // Pre-flash checks, image headers, hashes and the equivalent esptool command
+  const layoutIssues = useMemo(() => checkLayout(
+    enabledSlotsWithFiles.map(s => ({ label: s.label, offset: parseHexOffset(s.offset), size: s.fileInfo.data.length })),
+    enabledSlotsWithFiles.map(s => s.fileInfo.data)
+  ), [slots]); // eslint-disable-line react-hooks/exhaustive-deps
+  const esptoolCommand = useMemo(() => buildEsptoolCommand(
+    enabledSlotsWithFiles.map(s => ({ offset: parseHexOffset(s.offset), name: s.fileInfo.name })),
+    { baud: espBaud, compress: compressWrites }
+  ), [slots, espBaud, compressWrites]); // eslint-disable-line react-hooks/exhaustive-deps
+  const copyEsptool = async () => {
+    try {
+      await navigator.clipboard.writeText(esptoolCommand);
+      addLog('[FLASHER] esptool command copied (for running on a PC; this tool does not run it).', 'sys');
+    } catch (e) {
+      addLog(`[FLASHER] Could not copy to the clipboard: ${e.message}`, 'sys');
+    }
+  };
+
   // Load firmware directly from Cloud Catalog into slots
   const handleLoadFromCatalog = ({ firmware, files, flashConfig }) => {
     const newSlots = files.map((f, idx) => ({
@@ -217,6 +247,11 @@ export default function FlasherTab() {
 
     if (enabledSlotsWithFiles.length === 0) {
       alert('Please select and enable at least one partition file to flash.');
+      return;
+    }
+
+    if (layoutIssues.some(i => i.level === 'error')) {
+      alert('Fix the layout errors shown above the Flash button first (invalid offset or overlapping images).');
       return;
     }
 
@@ -376,35 +411,24 @@ export default function FlasherTab() {
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
 
+  const tabBtn = (active) => `flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+    active ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-slate-200 border border-transparent'
+  }`;
+  const selCls = 'bg-slate-950 border border-slate-800 rounded-md px-1.5 py-0.5 text-slate-200 font-bold outline-none focus:border-cyan-500';
+
   return (
-    <div className="flex flex-col gap-4 font-mono">
-      {/* Sub-Tab Navigation Header */}
-      <div className="flex items-center gap-2 p-1 bg-[#101216] border border-[#232733] rounded-2xl w-fit">
-        <button
-          onClick={() => setSubView('catalog')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
-            subView === 'catalog'
-              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          <span>Cloud Firmware Catalog (400+ Presets)</span>
+    <div className="flex flex-col gap-2 font-mono">
+      {/* Sub-view tabs */}
+      <div className="flex flex-wrap items-center gap-1 p-0.5 bg-[#101216] border border-[#232733] rounded-xl w-fit max-w-full">
+        <button onClick={() => setSubView('catalog')} className={tabBtn(subView === 'catalog')}>
+          <Sparkles className="w-3 h-3 text-amber-400" />
+          <span>Cloud Catalog (400+)</span>
         </button>
-        <button
-          onClick={() => setSubView('slots')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
-            subView === 'slots'
-              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <HardDrive className="w-3.5 h-3.5 text-amber-400" />
-          <span>Multi-Slot Partition Flasher</span>
+        <button onClick={() => setSubView('slots')} className={tabBtn(subView === 'slots')}>
+          <HardDrive className="w-3 h-3 text-amber-400" />
+          <span>Multi-Slot Flasher</span>
           {enabledSlotsWithFiles.length > 0 && (
-            <span className="text-[10px] px-1.5 py-0.2 bg-amber-500/30 text-amber-200 rounded-full font-mono">
-              {enabledSlotsWithFiles.length}
-            </span>
+            <span className="text-[10px] px-1.5 bg-amber-500/30 text-amber-200 rounded-full">{enabledSlotsWithFiles.length}</span>
           )}
         </button>
       </div>
@@ -413,388 +437,362 @@ export default function FlasherTab() {
         <CloudFirmwareCatalog onSelectFirmwareForFlashing={handleLoadFromCatalog} />
       ) : (
         <>
-          {/* Presets Header Card */}
-          <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 @sm:p-4 shadow-xl">
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-              <div>
-            <p className="text-[11px] text-slate-400">
-              Configure 1 to 4 independent binary/HEX slots with absolute memory offsets for ESP32, ESP8266, or custom targets.
-            </p>
-          </div>
-
-          {/* Preset Buttons */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] text-slate-500 font-bold uppercase mr-1">Presets:</span>
-            {PARTITION_PRESETS.map(preset => (
+          {/* Presets + layout map */}
+          <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 space-y-2">
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-[10px] text-slate-500 font-bold uppercase mr-0.5">Presets</span>
+              {PARTITION_PRESETS.map(preset => (
+                <button
+                  key={preset.id}
+                  onClick={() => handleApplyPreset(preset.id)}
+                  title={preset.description}
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all ${
+                    activePresetId === preset.id
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                  }`}
+                >
+                  {preset.name}
+                </button>
+              ))}
               <button
-                key={preset.id}
-                onClick={() => handleApplyPreset(preset.id)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${
-                  activePresetId === preset.id
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-amber-glow'
-                    : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
-                }`}
+                onClick={handleAddSlot}
+                disabled={slots.length >= 4}
+                title="Add an additional partition slot (max 4)"
+                aria-label="Add partition slot"
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 hover:border-cyan-500/40 text-[11px] font-bold disabled:opacity-40"
               >
-                {preset.name}
+                <Plus className="w-3 h-3" />
+                <span>Slot</span>
               </button>
-            ))}
-            <button
-              onClick={handleAddSlot}
-              disabled={slots.length >= 4}
-              title="Add an additional partition slot"
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 hover:border-cyan-500/40 text-xs font-bold disabled:opacity-40"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Slot</span>
-            </button>
-          </div>
-        </div>
+            </div>
 
-        {/* Partition Layout Visualization Bar */}
-        <div className="pt-3">
-          <div className="flex items-center justify-between text-[11px] text-slate-400 pb-1.5">
-            <span className="flex items-center gap-1.5 font-bold">
-              <Layers className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Memory Layout Mapping Preview</span>
-            </span>
-            <span className="text-slate-400">
-              Total Queue: <strong className="text-amber-400">{formatSize(totalPayloadSize)}</strong> across {enabledSlotsWithFiles.length} active file(s)
-            </span>
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-x-2 text-[10px] text-slate-400 pb-1">
+                <span className="flex items-center gap-1 font-bold" title="Box width follows file size, not flash address">
+                  <Layers className="w-3 h-3 text-cyan-400" />
+                  Layout
+                </span>
+                <span>
+                  Queue: <strong className="text-amber-400">{formatSize(totalPayloadSize)}</strong> in {enabledSlotsWithFiles.length} file(s)
+                </span>
+              </div>
+              <div className="h-5 bg-slate-950 rounded-md border border-slate-800 flex overflow-hidden p-0.5 gap-0.5">
+                {slots.map((slot) => {
+                  const hasFile = slot.fileInfo?.size > 0;
+                  return (
+                    <div
+                      key={slot.id}
+                      title={`${slot.label} @ ${slot.offset}: ${hasFile ? formatSize(slot.fileInfo.size) : 'No file loaded'}`}
+                      className={`h-full rounded flex items-center justify-center text-[10px] font-bold px-1.5 truncate transition-all ${
+                        !slot.enabled
+                          ? 'bg-slate-900/50 text-slate-600 border border-dashed border-slate-800'
+                          : hasFile
+                          ? 'bg-amber-500/25 text-amber-300 border border-amber-500/40'
+                          : 'bg-slate-900 text-slate-500 border border-slate-800'
+                      }`}
+                      style={{ flex: hasFile ? Math.max(1, slot.fileInfo.size / 1024) : 1 }}
+                    >
+                      <span className="truncate">{slot.label} ({slot.offset})</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
-          <div className="h-6 bg-slate-950 rounded-lg border border-slate-800 flex overflow-hidden p-0.5 gap-1">
-            {slots.map((slot, idx) => {
-              const hasFile = slot.fileInfo?.size > 0;
-              const isEnabled = slot.enabled;
+          {/* Slots */}
+          <div className="grid grid-cols-1 @md:grid-cols-2 gap-2">
+            {slots.map((slot, index) => {
+              const numOffset = parseHexOffset(slot.offset);
+              const isValidOffset = numOffset !== null;
+              const hasFile = !!slot.fileInfo;
+              const imageNote = hasFile ? describeImage(slot.fileInfo.data) : null;
+
               return (
                 <div
                   key={slot.id}
-                  title={`${slot.label} @ ${slot.offset}: ${hasFile ? formatSize(slot.fileInfo.size) : 'No file loaded'}`}
-                  className={`h-full rounded flex items-center justify-center text-[10px] font-bold px-2 truncate transition-all ${
-                    !isEnabled 
-                      ? 'bg-slate-900/50 text-slate-600 border border-dashed border-slate-800' 
-                      : hasFile 
-                      ? 'bg-gradient-to-r from-amber-500/30 to-amber-600/30 text-amber-300 border border-amber-500/40' 
-                      : 'bg-slate-900 text-slate-500 border border-slate-800'
+                  className={`bg-[#030712] border rounded-lg p-2 flex flex-col gap-1.5 transition-all ${
+                    slot.enabled ? 'border-slate-800 hover:border-slate-700' : 'border-slate-900 opacity-60'
                   }`}
-                  style={{ flex: hasFile ? Math.max(1, slot.fileInfo.size / 1024) : 1 }}
                 >
-                  <span className="truncate">{slot.label} ({slot.offset})</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <input
+                        type="checkbox"
+                        checked={slot.enabled}
+                        onChange={(e) => updateSlot(slot.id, { enabled: e.target.checked })}
+                        aria-label={`Enable slot ${index + 1}`}
+                        className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0 cursor-pointer"
+                      />
+                      <input
+                        type="text"
+                        value={slot.label}
+                        onChange={(e) => updateSlot(slot.id, { label: e.target.value })}
+                        aria-label={`Label for slot ${index + 1}`}
+                        className="bg-transparent border-b border-transparent hover:border-slate-700 focus:border-cyan-500 font-bold text-xs text-slate-200 outline-none min-w-0 w-full"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[10px] px-1 rounded bg-slate-900 text-slate-500">#{index + 1}</span>
+                      {slots.length > 1 && (
+                        <button
+                          onClick={() => handleRemoveSlot(slot.id)}
+                          title="Remove this partition slot"
+                          aria-label="Remove slot"
+                          className="p-0.5 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-900"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <label htmlFor={`off-${slot.id}`} className="text-[10px] font-bold text-slate-500 shrink-0">OFFSET</label>
+                    <div className="relative flex-1">
+                      <input
+                        id={`off-${slot.id}`}
+                        type="text"
+                        value={slot.offset}
+                        onChange={(e) => updateSlot(slot.id, { offset: e.target.value })}
+                        placeholder="0x00010000"
+                        className={`w-full bg-slate-950 border rounded-md px-2 py-0.5 text-xs font-mono font-bold outline-none uppercase ${
+                          isValidOffset ? 'border-slate-800 text-cyan-300 focus:border-cyan-500' : 'border-rose-500/80 text-rose-300'
+                        }`}
+                      />
+                      {!isValidOffset && (
+                        <span className="absolute right-2 top-0.5 text-[10px] text-rose-400">Invalid Hex</span>
+                      )}
+                    </div>
+                    {isValidOffset && (
+                      <span className="text-[10px] text-slate-500">({(numOffset / 1024).toFixed(0)} KB)</span>
+                    )}
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={(el) => (fileInputRefs.current[slot.id] = el)}
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) handleSlotFile(slot.id, e.target.files[0]);
+                    }}
+                    accept=".bin,.hex,.uf2"
+                    className="hidden"
+                  />
+
+                  {!hasFile ? (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => fileInputRefs.current[slot.id]?.click()}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRefs.current[slot.id]?.click(); } }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (e.dataTransfer.files?.[0]) handleSlotFile(slot.id, e.dataTransfer.files[0]);
+                      }}
+                      className="border border-dashed border-slate-800 hover:border-cyan-500/50 focus:border-cyan-500 outline-none bg-slate-950/60 rounded-md px-2 py-1.5 text-center cursor-pointer transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-slate-500" />
+                      <span className="text-[11px] text-slate-300 font-bold">Select or drop .bin / .hex / .uf2</span>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-950 border border-slate-800 rounded-md p-1.5 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <FileCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-200 truncate">{slot.fileInfo.name}</div>
+                          <div className="text-[10px] text-slate-500 truncate">
+                            {slot.fileInfo.type} - <strong className="text-amber-400">{formatSize(slot.fileInfo.size)}</strong>
+                            {imageNote && <> - {imageNote}</>}
+                          </div>
+                          <div
+                            className="text-[10px] text-slate-600 truncate select-all"
+                            title="MD5 of the file as it will be written. The ROM flash check compares the chip's MD5 of the written range against this."
+                          >
+                            md5 {cachedMd5(slot.fileInfo.data)}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => updateSlot(slot.id, { file: null, fileInfo: null })}
+                        className="p-1 rounded bg-slate-900 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 border border-slate-800 shrink-0"
+                        title="Clear file from this slot"
+                        aria-label="Clear file"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
-        </div>
-      </div>
 
-      {/* Multi-Binary Upload Slots (1 to 4) */}
-      <div className="grid grid-cols-1 @md:grid-cols-2 gap-3">
-        {slots.map((slot, index) => {
-          const numOffset = parseHexOffset(slot.offset);
-          const isValidOffset = numOffset !== null;
-          const hasFile = !!slot.fileInfo;
-
-          return (
-            <div
-              key={slot.id}
-              className={`bg-[#030712] border rounded-xl p-3 flex flex-col gap-2.5 transition-all shadow-lg ${
-                slot.enabled ? 'border-slate-800 hover:border-slate-700' : 'border-slate-900 opacity-60'
-              }`}
-            >
-              {/* Slot Header */}
-              <div className="flex items-center justify-between gap-2 border-b border-slate-850 pb-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={slot.enabled}
-                    onChange={(e) => updateSlot(slot.id, { enabled: e.target.checked })}
-                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0 cursor-pointer"
-                  />
-                  <input
-                    type="text"
-                    value={slot.label}
-                    onChange={(e) => updateSlot(slot.id, { label: e.target.value })}
-                    className="bg-transparent border-b border-transparent hover:border-slate-700 focus:border-cyan-500 font-bold text-xs text-slate-200 outline-none w-36 @sm:w-44"
-                  />
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-slate-500">
-                    SLOT {index + 1}
-                  </span>
-                  {slots.length > 1 && (
-                    <button
-                      onClick={() => handleRemoveSlot(slot.id)}
-                      title="Remove this partition slot"
-                      className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-900"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Offset Input Field */}
-              <div className="flex items-center gap-2">
-                <label className="text-[10px] font-bold text-slate-500 w-16 shrink-0">OFFSET:</label>
-                <div className="relative flex-1">
-                  <input
-                    type="text"
-                    value={slot.offset}
-                    onChange={(e) => updateSlot(slot.id, { offset: e.target.value })}
-                    placeholder="0x00010000"
-                    className={`w-full bg-slate-950 border rounded-lg px-2.5 py-1 text-xs font-mono font-bold outline-none uppercase ${
-                      isValidOffset ? 'border-slate-800 text-cyan-300 focus:border-cyan-500' : 'border-rose-500/80 text-rose-300'
-                    }`}
-                  />
-                  {!isValidOffset && (
-                    <span className="absolute right-2 top-1 text-[10px] text-rose-400">Invalid Hex</span>
-                  )}
-                </div>
-                {isValidOffset && (
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    ({(numOffset / 1024).toFixed(0)} KB)
-                  </span>
-                )}
-              </div>
-
-              {/* Hidden File Input */}
-              <input
-                type="file"
-                ref={(el) => (fileInputRefs.current[slot.id] = el)}
-                onChange={(e) => {
-                  if (e.target.files?.[0]) handleSlotFile(slot.id, e.target.files[0]);
-                }}
-                accept=".bin,.hex,.uf2"
-                className="hidden"
-              />
-
-              {/* Drop / Select Zone */}
-              {!hasFile ? (
-                <div
-                  onClick={() => fileInputRefs.current[slot.id]?.click()}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    if (e.dataTransfer.files?.[0]) handleSlotFile(slot.id, e.dataTransfer.files[0]);
-                  }}
-                  className="border border-dashed border-slate-800 hover:border-cyan-500/50 bg-slate-950/60 hover:bg-slate-900/40 rounded-lg p-3 text-center cursor-pointer transition-all flex flex-col items-center gap-1"
-                >
-                  <Upload className="w-4 h-4 text-slate-500" />
-                  <span className="text-[11px] text-slate-300 font-bold">Select or drop .bin / .hex / .uf2</span>
-                  <span className="text-[10px] text-slate-600">Click to browse file</span>
-                </div>
-              ) : (
-                <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 truncate">
-                    <FileCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <div className="truncate">
-                      <div className="text-xs font-bold text-slate-200 truncate">{slot.fileInfo.name}</div>
-                      <div className="text-[10px] text-slate-500">
-                        {slot.fileInfo.type} • <strong className="text-amber-400">{formatSize(slot.fileInfo.size)}</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => updateSlot(slot.id, { file: null, fileInfo: null })}
-                    className="p-1 rounded bg-slate-900 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 border border-slate-800 text-[10px]"
-                    title="Clear file from this slot"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+          {/* Engine settings + flash action */}
+          <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
+              <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+              <label className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">PROTOCOL</span>
+                <select value={flasherMode} onChange={(e) => setFlasherMode(e.target.value)} disabled={isFlashing} className={selCls}>
+                  <option value="esp-rom">ESP ROM Bootloader (SLIP / Sync)</option>
+                  <option value="raw-stream">Raw UART stream (no protocol, unverified)</option>
+                </select>
+              </label>
+              {flasherMode === 'esp-rom' && (
+                <>
+                  <label className="flex items-center gap-1" title="Rate used while flashing; falls back to 115200 if the chip stops answering. ESP8266 stays at 115200.">
+                    <span className="text-slate-500 font-bold">BAUD</span>
+                    <select value={espBaud} onChange={(e) => setEspBaud(Number(e.target.value))} disabled={isFlashing} className={selCls}>
+                      {[115200, 230400, 460800, 921600].map(b => (<option key={b} value={b}>{b}</option>))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1 font-bold text-slate-400 cursor-pointer" title="zlib-compressed writes (ESP32 family); the ESP8266 ROM always writes uncompressed">
+                    <input type="checkbox" checked={compressWrites} onChange={(e) => setCompressWrites(e.target.checked)} disabled={isFlashing} className="accent-amber-500" />
+                    COMPRESS
+                  </label>
+                </>
               )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Flasher Engine Settings & Flash Action */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 flex flex-col gap-3 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <Sliders className="w-4 h-4 text-cyan-400" />
-            <span className="font-bold text-slate-100 text-xs">BOOTLOADER ENGINE & TIMING CONTROLS</span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
-            {/* Protocol mode */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-500 text-[11px] font-bold">PROTOCOL:</span>
-              <select
-                value={flasherMode}
-                onChange={(e) => setFlasherMode(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-cyan-300 font-bold outline-none"
-              >
-                <option value="esp-rom">ESP ROM Bootloader (SLIP / Sync)</option>
-                <option value="raw-stream">Raw UART stream (no protocol, unverified)</option>
-              </select>
+              <label className="flex items-center gap-1">
+                <span className="text-slate-500 font-bold">BLOCK SIZE</span>
+                <select value={blockSize} onChange={(e) => setBlockSize(Number(e.target.value))} disabled={isFlashing} className={selCls}>
+                  {[256, 512, 1024, 2048, 4096].map(b => (<option key={b} value={b}>{b} Bytes</option>))}
+                </select>
+              </label>
+              {flasherMode === 'raw-stream' && (
+                <label className="flex items-center gap-1" title="Pause between blocks">
+                  <span className="text-slate-500 font-bold">DELAY</span>
+                  <input
+                    type="number" min="0" max="1000" value={chunkDelay} disabled={isFlashing}
+                    onChange={(e) => setChunkDelay(Math.max(0, Number(e.target.value) || 0))}
+                    className={`${selCls} w-14`}
+                  />
+                  <span className="text-slate-500">ms</span>
+                </label>
+              )}
             </div>
 
             {flasherMode === 'esp-rom' && (
-              <>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-500 text-[11px] font-bold">BAUD:</span>
-                  <select
-                    value={espBaud}
-                    onChange={(e) => setEspBaud(Number(e.target.value))}
-                    disabled={isFlashing}
-                    title="Rate used while flashing; falls back to 115200 if the chip stops answering. ESP8266 stays at 115200."
-                    className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 font-bold outline-none"
-                  >
-                    {[115200, 230400, 460800, 921600].map(b => (
-                      <option key={b} value={b}>{b}</option>
-                    ))}
-                  </select>
+              <details className="text-[11px]">
+                <summary className="cursor-pointer text-slate-500 hover:text-slate-300 select-none">Auto-reset timing (DTR/RTS)</summary>
+                <div className="grid grid-cols-1 @sm:grid-cols-2 gap-2 bg-slate-950/60 p-2 mt-1 rounded-md border border-slate-850">
+                  <div>
+                    <div className="flex items-center justify-between pb-0.5">
+                      <label htmlFor="flasher-reset-ms" className="text-slate-400 font-bold">Reset Pulse Duration</label>
+                      <span className="text-amber-400 font-bold">{resetHoldMs} ms</span>
+                    </div>
+                    <input id="flasher-reset-ms" type="range" min="50" max="500" step="10" value={resetHoldMs}
+                      onChange={(e) => setResetHoldMs(Number(e.target.value))} className="w-full accent-amber-500 cursor-pointer" />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between pb-0.5">
+                      <label htmlFor="flasher-boot-ms" className="text-slate-400 font-bold">Boot Pin (IO0) Hold Duration</label>
+                      <span className="text-cyan-400 font-bold">{bootPinHoldMs} ms</span>
+                    </div>
+                    <input id="flasher-boot-ms" type="range" min="20" max="250" step="5" value={bootPinHoldMs}
+                      onChange={(e) => setBootPinHoldMs(Number(e.target.value))} className="w-full accent-cyan-500 cursor-pointer" />
+                  </div>
                 </div>
-                <label
-                  className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 cursor-pointer"
-                  title="zlib-compressed writes (ESP32 family); the ESP8266 ROM always writes uncompressed"
-                >
-                  <input
-                    type="checkbox"
-                    checked={compressWrites}
-                    onChange={(e) => setCompressWrites(e.target.checked)}
-                    disabled={isFlashing}
-                    className="accent-amber-500"
-                  />
-                  COMPRESS
-                </label>
-              </>
+              </details>
             )}
 
-            {/* Block Size */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-500 text-[11px] font-bold">BLOCK SIZE:</span>
-              <select
-                value={blockSize}
-                onChange={(e) => setBlockSize(Number(e.target.value))}
-                className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 font-bold outline-none"
-              >
-                {[256, 512, 1024, 2048, 4096].map(b => (
-                  <option key={b} value={b}>{b} Bytes</option>
+            {/* Pre-flash checks */}
+            {layoutIssues.length > 0 && (
+              <ul className="space-y-0.5 text-[11px]" aria-label="Pre-flash checks">
+                {layoutIssues.map((iss, i) => (
+                  <li
+                    key={i}
+                    className={`flex items-start gap-1 ${iss.level === 'error' ? 'text-rose-300' : iss.level === 'warn' ? 'text-amber-300' : 'text-cyan-300'}`}
+                  >
+                    {iss.level === 'info' ? <Info className="w-3 h-3 mt-0.5 shrink-0" /> : <ShieldAlert className="w-3 h-3 mt-0.5 shrink-0" />}
+                    <span>{iss.message}</span>
+                  </li>
                 ))}
-              </select>
-            </div>
-          </div>
-        </div>
+              </ul>
+            )}
 
-        {/* Pulse Timing Sliders for Flasher */}
-        {flasherMode === 'esp-rom' && (
-          <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3 bg-slate-950/60 p-2.5 rounded-lg border border-slate-850 text-xs">
-            <div>
-              <div className="flex items-center justify-between text-[11px] pb-1">
-                <span className="text-slate-400 font-bold">Reset Pulse Duration:</span>
-                <span className="text-amber-400 font-bold">{resetHoldMs} ms</span>
+            {isFlashing && (
+              <div className="space-y-1.5 bg-slate-950 p-2 rounded-md border border-slate-800">
+                <div>
+                  <div className="flex justify-between text-[11px] text-slate-300 pb-0.5 font-bold">
+                    <span className="text-cyan-400 truncate">
+                      Partition [{progress.activePartitionIndex + 1}/{progress.totalPartitions}]: {progress.currentPartitionLabel}
+                    </span>
+                    <span>{progress.partitionPercent}%</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                    <div className="h-full bg-gradient-to-r from-cyan-500 to-cyan-400 transition-all duration-150" style={{ width: `${progress.partitionPercent}%` }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-[11px] text-slate-300 pb-0.5 font-bold">
+                    <span className="text-amber-400">Total</span>
+                    <span>{progress.aggregatePercent}% ({formatSize(progress.writtenBytes)} / {formatSize(progress.totalBytes)})</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                    <div className="h-full bg-gradient-to-r from-amber-500 to-emerald-400 transition-all duration-150" style={{ width: `${progress.aggregatePercent}%` }} />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-x-3 text-[10px] text-slate-400">
+                  <span>Speed: <strong className="text-emerald-400">{progress.speedKBps} KB/s</strong></span>
+                  <span>Elapsed: <strong className="text-slate-300">{progress.elapsedSeconds}s</strong></span>
+                  <span>ETA: <strong className="text-cyan-400">{progress.etaSeconds}s</strong></span>
+                </div>
               </div>
-              <input
-                type="range"
-                min="50"
-                max="500"
-                step="10"
-                value={resetHoldMs}
-                onChange={(e) => setResetHoldMs(Number(e.target.value))}
-                className="w-full accent-amber-500 cursor-pointer"
-              />
-            </div>
+            )}
 
-            <div>
-              <div className="flex items-center justify-between text-[11px] pb-1">
-                <span className="text-slate-400 font-bold">Boot Pin (IO0) Hold Duration:</span>
-                <span className="text-cyan-400 font-bold">{bootPinHoldMs} ms</span>
-              </div>
-              <input
-                type="range"
-                min="20"
-                max="250"
-                step="5"
-                value={bootPinHoldMs}
-                onChange={(e) => setBootPinHoldMs(Number(e.target.value))}
-                className="w-full accent-cyan-500 cursor-pointer"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Live Flashing Progress Displays */}
-        {isFlashing && (
-          <div className="space-y-2 bg-slate-950 p-3 rounded-lg border border-slate-800">
-            {/* Active Partition Progress */}
-            <div>
-              <div className="flex justify-between text-[11px] text-slate-300 pb-1 font-bold">
-                <span className="text-cyan-400">
-                  Partition [{progress.activePartitionIndex + 1}/{progress.totalPartitions}]: {progress.currentPartitionLabel}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={startFlashing}
+                disabled={isFlashing || !isConnected || enabledSlotsWithFiles.length === 0}
+                className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Zap className={`w-3.5 h-3.5 ${isFlashing ? 'animate-bounce' : ''}`} />
+                <span>
+                  {isFlashing
+                    ? 'PROGRAMMING PARTITIONS...'
+                    : !isConnected
+                    ? 'CONNECT SERIAL PORT TO FLASH'
+                    : enabledSlotsWithFiles.length === 0
+                    ? 'LOAD AT LEAST 1 PARTITION FILE'
+                    : `FLASH ${enabledSlotsWithFiles.length} PARTITION(S) [${formatSize(totalPayloadSize)}]`}
                 </span>
-                <span>{progress.partitionPercent}%</span>
-              </div>
-              <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-500 to-cyan-400 transition-all duration-150"
-                  style={{ width: `${progress.partitionPercent}%` }}
-                />
-              </div>
+              </button>
+
+              {isFlashing && (
+                <button
+                  onClick={() => {
+                    isFlashingRef.current = false;
+                    // Cancels the ROM flash between blocks; the flash loop resets the UI when it stops.
+                    abortRef.current?.abort();
+                    if (flasherMode !== 'esp-rom') setIsFlashing(false);
+                    addLog('[FLASHER] Abort requested by user.', 'sys');
+                  }}
+                  className="px-3 py-2 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold transition-all"
+                >
+                  ABORT
+                </button>
+              )}
             </div>
 
-            {/* Aggregate Progress */}
-            <div>
-              <div className="flex justify-between text-[11px] text-slate-300 pb-1 font-bold">
-                <span className="text-amber-400">Total Flashing Progress</span>
-                <span>{progress.aggregatePercent}% ({formatSize(progress.writtenBytes)} / {formatSize(progress.totalBytes)})</span>
-              </div>
-              <div className="w-full h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                <div
-                  className="h-full bg-gradient-to-r from-amber-500 to-emerald-400 transition-all duration-150"
-                  style={{ width: `${progress.aggregatePercent}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Metrics */}
-            <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 font-mono">
-              <span>Speed: <strong className="text-emerald-400">{progress.speedKBps} KB/s</strong></span>
-              <span>Elapsed: <strong className="text-slate-300">{progress.elapsedSeconds}s</strong></span>
-              <span>ETA: <strong className="text-cyan-400">{progress.etaSeconds}s</strong></span>
-            </div>
+            {esptoolCommand && (
+              <details className="text-[11px]">
+                <summary className="cursor-pointer text-slate-500 hover:text-slate-300 select-none">Export as esptool command (for a PC)</summary>
+                <div className="mt-1 flex items-start gap-1.5 bg-slate-950 border border-slate-800 rounded-md p-1.5">
+                  <code className="flex-1 break-all text-[10px] text-slate-300 select-all">{esptoolCommand}</code>
+                  <button onClick={copyEsptool} title="Copy command" aria-label="Copy esptool command"
+                    className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-cyan-400 border border-slate-800 shrink-0">
+                    <Copy className="w-3 h-3" />
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-600 mt-1">
+                  This tool does not run it. Replace the port (COM3) with yours. esptool v5 prefers write-flash; the write_flash spelling still works.
+                </p>
+              </details>
+            )}
           </div>
-        )}
-
-        {/* Action Button */}
-        <div className="flex items-center gap-3 pt-1">
-          <button
-            onClick={startFlashing}
-            disabled={isFlashing || !isConnected || enabledSlotsWithFiles.length === 0}
-            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-sm shadow-amber-glow transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Zap className={`w-4 h-4 ${isFlashing ? 'animate-bounce' : ''}`} />
-            <span>
-              {isFlashing 
-                ? 'PROGRAMMING PARTITIONS...' 
-                : !isConnected 
-                ? 'CONNECT SERIAL PORT TO FLASH' 
-                : enabledSlotsWithFiles.length === 0 
-                ? 'LOAD AT LEAST 1 PARTITION FILE' 
-                : `FLASH ${enabledSlotsWithFiles.length} PARTITION(S) [${formatSize(totalPayloadSize)}]`}
-            </span>
-          </button>
-
-          {isFlashing && (
-            <button
-              onClick={() => {
-                isFlashingRef.current = false;
-                // Cancels the ROM flash between blocks; the flash loop resets the UI when it stops.
-                abortRef.current?.abort();
-                if (flasherMode !== 'esp-rom') setIsFlashing(false);
-                addLog('[FLASHER] Abort requested by user.', 'sys');
-              }}
-              className="px-4 py-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold transition-all"
-            >
-              ABORT
-            </button>
-          )}
-        </div>
-      </div>
-      </>
+        </>
       )}
     </div>
   );
