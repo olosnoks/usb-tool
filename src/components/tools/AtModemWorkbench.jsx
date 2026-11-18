@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Cpu, Signal, Globe, Wifi, Mail, Satellite, Play, Terminal, Plug, Power, RefreshCw, Trash2, Send, Copy, Eye, Inbox, Activity, Info } from 'lucide-react';
+import { Cpu, Signal, Globe, Wifi, Mail, Satellite, Play, Terminal, Plug, Power, RefreshCw, Trash2, Send, Copy, Eye, Inbox, Info, Download, FileText, Search } from 'lucide-react';
 import { useOptionalSerial } from '../../context/SerialContext';
 import {
   createAtEngine, firstValue, detectFamily, parseImei, parseImsi, parseIccid, parseCpin,
@@ -8,6 +8,7 @@ import {
   parseCmgl, parseCmgr, parseCmti, parseCmgs, validateSmsNumber, isAsciiText, smsPartCount,
   parseCgpsinfo, parseQgpsloc, riskyReason, QUICK_COMMANDS, parseQuickCommandText,
 } from '../../utils/atModem.js';
+import { decodeSmsPdu, signalHistoryToCsv, logToText, searchAtReference } from '../../utils/atModemExtras.js';
 
 /**
  * AT Modem Console for cellular modules (SIMCom SIM7600/SIM800, Quectel EC25/BG96,
@@ -21,6 +22,7 @@ const TABS = [
   ['network', 'Network', Globe],
   ['apn', 'APN / PDP', Wifi],
   ['sms', 'SMS', Mail],
+  ['pdu', 'PDU decode', FileText],
   ['gnss', 'GNSS', Satellite],
   ['quick', 'Quick commands', Play],
   ['console', 'Console', Terminal],
@@ -45,7 +47,7 @@ function Btn({ tone = 'cyan', className = '', children, ...rest }) {
   return (
     <button
       type="button"
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border bg-slate-950 text-xs font-mono disabled:opacity-40 disabled:cursor-not-allowed ${TONE[tone]} ${className}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border bg-slate-950 text-[11px] font-mono disabled:opacity-40 disabled:cursor-not-allowed ${TONE[tone]} ${className}`}
       {...rest}
     >
       {children}
@@ -55,8 +57,8 @@ function Btn({ tone = 'cyan', className = '', children, ...rest }) {
 
 function Panel({ title, hint, right, children }) {
   return (
-    <section className="bg-slate-950 border border-slate-800 rounded-lg p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+    <section className="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
         <div>
           <h3 className="text-xs font-bold tracking-wide text-slate-200 uppercase">{title}</h3>
           {hint && <p className="text-[11px] text-slate-500 mt-0.5">{hint}</p>}
@@ -116,6 +118,16 @@ function writeStored(key, value) {
   } catch {
     /* storage full or blocked: the list just is not kept */
   }
+}
+
+function downloadText(name, text, type = 'text/plain') {
+  if (typeof document === 'undefined' || typeof URL === 'undefined' || !URL.createObjectURL) return;
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function SignalChart({ points }) {
@@ -216,6 +228,11 @@ export default function AtModemWorkbench({ onLogMessage }) {
   // GNSS
   const [gnss, setGnss] = useState(null);
   const [gnssStatus, setGnssStatus] = useState('');
+  // PDU decoder
+  const [pduText, setPduText] = useState('');
+  const [pduSmsc, setPduSmsc] = useState(true);
+  // Command reference
+  const [refQuery, setRefQuery] = useState('');
   // Quick commands and console
   const [lastQuick, setLastQuick] = useState(null);
   const [customText, setCustomText] = useState(() => readStored(CUSTOM_KEY, DEFAULT_CUSTOM));
@@ -506,6 +523,14 @@ export default function AtModemWorkbench({ onLogMessage }) {
     }
   };
 
+  const exportLog = () => downloadText('at-modem-log.txt', logToText(log));
+  const exportSignal = () => downloadText('at-signal-history.csv', signalHistoryToCsv(history), 'text/csv');
+  const pduResult = pduText.trim() ? decodeSmsPdu(pduText, { hasSmsc: pduSmsc }) : null;
+  const loadPduFromRead = () => {
+    const hit = [...log].reverse().find((e) => e.dir === 'rx' && /^[0-9A-Fa-f]{12,}$/.test(e.text.trim()));
+    if (hit) setPduText(hit.text.trim());
+  };
+
   const copyLog = () => {
     const text = log.map((e) => `${e.ts} ${e.dir.toUpperCase()} ${e.text}`).join('\n');
     navigator.clipboard?.writeText(text);
@@ -517,37 +542,28 @@ export default function AtModemWorkbench({ onLogMessage }) {
   const lastCell = signal?.cell;
 
   return (
-    <div className="flex flex-col gap-3 p-3 text-gray-200 font-sans text-sm">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-cyan-400" /> AT Modem Console
-          </h2>
-          <p className="text-[11px] text-slate-500">
-            Cellular modules over the shared serial port. Every value is a real reply from the modem.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`text-[11px] font-mono px-2 py-0.5 rounded border ${connected ? 'border-emerald-600/60 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>
-            {connected ? `CONNECTED ${serial?.baudRate ?? ''} bps` : 'NOT CONNECTED'}
-          </span>
-          {!connected && !noContext && (
-            <Btn tone="emerald" onClick={() => serial.connect()} disabled={!webSerial}>
-              <Plug className="w-3.5 h-3.5" /> Connect port
-            </Btn>
-          )}
-          {connected && (
-            <Btn tone="slate" onClick={() => serial.disconnect()}>
-              <Power className="w-3.5 h-3.5" /> Disconnect
-            </Btn>
-          )}
-          <label className="text-[11px] text-slate-500 flex items-center gap-1.5">
-            Vendor
-            <select className={field} value={vendor} onChange={(e) => setVendor(e.target.value)}>
-              {VENDORS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </label>
-        </div>
+    <div className="flex flex-col gap-2 text-gray-200 font-sans text-sm">
+      <h2 className="sr-only">AT Modem Console</h2>
+      <header className="flex flex-wrap items-center gap-2">
+        <span className={`text-[11px] font-mono px-2 py-0.5 rounded border ${connected ? 'border-emerald-600/60 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>
+          {connected ? `CONNECTED ${serial?.baudRate ?? ''} bps` : 'NOT CONNECTED'}
+        </span>
+        {!connected && !noContext && (
+          <Btn tone="emerald" onClick={() => serial.connect()} disabled={!webSerial}>
+            <Plug className="w-3.5 h-3.5" /> Connect port
+          </Btn>
+        )}
+        {connected && (
+          <Btn tone="slate" onClick={() => serial.disconnect()}>
+            <Power className="w-3.5 h-3.5" /> Disconnect
+          </Btn>
+        )}
+        <label className="text-[11px] text-slate-500 flex items-center gap-1.5 ml-auto">
+          Vendor
+          <select className={field} value={vendor} onChange={(e) => setVendor(e.target.value)}>
+            {VENDORS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </label>
       </header>
 
       {noContext && (
@@ -558,19 +574,18 @@ export default function AtModemWorkbench({ onLogMessage }) {
       )}
       {!connected && !noContext && webSerial && (
         <Notice>
-          Not connected. Press <span className="text-emerald-300">Connect port</span> (or connect in the header) and pick the modem's AT port.
-          Set the baud rate in the header (SIMCom and Quectel default to 115200). Vendor only chooses which GNSS and cell-info commands are sent.
+          Connect the modem's AT port (baud usually 115200). Vendor only picks the GNSS and cell-info commands.
         </Notice>
       )}
       {notice && <Notice tone="emerald">{notice}</Notice>}
 
-      <nav className="flex flex-wrap gap-1 border-b border-slate-800 pb-2" aria-label="AT modem sections">
+      <nav className="flex flex-wrap gap-1 border-b border-slate-800 pb-1.5" aria-label="AT modem sections">
         {TABS.map(([id, label, Icon]) => (
           <button
             key={id}
             type="button"
             onClick={() => setTab(id)}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono border ${tab === id ? 'border-cyan-600 bg-cyan-950/40 text-cyan-200' : 'border-slate-800 text-slate-400 hover:text-slate-200'}`}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono border ${tab === id ? 'border-cyan-600 bg-cyan-950/40 text-cyan-200' : 'border-slate-800 text-slate-400 hover:text-slate-200'}`}
           >
             <Icon className="w-3.5 h-3.5" /> {label}
           </button>
@@ -578,7 +593,7 @@ export default function AtModemWorkbench({ onLogMessage }) {
       </nav>
 
       {tab === 'identify' && (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-2 @md:grid-cols-2">
           <Panel
             title="Identify module"
             hint="ATI, CGMI, CGMM, CGMR, CGSN (IMEI), CIMI (IMSI), CCID or QCCID (ICCID), CPIN?"
@@ -614,7 +629,7 @@ export default function AtModemWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'signal' && (
-        <div className="grid gap-3">
+        <div className="grid gap-2">
           <Panel
             title="Signal and serving cell"
             hint={`CSQ and CESQ for signal; ${vendor === 'quectel' ? 'AT+QENG="servingcell"' : 'AT+CPSI?'} for the cell.`}
@@ -628,11 +643,12 @@ export default function AtModemWorkbench({ onLogMessage }) {
                     {POLL_OPTIONS.map((s) => <option key={s} value={s}>{s} s</option>)}
                   </select>
                 </label>
-                <Btn tone="slate" onClick={() => setHistory([])} disabled={!history.length}><Trash2 className="w-3.5 h-3.5" /> Clear chart</Btn>
+                <Btn tone="slate" onClick={exportSignal} disabled={!history.length} title="Download the readings as CSV"><Download className="w-3.5 h-3.5" /> CSV</Btn>
+                <Btn tone="slate" onClick={() => setHistory([])} disabled={!history.length} title="Clear chart"><Trash2 className="w-3.5 h-3.5" /> Clear</Btn>
               </div>
             )}
           >
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-2 @md:grid-cols-3">
               <div>
                 <div className="text-[11px] text-slate-500 mb-1">CSQ (RSSI)</div>
                 {signal?.csq ? (
@@ -681,7 +697,7 @@ export default function AtModemWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'network' && (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-2 @md:grid-cols-2">
           <Panel
             title="Registration"
             hint="CREG (2G/3G circuit), CGREG (GPRS), CEREG (LTE). URC changes update this panel live."
@@ -721,7 +737,7 @@ export default function AtModemWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'apn' && (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-2 @md:grid-cols-2">
           <Panel
             title="PDP contexts"
             hint="AT+CGDCONT? lists the stored APN for each context id."
@@ -763,7 +779,7 @@ export default function AtModemWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'sms' && (
-        <div className="grid gap-3">
+        <div className="grid gap-2">
           {newSms && (
             <Notice tone="amber">
               <span className="inline-flex items-center gap-2 flex-wrap">
@@ -775,7 +791,7 @@ export default function AtModemWorkbench({ onLogMessage }) {
               </span>
             </Notice>
           )}
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-2 @md:grid-cols-2">
             <Panel
               title="Messages (text mode)"
               hint="AT+CMGF=1, then AT+CMGL=&quot;ALL&quot;."
@@ -834,6 +850,37 @@ export default function AtModemWorkbench({ onLogMessage }) {
         </div>
       )}
 
+      {tab === 'pdu' && (
+        <Panel
+          title="SMS PDU decoder"
+          hint="Offline: paste a PDU (hex) from AT+CMGR or AT+CMGL in PDU mode (AT+CMGF=0). Nothing is sent to the modem."
+          right={<Btn tone="slate" onClick={loadPduFromRead} disabled={!log.some((e) => e.dir === 'rx' && /^[0-9A-Fa-f]{12,}$/.test(e.text.trim()))} title="Use the latest hex line received in the console log">Use last reply</Btn>}
+        >
+          <label className="flex flex-col gap-1 text-[11px] text-slate-500">PDU hex
+            <textarea className={`${field} min-h-[4.5rem] break-all`} value={pduText} spellCheck={false} placeholder="07911326040000F0040B91..." onChange={(e) => setPduText(e.target.value)} />
+          </label>
+          <label className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-1.5">
+            <input type="checkbox" checked={pduSmsc} onChange={(e) => setPduSmsc(e.target.checked)} />
+            PDU starts with the SMSC field (untick for a bare TPDU)
+          </label>
+          <div className="mt-2">
+            {!pduResult && <p className="text-xs text-slate-600">Paste a PDU to decode it.</p>}
+            {pduResult && !pduResult.ok && <Notice tone="rose">{pduResult.error}</Notice>}
+            {pduResult?.ok && (
+              <>
+                <Kv k="Type" v={pduResult.type} />
+                <Kv k={pduResult.type === 'SMS-SUBMIT' ? 'Recipient' : 'Sender'} v={pduResult.address || '(empty)'} />
+                {pduResult.smsc && <Kv k="SMSC" v={pduResult.smsc} />}
+                {pduResult.time && <Kv k="Service centre time" v={pduResult.time} />}
+                <Kv k="Alphabet (DCS)" v={`${pduResult.alphabet} (0x${pduResult.dcs.toString(16).toUpperCase().padStart(2, '0')})`} />
+                {pduResult.concat && <Kv k="Multipart" v={`part ${pduResult.concat.part} of ${pduResult.concat.total}, ref ${pduResult.concat.ref}`} />}
+                <pre className="text-xs whitespace-pre-wrap text-gray-200 mt-1 bg-black border border-slate-800 rounded p-2">{pduResult.text || '(empty text)'}</pre>
+              </>
+            )}
+          </div>
+        </Panel>
+      )}
+
       {tab === 'gnss' && (
         <Panel
           title="GNSS (module's own receiver)"
@@ -848,7 +895,7 @@ export default function AtModemWorkbench({ onLogMessage }) {
             </div>
           )}
         >
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-2 @md:grid-cols-2">
             <div>
               {gnss?.fix && (
                 <>
@@ -879,9 +926,9 @@ export default function AtModemWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'quick' && (
-        <div className="grid gap-3">
+        <div className="grid gap-2">
           <Panel title="Quick commands" hint="Built-in commands. Commands that drop the radio, reset, delete or change SIM or facility settings ask first.">
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-2 @md:grid-cols-2">
               {[...new Set(QUICK_COMMANDS.map((q) => q.group))].map((group) => (
                 <div key={group}>
                   <div className="text-[10px] uppercase tracking-wide text-slate-600 mb-1">{group}</div>
@@ -921,11 +968,12 @@ export default function AtModemWorkbench({ onLogMessage }) {
           right={(
             <div className="flex gap-2">
               <Btn tone="slate" onClick={copyLog} disabled={!log.length}><Copy className="w-3.5 h-3.5" /> Copy</Btn>
+              <Btn tone="slate" onClick={exportLog} disabled={!log.length} title="Download the log as a .txt file"><Download className="w-3.5 h-3.5" /> Save</Btn>
               <Btn tone="slate" onClick={() => setLog([])} disabled={!log.length}><Trash2 className="w-3.5 h-3.5" /> Clear</Btn>
             </div>
           )}
         >
-          <div ref={logEndRef} className="h-72 overflow-auto bg-black border border-slate-800 rounded p-2 font-mono text-[11px] leading-relaxed">
+          <div ref={logEndRef} className="h-56 @lg:h-72 overflow-auto bg-black border border-slate-800 rounded p-2 font-mono text-[11px] leading-relaxed">
             {log.length === 0 && <div className="text-slate-600">No traffic yet.</div>}
             {log.map((e) => (
               <div key={e.id} className="whitespace-pre-wrap break-all">
@@ -946,11 +994,29 @@ export default function AtModemWorkbench({ onLogMessage }) {
               onKeyDown={onConsoleKey}
               disabled={!connected}
               aria-label="AT command"
+              list="at-modem-reference"
+              autoComplete="off"
             />
+            <datalist id="at-modem-reference">
+              {searchAtReference('').map(([c, d]) => <option key={c} value={c}>{d}</option>)}
+            </datalist>
             <Btn onClick={sendConsole} disabled={!connected || !consoleInput.trim()}><Send className="w-3.5 h-3.5" /> Send</Btn>
           </div>
+          <details className="mt-1.5 text-[11px] text-slate-500">
+            <summary className="cursor-pointer select-none flex items-center gap-1"><Search className="w-3 h-3" /> AT command reference</summary>
+            <input className={`${field} w-full mt-1`} value={refQuery} onChange={(e) => setRefQuery(e.target.value)} placeholder="Filter, e.g. imei, sms, cops" aria-label="Filter AT command reference" />
+            <div className="max-h-40 overflow-auto mt-1 border border-slate-800 rounded">
+              {searchAtReference(refQuery).map(([c, d]) => (
+                <button key={c} type="button" onClick={() => setConsoleInput(c)} className="w-full text-left px-2 py-0.5 hover:bg-slate-900 flex gap-2">
+                  <span className="font-mono text-cyan-300 shrink-0">{c}</span><span className="truncate">{d}</span>
+                </button>
+              ))}
+              {searchAtReference(refQuery).length === 0 && <p className="p-2">No match.</p>}
+            </div>
+            <p className="mt-1">Click a row to put it in the input. Nothing is sent until you press Send.</p>
+          </details>
           <p className="text-[10px] text-slate-600 mt-1 flex items-center gap-1">
-            <Info className="w-3 h-3" /> Send the command without a line ending; the tool adds CR. Ctrl-Z for SMS is handled by the SMS tab.
+            <Info className="w-3 h-3" /> The tool adds CR; type the command without a line ending.
           </p>
         </Panel>
       )}

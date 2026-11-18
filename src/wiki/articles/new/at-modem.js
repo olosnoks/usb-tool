@@ -4,7 +4,7 @@ export default {
   category: 'utilities',
   title: 'AT Modem Console — cellular modules over AT commands',
   summary: 'Talk to SIMCom, Quectel and u-blox cellular modules over their AT port: identify the module and SIM, read signal and serving cell, check registration and APN, send and read SMS, get a GNSS fix, and use a raw console with an unsolicited-message log. Runs in Chromium over Web Serial.',
-  tags: ['AT commands', 'Cellular modem', 'SIM7600', 'SIM800', 'Quectel EC25', 'BG96', 'u-blox SARA', 'CSQ', 'RSRP', 'SMS text mode', 'APN', 'GNSS'],
+  tags: ['SMS PDU decoder', 'AT commands', 'Cellular modem', 'SIM7600', 'SIM800', 'Quectel EC25', 'BG96', 'u-blox SARA', 'CSQ', 'RSRP', 'SMS text mode', 'APN', 'GNSS'],
   readTime: '7 min read',
   content: `
 # AT Modem Console
@@ -29,7 +29,7 @@ Commands go out one at a time. The engine waits for a final line (OK, ERROR, NO 
 
 **Identify.** ATI, AT+CGMI, AT+CGMM, AT+CGMR, AT+CGSN (IMEI), AT+CIMI (IMSI), AT+CCID or AT+QCCID (ICCID) and AT+CPIN?. The reply text is used to guess the family, and the Vendor selector follows the guess. **Init modem** sends ATE0 (echo off), ATV1 and AT+CMEE=1 so errors come back as numbers that the tool can decode.
 
-**Signal.** AT+CSQ gives RSSI and converts it to dBm (index 0 is -113 dBm or lower, 31 is -51 dBm or higher). AT+CESQ gives LTE RSRP and RSRQ where the firmware supports it. The serving cell comes from AT+QENG="servingcell" on Quectel or AT+CPSI? on SIMCom. Polling every 2, 5, 10 or 30 seconds is off by default, and the chart shows the readings from this session.
+**Signal.** AT+CSQ gives RSSI and converts it to dBm (index 0 is -113 dBm or lower, 31 is -51 dBm or higher). AT+CESQ gives LTE RSRP and RSRQ where the firmware supports it. The serving cell comes from AT+QENG="servingcell" on Quectel or AT+CPSI? on SIMCom. Polling every 2, 5, 10 or 30 seconds is off by default, and the chart shows the readings from this session. CSV downloads those readings (time, RSSI dBm, RSRP dBm; empty where the module gave no value).
 
 **Network.** AT+CREG?, AT+CGREG? and AT+CEREG? decoded into the registration state, plus AT+COPS? for the current operator and access technology. Registration URCs update the panel as they arrive. This tab shows the current operator only; it does not scan for networks.
 
@@ -39,9 +39,11 @@ Commands go out one at a time. The engine waits for a final line (OK, ERROR, NO 
 
 **GNSS.** The module's own receiver. SIMCom: AT+CGPS=1 to start, AT+CGPSINFO to read, AT+CGPS=0 to stop. Quectel: AT+QGPS=1, AT+QGPSLOC=2, AT+QGPSEND. Coordinates are shown as signed decimal degrees, so south and west are negative. Start the receiver, wait for a fix outdoors, then read it.
 
+**PDU decode.** An offline decoder for SMS PDUs (hex), for modules or logs that use PDU mode (AT+CMGF=0). Paste the hex from AT+CMGR or AT+CMGL, or press Use last reply to take the latest hex line from the console log. It decodes SMS-DELIVER and SMS-SUBMIT: sender or recipient, SMSC, service centre time, alphabet (GSM 7-bit with the extension table, UCS-2 or 8-bit), multipart (concatenation) info and the text. Untick the SMSC box for a bare TPDU. Nothing is sent to the modem. Other message types (status reports, commands) are refused with a message, and the decoder does not reassemble multipart messages.
+
 **Quick commands.** About twenty common read-only commands grouped by topic, plus your own list (one command per line, lines starting with # are comments). The list is kept in this browser's local storage and runs in order, stopping at the first failure.
 
-**Console.** Every command and reply, with unsolicited lines marked URC. Enter sends, arrow keys recall earlier commands. Copy and Clear work on the log.
+**Console.** Every command and reply, with unsolicited lines marked URC. Enter sends, arrow keys recall earlier commands. Copy, Save (downloads the log as a .txt file) and Clear work on the log. The input offers autocomplete from a built-in list of about 40 common commands, and an AT command reference (collapsed by default) filters that list; clicking a row only fills the input and sends nothing.
 
 ## Commands that ask first
 
@@ -65,6 +67,10 @@ The tool asks for confirmation before sending commands that drop the radio or re
 - **+CME ERROR 30 or CSQ 99.** No network service or no signal. Check the antenna and the SIM's data plan.
 - **SMS send fails right after the prompt.** The text probably contains a character outside plain ASCII, or the destination format is wrong (use the international form such as +15551234567).
 - **GNSS "No fix yet".** Keep the antenna in open sky. Cold starts can take several minutes.
+
+## Similar tools
+
+Quectel QNavigator and QCOM, Gammu and the Wammu PDU decoder, and picocom or minicom on a plain serial port. They offer vendor-specific panels, repeated command batches, and PDU decoding. This tool covers the common SIMCom and Quectel tasks in the browser, but it is not a replacement for the vendor tools for firmware update, data sessions or batch stress tests.
 
 ## Related tools
 
