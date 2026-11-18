@@ -3,7 +3,7 @@ export default {
   toolId: 'i2c-address-ref',
   category: 'reference',
   title: 'I2C Address Reference & Scan Identifier — offline address map, part lookup and scan decoder',
-  summary: 'An offline lookup for I2C addresses: a 0x00 to 0x7F map, about 190 common parts with their addresses and ID registers, a decoder for pasted scan output (i2cdetect, Arduino scanner or a hex list), a 7-bit / 8-bit converter and a conflict checker. It never touches a bus.',
+  summary: 'An offline lookup for I2C addresses: a 0x00 to 0x7F map, about 190 common parts with their addresses and ID registers, a decoder for pasted scan output (i2cdetect, Arduino scanner or a hex list), a 7-bit / 8-bit converter and a conflict checker with an address planner. It never touches a bus.',
   tags: ['I2C', 'I2C address', 'i2cdetect', 'scan', 'address map', '7-bit', '8-bit', 'conflict', 'datasheet', 'reference'],
   readTime: '7 min read',
   content: `
@@ -42,6 +42,8 @@ For each address found, the tool lists the candidate parts, flags reserved addre
 
 **Copy table** puts the address, candidate names and suggestion on the clipboard as tab-separated text.
 
+Below the results, a collapsible **Free addresses on this bus** list shows every usable 7-bit address (0x08 to 0x77, reserved ones excluded) that did not answer in the pasted scan. It is only a guide: a device that is unpowered or unplugged will not appear in a scan.
+
 ### 3. 7-bit / 8-bit converter
 
 - Enter a 7-bit address (for example 0x3C) to see its write byte (0x78) and read byte (0x79). The 7-bit value is the address used in code and by i2cdetect; the write byte is that value shifted left one bit with the read/write bit cleared.
@@ -52,6 +54,8 @@ Many datasheets list the 8-bit write address. Mixing the two up is a common reas
 ### 4. Conflict checker
 
 Pick the parts you plan to put on one bus. The tool reports each address that two or more chosen parts claim, marks which parts have alternate addresses (set by pins or solder jumpers), and lists the alternates that no other chosen part uses. Parts with a fixed address are marked as not movable.
+
+When two or more parts are selected, a **Suggested addressing** card appears. It runs an exact search for a way to give every part its own address on one bus using each part's alternate addresses, and lists the address to set for each part. If no such assignment exists (for example two parts with the same fixed address), it splits the parts over several buses with a greedy first-fit, such as the channels of an I2C multiplexer, and names the multiplexers in the database with enough channels (TCA9548A and PCA9548A have 8, TCA9546A has 4). The bus count is small but not guaranteed minimal. **Copy** puts the plan on the clipboard as text.
 
 ## What it does not do
 
@@ -70,6 +74,10 @@ Any modern browser. No Web Serial, WebUSB or other hardware API is needed. The t
 - **Several parts share an address and no ID check is listed.** Use the board silkscreen, the part marking or the datasheet to identify the chip.
 - **"Ignored tokens" appears after pasting.** The text contained something that is not a 1 or 2 digit hex address (for example the decimal 104 is not a valid token, and 0x80 and above are outside the 7-bit range). Write addresses in hex, with or without the 0x prefix.
 - **An amber (reserved) address answers on the bus.** This is unusual. Check the wiring, pull-ups and whether a device is mis-addressing; reserved addresses are not used by normal parts.
+
+## Similar tools
+
+The feature set was compared with the Adafruit I2C Addresses list, i2cdevices.org, vendor address tables such as Seeed's, and the TCA9548A multiplexer guides from Adafruit, SparkFun and TI. Those are static tables; the scan decoder, ID-register hints, address planner and multiplexer split are what this tool adds on top.
 
 ## Related tools
 
