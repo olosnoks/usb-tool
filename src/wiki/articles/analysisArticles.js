@@ -360,16 +360,23 @@ Every value change records a timestamp (\`#41\`, in the file's timescale unit) f
 | **16-bit wide mode** | Checkbox | FX2 (fx2lafw) only: captures 16 channels instead of 8. fx2lafw cannot report how many inputs a board has, so only tick it on 16-channel boards; on an 8-input board the upper channels are meaningless. |
 | **Zoom out / Zoom in / Fit whole capture** | Buttons | Zoom the waveform; also mouse wheel pans and Ctrl+wheel zooms. |
 | **Waveform canvas** | Viewport | Timing diagram with one row per channel: the channel count comes from the device (SUMP metadata reports up to 32 channels; FX2 gives 8, or 16 in wide mode), labelled **CHANNELS (D0 - Dn)**. Click sets cursor A, Shift-click cursor B; ΔT and 1/ΔT are shown. **TIMELINE PAN** slider scrolls. |
+| **SNAP** | Dropdown | Above the waveform. Pick a channel and a click (or Shift-click) places cursor A (or B) on the nearest edge of that channel instead of the exact pixel. The ΔT bar then also shows the rising / falling edge count of that channel between A and B and the frequency from their rising-edge spacing. **off** restores free placement. |
 | **FIND** | Dropdown + PREV / NEXT | Searches from cursor A for a rising edge, falling edge, any edge, glitch (short pulse) or pattern (mask/value) on a channel. |
 | **VCD / PULSEVIEW .SR** | Buttons | Export the capture as a Value Change Dump or a PulseView/sigrok session file. |
 | **Protocol Decoder buttons** | Buttons | Pick I2C, UART, SPI, 1-Wire, CAN, WS2812, IR or SWD; role dropdowns map decoder signals to D0-D7 and parameter fields (baud, parity, SPI mode...) appear. |
 | **AUTO-BAUD** | Button | UART only: estimates the baud rate from the shortest pulses. |
 | **STACK** | Dropdown | Adds a second decoder on top of the protocol decoder's output, drawn in its own annotation lane and listed in the table: **SPI flash commands** (names JEDEC commands and identifies the chip from a JEDEC ID read, e.g. Winbond W25Q128), **EEPROM / register names** for I2C (with an address-bytes field), **NMEA 0183 (GPS)** for UART (with checksum check) and **UDS / OBD / J1939 names** for CAN. Commands cut off by the end of the capture are marked "cut short". |
 | **CSV** | Button | Exports the decoded items. |
+| **SIGROK-CLI** | Button | Copies a \`sigrok-cli\` command line that decodes the exported \`.sr\` file with the current decoder, channel mapping and options (channel names as renamed in the table). It is only text for you to run in sigrok-cli; nothing runs in the browser, and stacked decoders are not included. |
+| **Filter decoded items** | Text box | Above the decode table: shows only rows whose type or text contains every word you type (for example \`nack\`, \`0x68\`, \`error\`). The CSV export still contains all items. |
 | **OPEN SESSION / SAVE SESSION** | Buttons | Save the capture, channel names, decoder and stack settings to a JSON session file and open it again later (wide captures included). |
 | **Channel Measurements** | Table | Per channel name (editable), edges, frequency, duty and min/max pulse. |
 
 ---
+
+The toolbar is compact: the intro text sits under **About this tool**, and the layout adapts to narrow windows (about 360 px wide still works).
+
+**Similar tools:** PulseView / sigrok-cli, Saleae Logic 2 and DSView offer cursor snapping, decoder search and command-line decoding; this tool adds the same ideas in the browser (SNAP, the decode filter and a sigrok-cli command export).
 
 ### 4. Step-by-Step Engineering Walkthroughs
 
