@@ -218,3 +218,46 @@ describe('bit rate, sensitivity, link budget, duty cycle', () => {
     expect(d.minOffTimeMs).toBeCloseTo(56.576 * 99, 3);
   });
 });
+
+import {
+  regionCheck, rnodeconfCommand, reticulumInterfaceConfig, sampleStats, sparklinePoints, maxPayloadForToa,
+} from '../src/utils/rnodeLora.js';
+
+describe('regional checks and exports', () => {
+  it('passes 868.1 MHz at 14 dBm in EU868 and flags 20 dBm', () => {
+    expect(regionCheck('eu868', 868.1, 14).ok).toBe(true);
+    const r = regionCheck('eu868', 868.1, 20);
+    expect(r.ok).toBe(false);
+    expect(r.duty).toBe(0.01);
+  });
+  it('allows 27 dBm only in the 869.4-869.65 sub-band', () => {
+    expect(regionCheck('eu868', 869.5, 27)).toMatchObject({ ok: true, duty: 0.1 });
+    expect(regionCheck('eu868', 868.1, 27).ok).toBe(false);
+  });
+  it('flags frequencies outside the region and ignores "none"', () => {
+    expect(regionCheck('us915', 868, 10).ok).toBe(false);
+    expect(regionCheck('eu868', 868.65, 10).ok).toBe(false);
+    expect(regionCheck('none', 144, 22).ok).toBe(true);
+  });
+  it('builds rnodeconf and Reticulum config text', () => {
+    const p = { freqHz: 868000000, bwHz: 125000, sf: 8, cr: 5, txPowerDbm: 14 };
+    expect(rnodeconfCommand(p, 'COM3')).toBe('rnodeconf COM3 --freq 868000000 --bw 125000 --txp 14 --sf 8 --cr 5');
+    const cfg = reticulumInterfaceConfig(p);
+    expect(cfg).toContain('type = RNodeInterface');
+    expect(cfg).toContain('spreadingfactor = 8');
+    expect(() => rnodeconfCommand({ ...p, sf: 4 })).toThrow();
+  });
+  it('computes sample stats and sparkline points', () => {
+    expect(sampleStats([])).toBeNull();
+    expect(sampleStats([-100, -90, -80])).toEqual({ min: -100, max: -80, mean: -90, count: 3 });
+    expect(sparklinePoints([1])).toBe('');
+    expect(sparklinePoints([0, 10], 100, 20)).toBe('0.0,20.0 100.0,0.0');
+  });
+  it('finds the largest payload that fits a time-on-air budget', () => {
+    const o = { sf: 7, bwHz: 125000, cr: 5 };
+    const n = maxPayloadForToa(100, o);
+    expect(timeOnAir({ ...o, payloadBytes: n }).totalMs).toBeLessThanOrEqual(100);
+    expect(n === 255 || timeOnAir({ ...o, payloadBytes: n + 1 }).totalMs > 100).toBe(true);
+    expect(maxPayloadForToa(1, o)).toBe(-1);
+  });
+});

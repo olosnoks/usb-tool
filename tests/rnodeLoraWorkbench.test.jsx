@@ -14,3 +14,13 @@ describe('RnodeLoraWorkbench', () => {
     expect(html).toContain('Firmware Flasher');
   });
 });
+
+describe('RnodeLoraWorkbench region check', () => {
+  it('shows the region selector, export section and a passing default check', () => {
+    const html = renderToString(<RnodeLoraWorkbench />);
+    expect(html).toContain('Regulatory region');
+    expect(html).toContain('Export for rnodeconf');
+    expect(html).toContain('region-check');
+    expect(html).toContain('rnodeconf /dev/ttyUSB0 --freq 868000000');
+  });
+});

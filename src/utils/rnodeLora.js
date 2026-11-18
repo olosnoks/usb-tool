@@ -472,3 +472,114 @@ export function dutyCycleAllowance({ toaMs, dutyFraction = 0.01, windowMs = 3600
     minOffTimeMs: toaMs * (1 / dutyFraction - 1),
   };
 }
+
+// ---------------------------------------------------------------- regional limits (advisory)
+// Simplified licence-exempt ISM rules, for a sanity check only. Always confirm the current rules
+// for your country. Power limits are the regulatory figure (ERP/EIRP/conducted as noted), compared
+// here against the module TX power setting; antenna gain and cable loss are not modelled.
+export const REGIONS = {
+  none: { label: 'Other / licensed (no check)', bands: [] },
+  eu868: {
+    label: 'EU 863-870 MHz (ETSI EN 300 220)',
+    bands: [
+      { fromMhz: 863, toMhz: 865, duty: 0.001, maxDbm: 14, note: '25 mW ERP, 0.1%' },
+      { fromMhz: 865, toMhz: 868, duty: 0.01, maxDbm: 14, note: '25 mW ERP, 1%' },
+      { fromMhz: 868, toMhz: 868.6, duty: 0.01, maxDbm: 14, note: '25 mW ERP, 1%' },
+      { fromMhz: 868.7, toMhz: 869.2, duty: 0.001, maxDbm: 14, note: '25 mW ERP, 0.1%' },
+      { fromMhz: 869.4, toMhz: 869.65, duty: 0.1, maxDbm: 27, note: '500 mW ERP, 10%' },
+      { fromMhz: 869.7, toMhz: 870, duty: 0.01, maxDbm: 14, note: '25 mW ERP, 1%' },
+    ],
+  },
+  eu433: {
+    label: 'EU 433 MHz ISM',
+    bands: [{ fromMhz: 433.05, toMhz: 434.79, duty: 0.1, maxDbm: 10, note: '10 mW ERP, 10%' }],
+  },
+  us915: {
+    label: 'US 902-928 MHz (FCC Part 15.247)',
+    bands: [{ fromMhz: 902, toMhz: 928, duty: 1, maxDbm: 30, note: '1 W conducted with antenna up to 6 dBi, no duty cycle; dwell-time rules apply' }],
+  },
+  au915: {
+    label: 'AU 915-928 MHz',
+    bands: [{ fromMhz: 915, toMhz: 928, duty: 1, maxDbm: 30, note: '1 W EIRP class licence, no duty cycle' }],
+  },
+};
+
+/**
+ * Checks a frequency/TX power against a region. Returns {ok, band, duty, maxDbm, messages}.
+ * "none" always passes. A frequency outside every band of the region is not ok.
+ */
+export function regionCheck(regionId, freqMhz, txPowerDbm) {
+  const region = REGIONS[regionId];
+  if (!region || !region.bands.length) return { ok: true, band: null, duty: null, maxDbm: null, messages: [] };
+  const band = region.bands.find((b) => freqMhz >= b.fromMhz && freqMhz <= b.toMhz);
+  if (!band) {
+    return {
+      ok: false, band: null, duty: null, maxDbm: null,
+      messages: [`${freqMhz} MHz is outside the licence-exempt LoRa sub-bands for ${region.label}.`],
+    };
+  }
+  const messages = [];
+  if (txPowerDbm > band.maxDbm) {
+    messages.push(`TX power ${txPowerDbm} dBm is above the ${band.maxDbm} dBm limit for this sub-band (${band.note}).`);
+  }
+  return { ok: messages.length === 0, band, duty: band.duty, maxDbm: band.maxDbm, messages };
+}
+
+// ---------------------------------------------------------------- export helpers
+/** rnodeconf command line for the given parameters (an export for the CLI; not run by this tool). */
+export function rnodeconfCommand({ freqHz, bwHz, sf, cr, txPowerDbm }, port = '/dev/ttyUSB0') {
+  const errors = validateRadioParams({ freqHz, bwHz, sf, cr, txPowerDbm });
+  if (errors.length) throw new Error(errors.join(' '));
+  return `rnodeconf ${port} --freq ${freqHz} --bw ${bwHz} --txp ${txPowerDbm} --sf ${sf} --cr ${cr}`;
+}
+
+/** Reticulum ~/.reticulum/config RNodeInterface block for the given parameters. */
+export function reticulumInterfaceConfig({ freqHz, bwHz, sf, cr, txPowerDbm }, port = '/dev/ttyUSB0') {
+  const errors = validateRadioParams({ freqHz, bwHz, sf, cr, txPowerDbm });
+  if (errors.length) throw new Error(errors.join(' '));
+  return [
+    '[[RNode LoRa Interface]]',
+    '  type = RNodeInterface',
+    '  enabled = yes',
+    `  port = ${port}`,
+    `  frequency = ${freqHz}`,
+    `  bandwidth = ${bwHz}`,
+    `  txpower = ${txPowerDbm}`,
+    `  spreadingfactor = ${sf}`,
+    `  codingrate = ${cr}`,
+  ].join('\n');
+}
+
+/** Summary stats for an RSSI/SNR sample list: {min, max, mean, count}; null when empty. */
+export function sampleStats(samples) {
+  if (!samples || !samples.length) return null;
+  let min = Infinity;
+  let max = -Infinity;
+  let sum = 0;
+  for (const v of samples) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+    sum += v;
+  }
+  return { min, max, mean: sum / samples.length, count: samples.length };
+}
+
+/** SVG polyline points string scaling samples into a width x height box (y inverted). */
+export function sparklinePoints(samples, width = 120, height = 24) {
+  if (!samples || samples.length < 2) return '';
+  const { min, max } = sampleStats(samples);
+  const span = max - min || 1;
+  return samples
+    .map((v, i) => `${((i / (samples.length - 1)) * width).toFixed(1)},${(height - ((v - min) / span) * height).toFixed(1)}`)
+    .join(' ');
+}
+
+/** Largest payload (0-255) whose time on air fits maxToaMs, or -1 if even 0 bytes does not fit. */
+export function maxPayloadForToa(maxToaMs, opts) {
+  let best = -1;
+  for (let n = 0; n <= 255; n += 1) {
+    if (timeOnAir({ ...opts, payloadBytes: n }).totalMs <= maxToaMs) best = n;
+    else break;
+  }
+  return best;
+}

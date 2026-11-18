@@ -46,6 +46,23 @@ Set frequency (MHz), bandwidth, spreading factor, coding rate and TX power, then
 | Coding rate | 4/5 to 4/8 |
 | TX power | 0 to 22 dBm |
 
+### Regulatory region check
+
+A **Regulatory region** selector sits next to the TX power field. The default is EU 863-870 MHz. Other choices are EU 433 MHz, US 902-928 MHz, AU 915-928 MHz, and "Other / licensed (no check)". For a chosen region the tool finds the sub-band that contains your frequency and compares your TX power setting with its limit:
+
+| Region | Limits used |
+|---|---|
+| EU 863-870 | 863-865 and 865-868 and 868-868.6 MHz: 14 dBm (25 mW ERP), 1% duty (0.1% for 863-865). 868.7-869.2: 14 dBm, 0.1%. 869.4-869.65: 27 dBm (500 mW ERP), 10%. 869.7-870: 14 dBm, 1%. |
+| EU 433 | 433.05-434.79 MHz: 10 dBm (10 mW ERP), 10% |
+| US 902-928 | 30 dBm conducted (antenna up to 6 dBi), no duty cycle |
+| AU 915-928 | 30 dBm, no duty cycle |
+
+If the frequency is outside every sub-band, or the power is above the limit, a warning is shown and **Apply to device is blocked**. Choose "Other / licensed" only if you hold the right licence (for example amateur radio). The check is a simplification: it compares the module setting only and ignores antenna gain, cable loss and local rules. You are responsible for operating legally.
+
+### Export for rnodeconf / Reticulum
+
+Under the radio parameters, an **Export** section builds text from the current form values: an \`rnodeconf <port> --freq ... --bw ... --txp ... --sf ... --cr ...\` command and a Reticulum \`[[RNode LoRa Interface]]\` config block. You can edit the port name used in the text. This tool does **not** run these; copy them and use them with the command-line tools yourself.
+
 Invalid values are rejected before anything is sent. The tool sends frequency, bandwidth, TX power, SF and CR in that order, the same order Reticulum uses. It does not change the radio state.
 
 The panel shows two things separately: **Last applied by this tool** (what this tool sent) and **Echoed by device** (values the device sent back, if it does). Do not treat the first as proof that the radio is running those values.
@@ -57,7 +74,7 @@ The panel shows two things separately: **Last applied by this tool** (what this 
 
 ### Live statistics
 
-- **RSSI** (dBm) and **SNR** (dB) arrive from the device with each received packet. The tool shows the last value, plus the min and max over the last 60 samples. RSSI uses the RNode offset of 157.
+- **RSSI** (dBm) and **SNR** (dB) arrive from the device with each received packet. The tool shows the last value, plus the min, average and max over the last 60 samples, and a small trend line for each. RSSI uses the RNode offset of 157.
 - **Data frames** counts the packets the device received. The packet contents are not decoded.
 - **Poll channel stats** asks the device for its channel report (airtime, channel load, noise floor, interference). The reply format comes from the RNode and Reticulum sources. Counter and channel-stats replies are **not yet verified on hardware**.
 
@@ -96,6 +113,7 @@ LDRO can be set to auto, on or off. Auto turns it on when the symbol time is abo
 - **Sensitivity (estimate)**: −174 + 10·log10(bandwidth) + noise figure + SNR limit for the SF. The SNR limits are −7.5 dB at SF7 down to −20 dB at SF12. This is an estimate, not a datasheet value.
 - **Link budget**: maximum path loss = TX power + antenna gains − cable loss − sensitivity − fade margin. The range is the free-space distance for that loss. **Free-space range is an upper bound.** Terrain, buildings and foliage reduce it, often by a lot.
 - **Duty cycle**: the allowance per rolling hour, the maximum number of messages per hour at the chosen duty cycle, and the minimum off time after each message. EU868 is 1% (36 seconds per hour). The 869.4 to 869.65 MHz sub-band allows 10%, and some sub-bands allow 0.1%.
+- **Longest payload at the duty limit**: given a message interval in seconds (default 60) and the chosen duty cycle, the largest payload (0 to 255 bytes) whose time on air fits the allowed airtime for that interval. It shows "none fits" when even an empty packet is too long, and is not shown for "no limit".
 - **Time on air by SF** shows SF7 to SF12 side by side, which is useful when choosing a spreading factor for a given message size.
 
 ## Troubleshooting
@@ -105,6 +123,10 @@ LDRO can be set to auto, on or off. Auto turns it on when the symbol time is abo
 - **EEPROM says "ROM read returned N bytes".** The device did not send a full EEPROM image. Try again, then check the log.
 - **The checksum shows MISMATCH.** The stored product, model, hardware revision, serial or made bytes do not match the stored checksum. Do not ignore this on a device you intend to use on a real network.
 - **Apply to device does nothing.** Check the error text under the form. Out-of-range values are blocked, and the port must be connected.
+
+## Similar tools
+
+This tool was compared with \`rnodeconf\` (the Reticulum command-line configuration tool), browser RNode flashers such as liamcottle's rnode-flasher, and web LoRa airtime calculators such as The Things Network's. Unlike rnodeconf it does not flash or provision; unlike the calculators it can also talk to a device.
 
 ## Related tools
 
