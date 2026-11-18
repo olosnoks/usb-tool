@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { 
-  MapPin, 
   Sparkles, 
   Play, 
   Download, 
@@ -64,6 +63,7 @@ import {
   AUTH_MODES,
   CHANNELS
 } from '../../utils/wardriveDemoGenerator';
+import { generateGeoJson, generateGpx, generateKml, summarizeAps } from '../../utils/wardriveGeoExport';
 
 const ROUTE_PRESETS = [
   {
@@ -1101,6 +1101,19 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
     downloadFile(`${getCleanBaseFilename()}_generator.py`, py, 'text/x-python');
   };
 
+  const handleDownloadGeo = (kind) => {
+    if (!generatedResult?.aps?.length) return;
+    const aps = generatedResult.aps;
+    const path = generatedResult.masterPath || [];
+    const base = getCleanBaseFilename();
+    if (kind === 'geojson') downloadFile(`${base}.geojson`, generateGeoJson(aps, path), 'application/geo+json');
+    else if (kind === 'gpx') downloadFile(`${base}.gpx`, generateGpx(aps, path), 'application/gpx+xml');
+    else downloadFile(`${base}.kml`, generateKml(aps, path), 'application/vnd.google-earth.kml+xml');
+    onLogMessage(`[EXPORT] Downloaded SYNTHETIC ${kind.toUpperCase()} (${aps.length} APs)`);
+  };
+
+  const runSummary = useMemo(() => summarizeAps(generatedResult?.aps), [generatedResult]);
+
   const handleCopyClipboard = (type) => {
     if (!generatedResult?.aps?.length) return;
     let content = '';
@@ -1157,39 +1170,22 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
   }, [generatedResult, tableSearch]);
 
   return (
-    <div className="w-full space-y-2.5">
+    <div className="w-full space-y-2">
       {/* Data-integrity notice: generated rows must not be mistaken for a real survey */}
-      <div role="alert" className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/40 text-amber-200 rounded-xl px-3 py-2 text-[11px] leading-snug">
+      <div role="alert" className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/40 text-amber-200 rounded-lg px-2 py-1 text-[11px] leading-snug">
         <span className="font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 shrink-0">SYNTHETIC</span>
         <span>{SYNTHETIC_NOTICE} Every export is marked SYNTHETIC in its header, rows and file name.</span>
       </div>
 
-      {/* Top Banner / Tool Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 px-3 py-2 rounded-xl border border-slate-800 backdrop-blur-sm">
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400">
-            <MapPin className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                Kepler.gl & WiGLE
-              </span>
-              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
-                Inspired by OSINTI4L
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 leading-tight">
-              Synthetic wardriving vector art, AP density (up to 500k+), customizable scale & start timestamp
-            </p>
-          </div>
-        </div>
+      {/* Tool header: view switcher only (the window title already names the tool) */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[10px] font-mono text-slate-500">Kepler.gl & WiGLE layouts, inspired by OSINTI4L</span>
 
         {/* View Switcher Tabs */}
         <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800">
           <button
             onClick={() => setActiveTab('map')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition ${
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold transition ${
               activeTab === 'map'
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -1200,7 +1196,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </button>
           <button
             onClick={() => setActiveTab('table')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition ${
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold transition ${
               activeTab === 'table'
                 ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -1211,7 +1207,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </button>
           <button
             onClick={() => setActiveTab('python')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition ${
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold transition ${
               activeTab === 'python'
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -1222,7 +1218,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
           </button>
           <button
             onClick={() => setActiveTab('guide')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition ${
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold transition ${
               activeTab === 'guide'
                 ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -1235,13 +1231,13 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
       </div>
 
       {/* Main Control Card */}
-      <div className="bg-slate-900/60 p-2.5 sm:p-3 rounded-xl border border-slate-800 space-y-2.5">
+      <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800 space-y-2">
         {/* Mode Switcher Header: Text vs Route vs SVG */}
         <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800/70">
           <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
             <button
               onClick={() => setArtMode('text')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold transition ${
                 artMode === 'text'
                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -1252,7 +1248,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             </button>
             <button
               onClick={() => setArtMode('route')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold transition ${
                 artMode === 'route'
                   ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -1263,7 +1259,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
             </button>
             <button
               onClick={() => setArtMode('svg')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold transition ${
+              className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold transition ${
                 artMode === 'svg'
                   ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -2434,6 +2430,19 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
                 </span>
               </button>
 
+              {[['geojson', 'GeoJSON'], ['gpx', 'GPX'], ['kml', 'KML']].map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => handleDownloadGeo(k)}
+                  disabled={!generatedResult?.aps?.length}
+                  className="flex items-center gap-1 px-2 py-1 bg-slate-800/60 hover:bg-slate-800 border border-slate-600 text-slate-200 rounded text-xs font-semibold transition disabled:opacity-40"
+                  title={`Download SYNTHETIC ${label} (path track plus one point per AP)`}
+                >
+                  <Download className="w-3 h-3" />
+                  <span>{label}</span>
+                </button>
+              ))}
+
               <a
                 href="https://kepler.gl/demo"
                 target="_blank"
@@ -2445,6 +2454,15 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
               </a>
             </div>
           </div>
+
+          {runSummary.count > 0 && (
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 px-0.5 text-[10px] font-mono text-slate-400" aria-label="Run summary">
+              <span>{runSummary.uniqueSsids} unique SSIDs</span>
+              <span>2.4 GHz {runSummary.band24} / 5 GHz {runSummary.band5}</span>
+              <span>RSSI {runSummary.rssiMin} to {runSummary.rssiMax} (avg {runSummary.rssiAvg})</span>
+              <span>{Object.entries(runSummary.auth).map(([k, v]) => `${k} ${v}`).join(', ')}</span>
+            </div>
+          )}
 
           {/* Map Container */}
           <div className="relative w-full h-[540px] rounded-xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
@@ -2501,7 +2519,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
       {/* AP Data Table View */}
       {activeTab === 'table' && (
-        <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
+        <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="relative flex-1 max-w-sm">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -2579,7 +2597,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
       {/* Standalone Python Script Source View */}
       {activeTab === 'python' && (
-        <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
+        <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-xs font-bold text-slate-200 flex items-center gap-2">
@@ -2639,7 +2657,7 @@ export default function WardriveGeneratorWorkbench({ onLogMessage = () => {} }) 
 
       {/* Kepler.gl Visualizer Guide */}
       {activeTab === 'guide' && (
-        <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
+        <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 space-y-2">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2.5">
               <div className="p-1.5 bg-purple-500/10 border border-purple-500/30 rounded-lg text-purple-400">

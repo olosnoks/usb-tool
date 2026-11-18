@@ -1183,6 +1183,19 @@ The sliders button opens **Base Font Geometry & PRNG**:
 
 The file name is \`SYNTHETIC_\` followed by your phrase, lower-cased with non-alphanumerics replaced by \`_\` (\`demo\` if empty).
 
+#### Map formats: GeoJSON, GPX, KML
+Three more buttons in the map toolbar export the same dataset for GIS and mapping tools. Each has the path as a track plus one point per AP, and every file says SYNTHETIC in its name, title and description. They are not split by size.
+
+| Button | Contents | File name |
+| :--- | :--- | :--- |
+| **GeoJSON** | A \`FeatureCollection\`: one \`LineString\` for the path and one \`Point\` per AP (SSID, MAC, auth, time, channel, RSSI as properties, \`synthetic: true\`). | \`SYNTHETIC_<text>.geojson\` |
+| **GPX** | GPX 1.1 with one \`wpt\` per AP (UTC time) and a \`trk\` for the path. | \`SYNTHETIC_<text>.gpx\` |
+| **KML** | KML 2.2 with a \`LineString\` and one timestamped placemark per AP; opens in Google Earth. | \`SYNTHETIC_<text>.kml\` |
+
+Under the map toolbar a one-line **run summary** shows unique SSIDs, 2.4 / 5 GHz counts, the RSSI range and average, and the security mix.
+
+*Similar tools:* WiGLE's own app and Kismet export CSV, KML and WiGLE CSV for real surveys; GPX generators and location simulators produce synthetic tracks. This tool differs by tracing shapes with APs.
+
 #### Split limit
 - **Split** sets a per-file size cap: No Limit, 1, 2, 5, 10, 25, 50 or 100 MB.
 - When the data needs more than one file, each part carries the full header (and pre-header for WiGLE), so every part opens on its own. Parts are named \`SYNTHETIC_<text>_wigle_part01_of_04.csv\` and downloaded together as \`SYNTHETIC_<text>_wigle_<N>_parts.zip\` (Kepler likewise). The export button shows an estimated part count.
