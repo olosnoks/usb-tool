@@ -3,7 +3,7 @@ export default {
   toolId: 'fpga-programmer',
   category: 'programmers',
   title: 'FPGA Programmer — Lattice iCE40 over FTDI MPSSE (WebUSB)',
-  summary: 'Loads iCE40 bitstreams (.bin) into the FPGA SRAM or into the board SPI flash through an FTDI FT2232H or FT232H, using MPSSE over WebUSB. The flash path erases, programs and verifies, like iceprog. Not yet tested on hardware.',
+  summary: 'Loads iCE40 bitstreams (.bin) into the FPGA SRAM or into the board SPI flash through an FTDI FT2232H or FT232H, using MPSSE over WebUSB. The flash path erases, programs and verifies, like iceprog. It can also dump the flash to a .bin file, erase the whole chip, and show equivalent iceprog and openFPGALoader command lines. Not yet tested on hardware.',
   tags: ['FPGA', 'iCE40', 'iCEstick', 'iCEBreaker', 'UPduino', 'Alchitry Cu', 'FTDI', 'MPSSE', 'FT2232H', 'FT232H', 'iceprog', 'bitstream', 'SPI flash', 'WebUSB', 'Zadig'],
   readTime: '7 min read',
   content: `
@@ -54,18 +54,26 @@ The FTDI channel used is **interface A (interface 0)**. The UART on channel B of
    - **PROGRAM SRAM (VOLATILE):** loads the bitstream into the FPGA. It is lost at power-off. The panel shows CDONE after the load: HIGH means the FPGA started.
    - **PROGRAM FLASH (ERASE + VERIFY):** erases the 4 KB sectors (64 KB blocks where a full block fits) that cover the bitstream, programs it page by page, reads it back and compares, and then releases reset so the FPGA boots from flash. The **flash offset** (decimal, or hex with a 0x prefix) is where byte 0 of the bitstream goes; it defaults to 0.
    - **VERIFY FLASH:** reads back the bitstream range at the offset and compares it with the loaded file. It does not change the flash.
+   - **DUMP FLASH:** reads flash from the **flash offset** for the **dump length** (decimal or 0x hex; leave it blank to read to the end of the chip, which needs the size from DETECT FLASH) and saves it as \`flash-<offset>-<length>.bin\`. The result line shows the CRC-32 of the dump and whether the range is blank (all 0xFF). The FPGA is held in reset while reading and released afterwards. Use it to back up a board before you reflash it.
+   - **ERASE CHIP:** after a confirmation prompt, sends the chip-erase command (0xC7) and waits for the flash to finish (up to 2 minutes). This removes everything on the flash.
 6. **STOP** ends the job after the current USB transfer. A stopped flash write leaves the FPGA held in reset; load the bitstream again or power-cycle the board.
 7. **DISCONNECT** releases CRESET so the FPGA runs again.
+
+## Other panels
+
+- The loaded file line shows its size and CRC-32, so you can compare a file with a dump.
+- **EQUIVALENT CLI COMMANDS** (collapsed) lists \`iceprog\` and \`openFPGALoader\` command lines for SRAM, flash and verify, using your file name and flash offset. They are text to copy; the app never runs them. The openFPGALoader board and cable names are generic (\`-b ice40_generic\`, \`-c ft2232\` or \`ft232\`); check \`--list-boards\` and \`--list-cables\` for your board.
+- The log can be copied or cleared.
 
 ## How the flows work
 
 - **SRAM:** CRESET is pulled low with CS low, released, and the bitstream is clocked out on MOSI with CS still low, followed by 8 zero bytes (64 clocks, the iCE40 needs at least 49). CDONE is then read.
-- **Flash:** the FPGA is held in reset so it does not drive the shared SPI bus. The app reads the JEDEC ID (0x9F), erases with 0x20 (4 KB) or 0xD8 (64 KB), and sets the write enable (0x06) before each erase and each page program (0x02, 256-byte pages). It polls the status register (0x05) until WIP clears after every erase and page. Readback uses 0x03.
+- **Flash:** the FPGA is held in reset so it does not drive the shared SPI bus. The app reads the JEDEC ID (0x9F), erases with 0x20 (4 KB) or 0xD8 (64 KB), and sets the write enable (0x06) before each erase and each page program (0x02, 256-byte pages). It polls the status register (0x05) until WIP clears after every erase and page. Readback (verify and dump) uses 0x03; chip erase uses 0xC7.
 
 ## Limits and what it does NOT do
 
 - Not tested on hardware (see the warning above).
-- No flash dump or backup to a file, no chip erase, no status-register protection changes, no OTP or SPI-flash security settings.
+- No status-register protection changes, no OTP or SPI-flash security settings.
 - No \`.asc\`, \`.hex\` or \`.bin\` conversion; use icepack first and load the \`.bin\` output.
 - No cancellation inside a single USB transfer; a stalled transfer waits for the device.
 - Flash speed is limited by one USB round trip per page, so a large image takes a while.
@@ -79,6 +87,10 @@ The FTDI channel used is **interface A (interface 0)**. The UART on channel B of
 - **CDONE stays LOW after SRAM load**: the bitstream may be for a different FPGA part, or the SPI wiring is wrong. Confirm the part (UP5K, HX1K, HX8K) matches the one on the board.
 - **Verify failed**: the readback did not match the file at the reported address. The FPGA stays in reset; reprogram. A consistent failure at one address can mean a worn or faulty flash, or a too-fast clock.
 - **Timed out waiting for FTDI data**: the device stopped answering. Disconnect, reconnect, and try a lower clock.
+
+## Similar tools
+
+This tool follows the flow of iceprog (SRAM, flash, verify, offset, chip erase, read) and the open-source openFPGALoader, which supports many more vendors and cables. Vivado Hardware Manager is the equivalent for Xilinx devices and is not related to this code. Unlike the command-line tools, this one is limited to iCE40 with FTDI MPSSE adapters.
 
 ## Related tools in this app
 

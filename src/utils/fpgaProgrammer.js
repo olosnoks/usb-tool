@@ -73,6 +73,7 @@ export const FLASH_CMD = {
   PAGE_PROGRAM: 0x02,
   SECTOR_ERASE_4K: 0x20,
   BLOCK_ERASE_64K: 0xd8,
+  CHIP_ERASE: 0xc7,
   READ_JEDEC_ID: 0x9f,
   RELEASE_POWER_DOWN: 0xab
 };
@@ -311,6 +312,47 @@ export function decodeJedec(bytes) {
     capacityBytes,
     answered: !blank
   };
+}
+
+
+/** Parse a flash offset: empty = 0, decimal, or 0x hex. Returns NaN when invalid. */
+export function parseAddress(text) {
+  const t = String(text ?? '').trim();
+  if (t === '') return 0;
+  const n = /^0x[0-9a-f]+$/i.test(t) ? parseInt(t, 16) : /^\d+$/.test(t) ? Number(t) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : NaN;
+}
+
+/** Offset of the first byte that is not 0xFF, or -1 when the range is blank (erased). */
+export function firstNonBlank(bytes) {
+  const b = toBytes(bytes);
+  for (let i = 0; i < b.length; i++) if (b[i] !== 0xff) return i;
+  return -1;
+}
+
+/** CRC-32 (IEEE, as used by zip/gzip) as an 8-digit lowercase hex string. */
+export function crc32Hex(bytes) {
+  const b = toBytes(bytes);
+  let crc = 0xffffffff;
+  for (let i = 0; i < b.length; i++) {
+    crc ^= b[i];
+    for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return ((crc ^ 0xffffffff) >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Equivalent command lines for the CLI programmers. These are only text for the user to copy;
+ * the app never runs them. mode: 'sram' | 'flash' | 'verify'.
+ */
+export function buildCliCommands({ mode = 'flash', file = 'bitstream.bin', offset = 0, chip = 'FT2232H' } = {}) {
+  const f = /[\s"']/.test(file) ? `"${file.replace(/"/g, '')}"` : file;
+  const off = offset ? ` -o 0x${offset.toString(16)}` : '';
+  const cable = /^FT232H/.test(chip) ? 'ft232' : 'ft2232';
+  const ofl = `openFPGALoader -b ice40_generic -c ${cable}`;
+  if (mode === 'sram') return { iceprog: `iceprog -S ${f}`, openFPGALoader: `${ofl} -m ${f}` };
+  if (mode === 'verify') return { iceprog: `iceprog -c${off} ${f}`, openFPGALoader: `${ofl} --verify -f${off} ${f}` };
+  return { iceprog: `iceprog${off} ${f}`, openFPGALoader: `${ofl} -f --verify${off} ${f}` };
 }
 
 /** Board presets: labels and notes. The pin mapping is the same iceprog default for all of them. */
@@ -614,6 +656,53 @@ export class Ice40Programmer {
     this.log(cdone ? 'SRAM load done: CDONE is high.' : 'SRAM load finished but CDONE is LOW. The FPGA did not start.');
     this.progress('SRAM: done', 1);
     return { cdone, bytes: bits.length };
+  }
+
+  /**
+   * Read `length` bytes of flash from `offset` (default: whole chip if the size is known).
+   * The FPGA is held in reset during the read and released afterwards.
+   */
+  async dumpFlash({ offset = 0, length } = {}) {
+    this.begin();
+    const info = this.flash || (await this.detectFlash());
+    const len = length ?? (info.capacityBytes ? info.capacityBytes - offset : 0);
+    if (!Number.isInteger(len) || len <= 0) {
+      throw new FpgaProgrammerError('Flash size is unknown; enter a length to read.');
+    }
+    if (info.capacityBytes && offset + len > info.capacityBytes) {
+      throw new FpgaProgrammerError(`Range 0x${offset.toString(16)} + ${len} bytes runs past the ${info.capacityBytes / 1024} KB flash.`);
+    }
+    if (offset + len > 0x1000000) throw new FpgaProgrammerError('3-byte addressing reaches only 16 MB.');
+    const m = this.mpsse;
+    await m.exchange(m.pinsCmd({ cs: true, creset: false }));
+    try {
+      const data = await m.readFlash(offset, len, {
+        onChunk: (got) => this.progress('Reading flash', got / len),
+        checkCancel: () => this.checkCancel()
+      });
+      this.log(`Read ${len} bytes from 0x${offset.toString(16)}.`);
+      return data;
+    } finally {
+      await m.exchange(m.pinsCmd({ cs: true, creset: true }));
+    }
+  }
+
+  /** Erase the whole flash chip (0xC7). Resets are released afterwards. */
+  async eraseChip({ timeoutMs = 120000 } = {}) {
+    this.begin();
+    await this.detectFlash();
+    const m = this.mpsse;
+    await m.exchange(m.pinsCmd({ cs: true, creset: false }));
+    try {
+      this.progress('Chip erase', 0);
+      await this.writeEnable();
+      await m.spi(Uint8Array.of(FLASH_CMD.CHIP_ERASE), 0);
+      await this.waitIdle(timeoutMs);
+      this.log('Chip erase complete.');
+      this.progress('Chip erase', 1);
+    } finally {
+      await m.exchange(m.pinsCmd({ cs: true, creset: true }));
+    }
   }
 
   async waitIdle(timeoutMs = 30000) {
