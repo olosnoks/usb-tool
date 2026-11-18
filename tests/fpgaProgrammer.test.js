@@ -16,7 +16,11 @@ import {
   planPages,
   decodeJedec,
   Ice40Programmer,
-  FpgaProgrammerError
+  FpgaProgrammerError,
+  parseAddress,
+  firstNonBlank,
+  crc32Hex,
+  buildCliCommands
 } from '../src/utils/fpgaProgrammer';
 
 // --- Fake FTDI device -------------------------------------------------------------
@@ -53,6 +57,13 @@ class FakeSpiFlash {
       const addr = this.addr3();
       this.mem.fill(0xff, addr, addr + size);
       this.ops.push({ op: c === FLASH_CMD.BLOCK_ERASE_64K ? 'erase64k' : 'erase4k', addr });
+      this.wel = false;
+      this.busyReads = 2;
+    }
+    if (c === FLASH_CMD.CHIP_ERASE) {
+      if (!this.wel) throw new Error('chip erase without WREN');
+      this.mem.fill(0xff);
+      this.ops.push({ op: 'chiperase' });
       this.wel = false;
       this.busyReads = 2;
     }
@@ -537,5 +548,63 @@ describe('Ice40Programmer on a fake FT232H/FT2232H', () => {
       }
     };
     await expect(programmer.programFlash(makeBitstream(10000, 4))).rejects.toThrow(/Cancelled/);
+  });
+});
+
+describe('flash dump, chip erase and helpers', () => {
+  it('dumps a range and releases reset', async () => {
+    const { programmer, flash, transport } = setup();
+    await programmer.connect();
+    const bits = makeBitstream(3000, 5);
+    await programmer.programFlash(bits, { offset: 0x1000 });
+    const back = await programmer.dumpFlash({ offset: 0x1000, length: bits.length });
+    expect(Array.from(back)).toEqual(Array.from(bits));
+    expect(Array.from(flash.mem.subarray(0x1000, 0x1000 + bits.length))).toEqual(Array.from(bits));
+    expect(transport.low & PIN.CRESET).toBeTruthy();
+  });
+
+  it('dumps the whole chip by default and rejects ranges past the end', async () => {
+    const { programmer } = setup({ flashSize: 1 << 16, jedec: [0xef, 0x40, 0x10] });
+    await programmer.connect();
+    expect((await programmer.dumpFlash()).length).toBe(1 << 16);
+    await expect(programmer.dumpFlash({ offset: 0xff00, length: 0x200 })).rejects.toThrow(/past/);
+  });
+
+  it('erases the whole chip', async () => {
+    const { programmer, flash } = setup({ flashSize: 1 << 16, jedec: [0xef, 0x40, 0x10] });
+    await programmer.connect();
+    await programmer.programFlash(makeBitstream(500, 3));
+    expect(firstNonBlank(flash.mem)).toBe(1);
+    await programmer.eraseChip();
+    expect(flash.ops.some((o) => o.op === 'chiperase')).toBe(true);
+    expect(firstNonBlank(flash.mem)).toBe(-1);
+  });
+
+  it('parses addresses', () => {
+    expect(parseAddress('')).toBe(0);
+    expect(parseAddress('4096')).toBe(4096);
+    expect(parseAddress(' 0x1000 ')).toBe(4096);
+    expect(parseAddress('0x')).toBeNaN();
+    expect(parseAddress('-1')).toBeNaN();
+    expect(parseAddress('1.5')).toBeNaN();
+    expect(parseAddress('abc')).toBeNaN();
+  });
+
+  it('finds the first non-blank byte', () => {
+    expect(firstNonBlank(Uint8Array.of(0xff, 0xff))).toBe(-1);
+    expect(firstNonBlank(Uint8Array.of(0xff, 0x00, 0xff))).toBe(1);
+    expect(firstNonBlank(new Uint8Array(0))).toBe(-1);
+  });
+
+  it('computes CRC-32', () => {
+    expect(crc32Hex(new TextEncoder().encode('123456789'))).toBe('cbf43926');
+    expect(crc32Hex(new Uint8Array(0))).toBe('00000000');
+  });
+
+  it('builds equivalent CLI commands', () => {
+    expect(buildCliCommands({ mode: 'sram', file: 'a.bin' }).iceprog).toBe('iceprog -S a.bin');
+    expect(buildCliCommands({ mode: 'flash', file: 'a.bin', offset: 0x10000 }).iceprog).toBe('iceprog -o 0x10000 a.bin');
+    expect(buildCliCommands({ mode: 'verify', file: 'a b.bin' }).iceprog).toBe('iceprog -c "a b.bin"');
+    expect(buildCliCommands({ chip: 'FT232H' }).openFPGALoader).toContain('-c ft232 ');
   });
 });
