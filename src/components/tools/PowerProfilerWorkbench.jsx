@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Zap, Plug, Power, Play, Square, Pause, Download, Trash2, Gauge } from 'lucide-react';
+import { Plug, Power, Play, Square, Pause, Download, Trash2, Copy } from 'lucide-react';
 import {
   MODE_AMPERE,
   MODE_SOURCE,
@@ -14,6 +14,11 @@ import {
   envelope,
   rangeStats,
   recentAverageUa,
+  activityStats,
+  batteryLifeHours,
+  formatLife,
+  scaleCurrent,
+  statsSummary,
   csvRows,
   parseMetadata,
   requestPpk2Port,
@@ -28,7 +33,8 @@ const LANE_TOP = 214;
 const LANE_PITCH = 11;
 const LANE_H = 9;
 const EXPORT_CHUNK = 100000;
-const CONTROL_BTN = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-mono disabled:opacity-40 disabled:cursor-not-allowed';
+const CONTROL_BTN = 'inline-flex items-center gap-1 px-2 py-1 rounded border text-xs font-mono disabled:opacity-40 disabled:cursor-not-allowed';
+const FIELD = 'bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-xs';
 
 export function fmtCurrent(uA) {
   if (uA == null || !Number.isFinite(uA)) return '—';
@@ -84,8 +90,8 @@ function StatCard({ title, stats, voltageV, testId }) {
     ['Duration', stats.samples ? `${stats.durationS.toFixed(3)} s (${stats.samples.toLocaleString()} samples)` : '—'],
   ];
   return (
-    <div data-testid={testId} className="bg-slate-950 border border-slate-800 rounded p-3 space-y-1">
-      <div className="text-[11px] uppercase tracking-wider text-slate-400 mb-1">{title}</div>
+    <div data-testid={testId} className="bg-slate-950 border border-slate-800 rounded p-2 space-y-0.5">
+      <div className="text-[11px] uppercase tracking-wider text-slate-400">{title}</div>
       {rows.map(([k, v]) => (
         <div key={k} className="flex justify-between gap-3 text-xs font-mono">
           <span className="text-slate-500 shrink-0">{k}</span>
@@ -112,6 +118,12 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
   const [selStats, setSelStats] = useState(null);
   const [selection, setSelection] = useState(null); // { a, b } absolute sample indices
   const [captured, setCaptured] = useState(0);
+  const [logScale, setLogScale] = useState(false);
+  const [thresholdInput, setThresholdInput] = useState('100');
+  const [capacityInput, setCapacityInput] = useState('220');
+  const [marginInput, setMarginInput] = useState('20');
+  const [act, setAct] = useState(null);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
 
   const deviceRef = useRef(null);
   const infoRef = useRef(null);
@@ -128,6 +140,8 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
   const countRef = useRef(0);
   const connectedRef = useRef(false);
   const voltageRef = useRef(null);
+  const logRef = useRef(false);
+  const analysisRef = useRef({ open: false, threshold: 100 });
 
   const log = (text, level = 'info') => { if (onLogMessage) onLogMessage(text, level); };
   const voltageMv = Number(voltageInput);
@@ -139,6 +153,11 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
   useEffect(() => { voltageRef.current = Number.isFinite(voltageMv) ? voltageMv / 1000 : null; }, [voltageMv]);
   useEffect(() => { selRef.current = selection; }, [selection]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
+  useEffect(() => { logRef.current = logScale; }, [logScale]);
+  useEffect(() => {
+    const t = Number(thresholdInput);
+    analysisRef.current = { open: analysisOpen, threshold: thresholdInput !== '' && Number.isFinite(t) && t >= 0 ? t : null };
+  }, [analysisOpen, thresholdInput]);
 
   // Close the port when the tool window is closed.
   useEffect(() => () => {
@@ -167,6 +186,13 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
         const b = Math.max(ring.oldest, Math.min(sel.b, ring.total));
         setSelStats(rangeStats(ring, a, b, v));
       } else setSelStats(null);
+      const an = analysisRef.current;
+      if (an.open) {
+        let a2 = from;
+        let b2 = end;
+        if (sel) { a2 = Math.max(ring.oldest, Math.min(sel.a, ring.total)); b2 = Math.max(ring.oldest, Math.min(sel.b, ring.total)); }
+        setAct(activityStats(ring, a2, b2, an.threshold));
+      }
       const now = Date.now();
       const dt = (now - lastTick) / 1000;
       if (dt >= 1) {
@@ -215,7 +241,8 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
     let maxUa = 0;
     for (let b = 0; b < buckets; b++) if (env.valid[b] && env.max[b] > maxUa) maxUa = env.max[b];
     const yMax = Math.max(maxUa * 1.1, 1);
-    const yOf = (v) => 4 + (1 - Math.min(v, yMax) / yMax) * (CHART_H - 8);
+    const useLog = logRef.current;
+    const yOf = (v) => 4 + (1 - scaleCurrent(v, yMax, useLog)) * (CHART_H - 8);
 
     // Grid and axis labels
     ctx.strokeStyle = '#1e293b';
@@ -223,7 +250,7 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
     ctx.font = '10px monospace';
     ctx.lineWidth = 1;
     for (let g = 0; g <= 4; g++) {
-      const v = (yMax * g) / 4;
+      const v = useLog ? yMax ** (g / 4) * 0.1 ** (1 - g / 4) : (yMax * g) / 4;
       const y = Math.round(yOf(v)) + 0.5;
       ctx.beginPath();
       ctx.moveTo(40, y);
@@ -521,11 +548,22 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
   const meta = info?.meta;
   const energyV = Number.isFinite(voltageMv) ? voltageMv / 1000 : null;
 
+  const targetStats = selection ? selStats : liveStats;
+  const targetName = selection ? 'selection' : `last ${windowS} s`;
+  const lifeHours = batteryLifeHours(capacityInput, targetStats?.avgUa, marginInput);
+
+  const copySummary = async () => {
+    const parts = [statsSummary(`Last ${windowS} s`, liveStats, energyV)];
+    if (selection) parts.push(statsSummary('Selection', selStats, energyV));
+    try {
+      await navigator.clipboard.writeText(parts.join('\n\n'));
+      log('PPK2 stats copied to clipboard', 'info');
+    } catch (e) { setError('Could not copy to the clipboard.'); }
+  };
+
   return (
-    <div className="h-full overflow-auto bg-slate-950 text-slate-200 p-4 space-y-4 font-sans">
-      <div className="flex flex-wrap items-center gap-3">
-        <Zap className="w-5 h-5 text-amber-400" />
-        <h2 className="text-base font-semibold">Power Profiler (PPK2)</h2>
+    <div className="h-full overflow-auto bg-slate-950 text-slate-200 space-y-2 font-sans">
+      <div className="flex flex-wrap items-center gap-2">
         <span className={`text-[11px] font-mono px-2 py-0.5 rounded border ${connected ? 'border-emerald-700 text-emerald-300' : 'border-slate-700 text-slate-400'}`}>
           {connected ? 'CONNECTED' : 'DISCONNECTED'}
         </span>
@@ -534,6 +572,7 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
             {paused ? 'MEASURING (PAUSED VIEW)' : 'MEASURING'}
           </span>
         )}
+        <span className="font-mono text-sm text-cyan-200" title="Average of the last 2 ms">{fmtCurrent(nowUa)}</span>
         <div className="ml-auto flex gap-2">
           {!connected ? (
             <button type="button" onClick={connect} disabled={!webSerialAvailable || measuring}
@@ -558,10 +597,10 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
         <div className="text-xs text-rose-300 border border-rose-800 bg-rose-950/40 rounded p-2 font-mono break-words">{error}</div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+      <div className="grid gap-2 @lg:grid-cols-[230px_1fr]">
         {/* Controls */}
-        <div className="space-y-3">
-          <div className="bg-slate-900 border border-slate-800 rounded p-3 space-y-3">
+        <div className="space-y-2">
+          <div className="bg-slate-900 border border-slate-800 rounded p-2 space-y-2">
             <div className="text-[11px] uppercase tracking-wider text-slate-400">Mode</div>
             <div className="grid grid-cols-2 gap-2">
               <button type="button" onClick={() => changeMode(MODE_SOURCE)} disabled={measuring}
@@ -579,7 +618,7 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
                 <div className="flex gap-2">
                   <input id="ppk2-voltage" type="number" min={VDD_MIN_MV} max={VDD_MAX_MV} step={10}
                     value={voltageInput} onChange={(e) => setVoltageInput(e.target.value)}
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-xs" />
+                    className={`${FIELD} flex-1 min-w-0`} />
                   <button type="button" onClick={applyVoltage} disabled={!connected || !voltageValid}
                     className={`${CONTROL_BTN} border-slate-700 text-slate-300 hover:bg-slate-800`}>Apply</button>
                 </div>
@@ -589,19 +628,18 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
                 </button>
               </div>
             ) : (
-              <p className="text-xs text-slate-400 leading-relaxed">
-                The PPK2 measures current flowing through it from an external supply. DUT power is switched off in this mode.
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Measures current from an external supply. DUT power is off in this mode. Set the mV field to your supply voltage for energy.
               </p>
             )}
-            <div className="text-xs text-slate-400">
-              Energy uses {energyV != null ? <span className="font-mono text-slate-300">{energyV.toFixed(3)} V</span> : 'no voltage'} from the mV field
-              {mode === MODE_AMPERE ? ' (set it to your supply voltage)' : ''}.
+            <div className="text-[11px] text-slate-500">
+              Energy uses {energyV != null ? <span className="font-mono text-slate-300">{energyV.toFixed(3)} V</span> : 'no voltage'}.
             </div>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded p-3 space-y-2">
+          <div className="bg-slate-900 border border-slate-800 rounded p-2 space-y-2">
             <div className="text-[11px] uppercase tracking-wider text-slate-400">Capture</div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               <button type="button" onClick={start} disabled={!canMeasure || measuring}
                 className={`${CONTROL_BTN} border-emerald-700 text-emerald-300 hover:bg-emerald-950`}>
                 <Play className="w-3.5 h-3.5" /> Start
@@ -615,55 +653,52 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
                 <Pause className="w-3.5 h-3.5" /> {paused ? 'Resume view' : 'Pause view'}
               </button>
             </div>
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              Window
-              <select value={windowS} onChange={(e) => setWindowS(Number(e.target.value))}
-                className="bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+              <label htmlFor="ppk2-window">Window</label>
+              <select id="ppk2-window" value={windowS} onChange={(e) => setWindowS(Number(e.target.value))} className={FIELD}>
                 {WINDOWS_S.map((s) => <option key={s} value={s}>{s} s</option>)}
               </select>
+              <label className="inline-flex items-center gap-1 cursor-pointer" title="Logarithmic current axis (0.1 µA floor) so sleep current and bursts are both visible">
+                <input type="checkbox" checked={logScale} onChange={(e) => setLogScale(e.target.checked)} /> Log Y
+              </label>
             </div>
             <div className="text-[11px] font-mono text-slate-500">
-              Captured: {captured.toLocaleString()} samples
-              {' · '}rate: {rateKs != null ? `${rateKs.toFixed(1)} kS/s` : '—'} (nominal {SAMPLE_RATE_HZ / 1000} kS/s)
+              {captured.toLocaleString()} samples · {rateKs != null ? `${rateKs.toFixed(1)} kS/s` : '—'} (nominal {SAMPLE_RATE_HZ / 1000})
             </div>
-            <div className="flex gap-2 pt-1">
+            <div className="flex gap-1.5">
               <button type="button" onClick={doExport} disabled={!rowsAvailable}
+                title={`Export the selected range, or everything captured (up to the last ${CAPTURE_S} s)`}
                 className={`${CONTROL_BTN} border-slate-700 text-slate-300 hover:bg-slate-800`}>
-                <Download className="w-3.5 h-3.5" /> CSV ({rowsAvailable.toLocaleString()} rows)
+                <Download className="w-3.5 h-3.5" /> CSV ({rowsAvailable.toLocaleString()})
               </button>
               <button type="button" onClick={clearCapture} disabled={measuring || !ringRef.current}
+                title="Clear the capture"
                 className={`${CONTROL_BTN} border-slate-700 text-slate-400 hover:bg-slate-800`}>
                 <Trash2 className="w-3.5 h-3.5" /> Clear
               </button>
             </div>
-            <div className="text-[11px] text-slate-500">
-              Export uses the selected range if you have one, otherwise everything captured (up to the last {CAPTURE_S} s).
-            </div>
           </div>
 
           {info && (
-            <div className="bg-slate-900 border border-slate-800 rounded p-3 space-y-1 text-[11px] font-mono text-slate-400">
-              <div className="text-[11px] uppercase tracking-wider text-slate-400 mb-1 font-sans">Device</div>
-              <div>HW: {meta.hw ?? '—'}</div>
-              <div>VDD (metadata): {meta.vdd != null ? `${meta.vdd} mV` : '—'}</div>
-              <div>Mode (device): {meta.mode ?? '—'}</div>
-              <div>Calibration: {info.complete ? 'complete' : `INCOMPLETE (${info.missing.length} keys)`}</div>
-              {info.warnings.map((w) => <div key={w} className="text-amber-400">{w}</div>)}
-            </div>
+            <details className="bg-slate-900 border border-slate-800 rounded p-2 text-[11px] font-mono text-slate-400">
+              <summary className="cursor-pointer text-[11px] uppercase tracking-wider text-slate-400 font-sans">Device</summary>
+              <div className="mt-1 space-y-0.5">
+                <div>HW: {meta.hw ?? '—'}</div>
+                <div>VDD (metadata): {meta.vdd != null ? `${meta.vdd} mV` : '—'}</div>
+                <div>Mode (device): {meta.mode ?? '—'}</div>
+                <div>Calibration: {info.complete ? 'complete' : `INCOMPLETE (${info.missing.length} keys)`}</div>
+                {info.warnings.map((w) => <div key={w} className="text-amber-400">{w}</div>)}
+              </div>
+            </details>
           )}
         </div>
 
         {/* Chart and stats */}
-        <div className="space-y-3 min-w-0">
-          <div className="bg-slate-900 border border-slate-800 rounded p-3">
-            <div className="flex flex-wrap items-baseline gap-3 mb-2">
-              <Gauge className="w-4 h-4 text-cyan-400" />
-              <span className="text-[11px] uppercase tracking-wider text-slate-400">Current</span>
-              <span className="font-mono text-lg text-cyan-200">{fmtCurrent(nowUa)}</span>
-              <span className="text-[11px] text-slate-500 font-mono">avg of last 2 ms</span>
-              <span className="ml-auto text-[11px] text-slate-500 font-mono">
-                <span className="text-cyan-300">■</span> min/max &nbsp;<span className="text-emerald-400">—</span> avg &nbsp;<span className="text-amber-400">■</span> D0–D7
-              </span>
+        <div className="space-y-2 min-w-0">
+          <div className="bg-slate-900 border border-slate-800 rounded p-2">
+            <div className="flex flex-wrap items-center gap-2 mb-1 text-[11px] text-slate-500 font-mono">
+              <span><span className="text-cyan-300">■</span> min/max &nbsp;<span className="text-emerald-400">—</span> avg &nbsp;<span className="text-amber-400">■</span> D0–D7</span>
+              <span className="ml-auto">Drag to select a range; click clears it.</span>
             </div>
             <canvas
               ref={canvasRef}
@@ -675,25 +710,71 @@ export default function PowerProfilerWorkbench({ onLogMessage }) {
               onPointerUp={onPointerUp}
               onPointerLeave={() => { dragRef.current = null; }}
             />
-            <div className="text-[11px] text-slate-500 mt-1 font-mono">
-              Drag across the chart to select a range for stats and CSV export. A single click clears the selection.
-            </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-2 @md:grid-cols-2">
             <StatCard title={`Last ${windowS} s`} stats={liveStats || rangeStats(null, 0, 0)} voltageV={energyV} testId="ppk2-window-stats" />
             {selection ? (
               <StatCard title="Selection" stats={selStats || rangeStats(null, 0, 0)} voltageV={energyV} testId="ppk2-selection-stats" />
             ) : (
-              <div className="bg-slate-950 border border-dashed border-slate-800 rounded p-3 text-xs text-slate-500 flex items-center">
+              <div className="bg-slate-950 border border-dashed border-slate-800 rounded p-2 text-xs text-slate-500 flex items-center">
                 Drag on the chart to get stats for a selected time range.
               </div>
             )}
           </div>
-          <p className="text-[11px] text-slate-500">
-            Charge is the integral of current over time (µA × s = µC; 1 mAh = 3.6×10⁶ µC). Energy is charge × the voltage above.
-            Stats use the live window or selection as captured; they are not corrected for the PPK2 spike filter.
-          </p>
+
+          <div className="bg-slate-900 border border-slate-800 rounded p-2 space-y-2" data-testid="ppk2-battery">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+              <span className="text-[11px] uppercase tracking-wider">Battery life</span>
+              <label htmlFor="ppk2-cap">Capacity mAh</label>
+              <input id="ppk2-cap" type="number" min="0" step="any" value={capacityInput} onChange={(e) => setCapacityInput(e.target.value)} className={`${FIELD} w-20`} />
+              <label htmlFor="ppk2-margin">Margin %</label>
+              <input id="ppk2-margin" type="number" min="0" max="90" step="1" value={marginInput} onChange={(e) => setMarginInput(e.target.value)} className={`${FIELD} w-16`} />
+              <button type="button" onClick={copySummary} disabled={!liveStats?.samples} title="Copy the stats as text"
+                className={`${CONTROL_BTN} ml-auto border-slate-700 text-slate-300 hover:bg-slate-800`}>
+                <Copy className="w-3.5 h-3.5" /> Copy stats
+              </button>
+            </div>
+            <div className="text-xs font-mono text-slate-200">
+              {lifeHours != null
+                ? <>Estimated runtime at the {targetName} average ({fmtCurrent(targetStats.avgUa)}): <span className="text-emerald-300">{formatLife(lifeHours)}</span></>
+                : <span className="text-slate-500">Capture some data and enter a capacity to estimate runtime.</span>}
+            </div>
+            <div className="text-[11px] text-slate-500">
+              Simple average-current estimate (capacity × (1 − margin) ÷ average current). It ignores battery chemistry, voltage cutoff and pulse effects, and is only valid if the captured period is representative.
+            </div>
+          </div>
+
+          <details className="bg-slate-900 border border-slate-800 rounded p-2" onToggle={(e) => setAnalysisOpen(e.currentTarget.open)}>
+            <summary className="cursor-pointer text-[11px] uppercase tracking-wider text-slate-400">Activity analysis</summary>
+            <div className="mt-2 space-y-2 text-xs font-mono" data-testid="ppk2-activity">
+              <div className="flex flex-wrap items-center gap-2 text-slate-400">
+                <label htmlFor="ppk2-thr">Active above (µA)</label>
+                <input id="ppk2-thr" type="number" min="0" step="any" value={thresholdInput} onChange={(e) => setThresholdInput(e.target.value)} className={`${FIELD} w-24`} />
+                <span className="text-slate-500">on the {targetName}</span>
+              </div>
+              {act && act.samples ? (
+                <div className="grid grid-cols-1 @md:grid-cols-2 gap-x-4 gap-y-0.5">
+                  <div className="flex justify-between"><span className="text-slate-500">Std dev</span><span>{fmtCurrent(act.stdUa)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Peak-to-peak</span><span>{fmtCurrent(act.p2pUa)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Active time</span><span>{act.activeFraction != null ? `${(act.activeFraction * 100).toFixed(2)} % (${act.activeS.toFixed(4)} s)` : '—'}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Bursts</span><span>{act.bursts ?? '—'}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Avg active</span><span>{fmtCurrent(act.activeAvgUa)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Avg idle</span><span>{fmtCurrent(act.idleAvgUa)}</span></div>
+                </div>
+              ) : (
+                <div className="text-slate-500">No data yet.</div>
+              )}
+            </div>
+          </details>
+
+          <details className="text-[11px] text-slate-500">
+            <summary className="cursor-pointer">Notes</summary>
+            <p className="mt-1">
+              Charge is the integral of current over time (µA × s = µC; 1 mAh = 3.6×10⁶ µC). Energy is charge × the voltage above.
+              Stats use the live window or selection as captured; they are not corrected for the PPK2 spike filter.
+            </p>
+          </details>
         </div>
       </div>
     </div>

@@ -8,7 +8,8 @@ import PowerProfilerWorkbench from '../src/components/tools/PowerProfilerWorkben
 describe('PowerProfilerWorkbench', () => {
   it('renders the disconnected state without readings', () => {
     const html = renderToString(<PowerProfilerWorkbench />);
-    expect(html).toContain('Power Profiler (PPK2)');
+    expect(html).toContain('Battery life');
+    expect(html).toContain('Activity analysis');
     expect(html).toContain('DISCONNECTED');
     expect(html).toContain('Connect PPK2');
     expect(html).toContain('Source meter');

@@ -349,6 +349,110 @@ export function recentAverageUa(ring, endAbs, n = 200) {
   return sum / (endAbs - from);
 }
 
+/**
+ * Spread and activity analysis of [fromAbs, toAbs). Standard deviation and peak-to-peak
+ * describe the whole range. With a threshold (µA), samples above it count as "active":
+ * the result gives the active fraction, mean active and idle current and the number of
+ * separate active bursts. A burst is one run of consecutive samples above the threshold.
+ */
+export function activityStats(ring, fromAbs, toAbs, thresholdUa = null) {
+  const count = Math.max(0, toAbs - fromAbs);
+  if (count === 0) {
+    return { samples: 0, stdUa: null, p2pUa: null, activeFraction: null, activeAvgUa: null, idleAvgUa: null, bursts: null, activeS: null };
+  }
+  const cap = ring.capacity;
+  const hasT = Number.isFinite(thresholdUa);
+  let sum = 0;
+  let mn = Infinity;
+  let mx = -Infinity;
+  let activeN = 0;
+  let activeSum = 0;
+  let idleSum = 0;
+  let bursts = 0;
+  let prevActive = false;
+  let i = fromAbs % cap;
+  for (let k = fromAbs; k < toAbs; k++) {
+    const v = ring.uA[i];
+    sum += v;
+    if (v < mn) mn = v;
+    if (v > mx) mx = v;
+    if (hasT) {
+      const act = v > thresholdUa;
+      if (act) { activeN++; activeSum += v; if (!prevActive) bursts++; } else idleSum += v;
+      prevActive = act;
+    }
+    if (++i === cap) i = 0;
+  }
+  const mean = sum / count;
+  let sq = 0;
+  let j = fromAbs % cap;
+  for (let k = fromAbs; k < toAbs; k++) {
+    const d = ring.uA[j] - mean;
+    sq += d * d;
+    if (++j === cap) j = 0;
+  }
+  const idleN = count - activeN;
+  return {
+    samples: count,
+    stdUa: Math.sqrt(sq / count),
+    p2pUa: mx - mn,
+    activeFraction: hasT ? activeN / count : null,
+    activeAvgUa: hasT && activeN ? activeSum / activeN : null,
+    idleAvgUa: hasT && idleN ? idleSum / idleN : null,
+    bursts: hasT ? bursts : null,
+    activeS: hasT ? activeN / SAMPLE_RATE_HZ : null,
+  };
+}
+
+/**
+ * Battery life from capacity (mAh) and average current (µA), like the simple average-current
+ * method of battery estimators. `marginPct` (0-90) keeps that share of capacity unused
+ * (derating for cutoff voltage, temperature and self-discharge). Returns hours, or null.
+ */
+export function batteryLifeHours(capacityMah, avgUa, marginPct = 0) {
+  const cap = Number(capacityMah);
+  const ua = Number(avgUa);
+  const m = Math.min(90, Math.max(0, Number(marginPct) || 0));
+  if (!Number.isFinite(cap) || cap <= 0 || !Number.isFinite(ua) || ua <= 0) return null;
+  return (cap * (1 - m / 100)) / (ua / 1000);
+}
+
+/** Human duration for a number of hours: minutes, hours, days or years. */
+export function formatLife(hours) {
+  if (hours == null || !Number.isFinite(hours)) return '—';
+  if (hours < 1) return `${(hours * 60).toFixed(1)} min`;
+  if (hours < 48) return `${hours.toFixed(1)} h`;
+  const days = hours / 24;
+  if (days < 365) return `${days.toFixed(1)} days`;
+  return `${(days / 365.25).toFixed(2)} years (${Math.round(days)} days)`;
+}
+
+/**
+ * Map a current to a 0-1 chart height. Linear from 0, or logarithmic over [floorUa, maxUa]
+ * (floor must be above 0) so µA sleep current and mA bursts both stay visible.
+ */
+export function scaleCurrent(v, maxUa, log = false, floorUa = 0.1) {
+  if (!(maxUa > 0)) return 0;
+  if (!log) return Math.max(0, Math.min(1, v / maxUa));
+  const lo = Math.log10(Math.max(floorUa, 1e-9));
+  const hi = Math.log10(Math.max(maxUa, floorUa * 10));
+  const x = (Math.log10(Math.max(v, floorUa)) - lo) / (hi - lo);
+  return Math.max(0, Math.min(1, x));
+}
+
+/** Plain-text summary of a stats object (for the clipboard). */
+export function statsSummary(title, st, voltageV, act = null) {
+  if (!st || !st.samples) return `${title}: no samples`;
+  const lines = [
+    `${title} (${st.durationS.toFixed(3)} s, ${st.samples} samples)`,
+    `avg ${st.avgUa.toFixed(3)} uA, min ${st.minUa.toFixed(3)} uA, max ${st.maxUa.toFixed(3)} uA`,
+    `charge ${st.chargeUc.toFixed(3)} uC (${st.chargeMah.toExponential(3)} mAh)`,
+  ];
+  if (st.energyUj != null) lines.push(`energy ${st.energyUj.toFixed(3)} uJ at ${voltageV.toFixed(3)} V`);
+  if (act && act.stdUa != null) lines.push(`std ${act.stdUa.toFixed(3)} uA, peak-to-peak ${act.p2pUa.toFixed(3)} uA`);
+  return lines.join('\n');
+}
+
 export const CSV_HEADER = 'time_s,current_uA,D0,D1,D2,D3,D4,D5,D6,D7';
 
 /** CSV rows for [fromAbs, toAbs) without the header. Time is measured from the session start. */

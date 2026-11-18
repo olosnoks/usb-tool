@@ -3,7 +3,7 @@ export default {
   toolId: 'power-profiler',
   category: 'programmers',
   title: 'Power Profiler (PPK2) — source meter, ampere meter and live current capture',
-  summary: 'Drive a Nordic Power Profiler Kit II over its own Web Serial port: supply a DUT as a source meter or measure current as an ampere meter, watch a live min/max current envelope with D0–D7 logic lanes, get charge and energy stats for any selected range, and export CSV.',
+  summary: 'Drive a Nordic Power Profiler Kit II over its own Web Serial port: supply a DUT as a source meter or measure current as an ampere meter, watch a live min/max current envelope with D0–D7 logic lanes, get charge and energy stats for any selected range, estimate battery life, analyse active bursts, and export CSV.',
   tags: ['PPK2', 'Power Profiler Kit II', 'Nordic', 'nRF', 'current measurement', 'power analysis', 'source meter', 'ampere meter', 'energy', 'battery life', 'Web Serial'],
   readTime: '6 min read',
   content: `
@@ -33,7 +33,7 @@ The protocol follows the open-source [ppk2-api-python](https://github.com/IRNAS/
    - **Ampere meter** measures current flowing into the PPK2 from an external supply. DUT power is switched off in this mode.
    - Change modes only while not measuring. Stop first.
 3. **Start.** The tool sends the mode and voltage to the PPK2, then starts averaging. Each Start clears the previous capture.
-4. **Read the chart.** The top line is the current. The chart shows, for every pixel column, the minimum and maximum current in that slice of time as a cyan band, and the average as a green line. The window selector sets 1, 2, 5, 10, 30 or 60 seconds of history.
+4. **Read the chart.** The top line is the current. The chart shows, for every pixel column, the minimum and maximum current in that slice of time as a cyan band, and the average as a green line. The window selector sets 1, 2, 5, 10, 30 or 60 seconds of history. **Log Y** switches the current axis to a logarithmic scale from 0.1 µA up, so a µA sleep current and an mA burst are both readable.
 5. **Use the digital lanes.** The PPK2 samples eight digital inputs (D0 to D7) along with the current. They are drawn as amber lanes under the chart. A solid high or low line means the input was constant in that slice. A filled block means it toggled inside that slice.
 6. **Select a range.** Drag across the chart to select a time range. The Selection card then shows its stats. A single click clears the selection.
 7. **Pause view** freezes the chart and the window stats so you can read them. Capture continues in the background, so **Resume view** jumps back to live.
@@ -46,7 +46,10 @@ The protocol follows the open-source [ppk2-api-python](https://github.com/IRNAS/
 - **Selection.** The same figures for the range you dragged.
 - **Charge** is the integral of current over time. Each sample is 10 µs, so the total in µC is the sum of the samples in µA multiplied by 10 µs. 1 mAh is 3.6 × 10⁶ µC.
 - **Energy** is the charge multiplied by the supply voltage. The voltage comes from the mV field. In ampere mode, set this field to your real supply voltage. The tool does not read it from the device.
-- **Device** shows the hardware revision, the VDD value from the metadata, the device's own mode and whether the calibration is complete.
+- **Battery life.** Enter a battery capacity in mAh and a margin in percent. The tool divides capacity × (1 − margin) by the average current of your selection, or of the visible window if nothing is selected, and shows the runtime in minutes, hours, days or years. This is the simple average-current method. It does not model battery chemistry, voltage cutoff or pulse loads, so treat it as a first estimate. It is only meaningful if the captured period is representative of real use. The margin is clamped to 0 to 90 percent.
+- **Copy stats** copies the window stats (and the selection stats, if any) to the clipboard as plain text.
+- **Activity analysis** (collapsed by default, calculated only while it is open). Set a threshold in µA. For the selection or window it shows standard deviation, peak-to-peak current, the share of time above the threshold, the number of separate bursts above it, and the average current while active and while idle. A burst is one run of consecutive samples above the threshold. Use it to find the duty cycle of a device that sleeps and wakes.
+- **Device** (collapsed) shows the hardware revision, the VDD value from the metadata, the device's own mode and whether the calibration is complete.
 
 ## CSV export
 
@@ -68,6 +71,10 @@ The protocol follows the open-source [ppk2-api-python](https://github.com/IRNAS/
 - **Calibration incomplete.** Some per-range calibration keys were missing from the device, so currents are not shown. The calibration has to come from the device; this tool cannot repair it.
 - **Rate well below 100 kS/s.** The browser or the USB hub may be too slow for the stream. Connect the PPK2 directly to the computer and close other heavy tabs.
 - **Port does not appear.** Check the cable (use a data cable, not a charge-only one) and the PPK2 power LED.
+
+## Similar tools
+
+This tool was compared with the nRF Connect Power Profiler app (CSV and .ppk2 save, trigger, digital channels), the Joulescope UI (statistics such as standard deviation and peak-to-peak, charge and energy, dual markers) and the Otii battery life estimator (average-current estimate with a safety margin). Not implemented here: hardware trigger, saving or loading .ppk2 files, and discharge-curve based battery modelling.
 
 ## Related tools
 
