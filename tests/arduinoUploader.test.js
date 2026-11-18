@@ -10,7 +10,11 @@ import {
   touchForBootloader,
   programBoard,
   readBoardFlash,
-  getBoard
+  getBoard,
+  crc32,
+  imageStats,
+  compareFlashToImage,
+  avrdudeCommand
 } from '../src/utils/arduinoUploader';
 import { parseIntelHex } from '../src/utils/firmwareParser';
 import { SerialTimeoutError } from '../src/utils/serialLink';
@@ -436,5 +440,47 @@ describe('failure cases never report success', () => {
     const boot = new ScriptedBootloader({ protocol: 'stk500v1' });
     await expect(programBoard(boot, getBoard('uno'), { data: new Uint8Array(40000) }, fast)).rejects.toThrow(/past the 32256/);
     expect(boot.writes.length).toBe(0);
+  });
+});
+
+describe('image stats, verify-only compare and avrdude export', () => {
+  it('crc32 matches the standard check value', () => {
+    expect(crc32(new TextEncoder().encode('123456789'))).toBe(0xcbf43926);
+    expect(crc32(new Uint8Array(0))).toBe(0);
+  });
+
+  it('imageStats reports size, pages and free sketch space', () => {
+    const board = getBoard('uno');
+    const s = imageStats(board, { data: new Uint8Array(300), startAddress: 0 });
+    expect(s.bytes).toBe(300);
+    expect(s.pages).toBe(3);
+    expect(s.freeBytes).toBe(32256 - 300);
+    expect(s.flashPct).toBeCloseTo(0.9, 1);
+  });
+
+  it('compareFlashToImage matches equal data and groups differing runs', () => {
+    const flash = new Uint8Array(1024).fill(0xff);
+    const data = Uint8Array.from({ length: 100 }, (_, i) => i);
+    flash.set(data, 0);
+    expect(compareFlashToImage(flash, { data, startAddress: 0 }).match).toBe(true);
+    flash[10] = 0; flash[11] = 0; flash[50] = 0;
+    const r = compareFlashToImage(flash, { data, startAddress: 0 });
+    expect(r.match).toBe(false);
+    expect(r.mismatches).toBe(3);
+    expect(r.firstAddress).toBe(10);
+    expect(r.ranges).toEqual([{ start: 10, end: 12 }, { start: 50, end: 51 }]);
+  });
+
+  it('compareFlashToImage honours the start address and rejects oversize images', () => {
+    const flash = new Uint8Array(256).fill(0xff);
+    flash.set([1, 2, 3], 128);
+    expect(compareFlashToImage(flash, { data: Uint8Array.of(1, 2, 3), startAddress: 128 }).match).toBe(true);
+    expect(() => compareFlashToImage(flash, { data: new Uint8Array(300), startAddress: 0 })).toThrow();
+  });
+
+  it('avrdudeCommand builds the right line per protocol', () => {
+    expect(avrdudeCommand(getBoard('uno'), 'blink.hex')).toBe('avrdude -p m328p -c arduino -P <PORT> -b 115200 -U flash:w:blink.hex:i');
+    expect(avrdudeCommand(getBoard('nano-old'), 'a b.hex', { verifyOnly: true, port: 'COM3' })).toBe('avrdude -p m328p -c arduino -P COM3 -b 57600 -U flash:v:"a b.hex":i');
+    expect(avrdudeCommand(getBoard('leonardo'), 'x.hex')).toBe('avrdude -p m32u4 -c avr109 -P <PORT> -U flash:w:x.hex:i');
   });
 });

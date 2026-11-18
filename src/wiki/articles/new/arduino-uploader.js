@@ -3,7 +3,7 @@ export default {
   toolId: 'arduino-uploader',
   category: 'core',
   title: 'Arduino Bootloader Uploader — write sketches through the board\'s own bootloader',
-  summary: 'Uploads a compiled sketch (.hex or .bin) to an Arduino Uno, Nano, Pro Mini, Leonardo, Micro or Pro Micro through the bootloader already on the board, over its own Web Serial port. It writes, reads every page back to compare, and can read the flash back out to a file.',
+  summary: 'Uploads a compiled sketch (.hex or .bin) to an Arduino Uno, Nano, Pro Mini, Leonardo, Micro or Pro Micro through the bootloader already on the board, over its own Web Serial port. It writes, reads every page back to compare, can verify the board against a file without writing, reads the flash back out to a file, and shows the matching avrdude command.',
   tags: ['Arduino', 'bootloader', 'Optiboot', 'Caterina', 'STK500', 'AVR109', 'Uno', 'Nano', 'Leonardo', 'Pro Micro', 'flash', 'Intel HEX', 'Web Serial'],
   readTime: '6 min read',
   content: `
@@ -56,6 +56,18 @@ Caterina boards are a little different, because the bootloader is a separate USB
 
 If the board does not come back as a port, reset it (press the RESET button on the Leonardo or Micro) and try step 1 again.
 
+## Verify only
+
+Choose **Verify only**, load a file and run it. The tool reads the board's flash and compares the file's byte range with it. Nothing is written. It reports either a full match or the number of differing bytes, the first differing address and up to 8 differing address ranges. Use it to check whether a board already runs a given build. It reads the whole flash, so it takes as long as a full read, and the board restarts its sketch afterwards.
+
+## File summary
+
+Once a file fits the board, the Firmware panel shows its percentage of the sketch area, the free bytes left, how many flash pages it touches and a CRC-32 of the data bytes. The CRC-32 is of the sketch data only (not of the hex text), so it is comparable between a .hex and the same data as a .bin.
+
+## avrdude command
+
+The collapsed **avrdude command** section shows the equivalent avrdude line for the chosen board and file, for example \`avrdude -p m328p -c arduino -P <PORT> -b 115200 -U flash:w:blink.hex:i\`. It uses \`flash:v:\` in Verify only mode. This is an export for the command-line tool: the app does not run avrdude, and the port is a placeholder because the browser does not reveal real port names. The part and programmer are chosen from the preset (m328p with arduino, m32u4 with avr109).
+
 ## Read flash back
 
 Choose **Read flash back** and run the same steps. The tool reads the whole flash, \`flashSize\` bytes, one page at a time. Download the result as a raw .bin or as an Intel HEX .hex file.
@@ -68,6 +80,7 @@ The read-back covers the sketch area and the bootloader area. Whatever the bootl
 - Writes only the flash pages the sketch needs, padding the last page with 0xFF (erased flash).
 - Verifies every written page by reading it back and comparing every byte.
 - Shows a page-by-page progress bar, a log and a **Stop** button. Stopping ends the run at the next page. The board may then hold a partly written sketch, so upload again before running it.
+- Compares the board's flash with a file without writing (Verify only).
 - Reads the whole flash to a .bin or .hex file.
 
 **Does not**
@@ -85,6 +98,10 @@ The read-back covers the sketch area and the bootloader area. Whatever the bootl
 - **"Verify failed at 0x...".** A byte did not read back the same. Upload again. If it repeats, check the cable, the USB port and the CH340 driver.
 - **"Past the 32256 bytes"** (or the equivalent for your board). The sketch is too big for the sketch area, so it would overlap the bootloader. Shrink the sketch or use a board with more flash.
 - **No port in the picker after step 1.** Some boards need the reset button. Press it, then click Step 1 again.
+
+## Similar tools
+
+Compared against: avrdude (verify-only and command-line options), avrgirl-arduino and the browser uploaders arduino-web-uploader and avrbro, AVRChick, and XLoader. Those cover write and verify; fuses and EEPROM are left to avrdude and the AVR ISP tool.
 
 ## Related tools
 

@@ -540,3 +540,80 @@ export async function readBoardFlash(link, board, opts = {}) {
 
   throw new Error(`Unsupported protocol "${board.protocol}".`);
 }
+
+/** CRC-32 (IEEE, as used by zip/PNG) of `data`, as an unsigned integer. */
+export function crc32(data) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < data.length; i++) {
+    crc ^= data[i];
+    for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * Size facts about an image for `board`: byte count, share of the sketch area
+ * and of the whole flash, pages touched and a CRC-32 of the data bytes.
+ */
+export function imageStats(board, image) {
+  const data = image.data;
+  const start = image.startAddress || 0;
+  const pages = Math.ceil((start + data.length) / board.pageSize) - Math.floor(start / board.pageSize);
+  return {
+    bytes: data.length,
+    start,
+    end: start + data.length,
+    pages,
+    sketchAreaPct: Math.round(((start + data.length) / board.appLimit) * 1000) / 10,
+    flashPct: Math.round(((start + data.length) / board.flashSize) * 1000) / 10,
+    freeBytes: Math.max(0, board.appLimit - (start + data.length)),
+    crc32: crc32(data)
+  };
+}
+
+/**
+ * Compare flash read from a board with an image (verify only, no writing).
+ * Only the image's own byte range is compared. Returns the mismatching byte
+ * count, the first mismatching address and up to `maxRanges` differing runs.
+ */
+export function compareFlashToImage(flash, image, maxRanges = 8) {
+  const start = image.startAddress || 0;
+  const data = image.data;
+  if (start + data.length > flash.length) {
+    throw new Error('The image is larger than the flash that was read.');
+  }
+  let mismatches = 0;
+  let first = -1;
+  const ranges = [];
+  let cur = null;
+  for (let i = 0; i < data.length; i++) {
+    if (flash[start + i] !== data[i]) {
+      mismatches++;
+      if (first < 0) first = start + i;
+      if (cur && cur.end === start + i) cur.end++;
+      else {
+        cur = { start: start + i, end: start + i + 1 };
+        if (ranges.length < maxRanges) ranges.push(cur);
+      }
+    } else cur = null;
+  }
+  return { match: mismatches === 0, checked: data.length, mismatches, firstAddress: first, ranges };
+}
+
+const AVRDUDE_PART = { 0x1e950f: 'm328p', 0x1e9587: 'm32u4' };
+const AVRDUDE_PROGRAMMER = { stk500v1: 'arduino', avr109: 'avr109' };
+
+/**
+ * avrdude command line equivalent to this tool's write (or verify-only) for
+ * `board`. Export for the CLI tool: this app does not run avrdude. The port
+ * is a placeholder because the browser never exposes the real port name.
+ */
+export function avrdudeCommand(board, fileName = 'sketch.hex', { verifyOnly = false, port = '<PORT>' } = {}) {
+  const part = AVRDUDE_PART[board.signature] || 'm328p';
+  const programmer = AVRDUDE_PROGRAMMER[board.protocol] || 'arduino';
+  const quoted = /[\s"'$`\\]/.test(fileName) ? `"${fileName.replace(/(["\\$`])/g, '\\$1')}"` : fileName;
+  const parts = ['avrdude', `-p ${part}`, `-c ${programmer}`, `-P ${port}`];
+  if (board.protocol === PROTOCOL_STK500V1) parts.push(`-b ${board.baud}`);
+  parts.push(`-U flash:${verifyOnly ? 'v' : 'w'}:${quoted}:i`);
+  return parts.join(' ');
+}

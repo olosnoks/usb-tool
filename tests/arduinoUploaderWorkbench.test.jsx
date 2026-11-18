@@ -21,3 +21,11 @@ describe('ArduinoUploaderWorkbench', () => {
     expect(html).toContain('Web Serial is not available here');
   });
 });
+
+describe('ArduinoUploaderWorkbench additions', () => {
+  it('offers verify-only and shows an avrdude export for the default board', () => {
+    const html = renderToString(<ArduinoUploaderWorkbench />);
+    expect(html).toContain('Verify only');
+    expect(html).toContain('avrdude -p m328p -c arduino -P &lt;PORT&gt; -b 115200 -U flash:w:sketch.hex:i');
+  });
+});
