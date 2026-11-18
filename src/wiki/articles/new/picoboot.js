@@ -3,7 +3,7 @@ export default {
   toolId: 'picoboot',
   category: 'core',
   title: 'Picoboot — RP2040 / RP2350 PICOBOOT flash over WebUSB',
-  summary: 'Talks to a Raspberry Pi RP2040 or RP2350 in BOOTSEL mode over its PICOBOOT vendor interface: shows chip and vector-table info, reads flash to a .bin, writes a .bin or .uf2 with 4 KB erase, verifies by read-back, and reads the pico-sdk binary_info block. Untested on real hardware.',
+  summary: 'Talks to a Raspberry Pi RP2040 or RP2350 in BOOTSEL mode over its PICOBOOT vendor interface: shows chip and vector-table info, saves flash as .bin or .uf2 with CRC-32 and SHA-256, writes a .bin or .uf2 with 4 KB erase, verifies by read-back or against a file without writing, exports matching picotool commands, and reads the pico-sdk binary_info block. Untested on real hardware.',
   tags: ['RP2040', 'RP2350', 'PICOBOOT', 'BOOTSEL', 'WebUSB', 'Raspberry Pi Pico', 'UF2', 'flash', 'binary_info', 'picotool'],
   readTime: '6 min read',
   content: `
@@ -34,13 +34,18 @@ The board must be in **BOOTSEL mode**: hold the BOOTSEL button while plugging it
 2. The tool claims the PICOBOOT interface, resets it, requests **exclusive access** and reads the first 64 KB of flash (\`0x10000000\`).
 3. Read the **Device** panel: chip name from the USB product id, interface and endpoint numbers, the vector table stack pointer and reset vector. A stack pointer in RAM and a reset vector in flash mean the flash holds a normal program.
 4. Read the **binary_info** panel (see below) and the **First 256 bytes** dump.
-5. To save flash, enter an offset and length (hex like \`0x010000\` or decimal) and press **READ AND DOWNLOAD**. The result is a .bin file. Reads are split into 4 KB chunks, and the progress bar shows how far along it is.
+5. To save flash, enter an offset and a length (hex like \`0x010000\`, decimal, or with a K/M suffix such as \`256K\` or \`2M\`), or press a size button (256K, 1M, 2M, 4M, 16M). Pick the format: **.bin**, or **.uf2** (256-byte blocks starting at the offset address, family id RP2040 or RP2350 ARM secure). **trim trailing 0xFF** drops erased bytes at the end, keeping whole 256-byte pages. Press **READ AND DOWNLOAD**. The tool shows the saved size, **CRC-32** and **SHA-256** of the saved bytes. Reads are split into 4 KB chunks. The tool does not detect the flash size, so use a size that matches your board (a read past the real flash may return repeated data or fail).
 6. To write, choose a **.bin** or **.uf2** file:
    - **.uf2** carries its own target addresses. The tool converts them into flash offsets from \`0x10000000\`; the offset field is ignored.
    - **.bin** is written at the **offset** you enter (default \`0x000000\`).
    The plan line shows the erase range and the program range. Tick the confirmation box, then press **ERASE, WRITE AND VERIFY**.
-7. Writing erases every 4 KB sector the image touches, programs the image padded to 256-byte pages with 0xFF, and then reads the whole range back and compares it. The result line says either "Verify OK" or the number of differing bytes and the first address that differs.
-8. Use **reboot to app** to start the program, or **reboot to BOOTSEL (RP2350)** to go back into the bootloader for another write. The board disconnects during a reboot; reconnect afterwards.
+7. **VERIFY ONLY** compares the flash with the chosen file (same as \`picotool verify\`) and writes nothing. It needs no confirmation box.
+8. Writing erases every 4 KB sector the image touches, programs the image padded to 256-byte pages with 0xFF, and then reads the whole range back and compares it. The result line says either "Verify OK" or the number of differing bytes and the first address that differs.
+9. Use **reboot to app** to start the program, or **reboot to BOOTSEL (RP2350)** to go back into the bootloader for another write. The board disconnects during a reboot; reconnect afterwards.
+
+## Interface layout
+
+The window is compact. The long description, the 256-byte hex dump and the **Equivalent picotool commands** block are collapsible. The commands block builds \`picotool info -a\`, \`save\`, \`load -v\`, \`verify\` and \`reboot\` lines from your current offsets and file name, with a copy button. It is an export for the desktop CLI; this page does not run picotool.
 
 ## Erase behaviour
 
@@ -72,6 +77,10 @@ The header layout used by the parser is written from the pico-sdk as remembered,
 - **Verify FAILED:** the flash did not hold what was written. Retry the write, check the power supply and cable, and read the first mismatch address in the message.
 - **"Bulk IN failed" or "Bulk OUT failed" in the log:** the device stalled or disconnected. Disconnect, reconnect in BOOTSEL mode and retry.
 - **The reset vector is not in flash:** the flash is blank or holds a RAM image. Writing a program fixes a blank chip.
+
+## Similar tools
+
+Compared against picotool (info, save, load, verify, reboot, otp), the Raspberry Pi UF2 drag-and-drop flow, and the picoboot Rust crates. Picotool also has OTP commands, ELF input and full binary_info decoding, which this page does not.
 
 ## Related tools in this app
 

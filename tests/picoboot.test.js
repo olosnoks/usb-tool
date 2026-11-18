@@ -318,3 +318,45 @@ describe('PicobootConnection transport sequence', () => {
     expect(new DataView(cmd.args.buffer, cmd.args.byteOffset, 4).getUint32(0, true)).toBe(0x2);
   });
 });
+
+import { parseSize, usedLength, binToUf2, compareImages, crc32Hex, digestHex, picotoolCommands } from '../src/utils/picoboot';
+
+describe('save / verify / export helpers', () => {
+  it('parses sizes with K/M suffixes, hex and decimal', () => {
+    expect(parseSize('2M')).toBe(2 * 1024 * 1024);
+    expect(parseSize('256k')).toBe(262144);
+    expect(parseSize('0x1000')).toBe(4096);
+    expect(parseSize('12')).toBe(12);
+    expect(parseSize('abc')).toBeNull();
+    expect(parseSize('')).toBeNull();
+  });
+  it('trims trailing 0xFF rounded up to pages', () => {
+    const d = new Uint8Array(1024).fill(0xff);
+    d[300] = 1;
+    expect(usedLength(d)).toBe(512);
+    expect(usedLength(new Uint8Array(512).fill(0xff))).toBe(0);
+  });
+  it('encodes UF2 that parses back to the same flash image', () => {
+    const data = Uint8Array.from({ length: 700 }, (_, i) => i & 0xff);
+    const uf2 = binToUf2(data, XIP_BASE + 0x1000);
+    expect(uf2.length).toBe(3 * 512);
+    const img = uf2ToFlashImage(uf2.buffer);
+    expect(img.flashOffset).toBe(0x1000);
+    expect(Array.from(img.data.subarray(0, 700))).toEqual(Array.from(data));
+  });
+  it('compares images and reports the first mismatch', () => {
+    expect(compareImages(Uint8Array.of(1, 2, 3), Uint8Array.of(1, 2, 3)).equal).toBe(true);
+    const r = compareImages(Uint8Array.of(1, 2, 3), Uint8Array.of(1, 9, 3, 4));
+    expect(r).toMatchObject({ equal: false, mismatches: 2, firstIndex: 1 });
+  });
+  it('computes CRC-32 and SHA-256', async () => {
+    expect(crc32Hex(new TextEncoder().encode('123456789'))).toBe('cbf43926');
+    expect(await digestHex(new TextEncoder().encode('abc'))).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  });
+  it('builds picotool command lines', () => {
+    const c = picotoolCommands({ readOffset: 0, readLength: 0x1000, writeFile: 'fw.bin', writeOffset: 0x1000 });
+    expect(c).toContain('picotool save -r 0x10000000 0x10001000 flash.bin');
+    expect(c).toContain('picotool load fw.bin -o 0x10001000 -v');
+    expect(picotoolCommands({ writeFile: 'a b.uf2' })).toContain('picotool load "a b.uf2" -v');
+  });
+});
