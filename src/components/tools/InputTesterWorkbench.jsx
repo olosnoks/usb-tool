@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Gamepad2, Mouse, Usb, Vibrate, RotateCcw, Play, Square, Trash2, Ruler, Scroll, Activity } from 'lucide-react';
+import { Gamepad2, Mouse, Usb, Vibrate, RotateCcw, Play, Square, Trash2, Ruler, Scroll, Activity, Copy, Download } from 'lucide-react';
 import {
   STANDARD_BUTTON_NAMES, SONY_VENDOR_ID, DS4_USB_OFFSETS, DUALSENSE_USB_OFFSETS,
   updateRateFromTimestamps, eventsPerSecond, summarizeSeries, histogram, intervalStats,
   analyzeClicks, normalizeWheelDelta, summarizeWheel, sumMovement, dpiFromCounts, distanceToInches,
   applyRadialDeadzone, driftStats, createCircularityTracker, addCirclePoint, circularityReport,
   triggerResponse, sonyFamily, decodeSonyReport, hexDump,
+  createButtonTracker, updateButtonTracker, buttonTrackerSummary, createAxisTracker, updateAxisTracker,
+  axisRangeReport, suggestDeadzone, buildGamepadReport, formatGamepadReport,
 } from '../../utils/inputTester.js';
 
 /**
@@ -25,7 +27,7 @@ const CIRC_BINS = 360;
 const BUTTON_NAMES_MOUSE = ['Left', 'Middle', 'Right', 'Back', 'Forward'];
 const UI_INTERVAL_MS = 100;
 
-const card = 'bg-slate-950 border border-slate-800 rounded p-3';
+const card = 'bg-slate-950 border border-slate-800 rounded p-2';
 const label = 'text-[10px] uppercase tracking-wider text-slate-500';
 const btn = 'px-2.5 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-gray-200 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1';
 const btnPrimary = 'px-2.5 py-1 text-xs rounded border border-emerald-800 bg-emerald-900/40 text-emerald-200 hover:bg-emerald-900/70 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1';
@@ -188,9 +190,11 @@ function GamepadTab({ log }) {
   const [trigHigh, setTrigHigh] = useState(1);
   const [snap, setSnap] = useState(null);
   const [vibeMsg, setVibeMsg] = useState('');
+  const [copyMsg, setCopyMsg] = useState('');
 
   const cfgRef = useRef({});
   cfgRef.current = { deadzone, stick, trigLow, trigHigh };
+  const snapRef = useRef(null);
   const logRef = useRef(log);
   logRef.current = log;
 
@@ -209,6 +213,7 @@ function GamepadTab({ log }) {
     trig: { l2: [], r2: [] },
     drift: null, driftResult: null,
     circ: null,
+    btnT: createButtonTracker(), axT: createAxisTracker(),
     lastUi: 0,
   });
 
@@ -240,6 +245,7 @@ function GamepadTab({ log }) {
     L.trailL = []; L.trailR = []; L.tsBuf = []; L.lastTs = null;
     L.trig = { l2: [], r2: [] };
     L.drift = null; L.driftResult = null; L.circ = null;
+    L.btnT = createButtonTracker(); L.axT = createAxisTracker();
   }, [selected]);
 
   // Frame loop: read the pad, accumulate measurements, draw, and publish a snapshot ~10 Hz.
@@ -263,6 +269,8 @@ function GamepadTab({ log }) {
           L.lastTs = pad.timestamp;
           pushBounded(L.tsBuf, pad.timestamp, TS_LEN);
         }
+        updateButtonTracker(L.btnT, pad.buttons, now);
+        updateAxisTracker(L.axT, pad.axes);
         pushBounded(L.trig.l2, pad.buttons[6]?.value ?? 0, TRIG_LEN);
         pushBounded(L.trig.r2, pad.buttons[7]?.value ?? 0, TRIG_LEN);
 
@@ -297,6 +305,8 @@ function GamepadTab({ log }) {
           rate: updateRateFromTimestamps(L.tsBuf),
           drift: L.drift ? { status: 'measuring', elapsedMs: now - L.drift.startAt, samples: L.drift.samples.length, stick: L.drift.stick }
             : (L.driftResult ? { status: 'done', ...L.driftResult } : { status: 'idle' }),
+          btn: pad ? { counts: { ...L.btnT.counts }, chatter: { ...L.btnT.chatter }, minGap: { ...L.btnT.minGap }, ever: { ...L.btnT.everPressed }, summary: buttonTrackerSummary(L.btnT, pad.buttons.length) } : null,
+          axr: pad ? axisRangeReport(L.axT, pad.axes.length) : null,
           circ: L.circ ? { active: L.circ.active, stick: L.circ.stick, report: circularityReport(L.circ.tracker) } : null,
         });
       }
@@ -338,6 +348,47 @@ function GamepadTab({ log }) {
     drawCircularity(circRef.current, null);
   };
 
+  const resetButtons = () => {
+    live.current.btnT = createButtonTracker();
+    live.current.axT = createAxisTracker();
+  };
+  const currentReport = () => {
+    const sn = snapRef.current;
+    if (!sn?.pad) return null;
+    const dr = sn.drift?.status === 'done' ? sn.drift : null;
+    return buildGamepadReport({
+      pad: { id: sn.pad.id, mapping: sn.pad.mapping, buttons: sn.pad.buttons.length, axes: sn.pad.axes.length },
+      drift: dr,
+      circularity: sn.circ?.report && sn.circ.report.visitedBins ? sn.circ.report : null,
+      rate: sn.rate,
+      buttons: sn.btn?.summary,
+      axes: sn.axr,
+      deadzone: cfgRef.current.deadzone,
+    });
+  };
+  const copyReport = async () => {
+    const r = currentReport();
+    if (!r) return;
+    try {
+      await navigator.clipboard.writeText(formatGamepadReport(r));
+      setCopyMsg('Report copied.');
+    } catch (e) {
+      setCopyMsg(`Copy failed: ${e.message}`);
+    }
+  };
+  const downloadReport = () => {
+    const r = currentReport();
+    if (!r) return;
+    const blob = new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'gamepad-report.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    setCopyMsg('Report downloaded.');
+  };
+
   const testRumble = async () => {
     const pad = listPads().find((p) => p.index === selected);
     const actuator = pad?.vibrationActuator;
@@ -358,6 +409,7 @@ function GamepadTab({ log }) {
     return <div className={card + ' text-sm text-amber-300'}>The Gamepad API is not available in this browser or context. Use a Chromium-based browser over HTTPS or localhost.</div>;
   }
 
+  snapRef.current = snap;
   const pad = snap?.pad;
   const drift = snap?.drift;
   const circ = snap?.circ;
@@ -367,7 +419,7 @@ function GamepadTab({ log }) {
   const r2 = pad?.buttons?.[7]?.value ?? 0;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className={card}>
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className={label}>Connected gamepads ({pads.length})</div>
@@ -400,8 +452,17 @@ function GamepadTab({ log }) {
       {pad && (
         <>
           <div className={card}>
-            <div className={label}>Buttons (analog value 0-1)</div>
-            <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-1.5">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className={label}>Buttons (analog 0-1, press count, chatter)</div>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-slate-500 font-mono">tested {snap?.btn?.summary.tested ?? 0}/{pad.buttons.length}, presses {snap?.btn?.summary.totalPresses ?? 0}, chatter {snap?.btn?.summary.totalChatter ?? 0}</span>
+                <button onClick={resetButtons} className={btn} title="Reset press counts, chatter and axis ranges" aria-label="Reset button counts"><RotateCcw size={11} /></button>
+                <button onClick={copyReport} className={btn} title="Copy a text report of this session" aria-label="Copy report"><Copy size={11} /></button>
+                <button onClick={downloadReport} className={btn} title="Download the session as JSON" aria-label="Download report"><Download size={11} /></button>
+              </div>
+            </div>
+            {copyMsg && <div className="text-[10px] text-slate-400">{copyMsg}</div>}
+            <div className="mt-1.5 grid grid-cols-2 @md:grid-cols-4 gap-1">
               {pad.buttons.map((b, i) => {
                 const name = pad.mapping === 'standard' ? (STANDARD_BUTTON_NAMES[i] || `Button ${i}`) : `Button ${i}`;
                 return (
@@ -410,6 +471,10 @@ function GamepadTab({ log }) {
                       <span className="truncate text-gray-300">{i}: {name}</span>
                       <span className={b.pressed ? 'text-emerald-300' : 'text-slate-500'}>{fmt(b.value, 2)}</span>
                     </div>
+                    <div className="text-[10px] text-slate-500 flex justify-between">
+                      <span>{snap?.btn?.ever[i] ? 'tested' : 'untested'} x{snap?.btn?.counts[i] || 0}</span>
+                      {snap?.btn?.chatter[i] ? <span className="text-amber-300" title={`Shortest press-to-press gap ${fmt(snap.btn.minGap[i], 0)} ms`}>chatter {snap.btn.chatter[i]}</span> : null}
+                    </div>
                     <div className="h-1 bg-slate-800 rounded mt-1 overflow-hidden">
                       <div className="h-full bg-emerald-500" style={{ width: `${Math.round(b.value * 100)}%` }} />
                     </div>
@@ -417,12 +482,15 @@ function GamepadTab({ log }) {
                 );
               })}
             </div>
-            <div className="mt-2 text-[11px] font-mono text-slate-400 break-all">
+            <div className="mt-1.5 text-[11px] font-mono text-slate-400 break-all">
               Axes: {pad.axes.map((a, i) => `[${i}] ${fmt(a, 3)}`).join('   ')}
+            </div>
+            <div className="mt-1 text-[10px] font-mono text-slate-500 break-all" title="Sweep each stick fully. An axis that never reaches both -0.95 and +0.95 is not marked ok.">
+              Range seen: {(snap?.axr || []).map((a) => `[${a.axis}] ${fmt(a.min, 2)}..${fmt(a.max, 2)}${a.fullRange ? ' ok' : ''}`).join('   ')}
             </div>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-3">
+          <div className="grid @lg:grid-cols-2 gap-2">
             <div className={card}>
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className={label}>Sticks (trail = last {TRAIL_LEN} frames)</div>
@@ -461,7 +529,7 @@ function GamepadTab({ log }) {
                 </div>
               </div>
 
-              <div className="mt-3 border-t border-slate-800 pt-2">
+              <div className="mt-2 border-t border-slate-800 pt-2">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="text-xs text-gray-200">Drift at rest (3 s capture)</div>
                   <button onClick={startDrift} disabled={drift?.status === 'measuring'} className={btn}><Play size={11} /> Measure rest</button>
@@ -472,13 +540,15 @@ function GamepadTab({ log }) {
                   {drift?.status === 'done' && (
                     <span className="text-gray-200">
                       {drift.stick} stick: avg {pct(drift.avgPct, 2)}% max {pct(drift.maxPct, 2)}% (center x {fmt(drift.centerX, 3)}, y {fmt(drift.centerY, 3)}, {drift.count} samples)
+                      {' '}Suggested deadzone: <span className="text-emerald-300">{fmt(suggestDeadzone(drift), 2)}</span>
+                      <button onClick={() => setDeadzone(suggestDeadzone(drift))} className={`${btn} ml-1`} title="Set the deadzone slider to the suggested value">Apply</button>
                     </span>
                   )}
                   {(!drift || drift.status === 'idle') && <span className="text-slate-500">No drift result yet.</span>}
                 </div>
               </div>
 
-              <div className="mt-3 border-t border-slate-800 pt-2">
+              <div className="mt-2 border-t border-slate-800 pt-2">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="text-xs text-gray-200">Circularity (max-extent polygon)</div>
                   <div className="flex gap-1">
@@ -503,7 +573,7 @@ function GamepadTab({ log }) {
             </div>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-3">
+          <div className="grid @lg:grid-cols-2 gap-2">
             <div className={card}>
               <div className={label}>Triggers (L2 cyan, R2 purple; buttons 6 and 7)</div>
               <canvas ref={traceRef} width={360} height={60} className="mt-2 w-full rounded border border-slate-800" aria-label="Trigger trace" />
@@ -654,7 +724,7 @@ function HidPanel({ log }) {
       </div>
 
       {device && (
-        <div className="mt-3 space-y-2">
+        <div className="mt-2 space-y-2">
           <div className="font-mono text-[11px] text-gray-300">
             {device.name} (PID 0x{device.productId.toString(16).padStart(4, '0')}), family {device.family || 'unknown'}, reports received: {view.count}
           </div>
@@ -663,7 +733,7 @@ function HidPanel({ log }) {
             <>
               <div className="text-[11px] font-mono text-slate-400">Last report ID 0x{view.bytes[0].toString(16).padStart(2, '0')}, {view.bytes.length} bytes</div>
               {decoded ? (
-                <div className="grid md:grid-cols-2 gap-2 text-[11px] font-mono text-gray-300">
+                <div className="grid @md:grid-cols-2 gap-2 text-[11px] font-mono text-gray-300">
                   <div className="space-y-0.5">
                     <div>Left stick {fmt(decoded.sticks.left.x, 3)}, {fmt(decoded.sticks.left.y, 3)}</div>
                     <div>Right stick {fmt(decoded.sticks.right.x, 3)}, {fmt(decoded.sticks.right.y, 3)}</div>
@@ -894,8 +964,8 @@ function MouseTab({ log }) {
   const maxBin = hist ? Math.max(1, ...hist.counts) : 1;
 
   return (
-    <div className="space-y-3">
-      <div className="grid md:grid-cols-2 gap-3">
+    <div className="space-y-2">
+      <div className="grid @lg:grid-cols-2 gap-2">
         <div className={card}>
           <div className={label}>Pointer surface (move, click, scroll here)</div>
           <div
@@ -955,7 +1025,7 @@ function MouseTab({ log }) {
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-3">
+      <div className="grid @lg:grid-cols-2 gap-2">
         <div className={card}>
           <div className={label}><span className="inline-flex items-center gap-1"><Activity size={10} /> Polling rate (events per second, 1 s window)</span></div>
           <div className="mt-2 grid grid-cols-4 gap-2 text-center font-mono">
@@ -1073,12 +1143,9 @@ export default function InputTesterWorkbench({ onLogMessage }) {
   const log = useCallback((text, level) => onLogMessage?.(text, level), [onLogMessage]);
 
   return (
-    <div className="p-3 space-y-3 text-sm text-gray-200">
+    <div className="space-y-2 text-sm text-gray-200">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <div className="text-base font-semibold">Gamepad &amp; Mouse Tester</div>
-          <div className="text-[11px] text-slate-500">Reads your real controller and mouse in the browser. Nothing is simulated and nothing leaves the page. Chromium only (Gamepad API, pointer lock, WebHID).</div>
-        </div>
+        <div className="text-[11px] text-slate-500">Reads your real devices in the browser; nothing is simulated or uploaded. Chromium only.</div>
         <div className="flex gap-1" role="tablist">
           {TABS.map((t) => {
             const Icon = t.icon;
@@ -1089,7 +1156,7 @@ export default function InputTesterWorkbench({ onLogMessage }) {
                 role="tab"
                 aria-selected={active}
                 onClick={() => setTab(t.id)}
-                className={`px-3 py-1.5 text-xs rounded border inline-flex items-center gap-1.5 ${active ? 'border-emerald-700 bg-emerald-900/30 text-emerald-200' : 'border-slate-800 bg-slate-900 text-gray-400 hover:text-gray-200'}`}
+                className={`px-2.5 py-1 text-xs rounded border inline-flex items-center gap-1.5 ${active ? 'border-emerald-700 bg-emerald-900/30 text-emerald-200' : 'border-slate-800 bg-slate-900 text-gray-400 hover:text-gray-200'}`}
               >
                 <Icon size={12} /> {t.name}
               </button>
