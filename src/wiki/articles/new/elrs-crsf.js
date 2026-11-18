@@ -26,10 +26,13 @@ The **ELRS / CRSF Tool** talks the Crossfire (CRSF) serial protocol over the app
 ## Live telemetry tab
 
 - **Link statistics (0x14):** uplink RSSI for both antennas in dBm, uplink link quality (LQ) in percent, uplink SNR, active antenna, RF mode index, TX power in mW from the power index, and the downlink RSSI, LQ and SNR.
-- **LQ / RSSI trend:** the last 120 link frames, plotted as LQ (green) and uplink antenna 1 RSSI (cyan).
+- **LQ / RSSI trend:** the last 120 link frames, plotted as LQ (green), uplink antenna 1 RSSI (cyan) and antenna 2 RSSI (violet).
+- **Link badge:** a rule-of-thumb verdict on the latest link frame: LINK OK, WARN or BAD. It flags uplink LQ under 80% (warn) or 50% (bad), best-antenna RSSI at or below -95 dBm (warn) or -105 dBm (bad), and negative uplink SNR. These thresholds are general guidance and not part of the CRSF spec. Hover the badge for the reasons.
+- **Statistics table:** min, average and max of uplink LQ, RSSI on each antenna, uplink SNR and downlink LQ over the last 120 frames, plus the number of dropouts (LQ falling from 50% or more to under 50%).
+- **REC and CSV:** REC records every link frame (up to 20000) while connected. CSV downloads the recording, or the last 120 frames if nothing was recorded, with time in ms from the first sample, RSSI, LQ, SNR, antenna, RF mode index, TX power and the downlink values. The RF mode is shown as the raw index because its meaning depends on band and firmware.
 - **RC channels (0x16):** 16 channels of 11 bits, unpacked and shown as microseconds (988 to 2012 µs for the full range, 1500 µs at centre).
 - **Battery (0x08), GPS (0x02), attitude (0x1E) and flight mode (0x21):** the latest value of each. GPS latitude and longitude are shown to five decimals.
-- **Frames seen:** a count per frame type, plus valid frames, frames rejected for a bad CRC and bytes skipped while resynchronising.
+- **Frames seen:** a count and a rate in Hz (over the last 2 seconds) per frame type, plus valid frames, frames rejected for a bad CRC and bytes skipped while resynchronising.
 
 Values only appear when frames arrive. Panels with no data show a dash, not an example.
 
@@ -71,6 +74,10 @@ Every frame that passed the CRC check is listed with its time, direction (RX fro
 - **Device info never arrives after a ping:** the host sync byte may not match the device, or the device may not be powered or on the wire. Try each sync option.
 - **A parameter times out:** some parameters do not answer until the device has finished booting. Read again, or stop and read only the parameters you need.
 - **Write rejected:** the value is outside the device's range or the parameter is read-only. The message says which.
+
+## Similar tools
+
+Compared while designing this view: the ExpressLRS Lua script and Configurator (setup and flashing, which this tool does not do), EdgeTX telemetry screens (1RSS, 2RSS, RQly, RSNR, RFMD, TPWR sensors), and the link statistics views in Betaflight and INAV. The CRSF link statistics frame (0x14) carries the same values they show.
 
 ## Related tools
 

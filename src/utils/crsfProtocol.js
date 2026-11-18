@@ -580,3 +580,93 @@ export function createParamClient({ send, dest, sync = CRSF_SYNC.TX_MODULE, time
 
   return { readParam, writeParam, feed, reset, get busy() { return pending.size > 0; } };
 }
+
+// --- Link analysis (pure helpers, additive) ----------------------------------------
+
+/**
+ * Rule-of-thumb health verdict for one decoded link statistics sample. Thresholds are
+ * general guidance (ELRS shows LQ 100% as a perfect link; RSSI near the receiver's
+ * sensitivity floor means little margin), not a spec. Returns { level, reasons }.
+ */
+export function assessLink(link) {
+  if (!link) return { level: 'none', reasons: [] };
+  const reasons = [];
+  let level = 'good';
+  const bump = (to, why) => {
+    reasons.push(why);
+    if (to === 'bad' || level === 'good') level = to;
+  };
+  if (link.upLq < 50) bump('bad', `uplink LQ ${link.upLq}% is very low`);
+  else if (link.upLq < 80) bump('warn', `uplink LQ ${link.upLq}% is below 80%`);
+  const best = Math.max(link.upRssi1, link.upRssi2 <= -120 ? -200 : link.upRssi2);
+  if (best <= -105) bump('bad', `best uplink RSSI ${best} dBm is at the noise floor`);
+  else if (best <= -95) bump('warn', `best uplink RSSI ${best} dBm leaves little margin`);
+  if (link.upSnr < 0) bump('warn', `uplink SNR ${link.upSnr} dB is negative`);
+  return { level, reasons };
+}
+
+/** Min / average / max of a list of numbers (non-finite values ignored). null when empty. */
+function stat(values) {
+  const v = values.filter((x) => typeof x === 'number' && Number.isFinite(x));
+  if (!v.length) return null;
+  return { min: Math.min(...v), max: Math.max(...v), avg: v.reduce((a, b) => a + b, 0) / v.length };
+}
+
+/**
+ * Summarise recorded link samples ({ t, upLq, upRssi1, upRssi2, upSnr, downLq, ... }).
+ * dropouts counts transitions from LQ >= 50 to LQ < 50.
+ */
+export function summarizeLinkSamples(samples) {
+  const list = Array.isArray(samples) ? samples : [];
+  let dropouts = 0;
+  for (let i = 1; i < list.length; i++) {
+    if (list[i - 1].upLq >= 50 && list[i].upLq < 50) dropouts++;
+  }
+  return {
+    count: list.length,
+    durationMs: list.length > 1 ? list[list.length - 1].t - list[0].t : 0,
+    upLq: stat(list.map((s) => s.upLq)),
+    upRssi1: stat(list.map((s) => s.upRssi1)),
+    upRssi2: stat(list.map((s) => s.upRssi2)),
+    upSnr: stat(list.map((s) => s.upSnr)),
+    downLq: stat(list.map((s) => s.downLq)),
+    dropouts,
+  };
+}
+
+export const LINK_CSV_COLUMNS = ['t_ms', 'up_rssi1_dbm', 'up_rssi2_dbm', 'up_lq_pct', 'up_snr_db', 'antenna', 'rf_mode', 'tx_power_mw', 'down_rssi_dbm', 'down_lq_pct', 'down_snr_db'];
+
+/** CSV text for recorded link samples; t_ms is relative to the first sample. */
+export function linkSamplesToCsv(samples) {
+  const list = Array.isArray(samples) ? samples : [];
+  const t0 = list.length ? list[0].t : 0;
+  const rows = list.map((s) => [
+    s.t - t0, s.upRssi1, s.upRssi2, s.upLq, s.upSnr, s.antenna, s.rfMode, s.upPowerMw ?? '', s.downRssi, s.downLq, s.downSnr,
+  ].join(','));
+  return [LINK_CSV_COLUMNS.join(','), ...rows].join('\n');
+}
+
+/** Per-frame-type arrival rate in Hz over a sliding window (default 2 s). */
+export function createRateTracker(windowMs = 2000) {
+  const stamps = new Map();
+  const prune = (arr, now) => {
+    let i = 0;
+    while (i < arr.length && now - arr[i] > windowMs) i++;
+    if (i) arr.splice(0, i);
+  };
+  return {
+    mark(type, now) {
+      if (!stamps.has(type)) stamps.set(type, []);
+      stamps.get(type).push(now);
+    },
+    rates(now) {
+      const out = {};
+      for (const [type, arr] of stamps) {
+        prune(arr, now);
+        out[type] = (arr.length * 1000) / windowMs;
+      }
+      return out;
+    },
+    reset() { stamps.clear(); },
+  };
+}
