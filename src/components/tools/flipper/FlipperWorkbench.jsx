@@ -15,6 +15,7 @@ import {
   FolderOpen,
   Monitor
 } from 'lucide-react';
+import { pushHistory } from '../../../utils/flipperCli';
 import { formatHexDump, getFlipperDriver, isPrintableText } from '../../../utils/flipperDriver';
 import { useSerial } from '../../../context/SerialContext';
 import { identifyUsbChip } from '../../../utils/usbDatabase';
@@ -107,6 +108,7 @@ export default function FlipperWorkbench() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [logs, setLogs] = useState([]);
   const [cliInput, setCliInput] = useState('');
+  const [cliHistory, setCliHistory] = useState([]);
 
   // Keyboard Navigation Mode (Allows using PC Arrow keys + Enter + Esc)
   const [keyboardNavEnabled, setKeyboardNavEnabled] = useState(true);
@@ -463,6 +465,7 @@ export default function FlipperWorkbench() {
     e.preventDefault();
     if (!cliInput.trim()) return;
     driver.executeCommand(cliInput.trim());
+    setCliHistory(h => pushHistory(h, cliInput));
     setCliInput('');
   };
 
@@ -475,9 +478,9 @@ export default function FlipperWorkbench() {
   };
 
   return (
-    <div className="w-full space-y-4 font-mono text-xs select-none">
+    <div className="w-full space-y-2 font-mono text-xs select-none">
       {/* 1. Official qFlipper Window Header Bar */}
-      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-3 @sm:p-4 shadow-2xl flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2 shadow-lg flex flex-wrap items-center justify-between gap-2">
         {/* Left: Device Selector (qFlipper Style) */}
         <div className="flex items-center gap-3">
           <div className={`p-2.5 rounded-xl border flex-shrink-0 transition-all ${
@@ -537,15 +540,17 @@ export default function FlipperWorkbench() {
               return (
                 <button
                   key={tab.id}
+                  title={tab.name}
+                  aria-label={tab.name}
                   onClick={() => setActiveView(tab.id)}
-                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-mono transition-all ${
+                  className={`flex items-center gap-2 px-2.5 py-1 rounded-lg text-xs font-mono transition-all ${
                     isActive 
                       ? 'bg-[#fe8a2c] text-slate-950 font-bold shadow-lg shadow-[#fe8a2c]/30' 
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
-                  <span>{tab.name}</span>
+                  <span className="hidden @sm:inline">{tab.name}</span>
                 </button>
               );
             })}
@@ -626,7 +631,7 @@ export default function FlipperWorkbench() {
 
       {/* 2. Official qFlipper Disconnected Welcome Screen (NoDeviceOverlay) */}
       {!state.isConnected ? (
-        <div className="bg-[#171920] border border-[#2b303c] rounded-3xl p-8 @sm:p-12 shadow-2xl flex flex-col items-center justify-center text-center max-w-4xl mx-auto my-4">
+        <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-4 @sm:p-6 shadow-lg flex flex-col items-center justify-center text-center max-w-4xl mx-auto">
           {/* Active Serial Connection in Main Header Alert */}
           {serialCtx?.isConnected && (
             <div className="w-full max-w-xl bg-amber-950/40 border-2 border-amber-500/60 rounded-2xl p-4 @sm:p-5 mb-6 text-amber-200 flex flex-col @sm:flex-row items-center justify-between gap-4 shadow-2xl text-left">
@@ -697,7 +702,7 @@ export default function FlipperWorkbench() {
           )}
 
           {/* Authentic qFlipper Vector Graphics: Flipper + Type-C Plug */}
-          <div className="relative w-full max-w-lg h-44 @sm:h-52 flex items-center justify-center mb-6">
+          <div className="relative w-full max-w-lg h-32 @sm:h-40 flex items-center justify-center mb-3">
             <img 
               src={flipperSvg} 
               alt="Flipper Zero Outline" 
@@ -709,10 +714,10 @@ export default function FlipperWorkbench() {
             </div>
           </div>
 
-          <h3 className="text-xl @sm:text-2xl font-bold text-white tracking-wide mb-2 font-sans">
+          <h3 className="text-base @sm:text-lg font-bold text-white tracking-wide mb-2 font-sans">
             CONNECT YOUR FLIPPER ZERO
           </h3>
-          <p className="text-xs @sm:text-sm text-slate-400 max-w-lg mb-8 leading-relaxed font-sans">
+          <p className="text-xs @sm:text-sm text-slate-400 max-w-lg mb-4 leading-relaxed font-sans">
             Connect your Flipper Zero via USB cable to update firmware, manage MicroSD files, view real-time screen streaming, and control device peripherals.
           </p>
 
@@ -734,7 +739,7 @@ export default function FlipperWorkbench() {
             </button>
           </div>
 
-          <div className="mt-12 pt-6 border-t border-[#232733] flex flex-wrap items-center justify-center gap-8 text-[11px] text-slate-500 font-mono">
+          <div className="mt-4 pt-3 border-t border-[#232733] flex flex-wrap items-center justify-center gap-8 text-[11px] text-slate-500 font-mono">
             <span>• STMicroelectronics (VID: 0483, PID: 5740)</span>
             <span>• 115200 8-N-1 Virtual COM Port</span>
             <span>• Official, Unleashed, Momentum, Xtreme</span>
@@ -798,6 +803,8 @@ export default function FlipperWorkbench() {
           {activeView === 'cli' && (
             <CliView
               cliInput={cliInput}
+              cliHistory={cliHistory}
+              onClearLogs={() => setLogs([])}
               driver={driver}
               handleSendCli={handleSendCli}
               logContainerRef={logContainerRef}

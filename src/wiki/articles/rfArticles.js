@@ -226,6 +226,17 @@ The Flipper Zero mounts standard FAT32 / exFAT microSD cards under the root moun
 
 ---
 
+### 8b. Console Tab (Serial CLI)
+
+The **Console** tab sends plain text commands to the Flipper's CLI and shows the replies. Requires Chrome, Edge or Opera (Web Serial) and a connected Flipper.
+- **Quick commands:** grouped tabs (Info, Storage, Output, Misc) of commands from the Flipper CLI. Click one to run it. Output commands such as \`vibro\` and \`led\` act on the real device.
+- **History:** Up/Down arrows recall earlier commands (last 100, kept until you leave the tool). Consecutive duplicates are skipped.
+- **Completion:** as you type, matching known commands and past commands appear under the log. Press Tab to take the first one.
+- **Log tools:** filter the log by text, show or hide timestamps, copy the visible log, save it as a \`.txt\` file, or clear it. The log keeps the last 200 lines.
+- Similar tools: qFlipper (desktop), Flipper Lab (lab.flipper.net, browser) and the official CLI docs at docs.flipper.net.
+
+---
+
 ### 9. Complete Troubleshooting & Diagnostic Matrix
 
 | Error Message / Symptom | Root Cause | Engineering Solution |
