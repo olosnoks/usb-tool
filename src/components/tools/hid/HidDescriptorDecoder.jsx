@@ -29,7 +29,7 @@ export default function HidDescriptorDecoder() {
   };
 
   return (
-    <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2 @lg:col-span-2">
+    <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2 @lg:col-span-2">
       <span className="font-bold text-slate-200 flex items-center gap-2">
         <FileSearch className="w-4 h-4 text-cyan-400" /> DESCRIPTOR DECODER
       </span>
