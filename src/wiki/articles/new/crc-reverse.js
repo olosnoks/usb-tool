@@ -9,7 +9,7 @@ export default {
   content: `
 # CRC Reverse & Checksum Catalogue
 
-The **CRC Reverse & Checksum Catalogue** helps when a protocol frame ends with a checksum and you do not know which algorithm produced it. It runs entirely in the browser, with no hardware and no network. It has three tabs.
+The **CRC Reverse & Checksum Catalogue** helps when a protocol frame ends with a checksum and you do not know which algorithm produced it. It runs entirely in the browser, with no hardware and no network. It has four tabs: Calculator, Reverse, Locate and Model.
 
 ## Calculator
 
@@ -39,6 +39,17 @@ The search runs in chunks, shows progress and can be cancelled. Cancelled runs s
 
 Enter one frame. Its last *k* bytes are treated as a stored checksum. Every payload range that ends just before them is tested against each catalogue CRC of width up to 8k bits and each simple sum, in both byte orders. Matches print the start and end of the covered bytes. Frames can be up to 1024 bytes.
 
+## Model
+
+Work with one CRC model of your own, for example the result of a Reverse run.
+
+- **Fields:** width (1 to 64), poly, init, xorout (hex with \`0x\`, or decimal), and the refin and refout boxes. Values must fit the width.
+- **Load:** pick a catalogue model from the list, or paste a RevEng-style line such as \`width=16 poly=0x1021 init=0xffff refin=false refout=false xorout=0x0000\`. Unknown keys such as \`check\` and \`name\` are ignored. Missing init and xorout default to 0, and missing refin and refout to false. In the Reverse tab, **Use in Model tab** copies a result here, including its byte order.
+- **Summary line:** shows the RevEng string with the check value (CRC of ASCII \`123456789\`) and residue, with a copy button.
+- **Verify frames:** one hex frame per line, checksum at the tail (width divided by 8, rounded up, bytes) in big- or little-endian. Each line shows OK or MISMATCH with the stored and computed values.
+- **Append CRC:** one payload per line; the tool prints the CRC and the full frame with the CRC appended in the chosen byte order. You can copy all frames.
+- **Generate reference code:** a C, Python or JavaScript (BigInt) function for the model. It is a bit-at-a-time version that follows the Rocksoft definition. It is short and easy to check, but slow and not table-driven. The tests run the Python and JavaScript output against the built-in engine.
+
 ## Limits and what it does not do
 
 - The brute force covers widths 8 and 16 only. Width 32 uses only the known polynomial list. Other widths and unknown 32-bit polynomials are not searched.
@@ -54,6 +65,10 @@ Enter one frame. Its last *k* bytes are treated as a stored checksum. Every payl
 - **No model found:** check the byte order (try both), the checksum width (1, 2 or 4 bytes), and whether the frame includes a start marker or length byte that the checksum does not cover.
 - **Many matches with two samples:** that is expected for 8-bit results. Add a third sample.
 - **Locate shows nothing:** the checksum may cover bytes after it, or be a CRC over a different field entirely.
+
+## Similar tools
+
+The Reverse and Calculator tabs follow the same model as CRC RevEng (the catalogue and the parameter names), crccalc.com (custom parameter calculator) and delsum (parameter search). pycrc is the usual way to generate C code from a model; the code generator here is a smaller, unoptimised version of that idea. Unlike RevEng and delsum, this tool does not search arbitrary widths or arbitrary 32-bit polynomials.
 
 ## Related tools
 

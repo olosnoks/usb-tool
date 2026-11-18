@@ -9,6 +9,16 @@ import { SIMPLE_SUMS } from './crcReverse/sums.js';
 
 export { CRC_CATALOGUE, CRC_ALIASES, findCrcModel, SIMPLE_SUMS };
 export { reverseCrc, locateCrc, revengString, solveInitXorout, KNOWN_POLYS_32 } from './crcReverse/solver.js';
+export {
+  normalizeModel,
+  parseRevengModel,
+  checksumByteLength,
+  crcToBytes,
+  verifyFrames,
+  appendCrc,
+  parseHexLines,
+  generateCode,
+} from './crcReverse/custom.js';
 export { crcOf, crcNum, crcBig, residueOf, hexOf } from './crcReverse/engine.js';
 
 /**
