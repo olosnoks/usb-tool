@@ -3,7 +3,7 @@ export default {
   toolId: 'usb-power-meter',
   category: 'programmers',
   title: 'USB Power Meter Logger — RuiDeng and FNIRSI live V/A/W, mAh and CSV',
-  summary: 'Live voltage, current, power and temperature from RuiDeng UM24C/UM25C/UM34C and FNIRSI FNB48/FNB58/C1 USB testers, with the meter\'s own accumulated mAh/mWh, computed totals, session min/max, a live chart and CSV export.',
+  summary: 'Live voltage, current, power and temperature from RuiDeng UM24C/UM25C/UM34C and FNIRSI FNB48/FNB58/C1 USB testers, with the meter\'s own accumulated mAh/mWh, computed totals, session min/max, a live chart, limit alarms, averages and peaks, a battery runtime estimate and CSV export.',
   tags: ['USB power meter', 'USB tester', 'RuiDeng', 'UM25C', 'UM34C', 'FNIRSI', 'FNB58', 'C1', 'WebHID', 'Web Serial', 'mAh', 'mWh', 'USB-C charger'],
   readTime: '6 min read',
   content: `
@@ -34,12 +34,15 @@ The tool polls once a second. Before each request it discards stale bytes, so a 
 2. Press **Choose ... and connect**.
    - **RuiDeng:** pair the meter in Windows Bluetooth settings first. It then appears as a COM port in the Chrome or Edge port picker. Choose it.
    - **FNIRSI:** choose the meter in the HID picker.
-3. Live tiles show voltage, current, power and temperature. For RuiDeng, D+/D-, the charging mode and resistance appear too.
-4. **Device-reported** mAh and mWh show the data group the meter has selected. Only RuiDeng reports these in the verified layout.
-5. **Computed this session** integrates the samples over time with the trapezoid rule. It starts when you connect or press **Clear session**. Gaps longer than 5 seconds are not integrated.
-6. **Session min / max** tracks the extremes for V, A, W and temperature.
-7. The chart shows the last 600 samples. Each line is scaled to its own range, and the legend shows the range.
-8. **Export CSV** saves every sample with an ISO timestamp, elapsed seconds, the device and computed totals. Up to 200,000 rows are kept.
+3. Live tiles show voltage, current, power and temperature. For RuiDeng, D+/D-, the charging mode and the meter's resistance appear too.
+4. A strip of small readouts shows **Elapsed** time, **Load V/I** (volts divided by amps, blank below 1 mA), the time-weighted **Avg** power and current for the session, and the **Peak** power and current.
+5. **Device-reported** mAh and mWh show the data group the meter has selected. Only RuiDeng reports these in the verified layout.
+6. **Computed this session** integrates the samples over time with the trapezoid rule. It starts when you connect or press **Clear session**. Gaps longer than 5 seconds are not integrated, and they are also left out of the averages.
+7. The chart keeps the last 600 samples. Choose a **Window** of 100, 300 or 600 samples, and tick or untick the voltage, current and power lines. Each line is scaled to its own range, and the legend shows the range. **Pause chart** freezes the picture. Logging, totals and CSV rows keep going while it is paused.
+8. **Limit alarms** (collapsed section): enter an upper limit for current, power or temperature and a lower limit for voltage. Leave a field blank to turn it off. While a sample breaks a limit, a red banner shows. Each time a limit goes from fine to exceeded, one event is counted for that limit. This only warns on screen. It does not cut power or control the meter.
+9. **Battery runtime estimate** (collapsed section): enter a battery capacity in mAh, the cell voltage and a converter efficiency. The tool computes watt-hours and divides by the session average power. It is a rough guide, not a measurement.
+10. **Session min / max** (collapsed section) tracks the extremes for V, A, W and temperature, and the sample count.
+11. **Export CSV** saves every sample with an ISO timestamp, elapsed seconds, the device and computed totals. Up to 200,000 rows are kept.
 
 ## Browser requirements
 
@@ -76,6 +79,10 @@ Known gaps:
 
 - RuiDeng command table and 130-byte layout: [smandon/rdumtool](https://github.com/smandon/rdumtool) (\`rdum/__init__.py\`, \`rdum/tool.py\`), [Black-FX/rdserialtool](https://github.com/Black-FX/rdserialtool) (\`rdserial/um/__init__.py\`), and the [sigrok RDTech UM24C page](https://sigrok.org/wiki/RDTech_UM24C), which describes the model IDs, 0xF0 response and 9600 8-N-1 board link.
 - FNIRSI HID framing, init and keepalive commands, CRC-8 and sample layout: [yeckel/OpenFNB58](https://github.com/yeckel/OpenFNB58) (\`fnb58.py\`, FNB58 PID 2E3C:5558) and [baryluk/fnirsi-usb-power-data-logger](https://github.com/baryluk/fnirsi-usb-power-data-logger) (\`fnirsi_logger.py\`, FNB48 0483:003A, C1 0483:003B, FNB48S 2E3C:0049).
+
+## Similar tools
+
+The feature set was compared with [rdserialtool](https://github.com/Black-FX/rdserialtool) and rdumtool (RuiDeng command line tools), the FNIRSI UsbMeter PC software, and sigrok's supported energy meters. Those tools talk to the same meters. This one adds browser-only convenience (no install) and does not write settings to the meter.
 
 ## Related tools
 
