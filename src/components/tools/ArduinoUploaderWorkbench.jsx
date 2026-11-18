@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Cpu, CheckCircle2, AlertTriangle, Usb, Upload, Download, Square, Zap } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Usb, Upload, Download, Square, Zap, Copy } from 'lucide-react';
 import { SerialLink } from '../../utils/serialLink';
 import { loadFirmwareFile } from '../../utils/firmwareParser';
 import {
@@ -10,7 +10,10 @@ import {
   programBoard,
   readBoardFlash,
   touchForBootloader,
-  toIntelHex
+  toIntelHex,
+  imageStats,
+  compareFlashToImage,
+  avrdudeCommand
 } from '../../utils/arduinoUploader';
 import { confirmAction } from '../../utils/sessionLog';
 
@@ -37,7 +40,7 @@ export default function ArduinoUploaderWorkbench({ onLogMessage }) {
   const [boardId, setBoardId] = useState('uno');
   const board = ARDUINO_BOARDS[boardId];
   const isAvr109 = board.protocol === PROTOCOL_AVR109;
-  const [action, setAction] = useState('program'); // 'program' | 'read'
+  const [action, setAction] = useState('program'); // 'program' | 'verify' | 'read'
   const [image, setImage] = useState(null); // { name, type, data, startAddress }
   const [fileError, setFileError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -125,6 +128,22 @@ export default function ArduinoUploaderWorkbench({ onLogMessage }) {
         pushLog(`Verified ${r.bytes} bytes.`, 'success');
       });
     }
+    if (action === 'verify') {
+      return readBoardFlash(link, board, { onProgress, log, shouldAbort }).then((data) => {
+        const r = compareFlashToImage(data, image);
+        if (r.match) {
+          setStatus({ kind: 'ok', text: `Match: all ${r.checked} bytes of ${image.name} are identical to the flash on ${board.name}. Nothing was written.` });
+          pushLog(`Verify only: ${r.checked} bytes match.`, 'success');
+        } else {
+          const where = r.ranges.map((x) => `${hex(x.start)}-${hex(x.end - 1)}`).join(', ');
+          setStatus({
+            kind: 'err',
+            text: `Differs: ${r.mismatches} of ${r.checked} bytes do not match, first at ${hex(r.firstAddress)}. Differing runs: ${where}${r.ranges.length >= 8 ? ' (first 8 shown)' : ''}. Nothing was written.`
+          });
+          pushLog(`Verify only: ${r.mismatches} bytes differ.`, 'error');
+        }
+      });
+    }
     return readBoardFlash(link, board, { onProgress, log, shouldAbort }).then((data) => {
       setReadResult({ name: image ? baseName(image.name) : `${board.id}-flash`, data });
       setStatus({
@@ -133,7 +152,7 @@ export default function ArduinoUploaderWorkbench({ onLogMessage }) {
       });
       pushLog(`Read ${data.length} bytes.`, 'success');
     });
-  }
+  };
 
   const confirmWrite = () => {
     const bytes = planError ? 0 : buildPageBytes();
@@ -206,42 +225,57 @@ export default function ArduinoUploaderWorkbench({ onLogMessage }) {
   const bytesHint = image && !planError ? `${image.data.length} bytes, ${buildPageBytes()} bytes of pages to write` : '';
 
   const endAddress = image ? (image.startAddress || 0) + image.data.length : 0;
+  const stats = image && !planError ? imageStats(board, image) : null;
+  const cmd = avrdudeCommand(board, image ? image.name : 'sketch.hex', { verifyOnly: action === 'verify' });
+  const copyCmd = async () => {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      pushLog('Copied avrdude command.');
+    } catch (e) {
+      pushLog('Could not copy to the clipboard.', 'error');
+    }
+  };
+
+  const btn =
+    'flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300';
+  const tab = (id) =>
+    `px-2.5 py-1 rounded border focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 ${
+      action === id ? 'border-cyan-500 bg-cyan-950/60 text-cyan-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'
+    }`;
+  const runLabel = { program: 'Program board', verify: 'Verify against file', read: 'Read flash' }[action];
+  const step2Label =
+    action === 'program'
+      ? 'Step 2: choose bootloader port and program'
+      : action === 'verify'
+        ? 'Step 2: choose bootloader port and verify'
+        : 'Step 2: choose bootloader port and read';
 
   return (
-    <div className="flex flex-col gap-4 p-4 text-slate-200 text-xs font-mono bg-slate-950 h-full overflow-auto">
-      <div className="flex items-start gap-3">
-        <Cpu className="w-6 h-6 text-cyan-400 shrink-0 mt-0.5" />
-        <div>
-          <div className="text-sm font-bold text-slate-100">Arduino Bootloader Uploader</div>
-          <div className="text-slate-400 leading-relaxed">
-            Writes a sketch through the bootloader already on the board, over its own serial port. No programmer, no ISP wiring,
-            no chip erase. Write, read back and compare, then start the sketch.
-          </div>
-        </div>
-      </div>
+    <div className="flex flex-col gap-2 text-slate-200 text-[11px] font-mono bg-slate-950">
+      <h2 className="sr-only">Arduino Bootloader Uploader</h2>
 
       {!hasSerial && (
-        <div className="flex gap-2 border border-amber-700/60 bg-amber-950/40 text-amber-200 p-3 rounded">
+        <div className="flex gap-2 border border-amber-700/60 bg-amber-950/40 text-amber-200 p-2 rounded">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           Web Serial is not available here. Use Chrome or Edge on desktop, from https:// or localhost.
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <section className="border border-slate-800 rounded p-3 bg-slate-900/40 flex flex-col gap-2">
+      <div className="grid grid-cols-1 @lg:grid-cols-2 gap-2">
+        <section className="border border-slate-800 rounded p-2 bg-slate-900/40 flex flex-col gap-1.5">
           <div className="text-slate-400 uppercase tracking-wider">1. Board</div>
           <select
             aria-label="Board preset"
             value={boardId}
             onChange={(e) => onBoardChange(e.target.value)}
             disabled={busy}
-            className="bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-100"
+            className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-100"
           >
             {ARDUINO_BOARD_IDS.map((id) => (
               <option key={id} value={id}>{ARDUINO_BOARDS[id].name}</option>
             ))}
           </select>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-slate-300">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-slate-300">
             <dt className="text-slate-500">Protocol</dt>
             <dd>{isAvr109 ? 'AVR109 (Caterina)' : 'STK500v1 (Optiboot / ATmegaBOOT)'}</dd>
             <dt className="text-slate-500">Bootloader</dt>
@@ -256,25 +290,29 @@ export default function ArduinoUploaderWorkbench({ onLogMessage }) {
             <dd>0x0000 to {hex(board.appLimit)} (bootloader above)</dd>
           </dl>
           {isAvr109 && (
-            <div className="text-slate-400 leading-relaxed">
-              Caterina boards need two picks. The 1200-baud touch restarts the board as a new serial port, so the browser
-              will ask again: choose the bootloader port in step 2.
+            <div className="text-slate-400">
+              Caterina boards need two picks: the 1200-baud touch restarts the board as a new port, then choose the bootloader port in step 2.
             </div>
           )}
         </section>
 
-        <section className="border border-slate-800 rounded p-3 bg-slate-900/40 flex flex-col gap-2">
+        <section className="border border-slate-800 rounded p-2 bg-slate-900/40 flex flex-col gap-1.5">
           <div className="text-slate-400 uppercase tracking-wider">2. Firmware</div>
-          <label className="flex items-center gap-2 cursor-pointer text-cyan-300 hover:text-cyan-200">
-            <Upload className="w-4 h-4" />
+          <label className="flex items-center gap-2 cursor-pointer text-cyan-300 hover:text-cyan-200 focus-within:ring-2 focus-within:ring-cyan-300 rounded w-fit">
+            <Upload className="w-3.5 h-3.5" />
             <span>Load .hex or .bin</span>
-            <input type="file" accept=".hex,.bin" className="hidden" onChange={onFile} disabled={busy} />
+            <input type="file" accept=".hex,.bin" className="sr-only" onChange={onFile} disabled={busy} />
           </label>
           {fileError && <div className="text-rose-300">{fileError}</div>}
           {image && (
-            <div className="text-slate-300 leading-relaxed">
-              <div>{image.name} ({image.type})</div>
+            <div className="text-slate-300">
+              <div className="break-all">{image.name} ({image.type})</div>
               <div>{image.data.length} bytes, 0x{(image.startAddress || 0).toString(16).toUpperCase().padStart(4, '0')} to {hex(endAddress)}</div>
+              {stats && (
+                <div className="text-slate-400" data-testid="image-stats">
+                  {stats.sketchAreaPct}% of sketch area, {stats.freeBytes} bytes free, {stats.pages} pages, CRC-32 {stats.crc32.toString(16).toUpperCase().padStart(8, '0')}
+                </div>
+              )}
               {bytesHint && <div className="text-slate-500">{bytesHint}</div>}
               {planError && <div className="text-rose-300 mt-1">{planError}</div>}
             </div>
@@ -282,74 +320,56 @@ export default function ArduinoUploaderWorkbench({ onLogMessage }) {
           {!image && (
             <div className="text-slate-500">No file loaded. Intel HEX (.hex) is the usual Arduino IDE export; raw .bin is written from address 0.</div>
           )}
-          <div className="text-slate-500 leading-relaxed mt-1">
-            UF2 files are parsed by the shared loader but are not checked against this board's family here, so pick .hex or .bin for these boards.
-          </div>
         </section>
       </div>
 
-      <section className="border border-slate-800 rounded p-3 bg-slate-900/40 flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-slate-400 uppercase tracking-wider mr-2">3. Action</span>
-          <button
-            type="button"
-            onClick={() => setAction('program')}
-            disabled={busy}
-            className={`px-3 py-1.5 rounded border ${action === 'program' ? 'border-cyan-500 bg-cyan-950/60 text-cyan-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
-          >
+      <section className="border border-slate-800 rounded p-2 bg-slate-900/40 flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-slate-400 uppercase tracking-wider mr-1">3. Action</span>
+          <button type="button" onClick={() => setAction('program')} disabled={busy} aria-pressed={action === 'program'} className={tab('program')}>
             Write and verify sketch
           </button>
           <button
             type="button"
-            onClick={() => setAction('read')}
+            onClick={() => setAction('verify')}
             disabled={busy}
-            className={`px-3 py-1.5 rounded border ${action === 'read' ? 'border-cyan-500 bg-cyan-950/60 text-cyan-200' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+            aria-pressed={action === 'verify'}
+            title="Read the flash and compare it with the loaded file. Writes nothing."
+            className={tab('verify')}
           >
+            Verify only
+          </button>
+          <button type="button" onClick={() => setAction('read')} disabled={busy} aria-pressed={action === 'read'} className={tab('read')}>
             Read flash back
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           {!isAvr109 && (
-            <button
-              type="button"
-              onClick={runStk}
-              disabled={!canRun || !hasSerial}
-              className="flex items-center gap-2 px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold"
-            >
-              <Zap className="w-4 h-4" />
-              {action === 'program' ? 'Program board' : 'Read flash'}
+            <button type="button" onClick={runStk} disabled={!canRun || !hasSerial} className={btn}>
+              <Zap className="w-3.5 h-3.5" />
+              {runLabel}
             </button>
           )}
 
           {isAvr109 && !awaitingBootPort && (
-            <button
-              type="button"
-              onClick={touchAvr}
-              disabled={busy || !hasSerial}
-              className="flex items-center gap-2 px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold"
-            >
-              <Usb className="w-4 h-4" />
+            <button type="button" onClick={touchAvr} disabled={busy || !hasSerial} className={btn}>
+              <Usb className="w-3.5 h-3.5" />
               Step 1: start bootloader (1200-baud touch)
             </button>
           )}
 
           {isAvr109 && awaitingBootPort && (
             <>
-              <button
-                type="button"
-                onClick={runAvrStep2}
-                disabled={!canRun || !hasSerial}
-                className="flex items-center gap-2 px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold"
-              >
-                <Zap className="w-4 h-4" />
-                {action === 'program' ? 'Step 2: choose bootloader port and program' : 'Step 2: choose bootloader port and read'}
+              <button type="button" onClick={runAvrStep2} disabled={!canRun || !hasSerial} className={btn}>
+                <Zap className="w-3.5 h-3.5" />
+                {step2Label}
               </button>
               <button
                 type="button"
                 onClick={() => setAwaitingBootPort(false)}
                 disabled={busy}
-                className="px-3 py-2 rounded border border-slate-700 text-slate-300 hover:border-slate-500"
+                className="px-2.5 py-1.5 rounded border border-slate-700 text-slate-300 hover:border-slate-500"
               >
                 Cancel
               </button>
@@ -360,20 +380,21 @@ export default function ArduinoUploaderWorkbench({ onLogMessage }) {
             <button
               type="button"
               onClick={stopRun}
-              className="flex items-center gap-2 px-3 py-2 rounded border border-rose-700 text-rose-300 hover:bg-rose-950/40"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-rose-700 text-rose-300 hover:bg-rose-950/40"
             >
-              <Square className="w-3.5 h-3.5" />
+              <Square className="w-3 h-3" />
               Stop
             </button>
           )}
         </div>
+        {action === 'verify' && !image && <div className="text-slate-500">Load a file to compare the board against.</div>}
 
         {progress && (
           <div className="flex flex-col gap-1">
             <div className="text-slate-400">
               {PHASE_LABEL[progress.phase] || 'Working'} page {progress.done} of {progress.total}
             </div>
-            <div className="h-2 w-full bg-slate-800 rounded overflow-hidden">
+            <div className="h-1.5 w-full bg-slate-800 rounded overflow-hidden">
               <div
                 className="h-full bg-cyan-500 transition-all"
                 style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }}
@@ -394,42 +415,67 @@ export default function ArduinoUploaderWorkbench({ onLogMessage }) {
             }`}
           >
             {status.kind === 'ok' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : status.kind === 'err' ? <AlertTriangle className="w-4 h-4 shrink-0" /> : null}
-            <span className="leading-relaxed">{status.text}</span>
+            <span className="break-words min-w-0">{status.text}</span>
           </div>
         )}
 
         {readResult && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-slate-400">Read-back: {readResult.data.length} bytes</span>
             <button
               type="button"
+              title="Download the read-back as raw binary"
               onClick={() => download(`${readResult.name}-readback.bin`, readResult.data)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded border border-slate-700 hover:border-cyan-600 text-slate-200"
+              className="flex items-center gap-1 px-2 py-1 rounded border border-slate-700 hover:border-cyan-600 text-slate-200"
             >
-              <Download className="w-3.5 h-3.5" /> .bin
+              <Download className="w-3 h-3" /> .bin
             </button>
             <button
               type="button"
+              title="Download the read-back as Intel HEX"
               onClick={() => download(`${readResult.name}-readback.hex`, toIntelHex(readResult.data, 0), 'text/plain')}
-              className="flex items-center gap-1 px-3 py-1.5 rounded border border-slate-700 hover:border-cyan-600 text-slate-200"
+              className="flex items-center gap-1 px-2 py-1 rounded border border-slate-700 hover:border-cyan-600 text-slate-200"
             >
-              <Download className="w-3.5 h-3.5" /> .hex
+              <Download className="w-3 h-3" /> .hex
             </button>
           </div>
         )}
       </section>
 
-      <section className="border border-slate-800 rounded p-3 bg-slate-900/40 flex flex-col gap-2">
-        <div className="text-slate-400 uppercase tracking-wider">Log</div>
-        <pre className="bg-slate-950 border border-slate-800 rounded p-2 h-40 overflow-auto text-slate-300 whitespace-pre-wrap">
+      <details className="border border-slate-800 rounded bg-slate-900/40">
+        <summary className="cursor-pointer px-2 py-1.5 text-slate-400 uppercase tracking-wider">avrdude command (for the CLI)</summary>
+        <div className="p-2 pt-0 flex flex-col gap-1.5">
+          <div className="text-slate-500">Equivalent command to run on your own PC with avrdude. This app does not run avrdude; replace the port placeholder.</div>
+          <div className="flex items-start gap-1.5">
+            <code data-testid="avrdude-cmd" className="flex-1 min-w-0 break-all bg-slate-950 border border-slate-800 rounded p-1.5 text-slate-300">{cmd}</code>
+            <button
+              type="button"
+              onClick={copyCmd}
+              title="Copy command"
+              aria-label="Copy avrdude command"
+              className="p-1.5 rounded border border-slate-700 hover:border-cyan-600 text-slate-200"
+            >
+              <Copy className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      </details>
+
+      <details className="border border-slate-800 rounded bg-slate-900/40" open>
+        <summary className="cursor-pointer px-2 py-1.5 text-slate-400 uppercase tracking-wider">Log</summary>
+        <pre className="m-2 mt-0 bg-slate-950 border border-slate-800 rounded p-2 h-28 overflow-auto text-slate-300 whitespace-pre-wrap">
           {logLines.length ? logLines.join('\n') : 'No activity yet.'}
         </pre>
-      </section>
+      </details>
 
-      <section className="text-slate-500 leading-relaxed">
-        Not done here: ISP programming, fuses, EEPROM, bootloader updates and Caterina signature checks (AVR109 has no signature
-        command). Verification compares every written page with a read-back; nothing is reported as verified unless that pass matched.
-      </section>
+      <details className="text-slate-500">
+        <summary className="cursor-pointer px-1 text-slate-400">Limits</summary>
+        <p className="px-1 pt-1">
+          Not done here: ISP programming, fuses, EEPROM, bootloader updates and Caterina signature checks (AVR109 has no signature
+          command). Verification compares every written page with a read-back; nothing is reported as verified unless that pass matched.
+          UF2 files are parsed by the shared loader but not checked against this board's family, so pick .hex or .bin.
+        </p>
+      </details>
     </div>
   );
 }
