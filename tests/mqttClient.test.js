@@ -6,6 +6,7 @@ import {
   decodePacket, decodeBody, parseFrame, MqttStreamParser, MqttProtocolError, MqttClient,
   matchTopic, topicNameError, topicFilterError, brokerUrlError, mixedContentWarning,
   stripProfileSecrets, saveProfiles, loadProfiles, PROFILE_STORAGE_KEY, prettyJson, hexDump, parseHex,
+  parseBase64, diffLines, mqttxCommand, bytesToBase64,
 } from '../src/utils/mqttClient.js';
 
 // Compare bytes as lowercase space-separated hex, so each expected value is readable
@@ -474,5 +475,45 @@ describe('MqttClient over a fake WebSocket', () => {
     ws.onclose?.({ code: 1006, reason: '' });
     await expect(p).rejects.toThrow(/Connection closed/);
     expect(client.state).toBe('disconnected');
+  });
+});
+
+describe('base64 payloads', () => {
+  it('round-trips bytes and accepts URL-safe/unpadded input', () => {
+    const b = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0xfb]);
+    expect(Array.from(parseBase64(bytesToBase64(b)))).toEqual(Array.from(b));
+    expect(Array.from(parseBase64('3q2-7_s'))).toEqual(Array.from(b));
+    expect(parseBase64('').length).toBe(0);
+  });
+  it('rejects invalid base64', () => {
+    expect(() => parseBase64('a$b')).toThrow(/base64/);
+  });
+});
+
+const NL = String.fromCharCode(10);
+describe('diffLines', () => {
+  it('marks added, removed and unchanged lines', () => {
+    const d = diffLines(['{', '  "a": 1,', '  "b": 2', '}'].join(NL), ['{', '  "a": 1,', '  "b": 3', '}'].join(NL));
+    expect(d.filter((x) => x.type === 'del').map((x) => x.text)).toEqual(['  "b": 2']);
+    expect(d.filter((x) => x.type === 'add').map((x) => x.text)).toEqual(['  "b": 3']);
+    expect(d.filter((x) => x.type === 'same').length).toBe(3);
+  });
+  it('reports identical text as all same', () => {
+    expect(diffLines('x', 'x')).toEqual([{ type: 'same', text: 'x' }]);
+  });
+});
+
+describe('mqttxCommand', () => {
+  it('builds a subscribe command for a wss broker without the password', () => {
+    const c = mqttxCommand('sub', { url: 'wss://broker.hivemq.com:8884/mqtt', clientId: 'c1', username: 'u', filters: ['a/#', 'b/+'], qos: 1 });
+    expect(c).toBe("mqttx sub -l wss -h 'broker.hivemq.com' -p 8884 --path '/mqtt' -i 'c1' -u 'u' -P '<password>' -t 'a/#' -t 'b/+' -q 1");
+  });
+  it('builds a publish command and quotes single quotes', () => {
+    const c = mqttxCommand('pub', { url: 'ws://localhost:9001', topic: 't', payload: "it's", retain: true });
+    expect(c).toBe("mqttx pub -l ws -h 'localhost' -p 9001 -t 't' -q 0 -m 'it'\\''s' -r");
+  });
+  it('returns null for bad URLs or missing topic', () => {
+    expect(mqttxCommand('sub', { url: 'mqtt://x' })).toBeNull();
+    expect(mqttxCommand('pub', { url: 'ws://x' })).toBeNull();
   });
 });

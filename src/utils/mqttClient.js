@@ -613,6 +613,86 @@ export function bytesToBase64(bytes) {
   return btoa(s);
 }
 
+const NL = String.fromCharCode(10);
+
+/** Decode base64 text (whitespace and URL-safe characters tolerated) into bytes; throws on bad input. */
+export function parseBase64(text) {
+  const clean = String(text ?? '').replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  if (clean && !/^[A-Za-z0-9+/]*={0,2}$/.test(clean)) throw new Error('Not valid base64');
+  const padded = clean + '='.repeat((4 - (clean.length % 4)) % 4);
+  let bin;
+  try {
+    bin = atob(padded);
+  } catch {
+    throw new Error('Not valid base64');
+  }
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Line diff of two texts (longest common subsequence). Returns [{ type: 'same'|'add'|'del', text }].
+ * Used to compare a topic's previous payload with the latest one. Capped to keep it cheap.
+ */
+export function diffLines(before, after, maxLines = 400) {
+  const a = String(before ?? '').split(NL).slice(0, maxLines);
+  const b = String(after ?? '').split(NL).slice(0, maxLines);
+  const dp = Array.from({ length: a.length + 1 }, () => new Uint16Array(b.length + 1));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      out.push({ type: 'same', text: a[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ type: 'del', text: a[i++] });
+    } else {
+      out.push({ type: 'add', text: b[j++] });
+    }
+  }
+  while (i < a.length) out.push({ type: 'del', text: a[i++] });
+  while (j < b.length) out.push({ type: 'add', text: b[j++] });
+  return out;
+}
+
+const shq = (v) => "'" + String(v).split("'").join("'\\''") + "'";
+
+/**
+ * Build an MQTTX CLI command (npm i -g @emqx/mqttx-cli) equivalent to this connection. This is only
+ * text for the user to copy; nothing is executed. Passwords are never included (placeholder only).
+ */
+export function mqttxCommand(kind, { url, clientId, username, filters = [], qos = 0, topic, payload = '', retain = false } = {}) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const proto = u.protocol === 'wss:' ? 'wss' : u.protocol === 'ws:' ? 'ws' : null;
+  if (!proto) return null;
+  const parts = ['mqttx', kind, '-l', proto, '-h', shq(u.hostname), '-p', u.port || (proto === 'wss' ? '443' : '80')];
+  if (u.pathname && u.pathname !== '/') parts.push('--path', shq(u.pathname));
+  if (clientId) parts.push('-i', shq(clientId));
+  if (username) parts.push('-u', shq(username), '-P', "'<password>'");
+  if (kind === 'sub') {
+    for (const f of filters) parts.push('-t', shq(f));
+    parts.push('-q', String(qos));
+  } else {
+    if (!topic) return null;
+    parts.push('-t', shq(topic), '-q', String(qos), '-m', shq(payload));
+    if (retain) parts.push('-r');
+  }
+  return parts.join(' ');
+}
+
 // ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
