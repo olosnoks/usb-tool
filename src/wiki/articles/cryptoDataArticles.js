@@ -80,11 +80,16 @@ Paste a token (\`header.payload.signature\`) into **Encoded token**. The three p
 
 > Decoding is not verification. Anyone can read a JWT payload; it is trustworthy only after the signature is verified with the right key and the claims are checked.
 
+### Copy buttons
+Under the encoded token: **Token**, **Payload** (decoded JSON), **curl** (a \`curl -H 'Authorization: Bearer ...' URL\` command; edit the URL box next to the buttons) and **jwt-cli** (an export command for the separate jwt-cli tool, \`jwt decode ...\`, to run in your terminal; it includes the verify-box secret when the token is HS* and the secret is typed as Text, so check it before sharing). The tool does not send requests itself.
+
 ### Header warnings
 Amber warnings flag risky header content: \`alg: none\` and case variants of it or of a real algorithm name, \`jku\`, \`x5u\`, an embedded \`jwk\` or \`x5c\` (the token telling the verifier which key to trust), and a \`kid\` with path, quote, SQL or shell characters. These describe how a verifier could be misled; a server should pin the algorithm and allow-list key sources.
 
 ### Claim checks
 Chips show \`exp\`, \`nbf\` and \`iat\` against your computer's clock (live "expires in" countdown). Optional boxes **expected iss**, **expected aud** and **expected sub** compare those claims to your expected values, and **leeway** (seconds) tolerates clock skew. These checks are independent of the signature: a token can be validly signed and expired, or unexpired and forged.
+
+A **lifetime bar** appears when the token has \`exp\` and a start (\`nbf\`, otherwise \`iat\`): it shows the start and expiry times, the total lifetime and the percentage used (green while valid, amber before \`nbf\`, red once expired). **Explain claims** lists every payload claim with a plain-English meaning for the standard ones (iss, sub, aud, exp, nbf, iat, jti, OIDC claims such as azp, nonce, auth_time, amr, plus scope, roles, groups and similar); other claims are labelled custom. Time claims also show as UTC dates.
 
 ### Verifying the signature
 Put the key in the verify box and press **Verify**:
@@ -109,6 +114,9 @@ Choose an algorithm (HS, RS, PS, ES, EdDSA, or **none (unsigned, testing only)**
 - HS tokens verify with the same secret that signed them; RS/PS/ES/EdDSA verify with the public key only.
 - A trailing newline in a secret makes a valid HS token fail; check the encoding setting too.
 - Certificates and bare public keys are accepted; private keys are the wrong input for verification.
+
+## Similar tools
+jwt.io (debugger and key handling), mike-engel's jwt-cli (terminal decode/encode), and browser decoders that load a JWKS. This tool adds the claim explanations, lifetime bar and copy-as-command buttons in one client-side page.
 `,
   },
   {

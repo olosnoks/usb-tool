@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { KeyRound, ShieldCheck, ShieldAlert, ShieldX, PenLine, Search, CloudDownload, Copy } from 'lucide-react';
-import { decodeJwt, analyzeClaims, verifyJwt, signJwt, headerWarnings, fetchJwks, fetchJwksForIssuer, SIGN_ALGS } from '../../utils/jwt.js';
+import { decodeJwt, analyzeClaims, verifyJwt, signJwt, headerWarnings, fetchJwks, fetchJwksForIssuer, SIGN_ALGS, explainClaims, tokenTimeline, fmtDuration, curlBearer, jwtCliCommand } from '../../utils/jwt.js';
 import { proxiedFetch, describeNetworkError } from '../../utils/netClient.js';
 
 /**
@@ -17,7 +17,7 @@ const SAMPLE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiw
 const COLORS = ['text-red-400', 'text-purple-400', 'text-sky-400'];
 const ENCODINGS = [['text', 'Text'], ['hex', 'Hex'], ['base64', 'Base64'], ['base64url', 'Base64url']];
 const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono';
-const btnCls = 'px-3 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1';
+const btnCls = 'px-2 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1';
 
 export default function JwtInspectorWorkbench({ onLogMessage }) {
   const [tab, setTab] = useState('decode');
@@ -59,6 +59,13 @@ export default function JwtInspectorWorkbench({ onLogMessage }) {
     () => (decoded.value ? analyzeClaims(decoded.value.payload, nowSec, { leeway, iss: expIss, aud: expAud, sub: expSub }) : []),
     [decoded.value, nowSec, leeway, expIss, expAud, expSub],
   );
+  const timeline = useMemo(() => {
+    const t = decoded.value ? tokenTimeline(decoded.value.payload, nowSec) : null;
+    return t ? { ...t, startLabel: Number.isFinite(decoded.value.payload.nbf) ? 'nbf' : 'iat' } : null;
+  }, [decoded.value, nowSec]);
+  const explained = useMemo(() => (decoded.value ? explainClaims(decoded.value.payload) : []), [decoded.value]);
+  const [apiUrl, setApiUrl] = useState('https://api.example.com/');
+  const copy = (text, what) => { navigator.clipboard?.writeText(text); onLogMessage?.(`JWT: copied ${what}`); };
   const warnings = useMemo(() => (decoded.value ? headerWarnings(decoded.value.header) : []), [decoded.value]);
   const alg = decoded.value?.header?.alg;
   const isHmac = /^HS/.test(typeof alg === 'string' ? alg : '');
@@ -123,7 +130,7 @@ export default function JwtInspectorWorkbench({ onLogMessage }) {
 
   return (
     <div className="w-full min-w-0 max-w-full text-gray-200">
-      <div className="flex rounded overflow-hidden border border-slate-800 text-xs w-fit mb-3">
+      <div className="flex rounded overflow-hidden border border-slate-800 text-xs w-fit mb-2">
         {[['decode', 'Decode / Verify', Search], ['sign', 'Encode / Sign', PenLine]].map(([id, label, Icon]) => (
           <button key={id} onClick={() => setTab(id)} className={`px-3 py-1.5 inline-flex items-center gap-1.5 ${tab === id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>
             <Icon size={13} /> {label}
@@ -132,7 +139,7 @@ export default function JwtInspectorWorkbench({ onLogMessage }) {
       </div>
 
       {tab === 'sign' && (
-        <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(20rem,1fr))]">
+        <div className="grid gap-2 grid-cols-1 @lg:grid-cols-2">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <label className="text-[10px] uppercase tracking-wide text-slate-500" htmlFor="jwt-sign-alg">Algorithm</label>
@@ -189,7 +196,7 @@ export default function JwtInspectorWorkbench({ onLogMessage }) {
 
       {tab === 'decode' && (
         <>
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(20rem,1fr))]">
+          <div className="grid gap-2 grid-cols-1 @lg:grid-cols-2">
             <div>
               <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Encoded token</div>
               <textarea
@@ -209,6 +216,15 @@ export default function JwtInspectorWorkbench({ onLogMessage }) {
                   <span className={COLORS[2]}>{parts[2]}</span>
                 </div>
               )}
+              {decoded.value && (
+                <div className="flex flex-wrap items-center gap-1 mt-1">
+                  <button onClick={() => copy(token.trim(), 'token')} title="Copy the token" className={btnCls}><Copy size={13} /> Token</button>
+                  <button onClick={() => copy(JSON.stringify(decoded.value.payload, null, 2), 'payload')} title="Copy the decoded payload as JSON" className={btnCls}><Copy size={13} /> Payload</button>
+                  <button onClick={() => copy(curlBearer(token, apiUrl), 'curl command')} title="Copy a curl command with Authorization: Bearer header" className={btnCls}><Copy size={13} /> curl</button>
+                  <button onClick={() => copy(jwtCliCommand(token, isHmac && secretEnc === 'text' && !key.trim().startsWith('{') ? key : ''), 'jwt-cli command')} title="Copy an export command for the jwt-cli tool (run it in your terminal)" className={btnCls}><Copy size={13} /> jwt-cli</button>
+                  <input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} aria-label="URL for the curl command" className={`flex-1 min-w-[8rem] ${inputCls}`} />
+                </div>
+              )}
               {decoded.error && <div className="mt-2 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{decoded.error}</div>}
             </div>
 
@@ -225,7 +241,7 @@ export default function JwtInspectorWorkbench({ onLogMessage }) {
           </div>
 
           {warnings.length > 0 && (
-            <div className="mt-3 space-y-1">
+            <div className="mt-2 space-y-1">
               {warnings.map((w) => (
                 <div key={w} className="p-2 border border-amber-800 rounded bg-amber-950/20 text-xs text-amber-300 flex items-start gap-1.5"><ShieldAlert size={14} className="shrink-0 mt-0.5" /> {w}</div>
               ))}
@@ -233,9 +249,9 @@ export default function JwtInspectorWorkbench({ onLogMessage }) {
           )}
 
           {decoded.value && (
-            <div className="mt-3">
+            <div className="mt-2">
               <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Claim checks (independent of the signature)</div>
-              <div className="flex flex-wrap items-center gap-2 mb-2 text-[11px]">
+              <div className="flex flex-wrap items-center gap-2 mb-1.5 text-[11px]">
                 <input value={expIss} onChange={(e) => setExpIss(e.target.value)} placeholder="expected iss" aria-label="Expected issuer" className={`w-44 ${inputCls}`} />
                 <input value={expAud} onChange={(e) => setExpAud(e.target.value)} placeholder="expected aud" aria-label="Expected audience" className={`w-44 ${inputCls}`} />
                 <input value={expSub} onChange={(e) => setExpSub(e.target.value)} placeholder="expected sub" aria-label="Expected subject" className={`w-44 ${inputCls}`} />
@@ -252,11 +268,37 @@ export default function JwtInspectorWorkbench({ onLogMessage }) {
                   ))}
                 </div>
               ) : <div className="text-xs text-slate-500">No exp / nbf / iat claims in this token. Enter expected iss / aud / sub above to check them.</div>}
+              {timeline && (
+                <div className="mt-1.5" aria-label="Token lifetime timeline">
+                  <div className="h-2 rounded bg-slate-800 overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(timeline.fraction * 100)}>
+                    <div className={`h-full ${timeline.state === 'expired' ? 'bg-red-500' : timeline.state === 'not-yet' ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${timeline.fraction * 100}%` }} />
+                  </div>
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-0.5 gap-2">
+                    <span>{timeline.startLabel} {new Date(timeline.start * 1000).toISOString().replace('.000', '')}</span>
+                    <span>lifetime {fmtDuration(timeline.lifetime)} · {Math.round(timeline.fraction * 100)}% used</span>
+                    <span>exp {new Date(timeline.end * 1000).toISOString().replace('.000', '')}</span>
+                  </div>
+                </div>
+              )}
+              <details className="mt-1.5">
+                <summary className="cursor-pointer text-[11px] text-slate-400 hover:text-slate-200">Explain claims ({explained.length})</summary>
+                <div className="mt-1 border border-slate-800 rounded divide-y divide-slate-800 text-[11px]">
+                  {explained.map((c) => (
+                    <div key={c.claim} className="p-1.5 flex flex-col @md:flex-row @md:gap-2">
+                      <code className="text-purple-300 shrink-0 @md:w-28 break-all">{c.claim}</code>
+                      <div className="min-w-0">
+                        <div className="text-slate-300 break-all">{c.name ? `${c.name}: ` : 'Custom claim: '}{typeof c.value === 'object' ? JSON.stringify(c.value) : String(c.value)}{c.time ? ` (${c.time})` : ''}</div>
+                        {c.description && <div className="text-slate-500">{c.description}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
             </div>
           )}
 
           {decoded.value && (
-            <div className="mt-3">
+            <div className="mt-2">
               <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Verify signature {alg && <span className="text-slate-400">· alg: {String(alg)}</span>}</div>
               {typeof alg === 'string' && alg.toLowerCase() === 'none' && (
                 <div className="mb-2 p-2 border border-amber-800 rounded bg-amber-950/20 text-xs text-amber-300 flex items-center gap-1.5">
@@ -304,10 +346,11 @@ export default function JwtInspectorWorkbench({ onLogMessage }) {
               {verifyResult && verifyResult.warnings?.filter((w) => !warnings.includes(w)).map((w) => (
                 <div key={w} className="mt-1 p-2 border border-amber-800 rounded bg-amber-950/20 text-xs text-amber-300 flex items-start gap-1.5"><ShieldAlert size={14} className="shrink-0 mt-0.5" /> {w}</div>
               ))}
+              <details className="mt-1"><summary className="cursor-pointer text-[10px] text-slate-500">Key help</summary>
               <p className="text-[10px] text-slate-500 mt-1">
                 HS* uses the shared secret; RS*/PS*/ES*/EdDSA use the <strong>public</strong> key (PEM SPKI, certificate, JWK or JWKS). Verification runs in
                 the browser via Web Crypto — the secret/key never leaves this page. The signature result clears whenever the token, key or encoding changes.
-              </p>
+              </p></details>
             </div>
           )}
         </>
