@@ -82,3 +82,85 @@ export async function releaseDevice(device, claimed) {
   }
   try { await device.close(); } catch { /* already closed */ }
 }
+
+const EOL_BYTES = { none: [], cr: [0x0d], lf: [0x0a], crlf: [0x0d, 0x0a] };
+
+/**
+ * Build an OUT payload from the text box. mode 'hex' uses parseHexPayload; mode 'ascii' sends the
+ * characters as UTF-8 (backslash escapes for n, r, t, 0, backslash and xNN are honoured). eol appends CR / LF / CRLF.
+ */
+export function buildPayload(text, mode = 'hex', eol = 'none') {
+  const suffix = EOL_BYTES[eol];
+  if (!suffix) throw new Error(`Unknown line ending "${eol}".`);
+  let body;
+  if (mode === 'ascii') {
+    const raw = String(text ?? '');
+    if (!raw.length) throw new Error('Enter some text to send.');
+    const out = [];
+    const enc = new TextEncoder();
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (ch === '\\' && i + 1 < raw.length) {
+        const n = raw[i + 1];
+        const map = { n: 0x0a, r: 0x0d, t: 0x09, 0: 0x00, '\\': 0x5c };
+        if (n in map) { out.push(map[n]); i++; continue; }
+        const m = /^x([0-9a-fA-F]{2})/.exec(raw.slice(i + 1, i + 4));
+        if (m) { out.push(parseInt(m[1], 16)); i += 3; continue; }
+      }
+      out.push(...enc.encode(ch.codePointAt(0) > 0xffff ? raw.slice(i, i + 2) : ch));
+      if (ch.codePointAt(0) > 0xffff) i++;
+    }
+    body = out;
+  } else if (mode === 'hex') {
+    body = Array.from(parseHexPayload(text));
+  } else {
+    throw new Error(`Unknown payload mode "${mode}".`);
+  }
+  return Uint8Array.from([...body, ...suffix]);
+}
+
+export function bytesToHex(bytes) {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+}
+
+export function bytesToAscii(bytes) {
+  return Array.from(bytes).map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '.')).join('');
+}
+
+/** Plain-text export of the inbound packet log (oldest first; the UI keeps newest first). */
+export function formatCaptureLog(entries, endpointLabel = '') {
+  const lines = [`# USB IN capture${endpointLabel ? ` on ${endpointLabel}` : ''}`, `# ${entries.length} packet(s), ${entries.reduce((n, e) => n + e.len, 0)} byte(s)`];
+  for (const e of [...entries].reverse()) lines.push(`[${e.time}] ${e.len}B  ${e.hex}  |${e.ascii}|`);
+  return lines.join('\n') + '\n';
+}
+
+/** Text report of an interrogated device: identifiers, chip database match and the interface/endpoint map. */
+export function buildAutopsyReport(info, interfaces = []) {
+  if (!info) return '';
+  const hex2 = (n) => (n == null ? '??' : `0x${n.toString(16).padStart(2, '0').toUpperCase()}`);
+  const lines = [
+    'USB device autopsy (WebUSB, as reported by the browser)',
+    `Product:      ${info.productName}`,
+    `Manufacturer: ${info.manufacturerName}`,
+    `VID:PID:      ${info.vidHex.slice(2)}:${info.pidHex.slice(2)}`,
+    `USB version:  ${info.usbVersion}`,
+    `Serial:       ${info.serialNumber}`,
+    `Device class: ${hex2(info.deviceClass)}/${hex2(info.deviceSubclass)}/${hex2(info.deviceProtocol)}`
+  ];
+  if (info.intel) {
+    lines.push(`Chip match:   ${info.intel.known === false ? 'none in the built-in database' : info.intel.chip}`);
+    if (info.intel.known !== false && info.intel.notes) lines.push(`Notes:        ${info.intel.notes}`);
+  }
+  lines.push('', 'Interfaces (first alternate setting):');
+  if (!interfaces.length) lines.push('  (none; the device has no active configuration)');
+  for (const i of interfaces) {
+    lines.push(`  #${i.interfaceNumber}  class ${hex2(i.interfaceClass)}/${hex2(i.interfaceSubclass)}/${hex2(i.interfaceProtocol)}  ${i.interfaceName}`);
+    for (const ep of i.endpoints) lines.push(`      ${describeEndpointOption(ep)}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/** Total bytes across packet entries. */
+export function totalBytes(entries) {
+  return entries.reduce((n, e) => n + e.len, 0);
+}

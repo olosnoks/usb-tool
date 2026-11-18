@@ -19,6 +19,9 @@ import {
   Eye, 
   BookOpen, 
   Download,
+  Copy,
+  Trash2,
+  Pause,
   ChevronRight,
   ChevronDown,
   ChevronUp
@@ -31,7 +34,13 @@ import {
   sendHexToEndpoint,
   readFromEndpoint,
   releaseDevice,
-  formatUsbVersion
+  formatUsbVersion,
+  buildPayload,
+  bytesToHex,
+  bytesToAscii,
+  formatCaptureLog,
+  buildAutopsyReport,
+  totalBytes
 } from '../utils/usbRecon';
 
 export default function UsbReconDeck({
@@ -56,7 +65,12 @@ export default function UsbReconDeck({
 
   // Raw Endpoint Communication State
   const [outPayload, setOutPayload] = useState('41 54 0D 0A'); // "AT\r\n" in hex
+  const [payloadMode, setPayloadMode] = useState('hex'); // 'hex' | 'ascii'
+  const [payloadEol, setPayloadEol] = useState('none'); // 'none' | 'cr' | 'lf' | 'crlf'
+  const [grantedDevices, setGrantedDevices] = useState([]);
   const [inTransferLog, setInTransferLog] = useState([]);
+  const [logPaused, setLogPaused] = useState(false);
+  const logPausedRef = useRef(false);
   const [isListening, setIsListening] = useState(false);
   const listenLoopRef = useRef(false);
   const deviceRef = useRef(null);
@@ -112,6 +126,39 @@ export default function UsbReconDeck({
       setForcerStatus('Requesting USB device access from user...');
       // Empty filters array allows selecting ANY connected USB device
       const device = await navigator.usb.requestDevice({ filters: [] });
+      await openDevice(device);
+    } catch (err) {
+      if (err.name !== 'NotFoundError') {
+        console.error('USB Interrogation error:', err);
+        setForcerStatus(`Interrogation error: ${err.message}`);
+        onLogMessage?.(`[USB ERROR] ${err.message}`, 'err');
+      }
+    }
+  };
+
+  // Devices this site already has permission for (no picker needed to re-open them).
+  const refreshGranted = async () => {
+    try {
+      setGrantedDevices(navigator.usb ? await navigator.usb.getDevices() : []);
+    } catch {
+      setGrantedDevices([]);
+    }
+  };
+  useEffect(() => { refreshGranted(); }, []);
+
+  const handleOpenGranted = async (index) => {
+    const device = grantedDevices[Number(index)];
+    if (!device) return;
+    try {
+      await openDevice(device);
+    } catch (err) {
+      setForcerStatus(`Interrogation error: ${err.message}`);
+      onLogMessage?.(`[USB ERROR] ${err.message}`, 'err');
+    }
+  };
+
+  const openDevice = async (device) => {
+    {
       await releaseAll();
       setClaimedInterfaces({});
       setInTransferLog([]);
@@ -180,12 +227,7 @@ export default function UsbReconDeck({
 
       setForcerStatus(`Connected to ${device.productName || 'USB Device'} (VID: 0x${vid.toString(16)} PID: 0x${pid.toString(16)})`);
       onLogMessage?.(`[USB RECON] Interrogated: ${device.productName} [${device.vendorId}:${device.productId}]`, 'sys');
-    } catch (err) {
-      if (err.name !== 'NotFoundError') {
-        console.error('USB Interrogation error:', err);
-        setForcerStatus(`Interrogation error: ${err.message}`);
-        onLogMessage?.(`[USB ERROR] ${err.message}`, 'err');
-      }
+      refreshGranted();
     }
   };
 
@@ -208,8 +250,8 @@ export default function UsbReconDeck({
   const handleTransferOut = async () => {
     if (!usbDevice || !currentEndpoint) return;
     try {
-      const data = await sendHexToEndpoint(usbDevice, currentEndpoint, selectedInterface, claimedRef.current, outPayload);
-      onLogMessage?.(`[USB OUT Ep:${currentEndpoint.endpointNumber}] Sent ${data.length} bytes: ${outPayload}`, 'tx');
+      const data = await sendHexToEndpoint(usbDevice, currentEndpoint, selectedInterface, claimedRef.current, bytesToHex(buildPayload(outPayload, payloadMode, payloadEol)));
+      onLogMessage?.(`[USB OUT Ep:${currentEndpoint.endpointNumber}] Sent ${data.length} bytes: ${bytesToHex(data)}`, 'tx');
       setForcerStatus(`Sent ${data.length} bytes to Endpoint ${currentEndpoint.endpointNumber} (OUT)`);
     } catch (err) {
       onLogMessage?.(`[USB TRANSFER ERROR] ${err.message}`, 'err');
@@ -237,14 +279,15 @@ export default function UsbReconDeck({
       try {
         const bytes = await readFromEndpoint(device, ep, ifaceNum, claimedRef.current);
         if (bytes.length > 0) {
-          const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-          const ascii = Array.from(bytes).map(b => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '.')).join('');
-          const time = new Date().toLocaleTimeString();
-
-          setInTransferLog(prev => [
-            { id: Date.now() + Math.random(), time, len: bytes.length, hex, ascii },
-            ...prev.slice(0, 49)
-          ]);
+          if (!logPausedRef.current) {
+            const hex = bytesToHex(bytes);
+            const ascii = bytesToAscii(bytes);
+            const time = new Date().toLocaleTimeString();
+            setInTransferLog(prev => [
+              { id: Date.now() + Math.random(), time, len: bytes.length, hex, ascii },
+              ...prev.slice(0, 199)
+            ]);
+          }
         }
       } catch (err) {
         if (!listenLoopRef.current) break;
@@ -260,6 +303,24 @@ export default function UsbReconDeck({
       }
     }
   };
+
+  const copyText = async (text, what) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setForcerStatus(`Copied ${what} to the clipboard.`);
+    } catch {
+      setForcerStatus('Clipboard is not available in this context.');
+    }
+  };
+  const downloadText = (text, name) => {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const autopsyFileName = () => deviceInfo ? `usb-autopsy-${deviceInfo.vidHex.slice(2).toLowerCase()}-${deviceInfo.pidHex.slice(2).toLowerCase()}.txt` : 'usb-autopsy.txt';
 
   // BOOTLOADER FORCERS
 
@@ -376,220 +437,193 @@ export default function UsbReconDeck({
     }, 40);
   };
 
-  return (
-    <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-slate-200 text-xs font-mono space-y-4">
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-        <div className="flex items-center gap-2">
-          <Usb className="w-5 h-5 text-amber-400" />
-          <div>
-            <h2 className="font-bold text-sm text-slate-100 uppercase tracking-wider flex items-center gap-2">
-              UNIVERSAL USB RECON // DEVICE AUTOPSY & BOOT FORCER
-              <span className="text-[10px] px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800 font-bold">
-                RAW WEBUSB INTERROGATOR
-              </span>
-            </h2>
-            <p className="text-[11px] text-slate-400">
-              Interrogate, fingerprint, and talk to any mystery USB device (smart vapes, unknown dongles, toys) or force target chips into bootloader mode.
-            </p>
-          </div>
-        </div>
+  const tabBtn = (id, label, active) => (
+    <button
+      key={id}
+      onClick={() => setActiveTab(id)}
+      className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
+        activeTab === id ? active : 'text-slate-400 hover:text-slate-200'
+      }`}
+    >
+      {label}
+    </button>
+  );
 
-        {/* Tab Switcher Pills */}
-        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-          <button
-            onClick={() => setActiveTab('interrogate')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'interrogate' ? 'bg-amber-600 text-white shadow-amber-glow' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            DEVICE AUTOPSY
-          </button>
-          <button
-            onClick={() => setActiveTab('forcer')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'forcer' ? 'bg-cyan-600 text-white shadow-cyan-glow' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            BOOTLOADER FORCERS
-          </button>
-          <button
-            onClick={() => setActiveTab('guide')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'guide' ? 'bg-purple-600 text-white shadow-purple-glow' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            VAPE & PCB TEARDOWN
-          </button>
-        </div>
+  const hex2 = (n) => (n == null ? '??' : `0x${n.toString(16).padStart(2, '0').toUpperCase()}`);
+
+  return (
+    <div className="text-slate-200 text-xs font-mono space-y-2">
+      {/* Tab switcher */}
+      <div className="flex flex-wrap items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 w-fit max-w-full">
+        {tabBtn('interrogate', 'DEVICE AUTOPSY', 'bg-amber-600 text-white')}
+        {tabBtn('forcer', 'BOOTLOADER FORCERS', 'bg-cyan-600 text-white')}
+        {tabBtn('guide', 'VAPE & PCB TEARDOWN', 'bg-purple-600 text-white')}
       </div>
 
       {/* Main Tab 1: Device Autopsy & Raw WebUSB Interrogation */}
       {activeTab === 'interrogate' && (
-        <div className="space-y-4">
-          {/* Action Trigger Banner */}
-          <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <span className="font-bold text-slate-100 text-xs block">
-                CONNECT & PROBE ANY PLUGGED-IN USB HARDWARE
-              </span>
-              <p className="text-[11px] text-slate-400">
-                Bypasses COM port restrictions. Works on mystery gadgets, smart vapes, DFU devices, and raw USB controllers.
-              </p>
-            </div>
-
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleInterrogateAnyUsb}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold shadow-amber-glow transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold transition-all"
+              title="Opens the browser's USB picker; works on any device, no filters"
             >
-              <Search className="w-4 h-4" />
+              <Search className="w-3.5 h-3.5" />
               <span>INTERROGATE ANY USB DEVICE</span>
             </button>
+            {grantedDevices.length > 0 && (
+              <label className="flex items-center gap-1 text-[10px] text-slate-400">
+                <span>Already allowed:</span>
+                <select
+                  value=""
+                  onChange={e => handleOpenGranted(e.target.value)}
+                  aria-label="Re-open a previously allowed USB device"
+                  className="bg-slate-900 border border-slate-800 rounded px-1.5 py-1 text-slate-200 max-w-[14rem]"
+                >
+                  <option value="">pick a device...</option>
+                  {grantedDevices.map((d, i) => (
+                    <option key={i} value={i}>
+                      {d.productName || 'USB device'} ({d.vendorId.toString(16).padStart(4, '0')}:{d.productId.toString(16).padStart(4, '0')})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
 
           {forcerStatus && (
-            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-cyan-300 font-mono text-[11px] flex items-center gap-2">
-              <Activity className="w-4 h-4 text-cyan-400 shrink-0" />
-              <span>{forcerStatus}</span>
+            <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-cyan-300 text-[11px] flex items-center gap-2">
+              <Activity className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span className="min-w-0 break-words">{forcerStatus}</span>
             </div>
           )}
 
           {deviceInfo ? (
-            <div className="grid grid-cols-1 @lg:grid-cols-3 gap-4">
-              {/* Left Column: Silicon Fingerprint & Descriptors */}
-              <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div className="grid grid-cols-1 @lg:grid-cols-3 gap-2">
+              {/* Silicon Fingerprint */}
+              <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 space-y-2 min-w-0">
+                <div className="flex items-center justify-between gap-1 border-b border-slate-800 pb-1.5">
                   <span className="font-bold text-slate-200 flex items-center gap-1.5">
-                    <Cpu className="w-4 h-4 text-amber-400" />
+                    <Cpu className="w-3.5 h-3.5 text-amber-400" />
                     SILICON FINGERPRINT
                   </span>
-                  {deviceInfo.intel?.known === false ? (
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-700 font-bold">
-                      UNKNOWN
-                    </span>
-                  ) : (
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">
-                      IDENTIFIED
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {deviceInfo.intel?.known === false ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-700 font-bold">UNKNOWN</span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">IDENTIFIED</span>
+                    )}
+                    <button
+                      onClick={() => copyText(buildAutopsyReport(deviceInfo, interfaces), 'the autopsy report')}
+                      title="Copy a text report (IDs, chip match, interfaces, endpoints)"
+                      aria-label="Copy autopsy report"
+                      className="p-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800"
+                    ><Copy className="w-3 h-3" /></button>
+                    <button
+                      onClick={() => downloadText(buildAutopsyReport(deviceInfo, interfaces), autopsyFileName())}
+                      title="Download the autopsy report as a .txt file"
+                      aria-label="Download autopsy report"
+                      className="p-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800"
+                    ><Download className="w-3 h-3" /></button>
+                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  <div>
-                    <span className="text-[10px] text-slate-500 uppercase block font-bold">PRODUCT:</span>
-                    <span className="text-sm font-bold text-white font-mono">{deviceInfo.productName}</span>
+                <div className="space-y-1.5">
+                  <div className="min-w-0">
+                    <span className="text-[10px] text-slate-500 uppercase block font-bold">PRODUCT</span>
+                    <span className="text-xs font-bold text-white break-words">{deviceInfo.productName}</span>
                   </div>
-
-                  <div>
-                    <span className="text-[10px] text-slate-500 uppercase block font-bold">MANUFACTURER:</span>
-                    <span className="text-slate-300 font-mono">{deviceInfo.manufacturerName}</span>
+                  <div className="min-w-0">
+                    <span className="text-[10px] text-slate-500 uppercase block font-bold">MANUFACTURER</span>
+                    <span className="text-slate-300 break-words">{deviceInfo.manufacturerName}</span>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2 bg-slate-950 p-2 rounded-lg border border-slate-800">
+                  <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1.5 rounded border border-slate-800">
                     <div>
-                      <span className="text-[10px] text-slate-500 block">VENDOR ID (VID)</span>
-                      <strong className="text-amber-400 text-xs font-mono">{deviceInfo.vidHex}</strong>
+                      <span className="text-[10px] text-slate-500 block">VID</span>
+                      <strong className="text-amber-400 text-xs">{deviceInfo.vidHex}</strong>
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-500 block">PRODUCT ID (PID)</span>
-                      <strong className="text-cyan-400 text-xs font-mono">{deviceInfo.pidHex}</strong>
+                      <span className="text-[10px] text-slate-500 block">PID</span>
+                      <strong className="text-cyan-400 text-xs">{deviceInfo.pidHex}</strong>
                     </div>
                   </div>
-
-                  <div className="p-2.5 rounded-lg bg-amber-950/30 border border-amber-900/50 space-y-1">
-                    <span className="text-[10px] text-amber-400 uppercase font-bold block">
-                      CHIP ANALYSIS:
-                    </span>
+                  <div className="p-2 rounded bg-amber-950/30 border border-amber-900/50 space-y-0.5">
+                    <span className="text-[10px] text-amber-400 uppercase font-bold block">CHIP ANALYSIS</span>
                     <p className="text-slate-200 font-bold text-[11px]">{deviceInfo.intel.chip}</p>
                     <p className="text-slate-400 text-[10px] leading-relaxed">{deviceInfo.intel.notes}</p>
-                    <p className="text-[10px] text-amber-300/80 pt-1">⚡ Operating Logic: {deviceInfo.intel.voltage}</p>
+                    <p className="text-[10px] text-amber-300/80">Operating logic: {deviceInfo.intel.voltage}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Center & Right Column: USB Interfaces & Endpoint Interrogator */}
-              <div className="@lg:col-span-2 bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              {/* Interfaces & endpoint I/O */}
+              <div className="@lg:col-span-2 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 space-y-2 min-w-0">
+                <div className="flex flex-wrap items-center justify-between gap-1 border-b border-slate-800 pb-1.5">
                   <span className="font-bold text-slate-200 flex items-center gap-1.5">
-                    <Layers className="w-4 h-4 text-cyan-400" />
-                    USB INTERFACES & ENDPOINT COMMUNICATOR
+                    <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                    INTERFACES & ENDPOINT I/O
                   </span>
-                  <span className="text-[10px] text-slate-400 font-mono">
+                  <span className="text-[10px] text-slate-400 break-all">
                     USB v{deviceInfo.usbVersion} | Serial: {deviceInfo.serialNumber}
                   </span>
                 </div>
 
-                {/* Interfaces Table */}
-                <div className="space-y-2">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">
-                    Enumerated Interfaces:
-                  </span>
-                  <div className="grid grid-cols-1 @sm:grid-cols-2 gap-2">
-                    {interfaces.map(iface => {
-                      const isClaimed = !!claimedInterfaces[iface.interfaceNumber];
-                      const isSelected = selectedInterface === iface.interfaceNumber;
-                      return (
-                        <div
-                          key={iface.interfaceNumber}
-                          onClick={() => {
-                            listenLoopRef.current = false;
-                            setIsListening(false);
-                            setSelectedInterface(iface.interfaceNumber);
-                            setSelectedEndpoint(iface.endpoints[0] ? endpointKey(iface.endpoints[0]) : null);
-                          }}
-                          className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                            isSelected 
-                              ? 'bg-slate-900 border-cyan-500/80 shadow-cyan-glow/20' 
-                              : 'bg-slate-950 border-slate-800 hover:border-slate-700'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="font-bold text-slate-200">
-                              Interface #{iface.interfaceNumber}
-                            </span>
-                            {isClaimed ? (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">
-                                CLAIMED
-                              </span>
-                            ) : (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleClaimInterface(iface.interfaceNumber);
-                                }}
-                                className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 font-bold transition-colors"
-                              >
-                                CLAIM
-                              </button>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-slate-400 space-y-0.5">
-                            <div>Class: <strong className="text-slate-300">0x{iface.interfaceClass?.toString(16).padStart(2, '0').toUpperCase()}</strong></div>
-                            <div>Endpoints: <strong className="text-cyan-400">{iface.endpoints.length} active</strong></div>
-                          </div>
+                <div className="grid grid-cols-1 @sm:grid-cols-2 gap-1.5">
+                  {interfaces.map(iface => {
+                    const isClaimed = !!claimedInterfaces[iface.interfaceNumber];
+                    const isSelected = selectedInterface === iface.interfaceNumber;
+                    return (
+                      <div
+                        key={iface.interfaceNumber}
+                        onClick={() => {
+                          listenLoopRef.current = false;
+                          setIsListening(false);
+                          setSelectedInterface(iface.interfaceNumber);
+                          setSelectedEndpoint(iface.endpoints[0] ? endpointKey(iface.endpoints[0]) : null);
+                        }}
+                        className={`p-2 rounded-lg border cursor-pointer transition-all ${
+                          isSelected ? 'bg-slate-900 border-cyan-500/80' : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-slate-200">Interface #{iface.interfaceNumber}</span>
+                          {isClaimed ? (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">CLAIMED</span>
+                          ) : (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleClaimInterface(iface.interfaceNumber); }}
+                              className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 font-bold transition-colors"
+                            >
+                              CLAIM
+                            </button>
+                          )}
                         </div>
-                      );
-                    })}
-                  </div>
+                        <div className="text-[10px] text-slate-400">
+                          Class <strong className="text-slate-300">{hex2(iface.interfaceClass)}</strong> | <strong className="text-cyan-400">{iface.endpoints.length}</strong> endpoint(s)
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
 
-                {/* Raw Endpoint Transmitter & Receiver */}
-                <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                {/* Raw endpoint transmitter & receiver */}
+                <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
                     <span className="font-bold text-slate-200 text-[11px] flex items-center gap-1.5">
                       <Terminal className="w-3.5 h-3.5 text-amber-400" />
-                      RAW ENDPOINT I/O STREAM
+                      RAW ENDPOINT I/O
                     </span>
-                    <div className="flex items-center gap-2 text-[10px]">
-                      <span>ENDPOINT:</span>
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                       <select
                         value={selectedEndpoint || ''}
+                        aria-label="Endpoint"
                         onChange={e => {
                           listenLoopRef.current = false;
                           setIsListening(false);
                           setSelectedEndpoint(e.target.value);
                         }}
-                        className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-cyber-cyan font-bold"
+                        className="bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 text-cyber-cyan font-bold"
                       >
                         {currentInterface?.endpoints.map(ep => (
                           <option key={endpointKey(ep)} value={endpointKey(ep)}>
@@ -599,7 +633,7 @@ export default function UsbReconDeck({
                       </select>
                       <button
                         onClick={toggleListening}
-                        className={`px-2.5 py-0.5 rounded font-bold transition-all ${
+                        className={`px-2 py-0.5 rounded font-bold transition-all ${
                           isListening ? 'bg-rose-600 text-white animate-pulse' : 'bg-emerald-600 text-white'
                         }`}
                       >
@@ -608,34 +642,89 @@ export default function UsbReconDeck({
                     </div>
                   </div>
 
-                  {/* Send Payload Input */}
-                  <div className="flex items-center gap-2">
+                  {/* Send payload */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <select
+                      value={payloadMode}
+                      onChange={e => setPayloadMode(e.target.value)}
+                      aria-label="Payload format"
+                      className="bg-slate-900 border border-slate-800 rounded px-1.5 py-1 text-[10px] text-slate-200"
+                    >
+                      <option value="hex">Hex</option>
+                      <option value="ascii">Text</option>
+                    </select>
                     <input
                       type="text"
-                      placeholder="Hex bytes (e.g. 41 54 0D 0A or 55 AA 01)"
+                      aria-label="Payload to send"
+                      placeholder={payloadMode === 'hex' ? 'Hex bytes (41 54 0D 0A)' : 'Text, escapes \\n \\r \\xNN allowed'}
                       value={outPayload}
                       onChange={e => setOutPayload(e.target.value)}
-                      className="flex-1 bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-cyber-cyan font-mono text-xs outline-none"
+                      className="flex-1 min-w-[8rem] bg-slate-900 border border-slate-800 rounded px-2 py-1 text-cyber-cyan font-mono text-xs outline-none focus:border-cyan-500"
                     />
+                    <select
+                      value={payloadEol}
+                      onChange={e => setPayloadEol(e.target.value)}
+                      aria-label="Line ending appended to the payload"
+                      title="Line ending appended after the payload"
+                      className="bg-slate-900 border border-slate-800 rounded px-1.5 py-1 text-[10px] text-slate-200"
+                    >
+                      <option value="none">no EOL</option>
+                      <option value="cr">+CR</option>
+                      <option value="lf">+LF</option>
+                      <option value="crlf">+CRLF</option>
+                    </select>
                     <button
                       onClick={handleTransferOut}
-                      className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition-colors shrink-0"
+                      className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition-colors shrink-0"
                     >
-                      SEND BYTES
+                      SEND
                     </button>
                   </div>
 
-                  {/* Inbound packets log */}
-                  <div className="bg-slate-900/60 rounded border border-slate-800/80 p-2 max-h-32 overflow-y-auto font-mono text-[10px] space-y-1">
+                  {/* Inbound log toolbar */}
+                  <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-400">
+                    <span>{inTransferLog.length} packet(s), {totalBytes(inTransferLog)} B{logPaused ? ' (log paused)' : ''}</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => { logPausedRef.current = !logPaused; setLogPaused(!logPaused); }}
+                        title={logPaused ? 'Resume logging packets' : 'Keep listening but stop adding packets to the log'}
+                        aria-label={logPaused ? 'Resume log' : 'Pause log'}
+                        className={`p-1 rounded border ${logPaused ? 'border-amber-600 text-amber-300' : 'border-slate-700 text-slate-300'} hover:bg-slate-800`}
+                      >{logPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}</button>
+                      <button
+                        onClick={() => copyText(formatCaptureLog(inTransferLog, currentEndpoint ? describeEndpointOption(currentEndpoint) : ''), 'the capture')}
+                        disabled={!inTransferLog.length}
+                        title="Copy the capture as text"
+                        aria-label="Copy capture"
+                        className="p-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+                      ><Copy className="w-3 h-3" /></button>
+                      <button
+                        onClick={() => downloadText(formatCaptureLog(inTransferLog, currentEndpoint ? describeEndpointOption(currentEndpoint) : ''), 'usb-in-capture.txt')}
+                        disabled={!inTransferLog.length}
+                        title="Download the capture as a .txt file"
+                        aria-label="Download capture"
+                        className="p-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+                      ><Download className="w-3 h-3" /></button>
+                      <button
+                        onClick={() => setInTransferLog([])}
+                        disabled={!inTransferLog.length}
+                        title="Clear the log"
+                        aria-label="Clear log"
+                        className="p-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+                      ><Trash2 className="w-3 h-3" /></button>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/60 rounded border border-slate-800/80 p-1.5 max-h-40 overflow-y-auto text-[10px] space-y-0.5">
                     {inTransferLog.length === 0 ? (
-                      <span className="text-slate-600">No raw packets received yet. Click LISTEN above to read endpoint.</span>
+                      <span className="text-slate-600">No packets yet. Claim the interface, pick an IN endpoint and press LISTEN.</span>
                     ) : (
                       inTransferLog.map(pkt => (
-                        <div key={pkt.id} className="flex items-start gap-2 border-b border-slate-800/40 pb-0.5">
-                          <span className="text-slate-500">[{pkt.time}]</span>
-                          <span className="text-emerald-400 font-bold">{pkt.len}B:</span>
-                          <span className="text-cyan-300 truncate">{pkt.hex}</span>
-                          <span className="text-slate-400 truncate">({pkt.ascii})</span>
+                        <div key={pkt.id} className="flex items-start gap-1.5 border-b border-slate-800/40 pb-0.5">
+                          <span className="text-slate-500 shrink-0">[{pkt.time}]</span>
+                          <span className="text-emerald-400 font-bold shrink-0">{pkt.len}B</span>
+                          <span className="text-cyan-300 break-all">{pkt.hex}</span>
+                          <span className="text-slate-400 break-all">({pkt.ascii})</span>
                         </div>
                       ))
                     )}
@@ -644,11 +733,11 @@ export default function UsbReconDeck({
               </div>
             </div>
           ) : (
-            <div className="p-8 text-center text-slate-500 bg-slate-900/40 rounded-xl border border-slate-800 space-y-2">
-              <Usb className="w-8 h-8 mx-auto opacity-30 text-amber-400 mb-1" />
-              <p className="font-bold text-slate-300">No raw USB device interrogated yet.</p>
+            <div className="p-4 text-center text-slate-500 bg-slate-900/40 rounded-lg border border-slate-800 space-y-1">
+              <Usb className="w-6 h-6 mx-auto opacity-30 text-amber-400" />
+              <p className="font-bold text-slate-300">No USB device interrogated yet.</p>
               <p className="text-[11px] text-slate-500 max-w-md mx-auto">
-                Plug in any USB cable, disposable vape, unknown microcontroller, or peripheral, then click "INTERROGATE ANY USB DEVICE" to inspect its inner silicon.
+                Plug in a mystery gadget, dongle or microcontroller and press the button above. WebUSB needs Chrome, Edge or Opera; interfaces the OS driver owns may refuse to be claimed.
               </p>
             </div>
           )}
@@ -657,8 +746,8 @@ export default function UsbReconDeck({
 
       {/* Main Tab 2: The Universal Bootloader Forcer */}
       {activeTab === 'forcer' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-1">
+        <div className="space-y-2">
+          <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 space-y-1">
             <span className="font-bold text-slate-100 text-xs flex items-center gap-1.5">
               <Zap className="w-4 h-4 text-cyan-400" />
               HARDWARE KNOCKS & BOOTLOADER TRIGGER SEQUENCES
@@ -668,9 +757,9 @@ export default function UsbReconDeck({
             </p>
           </div>
 
-          <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-2">
             {/* Forcer 1: 1200-Baud CDC Magic Knock */}
-            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-3">
+            <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-2">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-200">1200-Baud CDC Knock</span>
@@ -686,7 +775,7 @@ export default function UsbReconDeck({
               <button
                 onClick={handle1200BaudKnock}
                 disabled={!isConnected || isExecutingForcer}
-                className={`w-full py-2 rounded-lg font-bold text-xs transition-all ${
+                className={`w-full py-1.5 rounded-lg font-bold text-xs transition-all ${
                   !isConnected 
                     ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500' 
                     : 'bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 text-slate-950 shadow-cyan-glow'
@@ -697,7 +786,7 @@ export default function UsbReconDeck({
             </div>
 
             {/* Forcer 2: ESP32 Hardware Strapping */}
-            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-3">
+            <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-2">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-200">ESP32 Boot Strapping</span>
@@ -713,7 +802,7 @@ export default function UsbReconDeck({
               <button
                 onClick={handleEsp32BootStrapping}
                 disabled={!isConnected || isExecutingForcer}
-                className={`w-full py-2 rounded-lg font-bold text-xs transition-all ${
+                className={`w-full py-1.5 rounded-lg font-bold text-xs transition-all ${
                   !isConnected 
                     ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500' 
                     : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 shadow-amber-glow'
@@ -724,7 +813,7 @@ export default function UsbReconDeck({
             </div>
 
             {/* Forcer 3: DFU Detach Knock */}
-            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-3">
+            <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-2">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-200">USB DFU Detach Knock</span>
@@ -740,7 +829,7 @@ export default function UsbReconDeck({
               <button
                 onClick={handleDfuDetachKnock}
                 disabled={!usbDevice || isExecutingForcer}
-                className={`w-full py-2 rounded-lg font-bold text-xs transition-all ${
+                className={`w-full py-1.5 rounded-lg font-bold text-xs transition-all ${
                   !usbDevice 
                     ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500' 
                     : 'bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-400 text-white shadow-purple-glow'
@@ -751,7 +840,7 @@ export default function UsbReconDeck({
             </div>
 
             {/* Forcer 4: Autoboot Abort Storm (U-Boot) */}
-            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-3">
+            <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-2">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-200">Autoboot Abort Storm</span>
@@ -767,7 +856,7 @@ export default function UsbReconDeck({
               <button
                 onClick={handleAutobootAbortStorm}
                 disabled={!isConnected}
-                className={`w-full py-2 rounded-lg font-bold text-xs transition-all ${
+                className={`w-full py-1.5 rounded-lg font-bold text-xs transition-all ${
                   !isConnected 
                     ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500' 
                     : 'bg-rose-600 hover:bg-rose-500 text-white'
@@ -778,7 +867,7 @@ export default function UsbReconDeck({
             </div>
 
             {/* Forcer 5: Reboot Commands Storm */}
-            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-3">
+            <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-2">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-200">Reboot Strings Storm</span>
@@ -794,7 +883,7 @@ export default function UsbReconDeck({
               <button
                 onClick={handleRebootStringsStorm}
                 disabled={!isConnected}
-                className={`w-full py-2 rounded-lg font-bold text-xs transition-all ${
+                className={`w-full py-1.5 rounded-lg font-bold text-xs transition-all ${
                   !isConnected 
                     ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500' 
                     : 'bg-emerald-600 hover:bg-emerald-500 text-white'
@@ -806,7 +895,7 @@ export default function UsbReconDeck({
           </div>
 
           {forcerStatus && (
-            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-cyan-300 font-mono text-[11px] flex items-center gap-2">
+            <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-cyan-300 font-mono text-[11px] flex items-center gap-2">
               <Activity className="w-4 h-4 text-cyan-400 shrink-0" />
               <span>{forcerStatus}</span>
             </div>
@@ -816,8 +905,8 @@ export default function UsbReconDeck({
 
       {/* Main Tab 3: Mystery Hardware & Smart Vape Teardown Guide */}
       {activeTab === 'guide' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-1">
+        <div className="space-y-2">
+          <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 space-y-1">
             <span className="font-bold text-slate-100 text-xs flex items-center gap-1.5">
               <BookOpen className="w-4 h-4 text-purple-400" />
               HOW TO TALK TO SMART VAPES & MYSTERY USB HARDWARE
@@ -827,14 +916,14 @@ export default function UsbReconDeck({
             </p>
           </div>
 
-          <div className="grid grid-cols-1 @md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 @md:grid-cols-2 gap-2">
             {/* Step 1: Power & Battery Safety */}
-            <div className={`border rounded-xl transition-all overflow-hidden ${
+            <div className={`border rounded-lg transition-all overflow-hidden ${
               openGuideSteps.step1 ? 'bg-slate-900 border-rose-500/50' : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
             }`}>
               <div 
                 onClick={() => toggleGuideStep('step1')}
-                className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
+                className="p-2.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
               >
                 <div className="flex items-center gap-2 text-rose-400 font-bold text-xs">
                   <AlertTriangle className="w-4 h-4" />
@@ -846,7 +935,7 @@ export default function UsbReconDeck({
                 </div>
               </div>
               {openGuideSteps.step1 && (
-                <div className="p-3.5 border-t border-slate-800/80 bg-slate-950/60">
+                <div className="p-2.5 border-t border-slate-800/80 bg-slate-950/60">
                   <p className="text-slate-300 text-[11px] leading-relaxed">
                     Smart vapes contain a 3.7V Lithium-Polymer pouch cell (typically 500mAh - 850mAh). Never puncture or short the cell. 
                     When opening the casing, safely desolder the battery negative wire before probing logic lines to prevent accidental shorts.
@@ -856,12 +945,12 @@ export default function UsbReconDeck({
             </div>
 
             {/* Step 2: Locating GND & Power Rails */}
-            <div className={`border rounded-xl transition-all overflow-hidden ${
+            <div className={`border rounded-lg transition-all overflow-hidden ${
               openGuideSteps.step2 ? 'bg-slate-900 border-amber-500/50' : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
             }`}>
               <div 
                 onClick={() => toggleGuideStep('step2')}
-                className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
+                className="p-2.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
               >
                 <div className="flex items-center gap-2 text-amber-400 font-bold text-xs">
                   <Zap className="w-4 h-4" />
@@ -873,7 +962,7 @@ export default function UsbReconDeck({
                 </div>
               </div>
               {openGuideSteps.step2 && (
-                <div className="p-3.5 border-t border-slate-800/80 bg-slate-950/60">
+                <div className="p-2.5 border-t border-slate-800/80 bg-slate-950/60">
                   <p className="text-slate-300 text-[11px] leading-relaxed">
                     <strong>GND:</strong> Put your multimeter in continuity mode. The metal shell of the USB-C port is always connected to PCB GND.
                     <br />
@@ -886,12 +975,12 @@ export default function UsbReconDeck({
             </div>
 
             {/* Step 3: Finding UART Serial Pads */}
-            <div className={`border rounded-xl transition-all overflow-hidden ${
+            <div className={`border rounded-lg transition-all overflow-hidden ${
               openGuideSteps.step3 ? 'bg-slate-900 border-cyan-500/50' : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
             }`}>
               <div 
                 onClick={() => toggleGuideStep('step3')}
-                className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
+                className="p-2.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
               >
                 <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs">
                   <Terminal className="w-4 h-4" />
@@ -903,7 +992,7 @@ export default function UsbReconDeck({
                 </div>
               </div>
               {openGuideSteps.step3 && (
-                <div className="p-3.5 border-t border-slate-800/80 bg-slate-950/60">
+                <div className="p-2.5 border-t border-slate-800/80 bg-slate-950/60">
                   <p className="text-slate-300 text-[11px] leading-relaxed">
                     Most smart vape PCBs have 3 to 5 unpopulated gold circular test pads near the microcontroller:
                     <br />
@@ -918,12 +1007,12 @@ export default function UsbReconDeck({
             </div>
 
             {/* Step 4: Finding SWD Debug Pads */}
-            <div className={`border rounded-xl transition-all overflow-hidden ${
+            <div className={`border rounded-lg transition-all overflow-hidden ${
               openGuideSteps.step4 ? 'bg-slate-900 border-purple-500/50' : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
             }`}>
               <div 
                 onClick={() => toggleGuideStep('step4')}
-                className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
+                className="p-2.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-800/40"
               >
                 <div className="flex items-center gap-2 text-purple-400 font-bold text-xs">
                   <Cpu className="w-4 h-4" />
@@ -935,7 +1024,7 @@ export default function UsbReconDeck({
                 </div>
               </div>
               {openGuideSteps.step4 && (
-                <div className="p-3.5 border-t border-slate-800/80 bg-slate-950/60">
+                <div className="p-2.5 border-t border-slate-800/80 bg-slate-950/60">
                   <p className="text-slate-300 text-[11px] leading-relaxed">
                     To dump the flash memory or upload your own game / custom screen animation:
                     <br />

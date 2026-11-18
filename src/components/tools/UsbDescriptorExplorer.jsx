@@ -160,16 +160,19 @@ export default function UsbDescriptorExplorer() {
     : { status: 'offline', value: 'Idle' };
 
   return (
-    <div className="space-y-4 font-mono text-xs">
+    <div className="space-y-2 font-mono text-xs">
 
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
           <div>
-            <p className="text-[11px] text-slate-400 max-w-3xl">
-              A WebUSB "lsusb -v": pick any USB device and read its raw device, configuration, BOS and string
-              descriptors, with class / subclass / protocol codes and class-specific descriptors decoded. Read-only:
-              it only issues standard GET_DESCRIPTOR reads and never writes to the device.
-            </p>
+            <details className="text-[11px] text-slate-400 max-w-3xl">
+              <summary className="cursor-pointer hover:text-slate-200">WebUSB "lsusb -v" (read-only)</summary>
+              <p className="mt-1">
+                Pick any USB device and read its raw device, configuration, BOS and string descriptors, with
+                class / subclass / protocol codes and class-specific descriptors decoded. It only issues standard
+                GET_DESCRIPTOR reads and never writes to the device.
+              </p>
+            </details>
           </div>
           <StatusBadge status={badge.status} label="USB" value={badge.value} />
         </div>
@@ -217,7 +220,7 @@ export default function UsbDescriptorExplorer() {
 
       {info && (
         <>
-          <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+          <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 shadow-xl space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
               <span className="font-bold text-slate-200 flex items-center gap-2">
                 <Cpu className="w-4 h-4 text-cyan-400" /> {info.vendorIdHex}:{info.productIdHex}
@@ -273,7 +276,7 @@ export default function UsbDescriptorExplorer() {
             const rc = rawConfigFor(cfg.value);
             const p = rc?.parsed;
             return (
-              <div key={cfg.value} className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
+              <div key={cfg.value} className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 shadow-xl space-y-2">
                 <span className="font-bold text-slate-200">Configuration {cfg.value}{cfg.name ? ` — ${cfg.name}` : ''}</span>
                 {p && (
                   <div className="flex flex-wrap gap-1.5 text-[10px]">
@@ -401,7 +404,7 @@ function capSummary(cap) {
 
 function Section({ title, children }) {
   return (
-    <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
+    <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 shadow-xl space-y-2">
       <span className="font-bold text-slate-200">{title}</span>
       {children}
     </div>
