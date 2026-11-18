@@ -352,7 +352,7 @@ EXCVADDR: 0x00000000  LBEG    : 0x4000c2e0  LEND    : 0x4000c2f6  LCOUNT  : 0x00
 
 Hexadecimal addresses in register dumps (e.g. \`PC: 0x400d1820\`) are difficult to correlate with source code without the compiler's symbol table.
 
-The deck does not parse addresses or build this command for you. Copy the dump with **COPY DUMP**, pick out the addresses, and resolve them yourself with GNU Binutils:
+The deck cannot resolve symbols itself (a browser has no access to your ELF file). It can build the command for you: when an incident's text contains code addresses, an **ADDR2LINE** button appears on its card. It copies a ready-to-run command using the toolchain and ELF path set under **Symbol lookup command** (see below). Run it in your own terminal. Written by hand, the command looks like this:
 
 \`\`\`bash
 xtensa-esp32-elf-addr2line -pfiaC -e build/my_project.elf 0x400d1820 0x400d195c
@@ -385,6 +385,20 @@ Each pattern chip also shows a counter of how many times it has matched.
 The Deck keeps a rolling buffer of the last ~4 KB of received text and matches against it, so a signature split across two serial chunks is still caught, and one panic fires only once even though it stays in the buffer. Only the first matching pattern counts per received chunk. The stored text starts a little before the match and runs to the end of the buffer.
 
 **Editing the watch list**: remove a pattern with its x, or type a new one in the **+ text or /regex/i** box and press Enter. Plain entries are matched as case-insensitive text; an entry written as \`/pattern/flags\` (for example \`/guru\s+meditation/i\`) is treated as a regular expression. If the regex is invalid, it is matched as plain text and a small warning is shown. The list is saved in this browser (local storage) and restored when you reopen the window.
+
+**Presets**: the **+ Add preset...** menu above the chips adds a ready-made set of signatures to your list without removing or duplicating anything: ESP32 / ESP-IDF, ESP8266, ARM Cortex-M / Zephyr, Linux / U-Boot, Arduino / AVR, and MicroPython / CircuitPython. Remove the ones you do not want with their x. Presets like \`Backtrace:\` or \`Traceback (most recent call last)\` are broad, so expect extra matches on firmware that prints them during normal operation.
+
+**Cooldown**: the **cooldown N s** box (default 0 = off, up to 600) stops alarm storms from a boot loop. After an alert sounds, further matches inside the window are still logged and counted, and the session log notes "(cooldown: no alarm)", but they do not play the chime or pause the terminal again. Desktop notifications and the title flash are not affected by the cooldown.
+
+**Exception cause**: for ESP-IDF Guru Meditation lines, the cause in brackets (for example \`LoadProhibited\`) is shown on the incident card.
+
+**Exporting the log**: when there is at least one incident, **TXT** and **JSON** buttons download the current log (time, signature and text for each incident) as a file. The log is held in memory only and is lost when the window closes, so export it if you need it.
+
+**Symbol lookup command (addr2line)**: a collapsed section with a toolchain choice (ESP32, ESP32-S3, ESP32-C3, ESP8266, ARM, or plain \`addr2line\`) and the path to your ELF file. Addresses are read from the PC half of \`Backtrace: 0xPC:0xSP\` pairs and from values labelled PC, EPC, MEPC, RA, LR or A0. Duplicates and addresses below 0x1000 are skipped. Check that the toolchain matches your chip, and use the ELF built from the same firmware that crashed, or the lines will be wrong.
+
+**Similar tools**: the Arduino ESP Exception Decoder extension, the PlatformIO \`esp32_exception_decoder\` monitor filter and \`idf.py monitor\` decode addresses automatically because they run locally with your toolchain. This deck runs in the browser and only detects, alerts and prepares the command.
+
+**Needs**: a serial connection opened in the terminal (Web Serial, Chromium-based browsers). Notifications need browser permission.
 
 ---
 

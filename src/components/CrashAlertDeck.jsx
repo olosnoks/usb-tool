@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ShieldAlert, Volume2, VolumeX, Copy, Check, Pause, Bell, BellOff } from 'lucide-react';
+import { ShieldAlert, Volume2, VolumeX, Copy, Check, Pause, Bell, BellOff, Download, Terminal } from 'lucide-react';
 import { alertSynth } from '../utils/audioAlert';
 import { useSerial } from '../context/SerialContext';
+import {
+  PATTERN_PRESETS, mergePatterns, extractAddresses, buildAddr2line, extractExceptionCause,
+  shouldAct, formatLogText, formatLogJson, TOOLCHAINS
+} from '../utils/crashAlertUtils';
 
 const DEFAULT_PATTERNS = [
   'Guru Meditation Error',
@@ -92,6 +96,10 @@ export default function CrashAlertDeck({
   const [crashHistory, setCrashHistory] = useState([]);
   const [counters, setCounters] = useState({});
   const [copiedId, setCopiedId] = useState(null);
+  const [cooldownSec, setCooldownSec] = useState(0);
+  const [toolchain, setToolchain] = useState('esp32');
+  const [elfPath, setElfPath] = useState('build/firmware.elf');
+  const lastActRef = useRef(null);
 
   const [patternWarning, setPatternWarning] = useState('');
   const tailRef = useRef('');
@@ -100,7 +108,7 @@ export default function CrashAlertDeck({
 
   // The receive callback outlives renders, so it reads the latest settings through a ref.
   const liveRef = useRef({});
-  liveRef.current = { compiled, audioEnabled, autoPauseEnabled, notifyEnabled, contextLines, onPauseTerminal, onLogMessage };
+  liveRef.current = { compiled, audioEnabled, autoPauseEnabled, notifyEnabled, contextLines, cooldownSec, onPauseTerminal, onLogMessage };
 
   useEffect(() => {
     try { localStorage.setItem(PATTERNS_KEY, JSON.stringify(activePatterns)); } catch { /* storage unavailable */ }
@@ -162,9 +170,11 @@ export default function CrashAlertDeck({
       setCounters(prev => ({ ...prev, [hit.pattern]: (prev[hit.pattern] || 0) + 1 }));
       pendingContextRef.current = live.contextLines > 0 ? { id, remaining: live.contextLines } : null;
 
-      if (live.audioEnabled) alertSynth.playCrashAlarm();
-      if (live.autoPauseEnabled && live.onPauseTerminal) live.onPauseTerminal(true);
-      live.onLogMessage?.(`[CRASH ALERT] Matched signature "${hit.pattern}" @ ${time}!`, 'sys');
+      const act = shouldAct(lastActRef.current, now.getTime(), live.cooldownSec);
+      if (act) lastActRef.current = now.getTime();
+      if (act && live.audioEnabled) alertSynth.playCrashAlarm();
+      if (act && live.autoPauseEnabled && live.onPauseTerminal) live.onPauseTerminal(true);
+      live.onLogMessage?.(`[CRASH ALERT] Matched signature "${hit.pattern}" @ ${time}!${act ? '' : ' (cooldown: no alarm)'}`, 'sys');
 
       if (typeof document !== 'undefined' && document.hidden) {
         if (live.notifyEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
@@ -199,80 +209,121 @@ export default function CrashAlertDeck({
     setActivePatterns(prev => prev.filter(p => p !== pat));
   };
 
+  const addPreset = (name) => {
+    if (!PATTERN_PRESETS[name]) return;
+    setActivePatterns((prev) => mergePatterns(prev, PATTERN_PRESETS[name]));
+  };
+
+  const downloadLog = (kind) => {
+    const body = kind === 'json' ? formatLogJson(crashHistory) : formatLogText(crashHistory);
+    const blob = new Blob([body], { type: kind === 'json' ? 'application/json' : 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `crash-log-${new Date().toISOString().replace(/[:.]/g, '-')}.${kind === 'json' ? 'json' : 'txt'}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const copyAddr2line = (crash) => {
+    const addrs = extractAddresses(crash.snippet);
+    if (!addrs.length) return;
+    navigator.clipboard.writeText(buildAddr2line(addrs, { toolchain, elf: elfPath }));
+    setCopiedId(`a2l-${crash.id}`);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
   const copyCrashSnippet = (crash) => {
     navigator.clipboard.writeText(crash.snippet);
     setCopiedId(crash.id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const tgl = (on, cls) => `flex items-center gap-1 px-2 py-1 rounded-lg border transition-all ${on ? cls : 'bg-slate-900 text-slate-500 border-slate-800'}`;
+  const inp = 'bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-slate-300 outline-none focus:border-rose-500';
+
   return (
-    <div className="bg-cyber-darkest border border-cyber-border rounded-xl shadow-xl p-4 flex flex-col gap-3 font-mono text-xs">
-      {/* Title Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-cyber-border">
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="w-4 h-4 text-rose-500 animate-pulse" />
-          <h2 className="font-bold text-slate-100 tracking-wider">HARDWARE CRASH TRIGGER & AUDIO ALERT WATCHER</h2>
-        </div>
+    <div className="flex flex-col gap-2 font-mono text-xs">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={() => setAudioEnabled(!audioEnabled)}
+          aria-pressed={audioEnabled}
+          title="Play an alarm when a pattern matches"
+          className={tgl(audioEnabled, 'bg-amber-500/20 text-cyber-amber border-amber-500/40')}
+        >
+          {audioEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+          <span>Audio Chime</span>
+        </button>
 
-        {/* Audio & Auto-Freeze Toggles */}
-        <div className="flex items-center gap-2 text-xs">
-          <button
-            onClick={() => setAudioEnabled(!audioEnabled)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all ${
-              audioEnabled ? 'bg-amber-500/20 text-cyber-amber border-amber-500/40' : 'bg-slate-900 text-slate-500 border-slate-800'
-            }`}
-          >
-            {audioEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-            <span>Audio Chime</span>
-          </button>
+        <button
+          onClick={toggleNotifications}
+          aria-pressed={notifyEnabled}
+          title="Desktop notification when an alert fires while this tab is hidden"
+          className={tgl(notifyEnabled, 'bg-rose-500/20 text-rose-300 border-rose-500/40')}
+        >
+          {notifyEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+          <span>Notify</span>
+        </button>
 
-          <button
-            onClick={toggleNotifications}
-            title="Desktop notification when an alert fires while this tab is hidden"
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all ${
-              notifyEnabled ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-slate-900 text-slate-500 border-slate-800'
-            }`}
-          >
-            {notifyEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
-            <span>Notify</span>
-          </button>
+        <button
+          onClick={() => setAutoPauseEnabled(!autoPauseEnabled)}
+          aria-pressed={autoPauseEnabled}
+          title="Pause the terminal when a pattern matches"
+          className={tgl(autoPauseEnabled, 'bg-cyan-500/20 text-cyber-cyan border-cyan-500/40')}
+        >
+          <Pause className="w-3.5 h-3.5" />
+          <span>Auto-Pause Terminal</span>
+        </button>
 
-          <label className="flex items-center gap-1 text-[11px] text-slate-400" title="Lines captured after a match">
-            <span>+</span>
-            <input
-              type="number"
-              min={0}
-              max={50}
-              value={contextLines}
-              onChange={(e) => setContextLines(Math.max(0, Math.min(50, Number(e.target.value) || 0)))}
-              aria-label="Lines of context after a match"
-              className="w-12 bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-slate-300"
-            />
-            <span>lines</span>
-          </label>
+        <label className="flex items-center gap-1 text-[11px] text-slate-400" title="Lines captured after a match">
+          <span>+</span>
+          <input
+            type="number"
+            min={0}
+            max={50}
+            value={contextLines}
+            onChange={(e) => setContextLines(Math.max(0, Math.min(50, Number(e.target.value) || 0)))}
+            aria-label="Lines of context after a match"
+            className={`w-12 ${inp}`}
+          />
+          <span>lines</span>
+        </label>
 
-          <button
-            onClick={() => setAutoPauseEnabled(!autoPauseEnabled)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all ${
-              autoPauseEnabled ? 'bg-cyan-500/20 text-cyber-cyan border-cyan-500/40' : 'bg-slate-900 text-slate-500 border-slate-800'
-            }`}
-          >
-            <Pause className="w-3.5 h-3.5" />
-            <span>Auto-Pause Terminal</span>
-          </button>
-        </div>
+        <label className="flex items-center gap-1 text-[11px] text-slate-400" title="After an alarm, further matches within this many seconds are logged but do not sound the alarm or pause the terminal. 0 = off.">
+          <span>cooldown</span>
+          <input
+            type="number"
+            min={0}
+            max={600}
+            value={cooldownSec}
+            onChange={(e) => setCooldownSec(Math.max(0, Math.min(600, Number(e.target.value) || 0)))}
+            aria-label="Alarm cooldown in seconds"
+            className={`w-12 ${inp}`}
+          />
+          <span>s</span>
+        </label>
       </div>
 
       {/* Active Trigger Signatures */}
-      <div className="space-y-1.5">
-        <span className="text-[10px] text-slate-500 uppercase font-bold block">
-          Active Watchdog Patterns:
-        </span>
-        <div className="flex flex-wrap items-center gap-1.5">
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-500 uppercase font-bold">
+          <span className="flex items-center gap-1"><ShieldAlert className="w-3 h-3 text-rose-500" />Watchdog patterns</span>
+          <select
+            value=""
+            onChange={(e) => addPreset(e.target.value)}
+            aria-label="Add a preset pattern set"
+            className={`${inp} normal-case font-normal text-[11px]`}
+          >
+            <option value="">+ Add preset...</option>
+            {Object.keys(PATTERN_PRESETS).map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
           {activePatterns.map((pat) => (
             <span
               key={pat}
-              className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-[11px] text-rose-400"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-[11px] text-rose-400"
             >
               <span>{pat}</span>
               {counters[pat] > 0 && (
@@ -280,7 +331,9 @@ export default function CrashAlertDeck({
               )}
               <button
                 onClick={() => removePattern(pat)}
-                className="text-slate-600 hover:text-slate-300 ml-1"
+                aria-label={`Remove pattern ${pat}`}
+                title="Remove pattern"
+                className="text-slate-600 hover:text-slate-300 ml-0.5"
               >
                 ✕
               </button>
@@ -292,6 +345,7 @@ export default function CrashAlertDeck({
               type="text"
               value={customPattern}
               onChange={(e) => setCustomPattern(e.target.value)}
+              aria-label="Add a text or /regex/ pattern"
               placeholder="+ text or /regex/i"
               className="bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-xs text-slate-200 outline-none focus:border-rose-500 w-36"
             />
@@ -300,54 +354,102 @@ export default function CrashAlertDeck({
         {patternWarning && <div className="text-[10px] text-amber-400">{patternWarning}</div>}
       </div>
 
+      {/* addr2line settings (collapsed) */}
+      <details className="text-[11px] text-slate-400">
+        <summary className="cursor-pointer select-none text-[10px] uppercase font-bold text-slate-500">Symbol lookup command (addr2line)</summary>
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          <label className="flex items-center gap-1">
+            <span>toolchain</span>
+            <select value={toolchain} onChange={(e) => setToolchain(e.target.value)} aria-label="addr2line toolchain" className={inp}>
+              {Object.entries(TOOLCHAINS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-1 min-w-0 flex-1">
+            <span>ELF</span>
+            <input
+              type="text"
+              value={elfPath}
+              onChange={(e) => setElfPath(e.target.value)}
+              aria-label="Path to the firmware ELF file"
+              className={`${inp} min-w-0 flex-1`}
+            />
+          </label>
+        </div>
+        <p className="pt-1 text-[10px] text-slate-500">
+          An incident card shows an ADDR2LINE button when its dump contains code addresses. It copies a command for you to run locally; the browser does not resolve symbols.
+        </p>
+      </details>
+
       {/* Crash Incident Log Feed */}
-      <div className="space-y-1.5 pt-1">
-        <div className="flex items-center justify-between text-[10px] text-slate-500 uppercase font-bold">
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500 uppercase font-bold">
           <span>Detected Crash Incidents ({crashHistory.length})</span>
           {crashHistory.length > 0 && (
-            <button
-              onClick={() => setCrashHistory([])}
-              className="text-slate-500 hover:text-rose-400"
-            >
-              Clear Log
-            </button>
+            <span className="flex items-center gap-2">
+              <button onClick={() => downloadLog('txt')} title="Download the log as a text file" className="flex items-center gap-1 hover:text-slate-200">
+                <Download className="w-3 h-3" />TXT
+              </button>
+              <button onClick={() => downloadLog('json')} title="Download the log as JSON" className="flex items-center gap-1 hover:text-slate-200">
+                <Download className="w-3 h-3" />JSON
+              </button>
+              <button onClick={() => setCrashHistory([])} className="hover:text-rose-400">
+                Clear Log
+              </button>
+            </span>
           )}
         </div>
 
-        <div className="h-52 overflow-y-auto bg-[#030712] border border-slate-800 rounded-xl p-2.5 flex flex-col gap-2">
+        <div className="max-h-[60vh] min-h-24 overflow-y-auto bg-[#030712] border border-slate-800 rounded-lg p-2 flex flex-col gap-2">
           {crashHistory.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-600 gap-1 select-none">
-              <ShieldAlert className="w-6 h-6 text-slate-800" />
+            <div className="py-6 flex flex-col items-center justify-center text-slate-600 gap-1 select-none">
+              <ShieldAlert className="w-5 h-5 text-slate-800" />
               <span>No crashes detected. Monitoring active UART stream...</span>
             </div>
           ) : (
-            crashHistory.map((crash) => (
-              <div
-                key={crash.id}
-                className="bg-rose-950/20 border border-rose-500/40 rounded-lg p-2.5 flex flex-col gap-1 text-[11px]"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-500 text-[10px]">{crash.time}</span>
-                    <span className="font-bold text-rose-400 uppercase bg-rose-950/80 px-1.5 py-0.2 rounded border border-rose-500/30">
-                      {crash.signature}
-                    </span>
+            crashHistory.map((crash) => {
+              const cause = extractExceptionCause(crash.snippet);
+              const hasAddrs = extractAddresses(crash.snippet).length > 0;
+              return (
+                <div
+                  key={crash.id}
+                  className="bg-rose-950/20 border border-rose-500/40 rounded-lg p-2 flex flex-col gap-1 text-[11px]"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-slate-500 text-[10px]">{crash.time}</span>
+                      <span className="font-bold text-rose-400 uppercase bg-rose-950/80 px-1.5 rounded border border-rose-500/30">
+                        {crash.signature}
+                      </span>
+                      {cause && <span className="text-[10px] text-amber-400" title="Exception cause from the Guru Meditation line">{cause}</span>}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {hasAddrs && (
+                        <button
+                          onClick={() => copyAddr2line(crash)}
+                          title="Copy an addr2line command for the addresses in this dump (run it locally)"
+                          className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200"
+                        >
+                          {copiedId === `a2l-${crash.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Terminal className="w-3 h-3" />}
+                          <span>{copiedId === `a2l-${crash.id}` ? 'COPIED' : 'ADDR2LINE'}</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => copyCrashSnippet(crash)}
+                        className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200"
+                      >
+                        {copiedId === crash.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedId === crash.id ? 'COPIED' : 'COPY DUMP'}</span>
+                      </button>
+                    </div>
                   </div>
 
-                  <button
-                    onClick={() => copyCrashSnippet(crash)}
-                    className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200"
-                  >
-                    {copiedId === crash.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                    <span>{copiedId === crash.id ? 'COPIED' : 'COPY DUMP'}</span>
-                  </button>
+                  <pre className="text-slate-300 font-mono text-[10px] whitespace-pre-wrap break-all bg-slate-950/70 p-1.5 rounded border border-slate-900">
+                    {crash.snippet}
+                  </pre>
                 </div>
-
-                <pre className="text-slate-300 font-mono text-[10px] whitespace-pre-wrap break-all bg-slate-950/70 p-1.5 rounded border border-slate-900">
-                  {crash.snippet}
-                </pre>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
