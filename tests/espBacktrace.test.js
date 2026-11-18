@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   decodeBacktrace, formatReport, prepareElf, callSiteFor, parsePanic, extractLatestPanic,
   parseElf, parseDebugLine, lookupLine, explainCause,
+  parseAddressList, lookupAddresses, annotateCrashText, buildAddr2lineCommand, addr2lineTool, formatMarkdown, baseName,
 } from '../src/utils/espBacktrace.js';
 
 // ---------- byte helpers for building test images ----------
@@ -462,5 +463,46 @@ describe('decodeBacktrace (end to end with a crafted ELF)', () => {
     expect(text).toContain('helper+0x12');
     expect(text).toContain('app_main+0x5  /src/main.c:42');
     expect(text).toContain('Registers:');
+  });
+});
+
+describe('address lookup, annotation and CLI export', () => {
+  const prepared = prepareElf(buildElf({ funcs: FUNCS, debugLine: LINE_V4 }));
+
+  it('parseAddressList picks hex addresses out of free text, de-duplicated', () => {
+    expect(parseAddressList('0x40080012:0x3ffb1f70 40080100, 0x40080012 zz')).toEqual([0x40080012, 0x3ffb1f70, 0x40080100]);
+    expect(parseAddressList('')).toEqual([]);
+  });
+
+  it('lookupAddresses resolves exact and return addresses', () => {
+    const [a] = lookupAddresses([0x40080012], prepared);
+    expect(a).toMatchObject({ func: 'helper', offset: 0x12, file: '/src/main.c', line: 7 });
+    const [b] = lookupAddresses([0x80080108], prepared, { arch: 'xtensa', asReturn: true });
+    expect(b).toMatchObject({ lookup: 0x40080105, func: 'app_main', line: 42 });
+    expect(lookupAddresses([0x40080012], null)[0].func).toBeNull();
+  });
+
+  it('annotateCrashText inserts decoded lines under Backtrace and register lines', () => {
+    const out = annotateCrashText(XTENSA_PANIC, prepared);
+    expect(out).toContain('0x40080012: helper+0x12 at /src/main.c:7');
+    expect(out).toContain('0x80080108: app_main+0x5 at /src/main.c:42');
+    expect(out).toContain('A0 0x80080108: app_main+0x5');
+    expect(annotateCrashText(XTENSA_PANIC, null)).toContain("Guru Meditation");
+  });
+
+  it('builds addr2line commands per architecture', () => {
+    expect(addr2lineTool('xtensa', 'ESP32-S3')).toBe('xtensa-esp32s3-elf-addr2line');
+    expect(addr2lineTool('xtensa', 'ESP32')).toBe('xtensa-esp32-elf-addr2line');
+    expect(addr2lineTool('riscv', 'ESP32-C3')).toBe('riscv32-esp-elf-addr2line');
+    expect(addr2lineTool('esp8266', null)).toBe('xtensa-lx106-elf-addr2line');
+    expect(buildAddr2lineCommand([0x40080012, 0x40080105], { arch: 'xtensa', chip: 'ESP32', elfName: 'my app.elf' }))
+      .toBe('xtensa-esp32-elf-addr2line -pfiaC -e "my app.elf" 0x40080012 0x40080105');
+  });
+
+  it('formatMarkdown renders a table and baseName strips directories', () => {
+    const md = formatMarkdown(decodeBacktrace(XTENSA_PANIC, prepared));
+    expect(md).toContain('| 0 | `0x40080012` | helper+0x12 | `/src/main.c:7` | PC |');
+    expect(baseName('/src/a/main.c')).toBe('main.c');
+    expect(baseName('C:' + String.fromCharCode(92) + 'x' + String.fromCharCode(92) + 'y.c')).toBe('y.c');
   });
 });

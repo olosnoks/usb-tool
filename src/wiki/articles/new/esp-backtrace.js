@@ -3,7 +3,7 @@ export default {
   toolId: 'esp-backtrace',
   category: 'core',
   title: 'ESP Backtrace Decoder — Crash Text + ELF to Function and File:Line',
-  summary: 'Offline decoder for ESP32 (Xtensa and RISC-V) and ESP8266 crashes. Paste a Guru Meditation or Exception block, or take the latest one from the serial port, load the firmware .elf, and get function names, file:line, registers and stack-dump code candidates.',
+  summary: 'Offline decoder for ESP32 (Xtensa and RISC-V) and ESP8266 crashes. Paste a Guru Meditation or Exception block, or take the latest one from the serial port, load the firmware .elf, and get function names, file:line, registers stack-dump code candidates, an annotated copy of the crash text, an addr2line lookup box and a CLI command export.',
   tags: ['ESP32', 'ESP8266', 'Backtrace', 'Crash', 'Guru Meditation', 'Exception Decoder', 'addr2line', 'DWARF', 'ELF', 'RISC-V', 'Xtensa', 'Panic', 'Stack Trace', 'idf.py monitor'],
   readTime: '8 min read',
   content: `
@@ -39,7 +39,10 @@ The ELF must come from **the same build** that crashed. A different build shifts
    - *Registers*: every register in the dump. Any value that points into executable code is symbolised.
    - *Stack-dump code candidates*: values in the stack dump that point into the ELF's executable sections.
    - *Notes*: anything the decoder could not do or that looks wrong (no ELF, architecture mismatch, unsupported DWARF, corrupted backtrace).
-4. **Copy as text.** *Copy as text* puts the whole decode on the clipboard as a plain-text report for an issue or chat.
+4. **Copy the result.** *Copy as text* and *Copy as Markdown* put the decode on the clipboard (the Markdown version has a frame table for GitHub issues). *Short paths* shows only the file name instead of the full path in the frame table and address lookup.
+5. **Annotated text.** In the Backtrace section, the *Annotated text* tab shows your crash text with a decoded line (\`0xADDR: function+offset at file:line\`) under each Backtrace line and under PC, MEPC, RA, A0 and epc registers that point into code, like \`idf.py monitor\` prints. Stack-dump lines are not annotated; see the candidates list. It needs an ELF.
+6. **addr2line command.** The collapsible *addr2line command (CLI export)* builds a command such as \`xtensa-esp32-elf-addr2line -pfiaC -e app.elf 0x... 0x...\` for the ESP toolchain on your PC. It uses the same lookup addresses as the table (return addresses already mapped). The tool does not run it, and the ELF path is the file name you loaded, so adjust it. The tool name follows the chip: \`xtensa-esp32[s2|s3]-elf-addr2line\`, \`riscv32-esp-elf-addr2line\` or \`xtensa-lx106-elf-addr2line\`.
+7. **Address lookup.** The collapsible *Address lookup* box takes any text containing hex addresses (\`0x...\` or bare 8-digit hex), for example from a log line or a map file, and resolves each one against the loaded ELF like \`addr2line\` would. Tick *Treat as return addresses* and choose the architecture to apply the same return-address mapping as the backtrace; otherwise addresses are looked up exactly.
 
 ## How addresses are looked up
 
@@ -77,6 +80,10 @@ File and line numbers come from DWARF \`.debug_line\`, versions 2 to 5, 32- and 
 | "No ESP panic markers" | Text is only a log line, or the block was cut | Copy the whole block from the Guru Meditation line to the end |
 | Serial button finds nothing | Port not connected when the crash happened | Connect before reproducing the crash, or paste the text |
 | Frames after \`|<-CORRUPTED\` look wrong | The stack was overwritten | Trust only the frames before the marker |
+
+## Similar tools
+
+This tool covers the same job as \`idf.py monitor\` address decoding (runs \`addr2line\` per address), the PlatformIO \`esp32_exception_decoder\` monitor filter, the Arduino EspExceptionDecoder, and Python scripts such as yaeed. Unlike them it needs no toolchain installed, but it does not run GDB, decode core dumps or the GDB stub, and does not unwind the stack itself.
 
 ## Related tools
 
