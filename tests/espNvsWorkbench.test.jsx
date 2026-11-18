@@ -7,10 +7,11 @@ import EspPartitionEditorWorkbench from '../src/components/tools/EspPartitionEdi
 describe('EspPartitionEditorWorkbench', () => {
   it('renders the idle state with no image loaded', () => {
     const html = renderToString(<EspPartitionEditorWorkbench />);
-    expect(html).toContain('ESP32 PARTITION TABLE');
+    expect(html).toContain('Layout preset');
+    expect(html).toContain('Flash size');
     expect(html).toContain('PARTITION TABLE');
     expect(html).toContain('NVS STORAGE');
     expect(html).toContain('Open a dump or partitions.bin, or start from CSV.');
-    expect(html).toContain('Nothing is shown until a file or CSV is provided.');
+    expect(html).toContain('or pick a preset.');
   });
 });
