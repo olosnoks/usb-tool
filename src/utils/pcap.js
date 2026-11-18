@@ -270,6 +270,7 @@ function decodeL4(b, off, proto, out) {
     const flags = tcpFlags(b[off + 13]);
     const pOff = off + Math.max(hlen, 20);
     const plen = Math.max(0, b.length - pOff);
+    out.tcp = { seq: u32(b, off + 4), ack: u32(b, off + 8), flagBits: b[off + 13], pOff, plen };
     out.info = flags + (plen ? ` Len=${plen}` : '');
     L(out, 'TCP', [['Source port', out.sport], ['Destination port', out.dport], ['Seq', u32(b, off + 4)], ['Ack', u32(b, off + 8)], ['Flags', flags || '(none)'], ['Payload', `${plen} bytes`]]);
     if (plen > 0) { decodeTls(b, pOff, out) || decodeHttp(b, pOff, out); }
@@ -477,26 +478,44 @@ function protoMatches(p, w) {
  * "and" between terms is ignored.
  */
 export function compileFilter(text) {
-  const words = (text || '').trim().toLowerCase().split(/\s+/).filter((w) => w && w !== 'and');
-  const tests = [];
+  const words = (text || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  // OR-separated groups of AND-ed terms; `not` or a leading `!` negates the next term.
+  const groups = [[]];
+  let negate = false;
+  const push = (t) => { const f = negate ? (p) => !t(p) : t; negate = false; groups[groups.length - 1].push(f); };
   for (let i = 0; i < words.length; i++) {
-    const w = words[i];
+    let w = words[i];
+    if (w === 'and' || w === '&&') continue;
+    if (w === 'or' || w === '||') { groups.push([]); negate = false; continue; }
+    if (w === 'not' || w === '!') { negate = !negate; continue; }
+    if (w.startsWith('!') && w.length > 1) { negate = !negate; w = w.slice(1); }
     if (w === 'port' && i + 1 < words.length) {
       const n = Number(words[++i]);
-      tests.push((p) => p.sport === n || p.dport === n);
-    } else if (w === 'host' && i + 1 < words.length) {
+      push((p) => p.sport === n || p.dport === n);
+    } else if ((w === 'host' || w === 'src' || w === 'dst') && i + 1 < words.length) {
       const h = words[++i];
-      tests.push((p) => (p.src || '').toLowerCase() === h || (p.dst || '').toLowerCase() === h
-        || (p.ethSrc || '') === h || (p.ethDst || '') === h);
+      const eq = (v) => (v || '').toLowerCase() === h;
+      if (w === 'src') push((p) => eq(p.src) || eq(p.ethSrc));
+      else if (w === 'dst') push((p) => eq(p.dst) || eq(p.ethDst));
+      else push((p) => eq(p.src) || eq(p.dst) || eq(p.ethSrc) || eq(p.ethDst));
+    } else if ((w === 'len' || w === 'length') && i + 2 < words.length && /^(>=|<=|>|<|==|=)$/.test(words[i + 1]) && /^\d+$/.test(words[i + 2])) {
+      const op = words[++i]; const n = Number(words[++i]);
+      push((p) => (op === '>' ? p.origlen > n : op === '<' ? p.origlen < n : op === '>=' ? p.origlen >= n : op === '<=' ? p.origlen <= n : p.origlen === n));
+    } else if (TCP_FLAG_WORDS[w] !== undefined) {
+      const bit = TCP_FLAG_WORDS[w];
+      push((p) => !!p.tcp && (p.tcp.flagBits & bit) !== 0);
     } else if (PROTO_WORDS.has(w)) {
-      tests.push((p) => protoMatches(p, w));
+      push((p) => protoMatches(p, w));
     } else {
-      tests.push((p) => hayOf(p).includes(w));
+      push((p) => hayOf(p).includes(w));
     }
   }
-  if (!tests.length) return () => true;
-  return (p) => tests.every((t) => t(p));
+  const active = groups.filter((g) => g.length);
+  if (!active.length) return () => true;
+  return (p) => active.some((g) => g.every((t) => t(p)));
 }
+
+const TCP_FLAG_WORDS = { fin: 0x01, syn: 0x02, rst: 0x04, psh: 0x08, ack: 0x10, urg: 0x20 };
 
 /** Per-protocol packet/byte counts, most frequent first. */
 export function protocolHierarchy(packets) {

@@ -491,9 +491,9 @@ Web Crypto PBKDF2 is correct but not fast — use modest wordlists. Only the PMK
     toolId: 'tcpdump-viewer',
     category: 'analysis',
     title: 'PCAP Viewer — pcap/pcapng parsing, filters, conversations & export',
-    summary: 'Open a .pcap or .pcapng capture and browse up to 200,000 decoded packets with paging, a display filter, conversation and protocol tables, per-packet layer detail, and CSV or filtered-PCAP export.',
+    summary: 'Open a .pcap or .pcapng capture and browse up to 200,000 decoded packets with paging, a display filter, conversation, endpoint and protocol tables, an I/O graph, TCP stream following, per-packet layer detail, and CSV or filtered-PCAP export.',
     tags: ['PCAP', 'pcapng', 'tcpdump', 'Packets', 'Ethernet', 'TCP', 'Wireshark', 'Conversations'],
-    readTime: '3 min read',
+    readTime: '4 min read',
     content: `
 # PCAP Viewer
 
@@ -508,13 +508,32 @@ Choose a \`.pcap\`, \`.cap\` or \`.pcapng\` file. The header line shows the form
 A table of #, time (relative to the first packet), source and destination (with ports), protocol, info and length, shown **500 per page** with **Prev** / **Next**. Click a row for the decoded layers (Frame, Ethernet/VLAN/Linux cooked/radiotap/raw IP, IPv4/IPv6, TCP/UDP/ICMP, plus one-line DNS, HTTP, TLS SNI, DHCP and ARP summaries) next to a hex dump of the packet.
 
 ### Filter
-The filter box ANDs space-separated terms (\`and\` is ignored): a protocol word such as \`tcp\`, \`udp\`, \`dns\`, \`tls\`, \`icmp\`, \`arp\`, \`http\`, \`dhcp\`, \`ipv4\`, \`ipv6\`, \`vlan\`; \`port N\`; \`host ADDRESS\`; or any other text, matched as a substring of the packet's addresses, ports, protocol and info text. Examples: \`tcp port 443\`, \`host 10.0.0.1\`, \`example.com\`. It is a simple display filter, not Wireshark or BPF syntax.
+The filter box is a simple display filter, not Wireshark or BPF syntax. Terms are ANDed; \`or\` starts an alternative group; \`not\` or a leading \`!\` negates the next term. Terms:
+- a protocol word: \`tcp\`, \`udp\`, \`dns\`, \`tls\`, \`icmp\`, \`arp\`, \`http\`, \`dhcp\`, \`ipv4\`, \`ipv6\`, \`vlan\`;
+- \`port N\`, \`host ADDRESS\`, \`src ADDRESS\`, \`dst ADDRESS\` (IP or MAC);
+- a TCP flag: \`syn\`, \`ack\`, \`fin\`, \`rst\`, \`psh\`, \`urg\`;
+- \`len > N\` (also \`<\`, \`>=\`, \`<=\`, \`=\`) on the on-wire length;
+- any other text, matched as a substring of the addresses, ports, protocol and info text.
 
-### Conversations and Protocols
-The **Conversations** tab lists bidirectional address pairs with packet count, bytes and duration; **Protocols** lists packets and bytes per protocol. Both follow the current filter.
+Examples: \`tcp port 443\`, \`dns or arp\`, \`not tcp\`, \`src 10.0.0.1 and syn\`, \`len > 1000\`, \`example.com\`. A summary line under the filter shows packets, bytes, duration, packet rate, bit rate and average length for the packets that match.
+
+### Statistics tabs
+All follow the current filter.
+- **Conversations**: bidirectional address pairs with packet count, bytes and duration. TCP rows have a **Follow** button.
+- **Endpoints**: per-address packets and bytes, split into sent (Tx) and received (Rx), busiest first. Uses the IP address, or the MAC when there is no IP layer.
+- **Protocols**: packets and bytes per protocol.
+- **I/O graph**: bars of packets or bytes per time bucket (the bucket width is chosen automatically, up to 5,000 buckets). Hover a bar for its values.
+
+Each of the three tables has a **CSV** button for that table.
+
+### Follow TCP stream
+Select a TCP packet and press **Follow TCP stream**, or press **Follow** on a conversation. The payload of each direction is ordered by sequence number, exact retransmissions are dropped (and counted), and gaps from packets missing in the capture are reported in bytes. Both directions are shown in order (blue is the first sender, amber the other), as ASCII or hex. **Save raw** writes the reassembled payload to a file. The view is capped at 64 KB per chunk and 500 chunks; the saved file is complete. Only TCP over IPv4/IPv6 is supported, out-of-window overlaps are trimmed rather than analysed, and TLS payload stays encrypted.
 
 ### Export
 **CSV** saves the filtered packet table. **PCAP** writes the filtered packets as a classic pcap; packets with a different link type than the first are skipped (and the number skipped is logged).
+
+### Similar tools
+Wireshark (Statistics > Conversations, Endpoints, Protocol Hierarchy, I/O Graphs, Follow Stream), termshark and NetworkMiner. This viewer covers a small subset of them, offline and in the browser. It has no capture, no deep dissectors and no file or credential extraction.
 
 ### Notes
 Decoding is best-effort: an unknown link type or truncated packet gives a partial decode rather than an error. Encrypted traffic is shown as such; this tool does not decrypt TLS.
