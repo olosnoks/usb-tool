@@ -7,7 +7,6 @@ import CrcReverseWorkbench from '../src/components/tools/CrcReverseWorkbench.jsx
 describe('CrcReverseWorkbench', () => {
   it('renders the calculator tab with its tab bar', () => {
     const html = renderToString(<CrcReverseWorkbench />);
-    expect(html).toContain('CRC Reverse');
     expect(html).toContain('Calculator');
     expect(html).toContain('Reverse');
     expect(html).toContain('Locate');

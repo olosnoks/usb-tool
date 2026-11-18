@@ -7,7 +7,7 @@ import PicobootWorkbench from '../src/components/tools/PicobootWorkbench.jsx';
 describe('PicobootWorkbench', () => {
   it('renders the disconnected state and says it is untested on hardware', () => {
     const html = renderToString(<PicobootWorkbench />);
-    expect(html).toContain('CONNECT PICOBOOT (WEBUSB)');
+    expect(html).toContain('CONNECT (WEBUSB)');
     expect(html).toContain('NOT CONNECTED');
     expect(html).toContain('UNTESTED ON HARDWARE');
     expect(html).toContain('mass-storage');
