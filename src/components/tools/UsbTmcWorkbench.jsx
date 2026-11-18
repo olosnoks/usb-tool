@@ -4,6 +4,7 @@ import { UsbTmcDevice, requestUsbTmcDevice } from '../../utils/usbtmcDriver';
 import {
   detectProfile, presetsFor, fetchWaveform, waveformStats, waveformCsv, fetchScreenshot, DMM_FUNCTIONS, parseNumber, drainErrors
 } from '../../utils/scpiTools';
+import { expandScript, loggerStats, isOutOfLimits, limitViolations, toPyvisaScript } from '../../utils/usbtmcExtras';
 import StatusBadge from '../common/StatusBadge';
 import { record } from '../../utils/sessionLog';
 
@@ -95,10 +96,12 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
   const [interval, setIntervalMs] = useState(500);
   const [logging, setLogging] = useState(false);
   const [samples, setSamples] = useState([]); // [{ t, v }]
+  const [limLow, setLimLow] = useState('');
+  const [limHigh, setLimHigh] = useState('');
   const loggingRef = useRef(false);
 
   // Script
-  const [script, setScript] = useState('# One command per line. "wait 500" pauses 500 ms.\n*IDN?\n*CLS\nSYST:ERR?\n');
+  const [script, setScript] = useState('# One command per line. "wait 500" pauses 500 ms; "repeat 3" ... "end" loops.\n*IDN?\n*CLS\nSYST:ERR?\n');
   const [scriptRunning, setScriptRunning] = useState(false);
   const stopScript = useRef(false);
 
@@ -243,32 +246,32 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
   }, [logging, inst]);
 
   const loggerUnit = customQuery.trim() ? '' : (DMM_FUNCTIONS.find((f) => f.id === dmmFn)?.unit || '');
-  const finite = samples.map((s) => s.v).filter(Number.isFinite);
-  const lstats = finite.length ? {
-    last: samples[samples.length - 1].v,
-    min: Math.min(...finite),
-    max: Math.max(...finite),
-    avg: finite.reduce((a, b) => a + b, 0) / finite.length,
-    std: Math.sqrt(finite.reduce((a, b) => a + (b - finite.reduce((x, y) => x + y, 0) / finite.length) ** 2, 0) / finite.length)
-  } : null;
+  const lstats = loggerStats(samples.map((x) => x.v));
+  const viol = limitViolations(samples.map((x) => x.v), limLow, limHigh);
+  const lastOut = samples.length > 0 && isOutOfLimits(samples[samples.length - 1].v, limLow, limHigh);
 
   // --- Script -------------------------------------------------------------------
 
   const runScript = async () => {
+    const { steps, error } = expandScript(script);
+    if (error) { addLog('err', error); return; }
     stopScript.current = false;
     setScriptRunning(true);
     try {
-      for (const raw of script.split('\n')) {
+      for (const step of steps) {
         if (stopScript.current) { addLog('err', 'Script stopped.'); break; }
-        const line = raw.trim();
-        if (!line || line.startsWith('#')) continue;
-        const wait = line.match(/^wait\s+(\d+)$/i);
-        if (wait) { await new Promise((r) => setTimeout(r, Number(wait[1]))); continue; }
-        try { await exclusive(() => send(line)); } catch (err) { addLog('err', `${line}: ${err.message}`); break; }
+        if (step.type === 'wait') { await new Promise((r) => setTimeout(r, step.ms)); continue; }
+        try { await exclusive(() => send(step.text)); } catch (err) { addLog('err', `${step.text}: ${err.message}`); break; }
       }
     } finally {
       setScriptRunning(false);
     }
+  };
+
+  const exportPython = (source) => {
+    const { steps, error } = expandScript(source);
+    if (error) { addLog('err', error); return; }
+    download(toPyvisaScript(steps, { timeoutMs }), `usbtmc-${stamp()}.py`, 'text/x-python');
   };
 
   const presets = profile ? presetsFor(profile) : [];
@@ -278,26 +281,21 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
   const inp = 'bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 outline-none';
 
   return (
-    <div className="space-y-4 font-mono text-xs">
+    <div className="space-y-2 font-mono text-xs">
 
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <p className="text-[11px] text-slate-400 max-w-3xl">
-              Control a USBTMC instrument (oscilloscope, DMM, power supply, signal generator) with SCPI over WebUSB. Pull scope
-              waveforms and screenshots (Rigol, Keysight, Siglent, Tektronix), log meter readings to CSV and run command scripts.
-            </p>
-          </div>
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+          <p className="text-[11px] text-slate-400">SCPI over WebUSB: scope waveforms, DMM/PSU logging, scripts.</p>
           <StatusBadge status={status} label={status === 'online' ? 'SCPI' : status === 'warning' ? 'ERR' : 'IDLE'} value={inst ? 'Connected' : 'Offline'} />
         </div>
 
         {!webUsbAvailable && (
-          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200">
+          <div className="mt-2 flex items-start gap-2 p-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200">
             <ShieldAlert className="w-4 h-4 shrink-0" /> WebUSB needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.
           </div>
         )}
 
-        <div className="pt-3 flex flex-wrap items-center gap-2">
+        <div className="pt-2 flex flex-wrap items-center gap-2">
           {!inst ? (
             <button onClick={() => connect()} disabled={!webUsbAvailable || busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 text-xs font-bold disabled:opacity-40">
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} CONNECT INSTRUMENT (WEBUSB)
@@ -326,7 +324,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
       </div>
 
       {inst && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 shadow-xl space-y-2">
           <div className="flex flex-wrap gap-1 border-b border-slate-800 pb-2">
             {TABS.map(([id, label, Icon]) => (
               <button key={id} onClick={() => setTab(id)} className={`flex items-center gap-1 px-2.5 py-1 rounded font-bold border ${tab === id ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
@@ -346,6 +344,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
                 {presets.map((q) => (
                   <button key={q} onClick={() => { setCmd(q); run(q); }} disabled={busy} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 disabled:opacity-40">{q}</button>
                 ))}
+                <button onClick={() => exportPython([...history].reverse().join('\n'))} disabled={!history.length} className={btn2} title="Download the command history as a PyVISA Python file (not run here)"><FileCode className="w-3.5 h-3.5" /> PYVISA</button>
                 <label className="ml-auto flex items-center gap-1 text-slate-400"><input type="checkbox" checked={checkErrors} onChange={(e) => setCheckErrors(e.target.checked)} className="accent-cyan-500" /> drain SYST:ERR? after each command</label>
               </div>
             </>
@@ -381,7 +380,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
                 yLabel="V"
               />
               {Object.keys(waves).length > 0 && (
-                <table className="w-full text-[11px]">
+                <div className="overflow-x-auto"><table className="w-full text-[11px]">
                   <thead className="text-slate-500 text-left"><tr><th>CH</th><th>POINTS</th><th>Vpp</th><th>MIN</th><th>MAX</th><th>MEAN</th><th>RMS</th><th>FREQ</th><th>SAMPLE RATE</th></tr></thead>
                   <tbody>
                     {Object.entries(waves).map(([ch, wf]) => (
@@ -398,7 +397,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
               {shot && (
                 <div className="space-y-1">
@@ -426,6 +425,9 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
                 ) : (
                   <button onClick={() => { loggingRef.current = false; setLogging(false); }} className={btn2}><Square className="w-3.5 h-3.5" /> STOP</button>
                 )}
+                <span className="text-slate-500 font-bold">LIMITS</span>
+                <input type="number" step="any" value={limLow} onChange={(e) => setLimLow(e.target.value)} placeholder="low" aria-label="Low limit" className={`${inp} w-20`} />
+                <input type="number" step="any" value={limHigh} onChange={(e) => setLimHigh(e.target.value)} placeholder="high" aria-label="High limit" className={`${inp} w-20`} />
                 <button onClick={() => setSamples([])} disabled={logging} className={btn2}>CLEAR</button>
                 <button
                   onClick={() => download(['time_iso,elapsed_s,value', ...samples.map((s) => `${s.at},${s.t.toFixed(3)},${s.v}`)].join('\n') + '\n', `log-${stamp()}.csv`, 'text/csv')}
@@ -435,6 +437,12 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
                   <Download className="w-3.5 h-3.5" /> CSV
                 </button>
               </div>
+              {(limLow !== '' || limHigh !== '') && samples.length > 0 && (
+                <div className={`text-[11px] ${lastOut ? 'text-rose-300' : 'text-slate-400'}`}>
+                  {lastOut ? 'Latest reading is OUT of limits. ' : 'Latest reading within limits. '}
+                  {viol.total} of {samples.length} readings outside ({viol.below} below, {viol.above} above).
+                </div>
+              )}
               {lstats && (
                 <div className="grid grid-cols-2 @sm:grid-cols-5 gap-2">
                   {[['NOW', lstats.last], ['MIN', lstats.min], ['MAX', lstats.max], ['MEAN', lstats.avg], ['STD DEV', lstats.std]].map(([k, v]) => (
@@ -452,18 +460,19 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
           {tab === 'script' && (
             <div className="space-y-2">
               <textarea value={script} onChange={(e) => setScript(e.target.value)} rows={8} spellCheck={false} className={`${inp} w-full`} />
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {!scriptRunning ? (
                   <button onClick={runScript} className={btn}><Play className="w-3.5 h-3.5" /> RUN SCRIPT</button>
                 ) : (
                   <button onClick={() => { stopScript.current = true; }} className={btn2}><Square className="w-3.5 h-3.5" /> STOP</button>
                 )}
-                <span className="text-slate-500">Stops at the first command that fails. Turn on "check SYST:ERR?" in the console to stop on instrument errors too.</span>
+                <button onClick={() => exportPython(script)} className={btn2} title="Download this script as a PyVISA Python file (not run here)"><FileCode className="w-3.5 h-3.5" /> EXPORT PYVISA</button>
+                <span className="text-slate-500">Syntax: <code>wait ms</code>, <code>repeat N</code> ... <code>end</code>, <code>#</code> comment. Stops at the first command that fails. Turn on "check SYST:ERR?" in the console to stop on instrument errors too.</span>
               </div>
             </div>
           )}
 
-          <div className="bg-slate-950 border border-slate-800 rounded p-2 max-h-72 overflow-auto space-y-0.5">
+          <div className="bg-slate-950 border border-slate-800 rounded p-2 max-h-48 overflow-auto space-y-0.5">
             <div className="flex justify-between text-slate-600">
               <span>EXCHANGES</span>
               {log.length > 0 && <button onClick={() => download(log.map((e) => `${e.ts} ${e.dir} ${e.text}`).join('\n') + '\n', `scpi-${stamp()}.txt`, 'text/plain')} className="hover:text-cyan-300">save</button>}

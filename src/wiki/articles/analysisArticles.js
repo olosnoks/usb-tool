@@ -1682,9 +1682,10 @@ SCPI itself is the familiar hierarchical text: \`*IDN?\`, \`MEAS:VOLT:DC?\`, \`S
 | **Preset buttons** | Common commands (\`*IDN?\`, \`*RST\`, \`*CLS\`, \`*OPC?\`, \`SYST:ERR?\`, \`*TST?\`) plus presets for the detected scope, DMM, power supply or signal generator and its brand's dialect. |
 | **check SYST:ERR? after each command** | Checkbox: queries the error queue after every command and logs a non-zero result as an instrument error. |
 | **SCOPE tab** | **CH1-CH4** checkboxes, **POINTS** (not shown for Rigol / Siglent), **FETCH WAVEFORM** (chart, Vpp / min / max / mean / RMS / frequency / sample rate per channel, CSV per channel), **SCREENSHOT** and **SAVE IMAGE**. Waveform and screenshot support depends on the instrument family. |
-| **DMM / PSU LOGGER tab** | **MEASURE** function (DC/AC voltage, DC/AC current, 2- and 4-wire resistance, frequency, capacitance, temperature) or a custom query, an interval in ms (min 50), **START / STOP**, **CLEAR**, **CSV**, with Now / Min / Max / Mean / Std Dev and a live chart. |
-| **SCRIPT tab** | One command per line, \`wait <ms>\` to pause, \`#\` comments. **RUN SCRIPT** stops at the first failing command. |
+| **DMM / PSU LOGGER tab** | **LIMITS** (optional low / high): a line under the controls says whether the latest reading is out of limits and how many readings were below or above. **MEASURE** function (DC/AC voltage, DC/AC current, 2- and 4-wire resistance, frequency, capacitance, temperature) or a custom query, an interval in ms (min 50), **START / STOP**, **CLEAR**, **CSV**, with Now / Min / Max / Mean / Std Dev and a live chart. |
+| **SCRIPT tab** | One command per line, \`wait <ms>\` to pause, \`#\` comments, and \`repeat <n>\` ... \`end\` loops (nestable; at most 5000 expanded steps; unbalanced blocks are reported before anything is sent). **RUN SCRIPT** stops at the first failing command. **EXPORT PYVISA** downloads the expanded script as a PyVISA Python file (not run here). |
 | **Exchanges log** | Every command (») and response («), errors (✗), with a button to save the log as a text file. |
+| **PYVISA (console)** | Downloads the console command history (oldest first) as a PyVISA Python file. It is an export for the Python tool; nothing runs in the browser. Edit the placeholder VISA resource string before use (the browser does not expose it). |
 
 ---
 
@@ -1693,7 +1694,9 @@ SCPI itself is the familiar hierarchical text: \`*IDN?\`, \`MEAS:VOLT:DC?\`, \`S
 - **Driver:** [\`src/utils/usbtmcDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/usbtmcDriver.js) — \`buildMsgOut\`/\`buildRequestIn\`/\`parseMsgIn\` for the framing, \`UsbTmcDevice\` with a rolling bTag, \`write\`/\`read\`/\`query\`/\`queryBinary\`, and fragment reassembly until EOM.
 - **Workbench:** [\`src/components/tools/UsbTmcWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/UsbTmcWorkbench.jsx).
 - **Instrument profiles:** [\`src/utils/scpiTools.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/scpiTools.js) detects the maker and family (Rigol, Keysight / Agilent, Siglent, Tektronix or generic) from the \`*IDN?\` reply and supplies the preset commands, IEEE 488.2 binary-block parsing, waveform scaling, screenshot capture and DMM function list.
-- **Tests:** [\`tests/usbtmc.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/usbtmc.test.js) checks the header building/parsing and runs \`*IDN?\` and measurement queries against a simulated instrument. The tool itself has no demo mode: it needs a real USBTMC device.
+- **Tests:** [\`tests/usbtmc.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/usbtmc.test.js) checks the header building/parsing and runs \`*IDN?\` and measurement queries against a simulated instrument. [\`tests/usbtmcExtras.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/usbtmcExtras.test.js) covers script expansion, logger statistics, limits and the PyVISA export (\`src/utils/usbtmcExtras.js\`). The tool itself has no demo mode: it needs a real USBTMC device.
+
+**Similar tools:** PyVISA-shell, NI-VISA Interactive Control, Keysight Connection Expert and Rigol Ultra Sigma. This tool is browser-only and does not use VISA resource strings.
 
 ---
 
