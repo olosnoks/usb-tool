@@ -546,3 +546,64 @@ function describeMime(mediaType, p) {
   }
   return { kind: 'binary' };
 }
+
+// ---------- capacity and clone helpers ----------
+
+/**
+ * Common Type 2 tags: total user memory and the largest NDEF message NXP specifies for each
+ * (the NDEF TLV header, terminator and any lock/memory-control TLVs already subtracted).
+ */
+export const TAG_TYPES = [
+  { id: 'ultralight', name: 'MIFARE Ultralight', userBytes: 48, maxNdef: 46 },
+  { id: 'ntag213', name: 'NTAG213', userBytes: 144, maxNdef: 137 },
+  { id: 'ntag215', name: 'NTAG215', userBytes: 504, maxNdef: 492 },
+  { id: 'ntag216', name: 'NTAG216', userBytes: 888, maxNdef: 868 },
+];
+
+/** Bytes a Type 2 tag spends on the NDEF TLV around a message of this size (header + 0xFE). */
+export function tlvOverhead(ndefLength) {
+  return (ndefLength < 0xff ? 2 : 4) + 1;
+}
+
+/** For an NDEF message size, says which common tags it fits and how full each would be. */
+export function tagFit(ndefLength) {
+  const size = Math.max(0, ndefLength | 0);
+  return TAG_TYPES.map((t) => ({
+    ...t,
+    fits: size <= t.maxNdef,
+    percent: Math.min(100, Math.round((size / t.maxNdef) * 100)),
+    free: t.maxNdef - size,
+  }));
+}
+
+/**
+ * Converts decoded records (from `describeRecord`) into composer entries `{ kind, f }` so a
+ * scanned tag can be copied onto another tag. Records the composer cannot express are listed in
+ * `skipped` instead of being guessed.
+ */
+export function recordsToComposerEntries(records) {
+  const entries = [];
+  const skipped = [];
+  (records || []).forEach((r, i) => {
+    const label = `#${i + 1} ${r.recordType}`;
+    if (r.kind === 'text' && r.recordType === 'text') {
+      entries.push({ kind: 'text', f: { text: r.text || '', lang: r.lang || 'en' } });
+    } else if (r.recordType === 'url' || r.recordType === 'absolute-url') {
+      entries.push({ kind: 'url', f: { uri: r.uri || '' } });
+    } else if (r.kind === 'android-app') {
+      entries.push({ kind: 'android', f: { pkg: r.pkg || '' } });
+    } else if (r.recordType === 'mime' && r.mediaType) {
+      entries.push({ kind: 'raw-mime', f: { mediaType: r.mediaType, hex: r.hex || '' } });
+    } else if (r.kind === 'external' && r.externalType) {
+      entries.push({ kind: 'raw-external', f: { type: r.externalType, hex: r.hex || '' } });
+    } else {
+      skipped.push(label);
+    }
+  });
+  return { entries, skipped };
+}
+
+/** Web NFC message that clears a tag's NDEF content (a single empty record). */
+export function buildEraseMessage() {
+  return { records: [{ recordType: 'empty' }] };
+}

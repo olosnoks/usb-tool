@@ -294,3 +294,38 @@ describe('composer and Web NFC bridge', () => {
     expect(describeRecord(rec)).toMatchObject({ kind: 'unknown', hex: '010203' });
   });
 });
+
+import { tagFit, tlvOverhead, recordsToComposerEntries, buildEraseMessage } from '../src/utils/webNfc.js';
+
+describe('capacity and clone helpers', () => {
+  it('computes TLV overhead for short and long messages', () => {
+    expect(tlvOverhead(10)).toBe(3);
+    expect(tlvOverhead(300)).toBe(5);
+  });
+  it('reports which tags a message fits', () => {
+    const f = tagFit(200);
+    expect(f.find((t) => t.id === 'ntag213').fits).toBe(false);
+    expect(f.find((t) => t.id === 'ntag215').fits).toBe(true);
+    expect(f.find((t) => t.id === 'ntag215').free).toBe(292);
+    expect(tagFit(900).every((t) => !t.fits)).toBe(true);
+    expect(tagFit(0)[0].percent).toBe(0);
+  });
+  it('maps decoded records back to composer entries and lists the rest as skipped', () => {
+    const recs = [
+      { kind: 'text', recordType: 'text', text: 'hi', lang: 'de', hex: '' },
+      { kind: 'uri', recordType: 'url', uri: 'https://a.example' },
+      { kind: 'android-app', recordType: 'android.com:pkg', pkg: 'com.x.y' },
+      { kind: 'binary', recordType: 'mime', mediaType: 'application/x-a', hex: '0102' },
+      { kind: 'external', recordType: 'example.com:t', externalType: 'example.com:t', hex: 'aa' },
+      { kind: 'smart-poster', recordType: 'smart-poster' },
+    ];
+    const { entries, skipped } = recordsToComposerEntries(recs);
+    expect(entries.map((e) => e.kind)).toEqual(['text', 'url', 'android', 'raw-mime', 'raw-external']);
+    expect(entries[0].f).toEqual({ text: 'hi', lang: 'de' });
+    expect(skipped).toEqual(['#6 smart-poster']);
+    expect(() => buildNdefFromSpecs(entries.map((e) => ({ kind: e.kind, ...e.f })))).not.toThrow();
+  });
+  it('builds an erase message', () => {
+    expect(buildEraseMessage()).toEqual({ records: [{ recordType: 'empty' }] });
+  });
+});

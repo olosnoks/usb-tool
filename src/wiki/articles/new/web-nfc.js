@@ -41,6 +41,8 @@ Press **Start scanning**, then hold a tag against the phone. Each successful rea
 
 Every record also has a collapsible **payload hex** view.
 
+**Copy to Write tab** loads the records of the shown scan into the Write composer, so you can put the same content on another tag (a copy of a tag's NDEF data, not of its UID). Text, URL, Android app, MIME and external records are copied; MIME and external records are copied as raw hex payloads. Smart posters, empty and unknown records cannot be expressed in the composer, so they are skipped and the tool lists which ones. Review the composer before writing.
+
 **Scan history** keeps the last 200 reads in this session with their time. Click an entry to show it again. **JSON** exports the whole history (decoded records, including hex) as a file. **Clear** empties the list. History lives in memory only and is lost when the tab reloads.
 
 ## Write tab
@@ -58,9 +60,11 @@ Compose a message from one or more records. They are written in the order shown.
 | **Raw MIME (hex)** | Any MIME type with a payload you type as hex. |
 | **Raw external (hex)** | Any \`domain:name\` external type with a hex payload. |
 
-The **preview** shows the NDEF message size and hex before anything is written. The sizes shown are checked against the NTAG family: NTAG213 holds 144 bytes, NTAG215 holds 504 and NTAG216 holds 888. A message larger than the tag will fail to write.
+The **preview** shows the NDEF message size and hex before anything is written, plus a **capacity bar** for each common tag: MIFARE Ultralight (46 bytes), NTAG213 (137), NTAG215 (492) and NTAG216 (868). These are the largest NDEF messages NXP specifies for those tags (user memory of 48, 144, 504 and 888 bytes, minus the NDEF TLV and other overhead). A message larger than the tag will fail to write, and the bar shows by how many bytes it is too big.
 
 **Overwrite existing NDEF data** is on by default. When it is off, the write is refused if the tag already holds NDEF data. Press **Write to tag**, keep the tag held against the phone, and wait for the confirmation. **Abort write** cancels a pending operation.
+
+**Erase tag** asks for confirmation, then writes a single empty NDEF record over the tag's content. It frees the tag for reuse but is not a hardware format, and it cannot erase a tag that is read-only or password protected.
 
 ### Make tag read-only (permanent)
 
@@ -100,6 +104,10 @@ Spaces, colons, dashes and \`0x\` prefixes are ignored. The parser reads each re
 - **"Could not read this tag"**: hold the tag still against the back of the phone and keep it there until the read finishes. Tap-range differs between phones; move the tag slightly if it fails.
 - **Write refused**: the tag may already hold data with Overwrite turned off, may be read-only, or may be too small for the message. Check the size note in the preview.
 - **Non-NDEF tag**: Mifare Classic or other tags are not NDEF. Use the Proxmark3 / PM5 Suite or Flipper Zero Suite tabs.
+
+## Similar tools
+
+NXP TagInfo (reads full memory layout and identifies the chip, which Web NFC cannot do), NFC Tools by wakdev and NXP TagWriter (record editors with tag info, erase and lock). This tool covers the NDEF part of what they do, in a browser, plus an offline parser and capacity check.
 
 ## Related tools
 
