@@ -79,3 +79,39 @@ describe('STUSB4500 through a Bus Pirate', () => {
     expect(st.rdo).toBe(null);
   });
 });
+
+import { validateRequest, watts, diffStatus, formatStatusReport, formatEventLog } from '../src/utils/usbPdTools';
+
+describe('usbPdTools', () => {
+  const st = (pos, a = 1.5, att = true, count = 2) => ({
+    attached: att,
+    rdo: pos ? { position: pos, operatingCurrentA: a, maxCurrentA: a } : null,
+    sink: { count, pdos: [{ voltageV: 5, currentA: 1.5 }, { voltageV: 9, currentA: 1.5 }, { voltageV: 20, currentA: 1 }] }
+  });
+  it('computes watts', () => { expect(watts(20, 3)).toBe(60); expect(watts('x', 1)).toBe(0); });
+  it('validates requests', () => {
+    expect(validateRequest('9', '1.5')).toMatchObject({ ok: true, watts: 13.5 });
+    expect(validateRequest('4', '1').ok).toBe(false);
+    expect(validateRequest('21', '1').ok).toBe(false);
+    expect(validateRequest('9', '0').ok).toBe(false);
+    expect(validateRequest('', '1').ok).toBe(false);
+    expect(validateRequest('20', '4').warnings.length).toBeGreaterThan(0);
+    expect(validateRequest('20', '5').warnings.join()).toMatch(/e-marked/);
+    expect(validateRequest('9', '1').warnings).toEqual([]);
+  });
+  it('diffs status', () => {
+    expect(diffStatus(null, st(2))[0]).toMatch(/attached/);
+    expect(diffStatus(st(2), st(2))).toEqual([]);
+    expect(diffStatus(st(2), st(3)).join()).toMatch(/#2 to #3/);
+    expect(diffStatus(st(2), st(2, 1.5, false)).join()).toMatch(/removed/);
+    expect(diffStatus(st(null), st(1)).join()).toMatch(/Contract: source PDO #1/);
+    expect(diffStatus(st(1), st(null)).join()).toMatch(/lost/);
+    expect(diffStatus(st(1, 1.5), st(1, 3)).join()).toMatch(/3.00 A/);
+    expect(diffStatus(st(1, 1.5, true, 2), st(1, 1.5, true, 3)).join()).toMatch(/Sink PDOs changed/);
+  });
+  it('formats reports', () => {
+    expect(formatStatusReport(st(2), 0x25)).toMatch(/PDO3: 20.00 V \/ 1.00 A = 20 W \(off\)/);
+    expect(formatStatusReport(null)).toBe('');
+    expect(formatEventLog([{ t: 0, text: 'x' }])).toBe('1970-01-01T00:00:00.000Z  x');
+  });
+});

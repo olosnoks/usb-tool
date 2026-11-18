@@ -500,17 +500,23 @@ The STUSB4500 (I2C address \`0x28\`, device ID \`0x21\` or \`0x25\`) is read and
 
 ### 3. Interactive Workbench Features
 
-Click **CONNECT STUSB4500 (BUS PIRATE)** and choose the Bus Pirate's serial port. The tool checks the chip ID, records the power-up PDOs, and shows two panels. Nothing is shown before you connect: there are no simulated PPS sliders or VBUS meters, because the chip has neither.
+Click **CONNECT STUSB4500 (BUS PIRATE)** and choose the Bus Pirate's serial port. The tool checks the chip ID, records the power-up PDOs, and shows the contract, request, event log and NVM panels. Nothing is shown before you connect: there are no simulated PPS sliders or VBUS meters, because the chip has neither.
 
 #### 1. STUSB4500 Contract panel
-- Shows **SOURCE** (ATTACHED / NONE), **CONTRACT** (which source PDO was taken), **OPERATING CURRENT** and **MAX CURRENT**, refreshed every 1.5 s (or with the refresh button), plus the three **Sink PDOs** (voltage / current, "off" for unused ones). A "capability mismatch" note appears if the charger could not satisfy any requested voltage above 5 V and the board fell back to 5 V.
-- **Preset buttons 5 V, 9 V, 12 V, 15 V, 20 V** and a **V at A** field with **SET** request a fixed voltage (5-20 V) at a given current (up to 5 A, default 1.5 A). After a confirmation, the tool keeps PDO1 at 5 V, rewrites PDO2 in the chip's RAM with your voltage and sends a PD soft reset so the charger renegotiates. Choosing 5 V drops back to a single PDO. This only works if the connected charger offers that voltage; these changes are **lost at power-off**.
+- Shows **SOURCE** (ATTACHED / NONE), **CONTRACT** (which source PDO was taken), **OPERATING CURRENT** and **MAX CURRENT**, refreshed every 1.5 s by default. The header has an **update rate** selector (0.5, 1.5, 3 or 5 s), a **pause / resume** button, a **refresh** button and a **copy** button that puts a plain-text status report (contract and sink PDOs with watts) on the clipboard. The three **Sink PDOs** show voltage / current and the wattage of each ("off" for unused ones). A "capability mismatch" note appears if the charger could not satisfy any requested voltage above 5 V and the board fell back to 5 V.
+- **Preset buttons 5 V, 9 V, 12 V, 15 V, 20 V** and a **V at A** field with **SET** request a fixed voltage (5-20 V) at a given current (up to 5 A, default 1.5 A). After a confirmation, the tool keeps PDO1 at 5 V, rewrites PDO2 in the chip's RAM with your voltage and sends a PD soft reset so the charger renegotiates. Choosing 5 V drops back to a single PDO. The tool checks the request first (5-20 V, above 0 A and at most 5 A), shows the requested wattage, and warns when the current is above 3 A (needs a 5 A e-marked cable) or the power is above the 100 W fixed-supply limit; an invalid request cannot be sent. This only works if the connected charger offers that voltage; these changes are **lost at power-off**.
 
-#### 2. NVM: Power-Up PDOs (survive power-off)
+#### 2. Event log
+- Below the contract panel, a log records each change the tool sees while polling: source attached or removed, contract moved to another source PDO, operating/max current changes, capability mismatch and sink PDO changes. It keeps the last 200 entries; the download button saves them to a \`.txt\` file and **CLEAR** empties it. It only sees changes at the polling rate, and it is not a CC-line protocol capture.
+
+#### 3. NVM: Power-Up PDOs (survive power-off)
 - **READ NVM** reads the chip's NVM sectors and decodes the PDOs; **BACKUP** saves them to a \`.txt\` file; **RESTORE...** writes a backup file back (all 40 bytes, after confirmation).
 - The editor sets the number of PDOs (1-3), PDO2/PDO3 voltage (5-20 V) and each PDO's current from the chip's fixed steps (0.5 to 5 A). **WRITE NVM** is enabled only when the NVM decodes to exactly the PDOs the chip loaded at power-up (the tool shows "Layout verified"); otherwise writing is disabled. Power-cycle the board and reconnect before reading if it says the layout is not verified. New PDOs apply after the next power-up. Check the output with a meter before connecting anything.
 
 ---
+
+#### Similar tools
+Hardware PD analyzers such as the Total Phase USB PD Analyzer, the TI PD Analyzer and the Infineon CY4500 decode full CC-line traffic, and the ChargerLAB KM003C meters VBUS and can request specific PD profiles. This tool does neither packet capture nor metering; it is a sink-side trigger with a contract readout.
 
 ### 4. Upstream Standards & Engineering Attribution
 
