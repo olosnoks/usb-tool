@@ -320,10 +320,10 @@ export default function DebugFeaturesPanel({ client, guard, busyRef, targetState
   const log = rttLogs[rttChannel] || '';
 
   return (
-    <div className="bg-[#030712] border border-cyber-border rounded-xl p-3.5 shadow-xl flex flex-col gap-3 text-xs">
-      <div className="flex flex-wrap gap-1 border-b border-slate-800 pb-2">
+    <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 flex flex-col gap-2 text-xs">
+      <div className="flex flex-wrap gap-1 border-b border-slate-800 pb-1.5">
         {TABS.map(({ id, label, icon: Icon }) => (
-          <button key={id} onClick={() => setTab(id)} className={`flex items-center gap-1 px-2.5 py-1 rounded font-bold border ${tab === id ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
+          <button key={id} onClick={() => setTab(id)} className={`flex items-center gap-1 px-2 py-0.5 rounded font-bold text-[11px] border ${tab === id ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>
             <Icon className="w-3.5 h-3.5" /> {label}
           </button>
         ))}

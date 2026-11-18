@@ -5,6 +5,7 @@
  * core, and reads registers and memory over SWD. ST-Link is not CMSIS-DAP.
  */
 
+import { SCB } from './cortexRegs';
 import { DapProbe, SwdTarget, requestDapTransport, describeCpuid, CORTEX, CORE_REG_SELECT } from './dapLink';
 import {
   RttClient, findRttControlBlock, configureSwoTarget, ItmParser, Breakpoints, Watchpoints, dumpMemory, programFlash, eraseChipWithAlgorithm, nrf52EraseAll,
@@ -234,6 +235,27 @@ export class CmsisDapClient {
     if (!this.connected) throw new Error('Probe not connected.');
     if (this.targetState !== 'halted') throw new Error('Halt the CPU first.');
     await this.target.writeCoreRegister(CORE_REG_SELECT[index], value >>> 0);
+  }
+
+  /** Read CFSR, HFSR, MMFAR and BFAR from the System Control Block (works halted or running). */
+  async readFaultRegisters() {
+    if (!this.connected) throw new Error('Probe not connected.');
+    const [cfsr, hfsr] = await this.target.readWords(SCB.CFSR, 2);
+    const [mmfar, bfar] = await this.target.readWords(SCB.MMFAR, 2);
+    return { cfsr, hfsr, mmfar, bfar };
+  }
+
+  /** Clear the sticky fault bits (they are write-1-to-clear). */
+  async clearFaultRegisters() {
+    if (!this.connected) throw new Error('Probe not connected.');
+    await this.target.writeWord(SCB.CFSR, 0xffffffff);
+    await this.target.writeWord(SCB.HFSR, 0xffffffff);
+  }
+
+  /** Read `count` words at `address` (aligned down); used by the watch list. */
+  async readWordsAt(address, count = 1) {
+    if (!this.connected) throw new Error('Probe not connected.');
+    return this.target.readWords(address & ~3, count);
   }
 
   get isArmv8() {
