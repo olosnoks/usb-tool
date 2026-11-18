@@ -4,7 +4,8 @@ import { renderToString } from 'react-dom/server';
 import { parseWigle } from '../src/utils/pigletToolkit';
 import {
   hasFix, rowsToGeoJson, rowsToKml, mergeWigleLogs, rowsToWigleCsv,
-  channelHistogram, securityHistogram, typeHistogram, mapPoints
+  channelHistogram, securityHistogram, typeHistogram, mapPoints,
+  rowsToGpx, haversineKm, trackStats, bandOf, bandHistogram, dedupeWigleCsv
 } from '../src/utils/pigletGeo';
 
 vi.mock('leaflet', () => ({ default: {} }));
@@ -126,5 +127,39 @@ describe('pigletGeo', () => {
     expect(html).toContain('Export KML');
     expect(html).toContain('Export GeoJSON');
     expect(html).toContain('80 points on the map');
+  });
+});
+
+describe('gpx, track stats, bands, dedupe', () => {
+  it('GPX has one wpt per MAC with a fix and escapes names', () => {
+    const rows = [{ mac: 'AA:BB:CC:DD:EE:01', ssid: 'a<b&c', auth: '', seen: '', ch: 1, rssi: -50, lat: 1, lon: 2, type: 'WIFI' },
+      { mac: 'AA:BB:CC:DD:EE:02', ssid: 'nofix', lat: 0, lon: 0, type: 'WIFI' }];
+    const g = rowsToGpx(rows);
+    expect(g.match(/<wpt /g)).toHaveLength(1);
+    expect(g).toContain('a&lt;b&amp;c');
+  });
+  it('haversine: one degree of latitude is about 111 km', () => {
+    const d = haversineKm({ lat: 0, lon: 0 }, { lat: 1, lon: 0 });
+    expect(d).toBeGreaterThan(110.5);
+    expect(d).toBeLessThan(111.9);
+  });
+  it('trackStats sums hops in time order and skips huge jumps', () => {
+    const r = (seen, lat, lon) => ({ mac: seen, seen, lat, lon, type: 'WIFI' });
+    const t = trackStats([r('2024-01-01 10:00:02', 0.02, 1), r('2024-01-01 10:00:00', 0, 1), r('2024-01-01 10:00:01', 0.01, 1), r('2024-01-01 10:00:03', 40, 40)]);
+    expect(t.km).toBeGreaterThan(2.1);
+    expect(t.km).toBeLessThan(2.3);
+    expect(t.skippedHops).toBe(1);
+    expect(trackStats([]).bbox).toBeNull();
+  });
+  it('bands and dedupe', () => {
+    expect(bandOf({ type: 'WIFI', freq: 5180, ch: 36 })).toBe('5 GHz');
+    expect(bandOf({ type: 'WIFI', freq: null, ch: 6 })).toBe('2.4 GHz');
+    expect(bandOf({ type: 'BLE' })).toBe('BLE');
+    expect(bandHistogram([{ type: 'WIFI', ch: 1 }, { type: 'BLE' }]).map((x) => x.key)).toEqual(['2.4 GHz', 'BLE']);
+    const p = parseWigle(fixtureLog());
+    const dup = [...p.rows, { ...p.rows[0], rssi: -10 }];
+    const out = parseWigle(dedupeWigleCsv(dup));
+    expect(out.rows).toHaveLength(p.rows.length);
+    expect(out.rows.find((x) => x.mac === p.rows[0].mac).rssi).toBe(-10);
   });
 });

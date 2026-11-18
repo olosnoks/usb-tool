@@ -942,6 +942,12 @@ The Warhog/Piglet SD file browser opens \`.csv\` logs in a viewer (the device ca
 - **Map and histograms:** logged networks are plotted on a Leaflet map (strongest-signal fix per MAC, capped at 5000 points), with histograms for Wi-Fi channel, Wi-Fi security and Wi-Fi vs BLE.
 - **Export KML / GeoJSON:** one point per MAC at its strongest-signal fix. Rows without a valid fix (including 0,0) are never plotted or exported; the buttons are disabled when the log has none.
 - **Merge selected logs:** select two or more WiGLE CSVs to merge them into one row per MAC, keeping the best-RSSI sighting (a row with a fix wins over a stronger one without) and the earliest FirstSeen. The result opens in the viewer and can be downloaded as \`merged.csv\`.
+- **Export GPX:** one waypoint per MAC at its strongest-signal fix, for GPS apps and mapping tools.
+- **Deduped CSV:** downloads the open log as a WiGLE CSV with one row per MAC (strongest sighting kept).
+- **Band histogram and route stats:** a fourth histogram splits 2.4 GHz / 5 GHz / 6 GHz / BLE (from Frequency, else Channel). A line under the buttons shows the approximate route length (haversine distance between fixes in FirstSeen order; hops over 5 km are ignored as GPS glitches) and the latitude/longitude area covered. The route is an estimate, since FirstSeen is when each network was first heard, not a continuous GPS track.
+- **Layout:** the tool uses compact tabs (SD Card, wardriver.cfg, Console, Flasher, Pinouts); the description sits under an About fold.
+
+Similar tools: WiGLE (web map and upload), Kismet (WiGLE CSV logging), the Marauder and M5PORKCHOP wardriving modes, and the JosephHewitt and ESP32 Dual Band wardriver firmwares.
 
 ---
 
