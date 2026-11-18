@@ -22,6 +22,10 @@ Click the grey test area to focus it, then press keys. The area captures every k
 
 - **Board.** An ANSI 104-key layout by default. Tick **TKL (no numpad)** for 87 keys. Tick **ISO layout** to add the ISO keys (IntlBackslash and the ISO hash key). The ISO shape is simplified: the key codes are correct, but the Enter key is not drawn tall.
 - **Colours.** Cyan means held now. Green means pressed at least once. Rose means a chatter flag. The small number on a key is its press count, and hovering a key shows the count too.
+- **Last key.** Shows \`code\`, \`key\`, the legacy \`keyCode\` number, location, which modifiers (Ctrl, Alt, Shift, Meta) were down, and the hold time (down to up) as average, minimum and maximum over that key's presses. Hold time is measured from browser event timestamps.
+- **Coverage.** A bar and count of how many board keys you have pressed, with a collapsible list of the keys not pressed yet. Use it to find dead keys on a full sweep.
+- **Ghosting combo.** Pick a preset (WASD + Space + Shift, arrows + Space, Q W E A S D, or Q A Z + W) and hold the whole combo. The card shows how many of its keys are held and which are missing. A missing key means the browser never received it: ghosting or blocking in the keyboard, or an OS filter. It cannot say which.
+- **COPY SUMMARY.** Copies a plain-text summary to the clipboard: keys tested, most keys held, chatter flags and keys not pressed. It holds no key sequence or timing log. Nothing is saved or sent anywhere.
 - **Held now.** The keys currently down, in the order they were pressed.
 - **Event log.** The newest 150 of up to 300 events: type (down or up), \`code\` (the physical key, for example \`KeyA\` or \`NumpadEnter\`), \`key\` (the character or name the layout produced), location (standard, left, right or numpad), repeat (auto-repeat while held), and a timestamp in milliseconds from the page clock.
 - **Press counts.** Each real press is counted once. Auto-repeat is logged but never counted.
@@ -104,6 +108,10 @@ The matrix is read per row, in chunks sized by the column count. If the keyboard
 - **"No VIA reply (timeout)".** The keyboard is not answering on the VIA interface. Reconnect the cable and reopen the device.
 - **"unhandled".** The firmware does not support that command, or VIA is disabled in the build.
 - **Keys missing in the key tester.** The page did not have focus, or the OS or a shortcut took the key first.
+
+## Similar tools
+
+Compared against: keyboardtester.com style online testers (visual board, rollover and ghosting checks), generic key-event testers (code, key, keyCode), and the VIA / QMK Configurator key tester and Test Matrix mode. Browser testers cannot measure true USB polling rate or see layer keys such as Fn, so this tool does not claim to. Use the VIA matrix test for those.
 
 ## Related tools
 
