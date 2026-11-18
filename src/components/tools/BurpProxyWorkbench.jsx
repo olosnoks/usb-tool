@@ -6,6 +6,7 @@ import { countMarkers, stripMarkers, applyMarkers, applyAllMarkers } from '../..
 import { CODECS, jwtDecode } from '../../utils/codec';
 import { md5Hex } from '../../utils/md5';
 import { parseCurl, parseRawHttp, toCurl, toFetch, toPowerShell, toPython } from '../../utils/httpImport';
+import { parseVars, substituteVars, missingVars, extractFromJson, toRawHttp, toHttpie, toGo } from '../../utils/httpExtras';
 import { lineDiff, diffStats } from '../../utils/diff';
 import ProxyConfig from './common/ProxyConfig';
 import WordlistPicker from './common/WordlistPicker';
@@ -92,12 +93,12 @@ export default function BurpProxyWorkbench({ onLogMessage, hideProxyConfig = fal
   const toComparer = (text, slot) => { if (slot === 'b') setCmpB(text); else setCmpA(text); setTab('comparer'); };
 
   return (
-    <div className="p-4">
+    <div className="p-0">
       {!hideProxyConfig && <ProxyConfig onLogMessage={onLogMessage} />}
-      <div className="flex gap-1 mb-3 border-b border-slate-800">
+      <div className="flex gap-1 mb-2 border-b border-slate-800">
         {['repeater', 'intruder', 'comparer', 'decoder'].map((t) => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-3 py-1 text-sm capitalize rounded-t ${tab === t ? 'bg-slate-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}>
+            className={`px-2.5 py-0.5 text-xs capitalize rounded-t ${tab === t ? 'bg-slate-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}>
             {t}
           </button>
         ))}
@@ -198,7 +199,7 @@ function ResponseView({ response, toComparer }) {
 
 function CopyAsMenu({ request, log }) {
   const [open, setOpen] = useState(false);
-  const FORMATS = [['curl', toCurl], ['fetch', toFetch], ['PowerShell', toPowerShell], ['Python requests', toPython]];
+  const FORMATS = [['curl', toCurl], ['fetch', toFetch], ['PowerShell', toPowerShell], ['Python requests', toPython], ['HTTPie', toHttpie], ['Go net/http', toGo], ['Raw HTTP', toRawHttp]];
   const pick = (name, fn) => { navigator.clipboard?.writeText(fn(request)); log(`Copied as ${name}`); setOpen(false); };
   return (
     <div className="relative">
@@ -219,6 +220,10 @@ function Repeater(props) {
   const [response, setResponse] = useState(null);
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState(() => loadHistory());
+  const [varsText, setVarsText] = useState('');
+  const [extractPath, setExtractPath] = useState('');
+  const [extractName, setExtractName] = useState('');
+  const [extractMsg, setExtractMsg] = useState('');
   const abortRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -230,11 +235,16 @@ function Repeater(props) {
     abortRef.current = ctrl;
     setBusy(true);
     setResponse(null);
-    log(`${method} ${url}${isProxyEnabled() ? ' (via proxy)' : ' (direct)'}`);
+    const vars = parseVars(varsText);
+    const sub = (t) => substituteVars(t, vars);
+    const eff = { method, url: sub(url), headers: sub(headers), body: sub(body) };
+    const miss = missingVars([url, headers, body], vars).filter((n) => n !== 'value');
+    if (miss.length) log(`Unresolved variables left as-is: ${miss.join(', ')}`);
+    log(`${method} ${eff.url}${isProxyEnabled() ? ' (via proxy)' : ' (direct)'}`);
     try {
-      const res = await sendRequest({ method, url, headers, body }, { signal: ctrl.signal, timeoutMs });
+      const res = await sendRequest(eff, { signal: ctrl.signal, timeoutMs });
       setResponse(res);
-      setHistory((h) => commitHistory([{ req: { method, url, headers, body }, res, status: res.status, statusText: res.statusText, size: res.size, timeMs: res.timeMs, startedAt: Date.now() }, ...h]));
+      setHistory((h) => commitHistory([{ req: eff, res, status: res.status, statusText: res.statusText, size: res.size, timeMs: res.timeMs, startedAt: Date.now() }, ...h]));
       log(`Response ${res.status} ${res.statusText} — ${res.size} bytes, ${res.timeMs}ms`);
     } catch (e) {
       setResponse({ error: errText(e) });
@@ -245,6 +255,17 @@ function Repeater(props) {
   };
 
   const cancel = () => abortRef.current?.abort();
+
+  const extract = () => {
+    if (!response || response.error) { setExtractMsg('No response yet'); return; }
+    const r = extractFromJson(response.body || '', extractPath);
+    if (!r.ok) { setExtractMsg(r.error); return; }
+    const name = extractName.trim();
+    if (!/^[A-Za-z_][\w.-]*$/.test(name)) { setExtractMsg(`Value: ${r.text} (name the variable to save it)`); return; }
+    const kept = varsText.split('\n').filter((l) => l.split('=')[0].trim() !== name);
+    setVarsText([...kept.filter((l) => l.trim()), `${name}=${r.text}`].join('\n'));
+    setExtractMsg(`Saved {{${name}}}`);
+  };
 
   const restore = (h) => {
     props.setMethod(h.req.method); props.setUrl(h.req.url); props.setHeaders(h.req.headers); props.setBody(h.req.body);
@@ -273,7 +294,7 @@ function Repeater(props) {
   const clear = () => { clearHistory(); setHistory([]); log('History cleared'); };
 
   return (
-    <div className="flex gap-3">
+    <div className="flex flex-col @lg:flex-row gap-2">
       <div className="flex-1 min-w-0">
         <ImportBar {...props} />
         <RequestEditor {...props} />
@@ -283,9 +304,21 @@ function Repeater(props) {
           <CopyAsMenu request={{ method, url, headers, body }} log={log} />
           <label className="text-xs text-gray-400">Timeout <input aria-label="Timeout seconds" value={timeoutSec} onChange={(e) => setTimeoutSec(e.target.value)} className="w-12 bg-slate-900 border border-slate-800 rounded p-0.5 text-xs text-gray-200 text-center" /> s</label>
         </div>
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer text-cyan-300">Variables &amp; extract ({Object.keys(parseVars(varsText)).length})</summary>
+          <textarea aria-label="Variables" value={varsText} onChange={(e) => setVarsText(e.target.value)} rows={3} placeholder={'NAME=value (use {{NAME}} in URL, headers, body)'}
+            className="mt-1 w-full bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
+          <div className="mt-1 flex flex-wrap gap-1 items-center">
+            <input aria-label="JSON path" value={extractPath} onChange={(e) => setExtractPath(e.target.value)} placeholder="JSON path, e.g. data.token" className="flex-1 min-w-[8rem] bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
+            <input aria-label="Variable name" value={extractName} onChange={(e) => setExtractName(e.target.value)} placeholder="save as" className="w-24 bg-slate-900 border border-slate-800 rounded p-1 text-xs text-gray-200 font-mono" />
+            <button onClick={extract} className="px-2 py-1 bg-slate-700 text-gray-200 rounded hover:bg-slate-600">Extract</button>
+          </div>
+          {extractMsg && <p className="mt-1 text-gray-400 break-all">{extractMsg}</p>}
+          <p className="mt-1 text-[10px] text-slate-500">Variables are substituted when you press Send (history keeps the substituted request). Unknown {'{{names}}'} are left as typed.</p>
+        </details>
         <ResponseView response={response} toComparer={toComparer} />
       </div>
-      <div className="w-56 shrink-0">
+      <div className="@lg:w-56 shrink-0">
         <div className="flex items-center gap-1 mb-1 text-xs text-gray-400">
           <span className="mr-auto">History ({history.length}/{HISTORY_CAP})</span>
           <button onClick={exportHar} disabled={!history.length} className="text-cyan-300 hover:text-cyan-200 disabled:opacity-40">Export HAR</button>
