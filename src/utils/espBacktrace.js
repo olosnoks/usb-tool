@@ -251,3 +251,113 @@ export function formatReport(result) {
   out.push('');
   return out.join('\n');
 }
+
+// ---------------------------------------------------------------------------
+// Additions: raw address lookup, annotated crash text, addr2line export, markdown.
+// ---------------------------------------------------------------------------
+
+/** Pull hex addresses (0x... or bare 6-8 digit hex) out of free text, in order, de-duplicated. */
+export function parseAddressList(text) {
+  const out = [];
+  const seen = new Set();
+  const re = /\b(?:0x([0-9a-fA-F]{1,8})|([0-9a-fA-F]{8}))\b/g;
+  const src = String(text || '');
+  for (let m; (m = re.exec(src)) !== null;) {
+    const v = parseInt(m[1] || m[2], 16) >>> 0;
+    if (seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+
+/**
+ * Look up plain addresses like addr2line does. asReturn=true maps each value as a return
+ * address (see callSiteFor) before lookup; arch is 'xtensa' | 'esp8266' | 'riscv'.
+ */
+export function lookupAddresses(addrs, prepared, { arch = 'xtensa', asReturn = false } = {}) {
+  return addrs.map((addr) => {
+    const lookup = asReturn ? callSiteFor(arch, addr) : addr;
+    return { addr, hex: hex(addr), lookup, ...symbolize(prepared, lookup) };
+  });
+}
+
+const locText = (s) => `${s.func ? `${s.func}${s.offset ? `+0x${s.offset.toString(16)}` : ''}` : '??'}${s.file ? ` at ${s.file}:${s.line}` : ''}`;
+
+/**
+ * Return the crash text with decoded "  0xADDR: func at file:line" lines inserted under each
+ * line that contains code addresses (Backtrace entries, PC/RA/A0/epc registers), like
+ * idf.py monitor. Stack-dump lines are left alone (see the candidates list).
+ */
+export function annotateCrashText(input, prepared) {
+  const text = String(input || '').replace(/\r\n?/g, '\n');
+  if (!prepared) return text;
+  const arch = parsePanic(text).arch;
+  const out = [];
+  for (const line of text.split('\n')) {
+    out.push(line);
+    if (/^\s*[0-9a-fA-F]{6,8}:/.test(line)) continue;
+    const notes = [];
+    if (/^\s*Backtrace:/.test(line)) {
+      const re = /0x([0-9a-fA-F]{1,8}):0x[0-9a-fA-F]{1,8}/g;
+      let i = 0;
+      for (let m; (m = re.exec(line)) !== null; i++) {
+        const pc = parseInt(m[1], 16) >>> 0;
+        const s = symbolize(prepared, i > 0 ? callSiteFor(arch, pc) : pc);
+        notes.push(`  ${hex(pc)}: ${s.func || s.file ? locText(s) : '??'}`);
+      }
+    } else {
+      const re = /\b(PC|MEPC|RA|A0|EPC1|EPC2|EPC3)\s*[:=]\s*0x([0-9a-fA-F]{1,8})\b|\b(epc[1-3])=0x([0-9a-fA-F]{1,8})\b/g;
+      for (let m; (m = re.exec(line)) !== null;) {
+        const name = (m[1] || m[3]).toUpperCase();
+        const v = parseInt(m[2] || m[4], 16) >>> 0;
+        const isRet = name === 'A0' || name === 'RA';
+        const addr = isRet ? callSiteFor(arch, v) : v;
+        if (!prepared.elf.isExec(addr)) continue;
+        const s = symbolize(prepared, addr);
+        if (s.func || s.file) notes.push(`  ${name} ${hex(v)}: ${locText(s)}`);
+      }
+    }
+    out.push(...notes);
+  }
+  return out.join('\n');
+}
+
+/** Toolchain addr2line binary name for a decoded crash (arch + optional chip name). */
+export function addr2lineTool(arch, chip) {
+  if (arch === 'riscv') return 'riscv32-esp-elf-addr2line';
+  if (arch === 'esp8266') return 'xtensa-lx106-elf-addr2line';
+  const c = chip && /^ESP32(?:-(S\d))?$/i.exec(chip);
+  const suffix = c && c[1] ? c[1].toLowerCase() : '';
+  return `xtensa-esp32${suffix}-elf-addr2line`;
+}
+
+/**
+ * Command line for the ESP-IDF / Arduino toolchain's addr2line that reproduces this decode.
+ * Addresses are the already mapped lookup addresses (return addresses are NOT mapped twice).
+ */
+export function buildAddr2lineCommand(addrs, { arch = 'xtensa', chip = null, elfName = 'build/app.elf' } = {}) {
+  const list = addrs.map((a) => hex(a)).join(' ');
+  const q = /\s/.test(elfName) ? `"${elfName}"` : elfName;
+  return `${addr2lineTool(arch, chip)} -pfiaC -e ${q} ${list}`.trim();
+}
+
+/** Strip the directory part of a path for compact display. */
+export function baseName(p) {
+  return String(p || '').split(/[\\/]/).pop();
+}
+
+/** Markdown version of a decode, for pasting into an issue. */
+export function formatMarkdown(result) {
+  const out = [`### ESP crash decode: ${result.arch}${result.chip ? ` (${result.chip})` : ''}, ${result.kind}`];
+  if (result.cause) out.push('', `**Cause:** ${result.cause.name}${result.cause.explanation ? ` - ${result.cause.explanation}` : ''}`);
+  if (result.faultAddress !== null && result.faultAddress !== undefined) out.push(`**Fault address (${result.faultRegister}):** \`${hex(result.faultAddress)}\``);
+  out.push('', '| # | Address | Function | File:line | Source |', '|---|---|---|---|---|');
+  for (const f of result.frames) {
+    const { fn, src } = fmtLocation(f);
+    out.push(`| ${f.index} | \`${hex(f.pc)}\` | ${fn.replace(/\|/g, '\\|')} | ${src ? `\`${src}\`` : ''} | ${f.role} |`);
+  }
+  if (result.backtraceCorrupted) out.push('', '_Backtrace marked CORRUPTED after the last frame._');
+  if (result.notes.length) out.push('', ...result.notes.map((n) => `- ${n}`));
+  return `${out.join('\n')}\n`;
+}
