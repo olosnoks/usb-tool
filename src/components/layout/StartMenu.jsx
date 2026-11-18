@@ -324,12 +324,11 @@ export default function StartButton({ onLaunch, onOpenPinouts, onOpenHardwareInt
     <div ref={rootRef} className="relative shrink-0">
       <button
         type="button" data-testid="start-button" onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu" aria-expanded={open} title="Start: all tools (Alt+S)"
-        className={`flex items-center gap-2 h-7 px-2.5 rounded border font-bold tracking-widest transition-colors ${
-          open ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-200' : 'bg-slate-900 border-slate-700 text-slate-200 hover:border-cyan-500/40 hover:text-white'}`}
+        aria-haspopup="menu" aria-expanded={open} aria-label="Start: all tools" title="Start: all tools (Alt+S)"
+        className={`flex items-center justify-center h-7 w-8 rounded border transition-colors ${
+          open ? 'bg-cyan-500/20 border-cyan-500/50 shadow-cyan-glow' : 'bg-gradient-to-br from-cyan-500/15 to-amber-500/10 border-cyan-500/30 hover:border-cyan-400/60'}`}
       >
-        <img src={skonLogo} alt="" className="w-4 h-4" />
-        <span className="hidden sm:inline text-[10px]">START</span>
+        <img src={skonLogo} alt="" className="w-6 h-auto select-none" draggable="false" />
       </button>
       {open && (
         <div className="absolute bottom-full left-0 mb-1.5 z-[10000] w-[calc(100vw-1rem)] md:w-auto">

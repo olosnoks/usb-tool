@@ -10,13 +10,13 @@ const serial = {
 };
 vi.mock('../src/context/SerialContext', () => ({ useSerial: () => serial }));
 
-const { default: Header } = await import('../src/components/layout/Header.jsx');
+const { TaskbarSerial } = await import('../src/components/layout/TaskbarControls.jsx');
 const { default: TerminalDrawer } = await import('../src/components/layout/TerminalDrawer.jsx');
 
-// The serial strip lives in the header; the drawer drops down below it and renders nothing when closed.
-describe('header serial strip and top drawer', () => {
-  it('header shows the SERIAL toggle and the connection controls', () => {
-    const html = renderToString(<Header activeTool="terminal" isDrawerOpen={false} onToggleDrawer={() => {}} />);
+// The serial strip lives in the taskbar; the drawer slides up above it and renders nothing when closed.
+describe('taskbar serial strip and drawer', () => {
+  it('taskbar strip shows the SERIAL toggle and the connection controls', () => {
+    const html = renderToString(<TaskbarSerial isDrawerOpen={false} onToggleDrawer={() => {}} />);
     expect(html).toContain('SERIAL');
     expect(html).toContain('CONNECT');
     expect(html).toContain('OFFLINE');
@@ -29,6 +29,6 @@ describe('header serial strip and top drawer', () => {
     expect(html).toContain('SERIAL TERMINAL');
     expect(html).toContain('hello');
     expect(html).toContain('SEND');
-    expect(html).not.toContain('BAUD'); // connection controls are in the header now
+    expect(html).not.toContain('BAUD'); // connection controls are in the taskbar now
   });
 });

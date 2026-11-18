@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Terminal as TerminalIcon,
-  ChevronUp,
+  ChevronDown,
   Send,
   Trash2,
   Maximize2,
@@ -10,8 +10,8 @@ import {
 } from 'lucide-react';
 import { useSerial } from '../../context/SerialContext';
 
-// The serial terminal drawer drops down from just below the app header. Its toggle and the
-// connection controls live in the header (Header.jsx); this renders nothing while closed.
+// The serial terminal drawer slides up from just above the desktop taskbar. Its toggle and the
+// connection controls live in the taskbar (TaskbarControls.jsx); this renders nothing while closed.
 
 export default function TerminalDrawer({
   isOpen,
@@ -53,9 +53,9 @@ export default function TerminalDrawer({
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (!isResizing) return;
-      // the drawer hangs from the header, so its height is the pointer's distance from the drawer top
-      const top = drawerRef.current?.getBoundingClientRect().top ?? 0;
-      const newHeight = e.clientY - top;
+      // the drawer sits on the taskbar, so its height is the pointer's distance above the drawer bottom
+      const bottom = drawerRef.current?.getBoundingClientRect().bottom ?? window.innerHeight;
+      const newHeight = bottom - e.clientY;
       if (newHeight >= 120 && newHeight <= window.innerHeight * 0.7) {
         setDrawerHeight(newHeight);
       }
@@ -78,7 +78,14 @@ export default function TerminalDrawer({
   if (!isOpen) return null;
 
   return (
-    <div ref={drawerRef} className="border-b border-cyber-border bg-[#050a16] shadow-2xl z-20 font-mono text-xs flex flex-col shrink-0">
+    <div ref={drawerRef} className="border-t border-cyber-border bg-[#050a16] shadow-2xl z-20 font-mono text-xs flex flex-col shrink-0">
+      {/* Resize handle: drag up to grow */}
+      <div
+        onMouseDown={() => setIsResizing(true)}
+        className="h-1.5 w-full bg-slate-900 hover:bg-cyan-500 cursor-ns-resize transition-colors"
+        title="Drag to resize terminal drawer"
+      />
+
       {/* Drawer action bar */}
       <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-1.5 bg-slate-950 border-b border-slate-900 select-none">
         <div className="flex items-center gap-1.5 text-cyan-400 font-bold">
@@ -119,7 +126,7 @@ export default function TerminalDrawer({
             className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800"
             title="Collapse drawer"
           >
-            <ChevronUp className="w-3.5 h-3.5" />
+            <ChevronDown className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -214,12 +221,6 @@ export default function TerminalDrawer({
           </form>
       </div>
 
-      {/* Resize handle: drag down to grow */}
-      <div
-        onMouseDown={() => setIsResizing(true)}
-        className="h-1.5 w-full bg-slate-900 hover:bg-cyan-500 cursor-ns-resize transition-colors"
-        title="Drag to resize terminal drawer"
-      />
     </div>
   );
 }

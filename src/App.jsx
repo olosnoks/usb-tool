@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SerialProvider, useSerial } from './context/SerialContext';
-import Header from './components/layout/Header';
+import { TaskbarSerial, TaskbarTray } from './components/layout/TaskbarControls';
 import Desktop from './components/layout/Desktop';
 import { setCurrentTool, record } from './utils/sessionLog';
 import TerminalDrawer from './components/layout/TerminalDrawer';
@@ -207,33 +207,11 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleSelectPreset]);
 
-  // Find active preset matching the focused tool
-  const currentActivePreset = WORKSPACE_PRESETS.find((p) => p.toolId === activeTool)?.id;
-
   return (
     <div className="h-screen bg-cyber-darkest text-slate-200 flex flex-col font-mono selection:bg-cyan-500/30 selection:text-cyan-300 overflow-hidden">
-      {/* 1. Global Persistent Header */}
-      <Header
-        activeTool={activeTool}
-        activePreset={currentActivePreset}
-        onSelectPreset={handleSelectPreset}
-        isDrawerOpen={isDrawerOpen}
-        onToggleDrawer={() => setIsDrawerOpen(!isDrawerOpen)}
-        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-        onOpenHardwareIntel={() => setIsHardwareIntelOpen(true)}
-        onOpenPinouts={() => setIsPinoutModalOpen(true)}
-      />
-
-      {/* 2. Main Workspace Layout: windowed desktop (tools launch from the taskbar's Start menu) */}
+      {/* Windowed desktop; the taskbar along the bottom holds Start, the serial controls and the tray */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* The terminal drawer drops down from the header, above the desktop with the tool windows */}
         <div className="flex-1 flex flex-col overflow-hidden bg-cyber-darkest min-w-0">
-          <TerminalDrawer
-            isOpen={isDrawerOpen}
-            onToggleOpen={() => setIsDrawerOpen(!isDrawerOpen)}
-            onNavigateToFullTerminal={() => { open('terminal'); setIsDrawerOpen(false); }}
-          />
-
           <Desktop
             state={wm} viewport={viewport} onViewport={onViewport}
             renderTool={renderToolInWindow} metaFor={metaFor}
@@ -243,6 +221,15 @@ function AppContent() {
             onZoomStep={onZoomStep} onToggleFit={onToggleFit} onResetZoom={onResetZoom} onDuplicate={onDuplicate} onSnap={onSnap}
             activeTool={activeTool} onLaunch={launchTool}
             onOpenPinouts={() => setIsPinoutModalOpen(true)} onOpenHardwareIntel={() => setIsHardwareIntelOpen(true)}
+            drawer={
+              <TerminalDrawer
+                isOpen={isDrawerOpen}
+                onToggleOpen={() => setIsDrawerOpen(!isDrawerOpen)}
+                onNavigateToFullTerminal={() => { open('terminal'); setIsDrawerOpen(false); }}
+              />
+            }
+            serialControls={<TaskbarSerial isDrawerOpen={isDrawerOpen} onToggleDrawer={() => setIsDrawerOpen(!isDrawerOpen)} />}
+            tray={<TaskbarTray onOpenCommandPalette={() => setIsCommandPaletteOpen(true)} />}
           />
 
         </div>
