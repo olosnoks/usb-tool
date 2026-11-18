@@ -316,7 +316,7 @@ IPv6 results have no broadcast or netmask rows. The calculator does arithmetic o
     toolId: 'osint-clients',
     category: 'webapp',
     title: 'OSINT API Clients — Shodan, urlscan.io & HackerTarget with your own keys',
-    summary: 'Front-ends for the Shodan REST API (search builder, host, DNS, exploits, account), urlscan.io search and HackerTarget lookups. You supply the API key; Shodan calls use the site relay automatically.',
+    summary: 'Front-ends for the Shodan REST API (search builder with saved queries, host exposure review, batch check of your own IPs, DNS, exploits, credits), urlscan.io search and HackerTarget lookups. You supply the API key; Shodan calls use the site relay automatically.',
     tags: ['OSINT', 'Shodan', 'urlscan.io', 'HackerTarget', 'API key', 'Recon', 'Relay', 'Proxy'],
     readTime: '5 min read',
     content: `
@@ -338,15 +338,20 @@ Most vendor APIs send no CORS headers, so a browser cannot call them directly. T
 The relay is narrow: GET/HEAD only, fixed upstreams, no cookies forwarded, nothing cached, and other sites are refused. It holds no key of its own: your key travels in the query string of the request, as the Shodan API expects, so treat the key as visible to anything that can see that request. Each result shows its route (via site relay, via proxy, direct), and non-JSON error pages are reported with the HTTP status.
 
 ### Shodan tab
-Modes: **Search**, **Host**, **DNS**, **Exploits**, **Account & tools**.
+Modes: **Search**, **Host**, **My IPs**, **DNS**, **Exploits**, **Account & tools**. The **credits** button in the header shows your plan and remaining query and scan credits (a free request); it turns red at 5 query credits or fewer.
 
 - **Search:** a query builder with one row per filter (negatable, with filter descriptions and examples), plus an editable raw query string and presets. Facets can be added and their top values clicked to add them to the query. **Search** returns paged results (**‹ prev** / **next ›**), **Count only (free)** returns just the total, and results export with **CSV**, **Copy IPs** and **Copy query**. Searches that use filters cost Shodan query credits; the credit note appears in the endpoint tooltips.
-- **Host:** everything Shodan knows about one IP, with history and minify options, and a **honeypot score**.
+- **Saved queries:** under the query builder, **save** stores the current query in this browser (optionally named), the **Saved** list reloads it, and **manage** deletes entries. The **presets** list has a group of starter queries for your own assets (network range, domain, organization, ASN). They contain placeholder values that you must replace.
+- **Host:** everything Shodan knows about one IP, with history and minify options, a **honeypot score**, and **my IP** to fill in the public address Shodan sees for the request. Each lookup also shows an **Exposure review**: plain-language findings sorted high, medium, info. The rules cover risky exposed services (Telnet, SMB, RDP, VNC, databases, Redis, Elasticsearch and others), matched CVEs, expired certificates, TLS older than 1.2, many open ports and disclosed server versions. These are hints from what Shodan last indexed, not a live scan; CVE matches come from banner versions and can be false positives. **Copy report** and **.md** export a Markdown report.
+- **My IPs:** paste your own public IPs (one per line or comma separated). Each gets a free host lookup, one per second, and the table shows a level, ports, CVEs and organization or hostnames, with a **CSV** export and a **Stop** button. Non-IP entries are skipped (resolve domains in the DNS mode first). An IP that Shodan has not indexed shows "no data".
 - **DNS:** **Domain info (1 credit)**, **Resolve hostnames** and **Reverse DNS**.
 - **Exploits:** search the Exploit-DB / Metasploit / CVE index.
 - **Account & tools:** API plan and credits, your IP, HTTP headers, crawled ports, crawler protocols, filter and facet lists, popular query tags, and **Community queries**.
 
 Raw JSON can be copied or downloaded from each result.
+
+### Similar tools
+The Shodan website and CLI (host, myip, alert commands), and Censys, which markets attack-surface monitoring of your own assets. This tool is a client for your own Shodan key; it has no alerts or continuous monitoring, so re-check periodically.
 
 ### urlscan.io tab
 Enter a search query such as \`domain:example.com\` and press **Search**. Up to 100 results are listed with the page URL (linking to the scan result), IP, server and date.

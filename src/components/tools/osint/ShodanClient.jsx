@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Search, RefreshCw, Plus, X, Copy, Download, ExternalLink, ChevronDown, ChevronRight,
-  Server, Globe, Database, Wrench, Minus, Info, ListFilter, Hash, Clock, Check,
+  Server, Globe, Database, Wrench, Minus, Info, ListFilter, Hash, Clock, Check, Bookmark, Trash2, ShieldAlert, FileText, Layers, Gauge,
 } from 'lucide-react';
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../../utils/netClient';
 import { getKey, ApiKeyField } from './apiKeys';
@@ -10,6 +10,10 @@ import {
   filterInfo, buildQuery, parseQuery, buildFacets, buildShodanUrl, redactKey,
   parseShodanResponse, summarizeMatch, matchesToCsv, shodanWebUrl, toRelayUrl, looksJson,
 } from '../../../utils/shodan';
+import {
+  assessHost, summarizeHost, hostRowsToCsv, hostReportMarkdown, parseTargets,
+  addSavedQuery, removeSavedQuery, parseSavedQueries, OWN_ASSET_PRESETS, quotaSummary,
+} from '../../../utils/shodanExposure';
 
 /**
  * Shodan client — granular front-end for the Shodan REST API.
@@ -57,6 +61,12 @@ async function shodanFetch(url) {
   const text = await resp.text();
   return { resp, text, route: isProxyEnabled() ? 'proxy' : 'direct', relayMissing };
 }
+
+const SAVED_KEY = 'skon.osint.shodanSavedQueries';
+const loadSaved = () => { try { return parseSavedQueries(localStorage.getItem(SAVED_KEY)); } catch { return []; } };
+const storeSaved = (l) => { try { localStorage.setItem(SAVED_KEY, JSON.stringify(l)); } catch { /* ignore */ } };
+
+const SEV_CLASS = { high: 'text-red-300 border-red-900 bg-red-950/30', medium: 'text-amber-300 border-amber-900 bg-amber-950/20', info: 'text-slate-300 border-slate-800 bg-slate-900/40' };
 
 const PAGE_SIZE = 100;
 
@@ -221,6 +231,37 @@ function FilterRow({ token, onChange, onRemove }) {
   );
 }
 
+function SavedQueries({ raw, onRaw }) {
+  const [list, setList] = useState(loadSaved);
+  const [name, setName] = useState('');
+  const save = () => { const next = addSavedQuery(list, name, raw); setList(next); storeSaved(next); setName(''); };
+  const del = (q) => { const next = removeSavedQuery(list, q); setList(next); storeSaved(next); };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+      <span className={lbl}><Bookmark size={12} /> Saved</span>
+      <select defaultValue="" onChange={(e) => { if (e.target.value) { onRaw(e.target.value); e.target.value = ''; } }} className={`${sel} max-w-[12rem]`} title="Load a saved query">
+        <option value="">{list.length ? `${list.length} saved...` : 'none saved'}</option>
+        {list.map((q) => <option key={q.query} value={q.query}>{q.name}</option>)}
+      </select>
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="name (optional)" aria-label="Saved query name" className={`${inp} text-xs w-28`} />
+      <button onClick={save} disabled={!raw.trim()} className={btnGhost} title="Save the current query in this browser"><Bookmark size={12} /> save</button>
+      {list.length > 0 && (
+        <details className="text-[11px] text-slate-400">
+          <summary className="cursor-pointer">manage</summary>
+          <div className="mt-1 space-y-0.5">
+            {list.map((q) => (
+              <div key={q.query} className="flex items-center gap-1.5">
+                <button onClick={() => onRaw(q.query)} className="text-cyan-300 hover:underline truncate max-w-[16rem]" title={q.query}>{q.name}</button>
+                <button onClick={() => del(q.query)} title="Delete" aria-label={`Delete saved query ${q.name}`} className="text-slate-500 hover:text-red-300"><Trash2 size={11} /></button>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function QueryBuilder({ tokens, raw, onTokens, onRaw }) {
   const update = (i, t) => { const next = tokens.map((x, j) => (j === i ? t : x)); onTokens(next); };
   const remove = (i) => onTokens(tokens.filter((_, j) => j !== i));
@@ -241,11 +282,17 @@ function QueryBuilder({ tokens, raw, onTokens, onRaw }) {
           </select>
           <select defaultValue="" onChange={(e) => { if (e.target.value) { onRaw(e.target.value); e.target.value = ''; } }} className={`${sel} max-w-[9rem]`} title="Load an example query">
             <option value="">presets…</option>
-            {SHODAN_PRESETS.map((p) => <option key={p.label} value={p.query}>{p.label}</option>)}
+            <optgroup label="My own assets (edit the placeholders)">
+              {OWN_ASSET_PRESETS.map((p) => <option key={p.label} value={p.query}>{p.label}</option>)}
+            </optgroup>
+            <optgroup label="General">
+              {SHODAN_PRESETS.map((p) => <option key={p.label} value={p.query}>{p.label}</option>)}
+            </optgroup>
           </select>
           {tokens.length > 0 && <button onClick={() => onTokens([])} className={btnGhost} title="Clear all rows"><X size={12} /> clear</button>}
         </div>
       </div>
+      <SavedQueries raw={raw} onRaw={onRaw} />
       <div className="space-y-1.5 mb-2">
         {tokens.length === 0 && <div className="text-[11px] text-slate-500">No filters yet — add one above, pick a preset, or type the query directly below.</div>}
         {tokens.map((t, i) => <FilterRow key={i} token={t} onChange={(nt) => update(i, nt)} onRemove={() => remove(i)} />)}
@@ -437,8 +484,10 @@ function HostMode({ log }) {
   const { busy, err, last, run } = useShodanRequest(log);
 
   const lookup = async () => { setHoney(null); const d = await run('host', { ip: ip.trim(), history, minify }); if (d) setOut(d); };
+  const myIp = async () => { const d = await run('myip'); if (d) setIp(String(d).replace(/"/g, '')); };
   const score = async () => { const d = await run('honeyscore', { ip: ip.trim() }); if (d !== null) setHoney(d); };
   const vulns = out?.vulns ? (Array.isArray(out.vulns) ? out.vulns : Object.keys(out.vulns)) : [];
+  const assessment = useMemo(() => (out ? assessHost(out) : null), [out]);
 
   return (
     <div>
@@ -447,6 +496,7 @@ function HostMode({ log }) {
         <label className={lbl}><input type="checkbox" checked={history} onChange={(e) => setHistory(e.target.checked)} className="mr-1" /> history (all banners ever seen)</label>
         <label className={lbl}><input type="checkbox" checked={minify} onChange={(e) => setMinify(e.target.checked)} className="mr-1" /> minify (ports + general info only)</label>
         <button onClick={lookup} disabled={busy || !ip.trim()} className={btn}>{busy ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />} Lookup</button>
+        <button onClick={myIp} disabled={busy} className={btnGhost} title="Fill in the public IP address Shodan sees for this request"><Globe size={12} /> my IP</button>
         <button onClick={score} disabled={busy || !ip.trim()} className={btnGhost} title="Probability that this host is a honeypot (0–1)">honeypot score</button>
       </div>
       <p className="text-[10px] text-slate-500 mb-2">Host lookups are free. To search by filter (e.g. <code>port:14000</code>) use the <b>Search</b> mode.</p>
@@ -469,6 +519,7 @@ function HostMode({ log }) {
             {vulns.length ? <span>Vulns: <span className="text-red-300">{vulns.join(', ')}</span></span> : null}
             <span>Last update: <span className="text-cyan-300">{out.last_update || '—'}</span></span>
           </div>
+          {assessment && <ExposurePanel host={out} assessment={assessment} />}
           {out.data?.length ? (
             <div className="border border-slate-800 rounded bg-slate-950 max-h-[45vh] overflow-auto mb-2">
               <table className="w-full text-[11px] font-mono">
@@ -482,6 +533,32 @@ function HostMode({ log }) {
           <RawJson data={out} name={`shodan-host-${out.ip_str || ip}.json`} />
         </>
       )}
+    </div>
+  );
+}
+
+function ExposurePanel({ host, assessment }) {
+  const lvl = { high: 'text-red-300', medium: 'text-amber-300', low: 'text-emerald-300' }[assessment.level];
+  return (
+    <div className="mb-2 p-2 border border-slate-800 rounded bg-slate-900/40">
+      <div className="flex flex-wrap items-center gap-2 mb-1.5 text-xs">
+        <span className="inline-flex items-center gap-1 text-slate-300"><ShieldAlert size={13} /> Exposure review:</span>
+        <span className={`font-semibold ${lvl}`}>{assessment.level}</span>
+        <span className="text-[10px] text-slate-500">hints from what Shodan last saw, not a live scan</span>
+        <span className="ml-auto flex gap-1.5">
+          <CopyBtn text={() => hostReportMarkdown(host, assessment)} label="Copy report" title="Copy a Markdown exposure report" />
+          <button onClick={() => downloadText(`exposure-${host.ip_str || 'host'}.md`, hostReportMarkdown(host, assessment), 'text/markdown')} className={btnGhost} title="Download a Markdown exposure report"><FileText size={12} /> .md</button>
+        </span>
+      </div>
+      {assessment.findings.length === 0 && <div className="text-[11px] text-slate-400">No findings from the built-in rules. That does not prove the host is safe.</div>}
+      <ul className="space-y-1">
+        {assessment.findings.map((f, i) => (
+          <li key={i} className={`border rounded px-2 py-1 text-[11px] ${SEV_CLASS[f.sev]}`}>
+            <span className="font-semibold uppercase text-[10px] mr-1.5">{f.sev}</span><span className="font-semibold">{f.title}</span>
+            <div className="text-slate-400">{f.detail}</div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -500,6 +577,74 @@ function HostBannerRow({ b }) {
       </tr>
       {open && <tr className="bg-slate-900/40"><td colSpan={5} className="p-2"><Pre>{JSON.stringify(b, null, 2)}</Pre></td></tr>}
     </>
+  );
+}
+
+/* ------------------------------------------------------------- batch mode --- */
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function BatchMode({ log }) {
+  const [text, setText] = useState('');
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState('');
+  const stop = React.useRef(false);
+  const { err, setErr, run } = useShodanRequest(log);
+  const { ips, others } = useMemo(() => parseTargets(text), [text]);
+
+  const go = async () => {
+    setRows([]); setErr(''); stop.current = false; setBusy(true);
+    const out = [];
+    for (let i = 0; i < ips.length; i++) {
+      if (stop.current) break;
+      setProgress(`${i + 1} / ${ips.length}: ${ips[i]}`);
+      const d = await run('host', { ip: ips[i] });
+      out.push(d ? summarizeHost(d) : { ip: ips[i], level: 'no data', ports: '', vulns: '', org: '', hostnames: '', high: 0, medium: 0, lastUpdate: '' });
+      setRows([...out]);
+      if (i < ips.length - 1) await sleep(1100); // Shodan allows about 1 request per second
+    }
+    setBusy(false); setProgress('');
+  };
+  const cls = { high: 'text-red-300', medium: 'text-amber-300', low: 'text-emerald-300' };
+  return (
+    <div>
+      <p className="text-[10px] text-slate-500 mb-1.5">Paste your own public IPs (one per line or comma separated). Each is a free host lookup, sent one per second. An IP Shodan has not indexed returns "no data". Domains are not resolved here; use the DNS mode first.</p>
+      <div className="flex flex-wrap gap-2 mb-2 items-start">
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} spellCheck={false} aria-label="IP addresses" placeholder={'203.0.113.10\n203.0.113.11'} className={`${inp} flex-1 min-w-[12rem] text-xs`} />
+        <div className="flex flex-col gap-1.5">
+          <button onClick={go} disabled={busy || !ips.length} className={btn}>{busy ? <RefreshCw size={14} className="animate-spin" /> : <Layers size={14} />} Check {ips.length || ''} IP{ips.length === 1 ? '' : 's'}</button>
+          {busy && <button onClick={() => { stop.current = true; }} className={btnGhost}>Stop</button>}
+        </div>
+      </div>
+      {others.length > 0 && <div className="mb-2 text-[11px] text-amber-300">Skipped (not an IP address): {others.slice(0, 6).join(', ')}{others.length > 6 ? ', ...' : ''}</div>}
+      {progress && <div className="mb-2 text-[11px] text-slate-400">Checking {progress}</div>}
+      <ErrorBox err={err} />
+      {rows.length > 0 && (
+        <>
+          <div className="flex flex-wrap items-center gap-2 mb-2 text-xs text-gray-300">
+            <span>{rows.length} checked · <span className="text-red-300">{rows.filter((r) => r.level === 'high').length} high</span> · <span className="text-amber-300">{rows.filter((r) => r.level === 'medium').length} medium</span></span>
+            <button onClick={() => downloadText(`shodan-batch-${Date.now()}.csv`, hostRowsToCsv(rows), 'text/csv')} className={btnGhost}><Download size={12} /> CSV</button>
+          </div>
+          <div className="border border-slate-800 rounded bg-slate-950 max-h-[50vh] overflow-auto mb-2">
+            <table className="w-full text-[11px] font-mono">
+              <thead className="sticky top-0 bg-slate-900 text-slate-400 text-left"><tr><th className="px-2 py-1">IP</th><th className="px-2 py-1">Level</th><th className="px-2 py-1">Ports</th><th className="px-2 py-1">CVEs</th><th className="px-2 py-1">Org / hostnames</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.ip} className="border-t border-slate-900">
+                    <td className="px-2 py-1 text-cyan-300 whitespace-nowrap">{r.ip}</td>
+                    <td className={`px-2 py-1 ${cls[r.level] || 'text-slate-500'}`}>{r.level}</td>
+                    <td className="px-2 py-1 text-amber-300 break-words">{r.ports || '—'}</td>
+                    <td className="px-2 py-1 text-red-300 break-words">{r.vulns || '—'}</td>
+                    <td className="px-2 py-1 text-gray-300 break-words">{[r.org, r.hostnames].filter(Boolean).join(' · ') || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -703,6 +848,7 @@ function AccountMode({ log }) {
 const MODES = [
   { id: 'search', label: 'Search', icon: Search, comp: SearchMode, desc: 'Filter the Shodan index (port, country, product, http.title, …)' },
   { id: 'host', label: 'Host', icon: Server, comp: HostMode, desc: 'Everything Shodan knows about one IP' },
+  { id: 'batch', label: 'My IPs', icon: Layers, comp: BatchMode, desc: 'Check a list of your own public IPs (free host lookups)' },
   { id: 'dns', label: 'DNS', icon: Globe, comp: DnsMode, desc: 'Domain records, resolve, reverse' },
   { id: 'exploits', label: 'Exploits', icon: Database, comp: ExploitsMode, desc: 'Exploit-DB / Metasploit / CVE search' },
   { id: 'account', label: 'Account & tools', icon: Wrench, comp: AccountMode, desc: 'Plan, credits, my IP, crawled ports, filter lists' },
@@ -714,18 +860,24 @@ export default function ShodanClient({ log }) {
   const changeTransport = (v) => { setTransport(v); setTransportState(v); log(`Shodan route: ${v === 'auto' ? 'site relay (auto)' : 'Proxy bar / direct'}`); };
   const active = MODES.find((m) => m.id === mode);
   const Active = active.comp;
+  const [quota, setQuota] = useState(null);
+  const q = useShodanRequest(log);
+  const checkQuota = async () => { const d = await q.run('apiInfo'); if (d) setQuota(quotaSummary(d)); };
   return (
     <div>
       <ApiKeyField service="shodan" label="Shodan" required hint="Find your key at account.shodan.io → API. A free account includes a key (host lookups and plain-text search are free; filtered searches use query credits)." />
       <div className="flex flex-wrap items-center gap-2 mb-2">
-        <div className="flex rounded overflow-hidden border border-slate-800 text-xs w-fit">
+        <div className="flex flex-wrap rounded overflow-hidden border border-slate-800 text-xs w-fit">
           {MODES.map((m) => (
-            <button key={m.id} onClick={() => setMode(m.id)} title={m.desc} className={`px-3 py-1.5 inline-flex items-center gap-1.5 ${mode === m.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>
+            <button key={m.id} onClick={() => setMode(m.id)} title={m.desc} className={`px-2.5 py-1.5 inline-flex items-center gap-1.5 ${mode === m.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>
               <m.icon size={12} /> {m.label}
             </button>
           ))}
         </div>
-        <span className="text-[10px] text-slate-500">{active.desc}</span>
+        <button onClick={checkQuota} disabled={q.busy} className={btnGhost} title="Show your plan and remaining credits (free request)"><Gauge size={12} /> credits</button>
+        {quota && <span className={`text-[11px] font-mono ${quota.low ? 'text-red-300' : 'text-emerald-300'}`} title={`Monitored IPs: ${quota.monitored ?? '?'} / ${quota.monitoredLimit ?? '?'}`}>{quota.text}{quota.low ? ' (low)' : ''}</span>}
+        {q.err && <span className="text-[11px] text-red-300">{q.err}</span>}
+        <span className="text-[10px] text-slate-500 hidden @lg:inline">{active.desc}</span>
         <label className={`${lbl} ml-auto`} title="Shodan blocks direct browser calls (no CORS). Auto uses this site's own /api/shodan relay, so nothing runs on your PC; it falls back to the Proxy bar when the relay is not served here.">
           Route
           <select value={transport} onChange={(e) => changeTransport(e.target.value)} className={`${sel} ml-1`}>

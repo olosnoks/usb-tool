@@ -26,7 +26,7 @@ export function ApiKeyField({ service, label, required, hint }) {
   };
   const dirty = val.trim() !== stored;
   return (
-    <div className="mb-3 p-2 border border-slate-800 rounded bg-slate-900/50">
+    <div className="mb-2 p-2 border border-slate-800 rounded bg-slate-900/50">
       <div className="flex items-center justify-between mb-1">
         <label className="text-[11px] font-semibold text-amber-300 flex items-center gap-1.5">
           <KeyRound size={13} /> {label} API key {required ? <span className="text-red-400">*</span> : <span className="text-slate-500 font-normal">(optional)</span>}
