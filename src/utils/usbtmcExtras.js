@@ -78,7 +78,7 @@ export function isOutOfLimits(v, low, high) {
   return limitViolations([v], low, high).total > 0;
 }
 
-const pyStr = (s) => `'${String(s).replace(/\/g, '\\').replace(/'/g, "\'")}'`;
+const pyStr = (s) => `'${String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 
 /**
  * Export steps as a PyVISA script (a starting point for the CLI/Python world; not executed here).

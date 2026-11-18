@@ -41,6 +41,6 @@ describe('toPyvisaScript', () => {
     expect(py).toContain('inst.timeout = 2000');
   });
   it('escapes quotes', () => {
-    expect(toPyvisaScript([{ type: 'cmd', text: "DISP:TEXT 'a'" }])).toContain("inst.write('DISP:TEXT \'a\'')");
+    expect(toPyvisaScript([{ type: 'cmd', text: "DISP:TEXT 'a'" }])).toContain("inst.write('DISP:TEXT \\'a\\'')");
   });
 });

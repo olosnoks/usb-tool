@@ -344,8 +344,7 @@ export default function UsbTmcWorkbench({ initialTab = 'console' }) {
                 {presets.map((q) => (
                   <button key={q} onClick={() => { setCmd(q); run(q); }} disabled={busy} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 disabled:opacity-40">{q}</button>
                 ))}
-                <button onClick={() => exportPython([...history].reverse().join('
-'))} disabled={!history.length} className={btn2} title="Download the command history as a PyVISA Python file (not run here)"><FileCode className="w-3.5 h-3.5" /> PYVISA</button>
+                <button onClick={() => exportPython([...history].reverse().join('\n'))} disabled={!history.length} className={btn2} title="Download the command history as a PyVISA Python file (not run here)"><FileCode className="w-3.5 h-3.5" /> PYVISA</button>
                 <label className="ml-auto flex items-center gap-1 text-slate-400"><input type="checkbox" checked={checkErrors} onChange={(e) => setCheckErrors(e.target.checked)} className="accent-cyan-500" /> drain SYST:ERR? after each command</label>
               </div>
             </>
