@@ -430,6 +430,23 @@ If your Proxmark3 is bricked or stuck in bootloader mode (e.g. following a faile
 | **Raw Hex Sender** | Input + Button | Transmits raw hex frames directly to the Proxmark3 firmware for manual testing. |
 | **Console View** | Viewport | Displays parsed responses, hex dumps, and ASCII translations returned by PM3 ARM firmware. |
 | **WebFlash Tab** | Tab | Switches view to the recovery firmware flasher with SHA-256 verification. |
+| **Offline decoders tab** | Tab | Three decoders that need no hardware (see section 7a). |
+| **Frame log tab** | Tab | Live TX/RX/debug/error lines. Each frame line shows the opcode name when known (for example \`CMD_PING\`). Has TX, RX, DEBUG and ERROR checkboxes, a text filter, copy, download as \`.txt\`, and Clear. Only the last 150 lines are kept. |
+| **Allow Risk Override** | Checkbox | Shown only for compatible-but-unmatched firmware. Unlocks write, magic and raw commands. |
+
+---
+
+### 7a. Offline Decoders (no hardware needed)
+
+These work with values you paste from a Proxmark console or a dump file. Nothing is transmitted.
+
+- **ISO 14443A UID / ATQA / SAK**: reads the UID size from ATQA, maps SAK to a likely card family (Classic 1K/2K/4K/Mini, Ultralight/NTAG, Plus, DESFire/ISO 14443-4, SmartMX/JCOP), reports whether the UID is complete and ISO 14443-4 capable, checks a 5-byte UID against its BCC, and flags a UID starting with \`08\` as probably random. The SAK table is a heuristic; confirm with \`hf search\` on the real card.
+- **Mifare Classic access bits**: paste bytes 6-9 of a sector trailer. It shows the C1C2C3 triple for each of the three data blocks and the trailer, the key A/key B read and write rules, and the user byte. It warns when the inverted copies do not match, because such a trailer would lock the sector permanently if written.
+- **EM410x ID**: paste the 5-byte ID. It shows the 40-bit and low 32-bit decimal values and builds the 64-bit on-air frame (9 header ones, row and column parity, stop bit). Facility/card splits vary by vendor, so only raw values are given.
+
+### Similar tools
+
+Compared against the Iceman \`pm3\` client (trace list, autopwn, dump viewers), Proxmark3GUI (access-bit analysis, dump handling) and the client's own history and log files. This page does not run MIFARE attacks or Lua scripts; use the desktop client for those.
 
 ---
 
