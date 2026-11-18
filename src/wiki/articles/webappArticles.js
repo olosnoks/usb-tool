@@ -40,7 +40,10 @@ Choose a method, enter a URL (a scheme-less URL defaults to \`https://\`), add h
 - Text responses have the views **pretty** (formatted JSON), **raw**, **hex** and **render** (HTML in a sandboxed iframe with scripts disabled). A search box highlights matches; **→ Comparer A** / **→ Comparer B** send the body to the Comparer.
 
 #### Copy as
-**Copy as ▾** copies the current request as **curl**, **fetch**, **PowerShell** (\`Invoke-WebRequest\`) or **Python requests**. The curl output single-quotes every value so shell metacharacters stay inert, and uses \`--data-raw\` so a body starting with \`@\` is never read as a file.
+**Copy as ▾** copies the current request as **curl**, **fetch**, **PowerShell** (\`Invoke-WebRequest\`), **Python requests**, **HTTPie**, **Go net/http** or **Raw HTTP** (an HTTP/1.1 message with a Host header). HTTPie and Go output are text exports for those tools; nothing is run here. The curl output single-quotes every value so shell metacharacters stay inert, and uses \`--data-raw\` so a body starting with \`@\` is never read as a file.
+
+#### Variables and extract
+Open **Variables & extract** under the Send row. Enter \`NAME=value\` lines (blank lines and \`#\` comments are ignored) and use \`{{NAME}}\` in the URL, headers or body; values are substituted when you press **Send**, and history stores the substituted request. Unknown names are left as typed (and listed in the log), so Intruder's \`{{value}}\` markers are unaffected. After a JSON response, enter a path such as \`data.items[0].token\` (also \`$.a["b c"]\` and \`[*]\` for all elements), name a variable and press **Extract** to store the value as a variable for the next request. Without a name it only shows the value. Only JSON bodies are supported.
 
 #### History and HAR
 The History column keeps up to 100 requests. It is saved in this browser's local storage; header values for \`Authorization\`, \`Proxy-Authorization\`, \`Cookie\`, \`X-API-Key\`, \`X-Auth-Token\` and \`X-CSRF-Token\` are replaced with \`[redacted]\` before saving, and response bodies are not saved. Request bodies are stored as typed, so avoid putting secrets in them. **Export HAR** writes the listed entries as a HAR 1.2 file, **Import** adds requests from a HAR file, **Clear** empties the history.
@@ -57,6 +60,8 @@ Paste or send two responses into A and B and press **Compare** for a line-level 
 
 ### Decoder
 Per-codec **enc** / **dec** buttons (Base64, URL, Hex, HTML), **JWT decode** (header and payload only, signature not verified), **Smart decode** (tries the codecs in turn), and hash buttons for MD5 and SHA. **↑ output → input** chains steps.
+
+**Similar tools:** Burp Repeater/Comparer, Postman, Insomnia and Hoppscotch (variables, code generation, history).
 
 **Limits:** a browser cannot set some headers (Host, Content-Length) and cannot be a transparent intercepting proxy; use a real proxy for live interception.
 `,

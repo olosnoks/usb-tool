@@ -24,7 +24,7 @@ export default function HttpWorkbench({ onLogMessage, initialSection = 'request'
 
   return (
     <div className="w-full min-w-0 max-w-full text-gray-200">
-      <div className="px-4 pt-3">
+      <div className="pb-2">
         <ProxyConfig onLogMessage={log} />
         <div className="flex rounded overflow-hidden border border-slate-800 text-xs w-fit">
           {OUTER.map((o) => {
@@ -33,7 +33,7 @@ export default function HttpWorkbench({ onLogMessage, initialSection = 'request'
               <button
                 key={o.id}
                 onClick={() => setSection(o.id)}
-                className={`px-3 py-1.5 inline-flex items-center gap-1.5 ${section === o.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}
+                className={`px-2.5 py-1 inline-flex items-center gap-1.5 ${section === o.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}
               >
                 <Icon size={13} /> {o.label}
               </button>

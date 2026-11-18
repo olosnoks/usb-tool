@@ -153,7 +153,7 @@ export default function ApiClientWorkbench({ onLogMessage, hideProxyConfig = fal
   const shownOps = ops.filter((o) => !filter || `${o.method} ${o.path} ${o.summary}`.toLowerCase().includes(filter.toLowerCase()));
 
   return (
-    <div className="p-4 text-sm">
+    <div className="p-0 text-xs">
       {!hideProxyConfig && <ProxyConfig onLogMessage={onLogMessage} />}
 
       {!spec ? (
