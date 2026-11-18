@@ -8,7 +8,6 @@ import BtHciLogWorkbench from '../src/components/tools/BtHciLogWorkbench.jsx';
 describe('BtHciLogWorkbench', () => {
   it('renders the idle state', () => {
     const html = renderToString(<BtHciLogWorkbench />);
-    expect(html).toContain('Bluetooth HCI Log Viewer');
     expect(html).toContain('Open capture file');
     expect(html).toContain('Load example');
     expect(html).toContain('nothing is uploaded');

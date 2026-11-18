@@ -30,7 +30,9 @@ Enable Developer options, turn on "Bluetooth HCI snoop log", reproduce the probl
 - Every H4 packet is listed with its number, time in seconds from the first packet, direction (TX means host to controller, RX means controller to host), type, and a one-line summary.
 - **Type** filters commands, events, ACL, SCO and ISO packets. **Handle** (for example 0x0040) limits the list to one ACL connection. **Text** searches the summary and the decoded fields.
 - Selecting a row opens the decoded field list, any advertising data structures, the L2CAP details, and a hex dump of the H4 bytes.
-- **Export filtered CSV** writes the packets that match the current filter (not only the visible rows) as CSV.
+- **Direction** limits the list to TX or RX packets. The **Delta ms** column is the time since the previous packet in the file.
+- **CSV** writes the packets that match the current filters (not only the visible rows) as CSV.
+- **btsnoop** writes the matching packets to a new btsnoop v1 (H4) file, so you can share a trimmed log. Original timestamps are kept when the source file had them.
 
 ## What is decoded
 
@@ -54,7 +56,17 @@ Requests and responses are paired in order, one outstanding request per connecti
 
 ## Connections tab
 
-Lists each connection with its transport (LE or BR/EDR), handle, role, peer address, start and end packet numbers, connection interval, packet count, ATT PDU count and end reason. The reason comes from the Disconnection Complete event.
+Lists each connection with its transport (LE or BR/EDR), handle, role, peer address, start and end packet numbers, connection interval, packet count, ATT PDU count, ACL payload bytes sent and received, average rates and end reason. The reason comes from the Disconnection Complete event. Rates are averaged between the first and last ACL packet of the connection, so they describe the capture, not the radio link speed.
+
+## Issues tab
+
+A short list of things worth checking first. Each row can be clicked to open that packet.
+
+- **Commands**: every HCI command is paired with the first Command Complete or Command Status that names the same opcode. A non-zero status is an error. A command with no response in the file is a warning. A response that took 500 ms or more is noted as slow.
+- **Connections**: failed connection attempts, and disconnects with a reason other than the normal ones (remote user terminated, low resources, power off, local host terminated).
+- **ATT errors**, **encryption change failures**, **controller hardware errors** and parser warnings.
+
+This is a rule-based summary of what is in the file. A clean list does not prove the link was healthy.
 
 ## Limits
 
@@ -71,6 +83,10 @@ Lists each connection with its transport (LE or BR/EDR), handle, role, peer addr
 - **Few or no services**: the capture may not contain the discovery exchange, or it started after discovery finished. Look for Read By Group Type Request packets with UUID 0x2800.
 - **Fragment warnings**: the file may have been truncated (for example by a partial bug-report copy). The packet list still shows everything that was read; check the warnings list.
 - **Values look like random bytes**: the connection was encrypted, or the attribute is not text. The hex column is always correct.
+
+## Similar tools
+
+Wireshark (Bluetooth HCI dissectors), BlueZ btmon, the Python btsnoop-parser and the btsnoop-extcap Wireshark plugin were looked at for comparison. They decode more protocols; this viewer adds a command/response check, a per-connection traffic summary and trimmed btsnoop export in the browser.
 
 ## Related tools in this app
 
