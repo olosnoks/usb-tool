@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Binary, ChevronRight, ChevronDown, Copy, Download, FileUp, Send, X } from 'lucide-react';
+import { ChevronRight, ChevronDown, Copy, Download, FileUp, Send, X, Search } from 'lucide-react';
 import {
   resolveInput, detectFormats, decodeAs, encodeJson, splitFrames, FORMAT_LABELS, TEXT_ENCODINGS,
   FRAMINGS, toHex, toBase64,
 } from '../../utils/binaryDecoder.js';
+import {
+  parseTemplate, decodeStruct, inspectBytes, findBytes, parsePattern, STRUCT_EXAMPLE, STRUCT_EXAMPLE_HEX, STRUCT_TYPES,
+} from '../../utils/binaryStruct.js';
 
 /**
  * Binary Payload Decoder: offline, schema-less decoding of serialized payloads.
@@ -14,7 +17,7 @@ import {
 
 const PAGE = 2048;
 const MAX_CHILDREN_SHOWN = 500;
-const TABS = [['decode', 'Decode'], ['encode', 'Encode JSON'], ['framing', 'Framing']];
+const TABS = [['decode', 'Decode'], ['struct', 'Struct'], ['encode', 'Encode JSON'], ['framing', 'Framing']];
 const FRAMING_OPTIONS = [['none', 'None'], ['cobs', 'COBS'], ['cobs-r', 'COBS/R'], ['slip', 'SLIP'], ['hdlc', 'HDLC-style (0x7E/0x7D)']];
 
 const CBOR_SAMPLE_HEX = 'a3' + '6673656e736f72' + '63696d75' + '6474656d70' + 'f94d60' + '626f6b' + 'f5';
@@ -43,8 +46,8 @@ const btnCls = 'inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-
 
 function Panel({ title, children, right }) {
   return (
-    <div className="bg-slate-950 border border-slate-800 rounded p-3">
-      <div className="flex items-center justify-between mb-2 gap-2">
+    <div className="bg-slate-950 border border-slate-800 rounded p-2">
+      <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
         <span className="text-[10px] uppercase tracking-wider text-slate-500">{title}</span>
         {right}
       </div>
@@ -118,9 +121,44 @@ function NodeRow({ node, path, depth, sel, onSelect, expanded, onToggle, overrid
   );
 }
 
-function HexView({ bytes, sel, page, setPage }) {
+function Inspector({ bytes, offset }) {
+  const [little, setLittle] = useState(true);
+  const rows = useMemo(() => inspectBytes(bytes, offset, little), [bytes, offset, little]);
+  if (offset == null || !rows.length) return <div className="text-[10px] text-slate-600">Click a byte to inspect it as integers, floats and time.</div>;
+  return (
+    <div>
+      <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-1">
+        <span>Inspector @{offset}</span>
+        <button type="button" className={btnCls} onClick={() => setLittle((v) => !v)} title="Toggle byte order" aria-label="Toggle byte order">{little ? 'little-endian' : 'big-endian'}</button>
+      </div>
+      <div className="grid grid-cols-2 @md:grid-cols-3 gap-x-3 gap-y-0.5 text-[11px] font-mono">
+        {rows.map((r) => (
+          <div key={r.label} className="flex gap-1 min-w-0">
+            <span className="text-slate-500 shrink-0">{r.label}</span>
+            <span className="text-gray-200 break-all">{r.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HexView({ bytes, sel, page, setPage, onPick }) {
   const pages = Math.max(1, Math.ceil(bytes.length / PAGE));
   const start = page * PAGE;
+  const [query, setQuery] = useState('');
+  const [qmode, setQmode] = useState('hex');
+  const [hitIdx, setHitIdx] = useState(0);
+  const search = useMemo(() => {
+    if (!query.trim()) return { hits: [], len: 0 };
+    try { return { hits: findBytes(bytes, query, qmode), len: parsePattern(query, qmode).length }; } catch (e) { return { hits: [], len: 0, error: e.message }; }
+  }, [bytes, query, qmode]);
+  const goHit = (i) => {
+    if (!search.hits.length) return;
+    const k = (i + search.hits.length) % search.hits.length;
+    setHitIdx(k);
+    onPick?.({ offset: search.hits[k], length: search.len });
+  };
   const rows = [];
   for (let r = 0; r < PAGE / 16; r++) {
     const rowStart = start + r * 16;
@@ -132,14 +170,18 @@ function HexView({ bytes, sel, page, setPage }) {
       const b = bytes[i];
       const inSel = sel && i >= sel.offset && i < sel.offset + sel.length;
       cells.push(
-        <span key={i} className={`inline-block w-5 text-center ${inSel ? 'bg-cyan-700 text-white rounded-sm' : 'text-gray-300'}`}>
+        <span
+          key={i}
+          onClick={() => onPick?.({ offset: i, length: 1 })}
+          className={`inline-block w-5 text-center cursor-pointer ${inSel ? 'bg-cyan-700 text-white rounded-sm' : 'text-gray-300 hover:bg-slate-800'}`}
+        >
           {b.toString(16).padStart(2, '0')}
         </span>,
       );
       ascii += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '.';
     }
     rows.push(
-      <div key={rowStart} className="flex items-center gap-3 whitespace-nowrap">
+      <div key={rowStart} className="flex items-center gap-2 whitespace-nowrap">
         <span className="text-slate-600 w-16 shrink-0">{rowStart.toString(16).padStart(8, '0')}</span>
         <span className="flex gap-1">{cells}</span>
         <span className="text-slate-500">{ascii}</span>
@@ -147,16 +189,35 @@ function HexView({ bytes, sel, page, setPage }) {
     );
   }
   return (
-    <div>
-      <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-1">
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
         <button className={btnCls} onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0}>Prev</button>
-        <span>page {page + 1} / {pages} · {bytes.length} bytes</span>
+        <span>page {page + 1}/{pages} · {bytes.length} B</span>
         <button className={btnCls} onClick={() => setPage(Math.min(pages - 1, page + 1))} disabled={page >= pages - 1}>Next</button>
-        {sel && <span className="ml-auto text-cyan-300">selected @{sel.offset} +{sel.length}</span>}
+        {sel && <span className="ml-auto text-cyan-300">@{sel.offset} +{sel.length}</span>}
       </div>
-      <div className="max-h-[480px] overflow-auto font-mono text-[11px] leading-5 bg-slate-950 border border-slate-800 rounded p-2">
+      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+        <Search size={11} className="text-slate-500" />
+        <input
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setHitIdx(0); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') goHit(e.shiftKey ? hitIdx - 1 : hitIdx); }}
+          placeholder={qmode === 'hex' ? 'de ad ?? ef' : 'text'}
+          aria-label="Search bytes"
+          className="flex-1 min-w-[6rem] bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 font-mono text-gray-200"
+        />
+        <select value={qmode} onChange={(e) => { setQmode(e.target.value); setHitIdx(0); }} className={selectCls} aria-label="Search mode">
+          <option value="hex">hex</option>
+          <option value="text">text</option>
+        </select>
+        <button className={btnCls} disabled={!search.hits.length} onClick={() => goHit(hitIdx - 1)} aria-label="Previous match">Prev</button>
+        <button className={btnCls} disabled={!search.hits.length} onClick={() => goHit(hitIdx + 1)} aria-label="Next match">Next</button>
+        <span className="text-slate-500">{search.error ? <span className="text-red-400">{search.error}</span> : query.trim() ? `${search.hits.length}${search.hits.length >= 1000 ? '+' : ''} match(es)` : ''}</span>
+      </div>
+      <div className="max-h-[360px] overflow-auto font-mono text-[11px] leading-5 bg-slate-950 border border-slate-800 rounded p-1.5">
         {rows}
       </div>
+      <Inspector bytes={bytes} offset={sel ? sel.offset : null} />
     </div>
   );
 }
@@ -248,7 +309,7 @@ function DecodeTab({ onSendToFraming, handoff, handoffKey }) {
   const payloadHex = payload ? toHex(payload) : '';
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <Panel
         title="Input"
         right={(
@@ -377,10 +438,10 @@ function DecodeTab({ onSendToFraming, handoff, handoffKey }) {
             <div key={w} className="text-[11px] text-amber-300 mb-1">{w}</div>
           ))}
           {result?.ok && (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 @xl:grid-cols-2 gap-2">
               <div>
                 <div className="text-[10px] text-slate-500 mb-1">Tree (click a node to highlight its bytes; offsets are into the payload)</div>
-                <div className="max-h-[480px] overflow-auto bg-slate-950 border border-slate-800 rounded p-1">
+                <div className="max-h-[420px] overflow-auto bg-slate-950 border border-slate-800 rounded p-1">
                   <NodeRow
                     node={result.r.root}
                     path="r"
@@ -394,7 +455,7 @@ function DecodeTab({ onSendToFraming, handoff, handoffKey }) {
                   />
                 </div>
               </div>
-              <HexView bytes={payload} sel={sel} page={page} setPage={setPage} />
+              <HexView bytes={payload} sel={sel} page={page} setPage={setPage} onPick={(p) => { setSel({ path: null, ...p }); setPage(Math.floor(p.offset / PAGE)); }} />
             </div>
           )}
           {!result && activeFormat && <div className="text-xs text-slate-500">Decoding...</div>}
@@ -423,7 +484,7 @@ function EncodeTab({ onSendToDecode }) {
   }, [text, format]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <Panel
         title="JSON input"
         right={(
@@ -520,7 +581,7 @@ function FramingTab({ onSendToDecode }) {
   }, [input, mode, dir]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <Panel title="Framing">
         <div className="flex flex-wrap items-center gap-3 text-xs">
           <label className="inline-flex items-center gap-1 text-slate-400">
@@ -595,6 +656,116 @@ function FramingTab({ onSendToDecode }) {
   );
 }
 
+// ---------- Struct tab ----------
+
+function StructTab() {
+  const [hexText, setHexText] = useState(STRUCT_EXAMPLE_HEX);
+  const [fileBytes, setFileBytes] = useState(null);
+  const [tmpl, setTmpl] = useState(STRUCT_EXAMPLE);
+  const [startAt, setStartAt] = useState('0');
+  const [sel, setSel] = useState(null);
+  const [page, setPage] = useState(0);
+  const [fileError, setFileError] = useState('');
+
+  const input = useMemo(() => {
+    if (fileBytes) return { ok: true, bytes: fileBytes.bytes };
+    try { return { ok: true, bytes: resolveInput({ text: hexText, encoding: 'auto' }).bytes }; } catch (e) { return { ok: false, error: e.message }; }
+  }, [hexText, fileBytes]);
+  const parsed = useMemo(() => parseTemplate(tmpl), [tmpl]);
+  const start = Math.max(0, parseInt(startAt, 10) || 0);
+  const result = useMemo(
+    () => (input.ok ? decodeStruct(input.bytes, parsed.fields, start) : null),
+    [input, parsed, start],
+  );
+  const onFile = async (file) => {
+    setFileError('');
+    if (!file) return;
+    if (file.size > 16 * 1024 * 1024) { setFileError('File is larger than 16 MB.'); return; }
+    setFileBytes({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
+    setSel(null);
+    setPage(0);
+  };
+  const pick = (p) => { setSel({ path: null, ...p }); setPage(Math.floor(p.offset / PAGE)); };
+  const exportJson = () => {
+    const out = {};
+    result.rows.forEach((r) => { out[r.name] = r.value; });
+    download('struct-decoded.json', JSON.stringify(out, null, 2), 'application/json');
+  };
+
+  return (
+    <div className="grid grid-cols-1 @xl:grid-cols-2 gap-2">
+      <div className="space-y-2 min-w-0">
+        <Panel title="Data">
+          {fileBytes ? (
+            <div className="flex items-center gap-2 text-xs font-mono text-gray-300">
+              <FileUp size={14} className="text-cyan-400" />
+              <span className="truncate">{fileBytes.name}</span>
+              <span className="text-slate-500">{fileBytes.bytes.length} B</span>
+              <button className={btnCls} onClick={() => setFileBytes(null)}><X size={11} /> Clear</button>
+            </div>
+          ) : (
+            <textarea value={hexText} onChange={(e) => setHexText(e.target.value)} spellCheck={false} aria-label="Struct data" placeholder="Hex or base64 bytes" className="w-full h-16 bg-slate-900 border border-slate-800 rounded p-1.5 font-mono text-xs text-gray-200" />
+          )}
+          <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs">
+            <label className={`${btnCls} cursor-pointer`}><FileUp size={11} /> Open file<input type="file" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} /></label>
+            <label className="inline-flex items-center gap-1 text-slate-400">
+              <span>Start offset</span>
+              <input value={startAt} onChange={(e) => setStartAt(e.target.value)} inputMode="numeric" aria-label="Start offset" className={`${selectCls} w-16`} />
+            </label>
+            {input.ok ? <span className="text-[11px] text-slate-500">{input.bytes.length} byte(s)</span> : <span className="text-red-400 text-[11px]">{input.error}</span>}
+            {fileError && <span className="text-red-400 text-[11px]">{fileError}</span>}
+          </div>
+        </Panel>
+        <Panel title="Template" right={<button className={btnCls} onClick={() => { setTmpl(STRUCT_EXAMPLE); setHexText(STRUCT_EXAMPLE_HEX); setFileBytes(null); }}>Example</button>}>
+          <textarea value={tmpl} onChange={(e) => setTmpl(e.target.value)} spellCheck={false} aria-label="Struct template" className="w-full h-40 bg-slate-900 border border-slate-800 rounded p-1.5 font-mono text-xs text-gray-200" />
+          {parsed.errors.map((er) => <div key={er} className="text-[11px] text-red-400 font-mono">{er}</div>)}
+          <details className="mt-1 text-[11px] text-slate-500">
+            <summary className="cursor-pointer">Template syntax</summary>
+            <div className="mt-1 leading-relaxed font-mono">
+              One field per line: name: type, name: type[n], name: type[other_field], name: type[*] (rest of data).
+              Types: {STRUCT_TYPES.join(' ')}. Byte order: an endian le or endian be line, or a suffix such as u16be. Put hex, bin or dec after the type to choose the number format. char[n] and cstr are UTF-8 text, bytes[n] is raw. A # starts a comment. No nested structs, unions or conditions.
+            </div>
+          </details>
+        </Panel>
+      </div>
+      <div className="space-y-2 min-w-0">
+        <Panel
+          title="Fields"
+          right={result && result.rows.length > 0 && (
+            <button className={btnCls} onClick={exportJson}><Download size={11} /> JSON</button>
+          )}
+        >
+          {result?.rows.length === 0 && !result.error && <div className="text-xs text-slate-500">No fields yet.</div>}
+          <div className="max-h-[260px] overflow-auto">
+            {result?.rows.map((r) => {
+              const isSel = sel && sel.offset === r.offset && sel.length === Math.max(1, r.length);
+              return (
+                <div
+                  key={r.name}
+                  onClick={() => pick({ offset: r.offset, length: Math.max(1, r.length) })}
+                  className={`flex flex-wrap items-start gap-x-2 py-0.5 px-1 rounded cursor-pointer text-xs font-mono ${isSel ? 'bg-cyan-900/40' : 'hover:bg-slate-900'}`}
+                >
+                  <span className="text-cyan-300 shrink-0">{r.name}</span>
+                  <span className="text-[10px] text-slate-500 border border-slate-800 rounded px-1 shrink-0">{r.type}</span>
+                  <span className="text-gray-200 break-all min-w-0">{r.value}</span>
+                  <span className="ml-auto text-[10px] text-slate-600 whitespace-nowrap">@{r.offset} +{r.length}</span>
+                </div>
+              );
+            })}
+          </div>
+          {result?.error && <div className="mt-1 p-1.5 border border-red-900 rounded bg-red-950/30 text-[11px] text-red-300 font-mono">{result.error}</div>}
+          {result && !result.error && input.ok && result.end < input.bytes.length && (
+            <div className="mt-1 text-[11px] text-slate-500">{input.bytes.length - result.end} byte(s) after the last field are not covered.</div>
+          )}
+        </Panel>
+        {input.ok && input.bytes.length > 0 && (
+          <Panel title="Bytes"><HexView bytes={input.bytes} sel={sel} page={page} setPage={setPage} onPick={pick} /></Panel>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------- shell ----------
 
 export default function BinaryDecoderWorkbench({ onLogMessage }) {
@@ -612,24 +783,20 @@ export default function BinaryDecoderWorkbench({ onLogMessage }) {
   const show = (k) => (tab === k ? '' : 'hidden');
 
   return (
-    <div className="p-3 space-y-3 text-gray-200">
-      <div className="flex items-center gap-3">
-        <Binary size={18} className="text-cyan-400" />
-        <div>
-          <div className="text-sm font-semibold">Binary Payload Decoder</div>
-          <div className="text-[11px] text-slate-500">Offline, schema-less. Protobuf, CBOR, MessagePack, BSON, COBS / COBS-R / SLIP / HDLC framing. Nothing is sent anywhere.</div>
-        </div>
-      </div>
-      <div className="flex gap-1 border-b border-slate-800">
+    <div className="space-y-2 text-gray-200">
+      <div className="flex gap-1 border-b border-slate-800 overflow-x-auto" role="tablist">
         {TABS.map(([k, label]) => (
           <button
             key={k}
+            role="tab"
+            aria-selected={tab === k}
             onClick={() => setTab(k)}
-            className={`px-3 py-1.5 text-xs rounded-t ${tab === k ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-gray-200'}`}
+            className={`px-2.5 py-1 text-xs rounded-t whitespace-nowrap ${tab === k ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-gray-200'}`}
           >
             {label}
           </button>
         ))}
+        <span className="ml-auto self-center pr-1 text-[10px] text-slate-600 whitespace-nowrap hidden @lg:inline">Offline, schema-less: nothing leaves the browser</span>
       </div>
       <div className={show('decode')}>
         <DecodeTab
@@ -638,6 +805,7 @@ export default function BinaryDecoderWorkbench({ onLogMessage }) {
           handoffKey={handoffKey}
         />
       </div>
+      <div className={show('struct')}><StructTab /></div>
       <div className={show('encode')}><EncodeTab onSendToDecode={(b) => sendTo(b, 'decode')} /></div>
       <div className={show('framing')}><FramingTab onSendToDecode={(b) => sendTo(b, 'decode')} /></div>
     </div>

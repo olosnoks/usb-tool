@@ -11,11 +11,12 @@ export default {
 
 The **Binary Payload Decoder** takes a serialized payload and shows what is inside it as a tree, with the byte offset and length of every item. It needs no schema and no device. Everything runs in your browser; the bytes you paste or open are never uploaded.
 
-It has three tabs:
+It has four tabs:
 
 | Tab | What it does |
 |---|---|
 | **Decode** | Unwraps text encodings, optionally splits frames, detects or forces the payload format and shows a collapsible tree next to a hex view. |
+| **Struct** | Decodes bytes against a small C-like field template (like an ImHex pattern or a 010 Editor template, but much simpler). |
 | **Encode JSON** | Turns JSON text into CBOR or MessagePack bytes, then decodes the result again as a check. |
 | **Framing** | Encodes a payload with COBS, COBS/R, SLIP or HDLC-style stuffing, or splits a stream into frames and decodes each one. |
 
@@ -58,6 +59,34 @@ The full specification: fixint, fixmap, fixarray, fixstr, bin, ext, float, all i
 
 Documents, arrays and every element type in the BSON 1.1 specification, including the deprecated ones (undefined, DBPointer, symbol, code with scope, old binary subtype 2). Dates, ObjectIds and decimal128 values are shown in their usual notation. The length prefix must match the input, and the trailing bytes after the document are reported.
 
+## Hex view, search and data inspector
+
+The hex view is shared by the Decode and Struct tabs.
+
+- **Click a byte** to select it. The data inspector under the hex view then shows the bytes at that offset as u8, i8, u16, i16, u24, i24, u32, i32, u64, i64, f32 and f64, plus binary, ASCII character and a Unix time (u32 seconds, shown in UTC). Only the widths that fit before the end of the data are shown. The **little-endian / big-endian** button switches the byte order.
+- **Search** finds a hex pattern (for example de ad ?? ef, where ?? matches any byte) or UTF-8 text. Enter or the Next and Prev buttons step through the matches, which are selected in the hex view. At most 1000 matches are listed.
+
+## Struct tab
+
+Write one field per line and the tool reads the bytes in order, showing each field's value, type, offset and length. Click a field to highlight its bytes.
+
+| Syntax | Meaning |
+|---|---|
+| name: u16 | Scalar. Types: u8 i8 u16 i16 u32 i32 u64 i64 f32 f64 bool |
+| endian le or endian be | Default byte order from that line on (little-endian if omitted) |
+| name: u16be, name: u32le | Byte order for one field |
+| name: u8[4] | Array with a fixed count |
+| name: u8[len] | Count taken from an earlier numeric field named len |
+| name: u8[*] | As many items as fit in the rest of the data |
+| name: char[8], name: cstr | UTF-8 text with a fixed length, or zero-terminated |
+| name: bytes[n], name: skip[n] | Raw bytes shown as hex, or bytes to skip |
+| name: u32 hex | Number format: hex, bin or dec |
+| # comment | Ignored |
+
+The **Start offset** box begins decoding part-way into the data. You can paste hex or base64, or open a file up to 16 MB. **JSON** exports the field values as text. A field that does not fit in the remaining data stops decoding with an error message that gives the offset. Template mistakes are listed under the template with their line number.
+
+Not supported: nested structs, unions, bitfields, conditions and loops, and enums. Use a full tool such as ImHex, 010 Editor or Kaitai Struct for those.
+
 ## Auto-detection
 
 Auto-detect tries every format and ranks the ones that decode the whole input. The score is a heuristic, not proof:
@@ -87,7 +116,7 @@ Every encoder result is decoded again as a round-trip check.
 2. Paste hex or base64, or open a file. Check the text encoding line under the input.
 3. Leave the format on Auto and read the ranking, or force the format.
 4. For a framed stream, choose the framing, then click a frame.
-5. Click a node in the tree. Its bytes are highlighted in the hex view, which pages through the payload in 2 KB blocks.
+5. Click a node in the tree. Its bytes are highlighted in the hex view, which pages through the payload in 2 KB blocks. Click any byte to see it in the data inspector.
 6. For protobuf, use the selector on a length-delimited field to change its interpretation.
 7. Export JSON, or the CBOR diagnostic notation. Send the payload to the Framing tab to re-frame it.
 
@@ -100,6 +129,7 @@ Every encoder result is decoded again as a round-trip check.
 - The encoders take JSON-like values only. There is no BSON encoder. CBOR tags and simple values are written only through the $tag and $simple wrappers, and MessagePack rejects tags and simple values because it has neither.
 - COBS/R is implemented from the public description of the variant. Compare it with another implementation before relying on it for interoperability.
 - The encoder for MessagePack always writes floats as 64-bit values.
+- The Struct tab is a flat template only (see above), and the data inspector reads one value at the selected offset.
 - Nothing is saved between visits. Use the export buttons to keep results.
 
 ## Troubleshooting
@@ -113,6 +143,10 @@ Every encoder result is decoded again as a round-trip check.
 | "invalid UTF-8" | A text string holds non-UTF-8 bytes | The payload is probably binary, not text; try protobuf or raw bytes |
 | "no frames found" | Framing does not match the stream | Try a different framing mode |
 | COBS frame shows "zero byte inside frame" | Frame was split in the wrong place, or is not COBS | Check the delimiter and the framing |
+
+## Similar tools
+
+The Struct tab, data inspector and search were modelled on features of Kaitai Struct Web IDE (live tree next to a hex view), ImHex (pattern language and data inspector), 010 Editor (binary templates) and Hex Fiend (templates). Those tools offer much richer languages; this one runs in a browser tab with no install.
 
 ## Related tools in this app
 

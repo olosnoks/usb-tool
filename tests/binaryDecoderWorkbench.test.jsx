@@ -8,10 +8,10 @@ import BinaryDecoderWorkbench from '../src/components/tools/BinaryDecoderWorkben
 describe('BinaryDecoderWorkbench', () => {
   it('renders the decode tab with the built-in example decoded', () => {
     const html = renderToString(<BinaryDecoderWorkbench />);
-    expect(html).toContain('Binary Payload Decoder');
     expect(html).toContain('Offline, schema-less');
     expect(html).toContain('Decode');
     expect(html).toContain('Encode JSON');
+    expect(html).toContain('Struct');
     expect(html).toContain('Framing');
     expect(html).toContain('Protobuf (raw, no schema)');
     expect(html).toContain('testing');
