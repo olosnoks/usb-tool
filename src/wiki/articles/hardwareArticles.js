@@ -1160,16 +1160,18 @@ The **Android** tool has two tabs, **ADB** and **Fastboot**; the sidebar entries
 
 | UI Element | Purpose |
 | :--- | :--- |
-| **CONNECT FASTBOOT (WEBUSB)** | Opens a device in fastboot mode, claims the fastboot interface and reads \`getvar:all\`. **DISCONNECT** and **RE-READ VARS** appear once connected. |
+| **CONNECT FASTBOOT** | Opens a device in fastboot mode, claims the fastboot interface and reads \`getvar:all\`. **DISCONNECT** and **RE-READ VARS** appear once connected. |
 | **DEVICE panel** | Product, bootloader version, serial, active slot, baseband, secure, max download size, partition count, and the BOOTLOADER LOCKED / UNLOCKED badge. On A/B devices, **slot A / slot B** buttons run \`set_active\`. |
-| **BOOTLOADER LOCK: UNLOCK BOOTLOADER** | Sends \`flashing unlock\` (falling back to \`oem unlock\`). The phone asks you to confirm; this **wipes user data**. **RE-LOCK** sends the lock command (also wipes on most devices). |
-| **Partition / Slot / CHOOSE IMAGE...** | Partition name (suggestions come from the device's variables), slot (current / A / B / both, on A/B devices) and the image file (raw or Android sparse). The tool shows whether it is sparse and how many pieces it will be split into if larger than \`max-download-size\`. |
+| **BOOTLOADER LOCK: UNLOCK** | Sends \`flashing unlock\` (falling back to \`oem unlock\`). The phone asks you to confirm; this **wipes user data**. **RE-LOCK** sends the lock command (also wipes on most devices). |
+| **Partition / Slot / CHOOSE IMAGE...** | Partition name (suggestions come from the device's variables), slot (current / A / B / both, on A/B devices) and the image file (raw or Android sparse). The tool shows the detected format (sparse, boot, vbmeta, ext4, EROFS or unknown) and how many pieces it will be split into if larger than \`max-download-size\`. **Pre-flash warnings** appear when the image is bigger than the \`partition-size\` variable, when its type does not match the partition (for example a vbmeta image for \`boot\`), or when the target is firmware or userdata. They are hints, not guarantees. **SHA-256** hashes the file so you can compare it with the published checksum. |
 | **FLASH IMAGE** | Download handshake then \`flash:<partition>\` (confirmation first). The bootloader refuses it while locked. |
 | **BOOT ONCE** | Downloads an image and \`boot\`s it without flashing. |
-| **ERASE PARTITION** | \`erase:<partition>\` (confirmation first). |
-| **FACTORY IMAGE (FLASH-ALL)** | **OPEN FACTORY ZIP...** reads a factory image zip (or its inner \`image-*.zip\`), checks the bootloader/baseband requirements against the device, lets you untick individual images, optionally **wipe user data** (like \`flash-all.sh -w\`), and **FLASH FACTORY IMAGE** runs the bootloader, radio, boot-type images, and fastbootd steps in order. Requires an unlocked bootloader; the whole zip is read into memory. |
+| **ERASE** | \`erase:<partition>\` (confirmation first). |
+| **COPY CLI** | Copies the equivalent desktop command (for example \`fastboot --slot=all flash boot boot.img\`) to the clipboard. This is an export; nothing is run. |
+| **FACTORY IMAGE (FLASH-ALL)** | **OPEN FACTORY ZIP...** reads a factory image zip (or its inner \`image-*.zip\`), checks the bootloader/baseband requirements against the device, lets you untick individual images, optionally **wipe user data** (like \`flash-all.sh -w\`), and **FLASH FACTORY IMAGE** runs the bootloader, radio, boot-type images, and fastbootd steps in order. Requires an unlocked bootloader; the whole zip is read into memory. **EXPORT SCRIPT** downloads a \`flash-all.sh\` with the same steps and your current selection and wipe setting, for the desktop \`fastboot\` tool (script only, it does not include the image files). |
 | **REBOOT** | **System (Android)**, **Bootloader**, **Fastbootd (userspace)**, **Recovery**. |
-| **All variables / LOG** | The full \`getvar:all\` table and an activity log. |
+| **COMMAND CONSOLE** (collapsed) | Sends one raw command, in CLI form (\`getvar all\`, \`oem device-info\`, \`reboot bootloader\`) or wire form (\`getvar:all\`), up to 64 bytes, with quick-fill chips for common \`getvar\` queries. Erase, format, lock/unlock, vendor wipe/fuse and partition-layout commands ask for confirmation. \`download\`, \`upload\`, \`boot\` and \`flash <file>\` are refused here because they need file data; use the Flash panel. Vendor \`oem\` commands differ by device and some are irreversible. |
+| **All variables / LOG** | The full \`getvar:all\` table (collapsed) with **COPY** and **SAVE .TXT** in \`(bootloader) name: value\` format, and an activity log with copy and clear buttons. |
 
 Every destructive action asks for confirmation first, and flashing/erasing is refused by the bootloader while it is locked.
 
@@ -1186,17 +1188,24 @@ Every destructive action asks for confirmation first, and flashing/erasing is re
 
 ---
 
-### 5. Implementation & Architecture
+### 5. Similar tools
+
+The official desktop \`fastboot\` CLI (platform-tools), PixelFlasher, Google's Android Flash Tool (web) and fastboot.js cover the same ground. This tool has no backup/restore, ROM downloads or device-specific unlock-token flows; it does need a Chromium browser with WebUSB, and on Windows the device must use the WinUSB driver (Google USB driver or Zadig) to be claimable.
+
+---
+
+### 6. Implementation & Architecture
 
 - **Image tools:** [\`src/utils/fastbootTools.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fastbootTools.js) parses and splits Android sparse images, resolves A/B partition names, and reads and runs factory-image zips.
 - **Driver:** [\`src/utils/fastbootDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/fastbootDriver.js) owns the protocol with no React or \`navigator.usb\` dependency: \`FastbootDevice\` serializes commands on the shared bulk pipe, \`parseResponse\` splits the tag, \`download()\` runs the DATA handshake and chunks the upload, and \`getAllVars()\` parses \`getvar:all\` (splitting on the **last** colon, since names like \`partition-type:boot\` contain colons).
 - **Transport:** \`FastbootUsbTransport\` finds the class \`ff/42/03\` interface and its bulk endpoints.
-- **Workbench:** [\`src/components/tools/FastbootWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/FastbootWorkbench.jsx) renders the device summary, the lock/flash/erase/boot/reboot panels and the variable table, with a confirmation on every destructive step.
+- **Workbench:** [\`src/components/tools/FastbootWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/FastbootWorkbench.jsx) renders the device summary, the lock/flash/erase/boot/reboot panels, the command console and the variable table, with a confirmation on every destructive step.
+- **Pre-flash and export helpers:** \`identifyImage\`, \`preflightChecks\`, \`prepareConsoleCommand\`, \`buildFlashAllScript\` and friends live in \`fastbootTools.js\` and are covered by [\`tests/fastbootPolish.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fastbootPolish.test.js).
 - **Tests:** [\`tests/fastboot.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fastboot.test.js) and [\`tests/fastbootTools.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/fastbootTools.test.js) run the driver and image tools against a simulated bootloader covering getvar, the download handshake, lock-gated flashing, erase, slots, boot, factory zips and reboot.
 
 ---
 
-### 6. References
+### 7. References
 
 | Resource | Source |
 | :--- | :--- |

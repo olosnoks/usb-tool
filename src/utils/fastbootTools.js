@@ -340,3 +340,125 @@ export async function flashFactory(plan, { fb, reconnect, wipe = false, skip = [
   }
   onStep('Done. Reboot when ready.');
 }
+
+// ---------------------------------------------------------------------------
+// Pre-flash checks, console command safety and CLI export
+// ---------------------------------------------------------------------------
+
+const toHex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+
+/** SHA-256 of an image as lowercase hex (WebCrypto). */
+export async function sha256Hex(data) {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) throw new Error('WebCrypto is not available in this context.');
+  return toHex(new Uint8Array(await subtle.digest('SHA-256', data)));
+}
+
+/** Identify an image from its first bytes. A sparse image is reported as sparse (its contents are not inspected). */
+export function identifyImage(data) {
+  const ascii = (o, n) => String.fromCharCode(...data.subarray(o, o + n));
+  const u32 = (o) => new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(o, true);
+  if (isSparse(data)) return { kind: 'sparse', label: 'Android sparse image' };
+  if (data.length >= 8 && ascii(0, 8) === 'ANDROID!') return { kind: 'boot', label: 'Android boot image (ANDROID!)' };
+  if (data.length >= 8 && ascii(0, 8) === 'VNDRBOOT') return { kind: 'vendor_boot', label: 'Vendor boot image (VNDRBOOT)' };
+  if (data.length >= 4 && ascii(0, 4) === 'AVB0') return { kind: 'vbmeta', label: 'AVB vbmeta image (AVB0)' };
+  if (data.length >= 4 && ascii(0, 4) === 'LpMe') return { kind: 'super', label: 'Dynamic partition metadata (LpMe)' };
+  if (data.length >= 1084 && data[1080] === 0x53 && data[1081] === 0xef) return { kind: 'ext4', label: 'ext4 filesystem' };
+  if (data.length >= 1028 && u32(1024) === 0xe0f5e1e2) return { kind: 'erofs', label: 'EROFS filesystem' };
+  return { kind: 'unknown', label: 'Unrecognised format (raw blob)' };
+}
+
+/** Parse a fastboot size variable ("0x4000000" or decimal) to a number, or null. */
+export function parseSizeVar(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  const n = /^0x[0-9a-f]+$/i.test(s) ? parseInt(s, 16) : /^\d+$/.test(s) ? parseInt(s, 10) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Sanity-check an image against a partition before flashing. Returns
+ * [{ level: 'warn', text }]. `vars` is the getvar:all object. These are hints, not guarantees.
+ */
+export function preflightChecks(partition, data, vars = {}) {
+  const out = [];
+  const id = identifyImage(data);
+  const base = partition.replace(/_(a|b)$/, '');
+  const size = imageRawSize(data);
+  const cap = parseSizeVar(vars[`partition-size:${partition}`]) ?? parseSizeVar(vars[`partition-size:${base}`]);
+  if (cap !== null && size > cap) out.push({ level: 'warn', text: `Image is ${size} bytes but partition ${partition} is only ${cap} bytes.` });
+  const bootLike = { boot: 'boot', init_boot: 'boot', recovery: 'boot', vendor_boot: 'vendor_boot', vbmeta: 'vbmeta', vbmeta_system: 'vbmeta', vbmeta_vendor: 'vbmeta' }[base];
+  if (bootLike && id.kind !== 'sparse' && id.kind !== bootLike) out.push({ level: 'warn', text: `${base} normally holds a ${bootLike} image, but this file looks like: ${id.label}.` });
+  if (LOGICAL_PARTITIONS.includes(base) && ['boot', 'vbmeta', 'vendor_boot'].includes(id.kind)) out.push({ level: 'warn', text: `${base} is a filesystem partition, but this file looks like: ${id.label}.` });
+  if (base === 'userdata' || base === 'metadata') out.push({ level: 'warn', text: `Flashing ${base} replaces user data.` });
+  if (['bootloader', 'radio', 'modem', 'aboot', 'sbl1', 'xbl', 'abl'].includes(base)) out.push({ level: 'warn', text: `${base} is firmware. A wrong or interrupted flash can leave the device unbootable${vars.product ? ` (device product: ${vars.product})` : ''}.` });
+  return out;
+}
+
+const DESTRUCTIVE = [
+  [/^erase:/i, 'erases a partition'],
+  [/^format[:\s]/i, 'formats a partition'],
+  [/^flash:/i, 'flashes the download buffer to a partition'],
+  [/^flashing\s+(unlock|lock|unlock_critical|lock_critical)/i, 'changes the bootloader lock and usually wipes user data'],
+  [/^oem\s+(unlock|lock)/i, 'changes the bootloader lock and usually wipes user data'],
+  [/^oem\s+(wipe|erase|format|fuse|rpmb|ramdump)/i, 'is a vendor wipe/fuse/debug command'],
+  [/^(set_active|update-super|create-logical-partition|delete-logical-partition|resize-logical-partition|snapshot-update|wipe-super)/i, 'changes the active slot or the partition layout']
+];
+
+const COLON_VERBS = /^(getvar|erase|format|set_active|snapshot-update|create-logical-partition|delete-logical-partition|resize-logical-partition|update-super)\s+/i;
+
+/**
+ * Turn what the user typed into a wire command and describe its risk.
+ * Accepts CLI style ("getvar all", "oem device-info", "reboot bootloader") or wire style ("getvar:all").
+ * Returns { cmd, destructive, reason }; throws for empty, over-long or file-transfer commands.
+ */
+export function prepareConsoleCommand(input) {
+  let s = String(input || '').trim().replace(/^fastboot\s+/i, '');
+  if (!s) throw new Error('Type a command first.');
+  if (/^(download|upload|boot|flash)(\s|:|$)/i.test(s) && !/^flash:\S/i.test(s)) {
+    throw new Error('download, upload, boot and flash take file data: use the FLASH / ERASE / BOOT panel.');
+  }
+  if (/^download:|^upload\b|^boot$/i.test(s)) throw new Error('download and upload take file data: use the FLASH / ERASE / BOOT panel.');
+  const rb = s.match(/^reboot(?:[\s-]+(bootloader|recovery|fastboot))?$/i);
+  if (rb) s = rb[1] ? `reboot-${rb[1].toLowerCase()}` : 'reboot';
+  else if (/^(oem|flashing)[:\s]/i.test(s)) s = s.replace(/^(oem|flashing):\s*/i, '$1 ');
+  else if (COLON_VERBS.test(s)) s = s.replace(/^(\S+)\s+/, '$1:').replace(/\s+/g, ' ');
+  if (new TextEncoder().encode(s).length > 64) throw new Error('Fastboot commands are limited to 64 bytes.');
+  const hit = DESTRUCTIVE.find(([re]) => re.test(s));
+  return { cmd: s, destructive: !!hit, reason: hit ? hit[1] : '' };
+}
+
+/** Variables as `fastboot getvar all` prints them ("(bootloader) name: value"). */
+export function formatVarsText(vars) {
+  return Object.entries(vars || {}).map(([k, v]) => `(bootloader) ${k}: ${v}`).join('\n');
+}
+
+const sh = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, "'\\''")}'`);
+
+/** The desktop fastboot command for one flash. Export only: the browser tool does not run it. */
+export function cliFlashCommand(partition, fileName, { slot = null } = {}) {
+  const slotArg = slot === 'all' ? ' --slot=all' : slot ? ` --slot=${slot}` : '';
+  return `fastboot${slotArg} flash ${sh(partition)} ${sh(fileName)}`;
+}
+
+/**
+ * A flash-all.sh style script for a factory plan (same order as flashFactory).
+ * Export only: it is text for the desktop fastboot tool.
+ */
+export function buildFlashAllScript(plan, { wipe = false, skip = [] } = {}) {
+  const L = ['#!/bin/sh', '# Generated by Skon\'s USB Tool. Run with the files extracted next to this script.', 'set -e'];
+  const base = (f) => f.split('/').pop();
+  if (plan.bootloader && !skip.includes('bootloader')) L.push(`fastboot flash bootloader ${sh(base(plan.bootloader))}`, 'fastboot reboot-bootloader', 'sleep 5');
+  if (plan.radio && !skip.includes('radio')) L.push(`fastboot flash radio ${sh(base(plan.radio))}`, 'fastboot reboot-bootloader', 'sleep 5');
+  const phys = plan.images.filter((i) => !i.logical && !skip.includes(i.name));
+  const logi = plan.images.filter((i) => i.logical && !skip.includes(i.name));
+  for (const i of phys) L.push(`fastboot flash ${i.name} ${sh(base(i.file))}`);
+  if (logi.length) {
+    L.push('fastboot reboot-fastboot', 'sleep 5');
+    if (plan.superEmpty) L.push(`fastboot update-super super ${sh(base(plan.superEmpty))}${wipe ? ' --wipe' : ''}`);
+    for (const i of logi) L.push(`fastboot flash ${i.name} ${sh(base(i.file))}`);
+  }
+  if (wipe) L.push('fastboot erase userdata', 'fastboot erase metadata');
+  L.push('fastboot reboot');
+  return L.join('\n') + '\n';
+}
