@@ -3,7 +3,7 @@ export default {
   toolId: 'rtl-sdr',
   category: 'rf',
   title: 'RTL-SDR Receiver — RTL2832U and R820T over WebUSB',
-  summary: 'Receive with a cheap RTL-SDR dongle straight from the browser: tune, see the spectrum and waterfall, listen to WFM, NFM or AM, decode 1090 MHz ADS-B, and record raw IQ as .cu8.',
+  summary: 'Receive with a cheap RTL-SDR dongle straight from the browser: tune, see the spectrum and waterfall, listen to WFM, NFM or AM, decode 1090 MHz ADS-B, record raw IQ as .cu8, and keep bookmarks, peak hold and CSV or PNG snapshots.',
   tags: ['RTL-SDR', 'SDR', 'RTL2832U', 'R820T', 'R828D', 'WebUSB', 'Zadig', 'WinUSB', 'Spectrum', 'Waterfall', 'FM', 'AM', 'ADS-B', 'cu8', 'IQ'],
   readTime: '9 min read',
   content: `
@@ -49,6 +49,13 @@ Recognised USB IDs are VID \`0x0BDA\` with PID \`0x2838\` or \`0x2832\`. Any RTL
 | **PPM** | Frequency correction for crystal error. Applied by scaling the reference crystal in the tuner and IF maths. Enter the measured error of your dongle. |
 | **Squelch** | Opens the audio only when the channel power is above the threshold (dBFS). At the far left, squelch is off. |
 | **Volume** | Output gain for the audio. |
+| **Step buttons and step size** | The left and right arrow buttons, or the Up and Down keys in the frequency box, move the frequency by the chosen step (1 kHz to 1 MHz). |
+| **Presets / bookmarks** | A drop-down of fixed band references (FM broadcast, airband guard, marine ch16, NOAA weather, 2 m and 70 cm calling frequencies, ADS-B 1090) plus your own bookmarks. Choosing one tunes and sets the mode. The star button saves the current frequency and mode under the name you typed. Bookmarks are kept in this browser's local storage and can be deleted under "Manage bookmarks". |
+| **Peak hold / Average** | Optional traces on the spectrum: amber is the maximum seen per bin, violet is a smoothed average. Both reset when you retune, change the sample rate, or press RESET. |
+| **Hover read-out** | Moving the mouse over the spectrum shows the frequency and level under the pointer. |
+| **Strongest** | Up to three local maxima more than 10 dB above the noise floor; click one to tune to it (rounded to 1 kHz). |
+| **CSV** | Saves the current spectrum as one row in the layout used by \`rtl_power\` (date, time, low Hz, high Hz, bin step, sample count, then one value per bin). Values are this tool's uncalibrated FFT dBFS, not dBm, and it is a single snapshot, not a swept survey. |
+| **PNG** | Saves the waterfall canvas as an image. |
 | **Spectrum** | Hann-windowed FFT averaged over every sample between display frames. The line shows dBFS; the grey lines are graticule marks. |
 | **Waterfall** | Scrolling history of the spectrum, one row per display frame. |
 
@@ -101,6 +108,10 @@ The tuner and demodulator register sequences are ported from:
 ## Testing status
 
 The register sequences, PLL values, IF and resampler maths, gain selection, IQ conversions, the recorder and the demodulator (on synthetic FM, NFM and AM tones) are covered by unit tests. **None of this has been verified on a physical dongle.** The first hardware run should confirm that the tuner locks across the band and that the spectrum sits where the tuned frequency says it should. Treat the output as untested until that has been done.
+
+## Similar tools
+
+Compared against SDR#, Gqrx, SDR++ and \`rtl_power\`. Those programs add a frequency manager or bookmarks, peak hold, and (rtl_power) wideband sweeps with CSV output; the first three are covered above. Not implemented here: wideband sweeping beyond the current span, IQ playback, scanning, digital voice decoding and bias-tee control.
 
 ## Related tools
 
