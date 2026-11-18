@@ -69,6 +69,8 @@ Polls these read-only requests in turn while the tab is open:
 - **Battery (MSP_ANALOG 110):** voltage (0.1 V steps), current, mAh used and the raw RSSI value the firmware reports.
 - **Motors (MSP_MOTOR 104):** readout only. The tool never spins or tests a motor.
 
+**Record** (top of the tab) keeps one row per completed read cycle (attitude, raw IMU, receiver, battery, motors) in memory with a millisecond timestamp. **CSV** downloads the rows (up to 20000; the recording stops by itself at that limit, and when the port disconnects). Each row repeats the latest value of every channel, so the sample rate is the poll rate of your link, not the gyro rate. Nothing is uploaded. Unknown cells are left empty and up to 8 RC channels and 8 motor slots are exported.
+
 Use **Polling: on/off** in the tab bar to pause the requests. The footer counts requests, replies, timeouts, unsupported replies and bad frames, which helps when a link is noisy.
 
 ### CLI
@@ -76,6 +78,10 @@ Use **Polling: on/off** in the tab bar to pause the requests. The footer counts 
 - **Enter CLI (#)** sends the single byte \`#\`, which Betaflight and INAV use to switch from MSP to the text CLI. MSP polling pauses while the CLI is active.
 - Type a command and press Enter. Commands are sent only when you type them. The tool does not send \`set\`, \`save\` or any other command on its own.
 - **Capture diff all** and **Capture dump** send \`diff all\` or \`dump\` and collect the output until the \`#\` prompt returns. Use **Download** to save the capture as a text file.
+- **Copy** puts the finished capture on the clipboard.
+- **Quick (read-only)** buttons send \`version\`, \`status\`, \`tasks\`, \`diff\` (captured) or \`get name\`. They only print information.
+- Press **Up** and **Down** in the command box to walk through the last 50 commands you sent.
+- **Compare a saved diff with the latest capture** (collapsed section): load a baseline text file saved earlier, and once a capture finishes the tool lists settings that changed, exist only in one of them, or are the same, with a count per command type. Settings are keyed by name plus the active \`profile\` and \`rateprofile\`, and \`feature GPS\` against \`feature -GPS\` counts as a change. Both texts are only parsed in your browser; nothing is written to the board. Comparing across firmware versions may show renamed settings as removed plus added.
 - Typing \`exit\` opens a confirmation first. Exiting **reboots the flight controller**. Anything not saved with \`save\` is lost, and the USB serial port may drop and need reconnecting.
 
 ## What it does NOT do
@@ -84,7 +90,11 @@ Use **Polling: on/off** in the tab bar to pause the requests. The footer counts 
 - It does **not** write settings over MSP. Settings change only through commands you type in the CLI, such as \`set\` followed by \`save\`.
 - It does not decode arming-disabled reasons from STATUS_EX.
 - It does not implement MSP v1 "jumbo" frames (payloads over 255 bytes). The requests it sends are all small.
-- It does not flash firmware, read blackbox logs, or upload configurations. Use the official Betaflight or INAV configurator for those.
+- It does not flash firmware, read blackbox logs, or restore configurations (you can compare a saved diff, but pasting one back is up to you in the CLI). Use the official Betaflight or INAV configurator for those.
+
+## Similar tools
+
+Betaflight Configurator, INAV Configurator and Blackbox Explorer cover much more (tuning, mixers, firmware flashing, blackbox log graphs). This tool is a lightweight read-only companion. Use the official apps for those jobs.
 
 ## Troubleshooting
 
