@@ -22,10 +22,17 @@ import {
   CornerLeftUp,
   FolderTree,
   Package,
-  Search
+  Search,
+  Pencil,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import { pyStr, buildDeleteScript, writeFileChunked, readFileChunked } from '../utils/micropythonFiles';
 import { resolvePackage } from '../utils/micropythonMip';
+import {
+  joinPath, parentPath, formatSize, sortFilterEntries, validateName,
+  buildRemoveTreeScript, buildRenameScript, buildRunFileScript, parseMarker,
+} from '../utils/micropythonTools';
 import { MICROPYTHON_DRIVERS } from '../utils/microPythonDrivers';
 
 export default function MicroPythonFileManager({
@@ -115,7 +122,7 @@ export default function MicroPythonFileManager({
   const handleMkdir = async () => {
     const name = prompt('New folder name');
     if (!name) return;
-    const full = currentPath === '.' ? name : `${currentPath}/${name}`;
+    const full = joinPath(currentPath, name);
     setIsExecuting(true);
     try {
       const out = await executeInRawRepl(`import os\nos.mkdir(${pyStr(full)})\nprint("__OK__")`);
@@ -230,7 +237,7 @@ print("__PY_DATA_END__")
   };
 
   const getFullPath = (fileName) => {
-    return currentPath === '.' ? fileName : `${currentPath}/${fileName}`;
+    return joinPath(currentPath, fileName);
   };
 
   // Read file from device to view/edit
@@ -296,23 +303,24 @@ print("__PY_DATA_END__")
     }
   };
 
-  // Delete file from device
-  const handleDeleteFile = async (fileName) => {
-    const fullPath = getFullPath(fileName);
-    if (!confirm(`Are you sure you want to delete "${fullPath}" from the device filesystem?`)) return;
+  // Delete a file, or a folder with everything in it (confirmed first)
+  const handleDeleteFile = async (file) => {
+    const fullPath = getFullPath(file.name);
+    const msg = file.isDir
+      ? `Delete folder "${fullPath}" and EVERYTHING inside it from the device? This cannot be undone.`
+      : `Are you sure you want to delete "${fullPath}" from the device filesystem?`;
+    if (!confirm(msg)) return;
 
     setIsExecuting(true);
     onLogMessage?.(`[MICROPYTHON] Removing "${fullPath}"...`, 'sys');
-
-    const delPython = buildDeleteScript(fullPath);
-
     try {
-      const output = await executeInRawRepl(delPython);
-      if (output.includes('__FILE_DEL_SUCCESS__')) {
+      const output = await executeInRawRepl(buildRemoveTreeScript(fullPath), 60000);
+      const r = parseMarker(output, '__RM_OK__', '__RM_ERR__');
+      if (r.ok) {
         onLogMessage?.(`[MICROPYTHON] Deleted "${fullPath}"`, 'sys');
         await handleScanFiles(currentPath);
       } else {
-        alert('Failed to delete file from device.');
+        alert(`Failed to delete: ${r.error}`);
       }
     } catch (err) {
       alert(`Delete failed: ${err.message}`);
@@ -321,18 +329,80 @@ print("__PY_DATA_END__")
     }
   };
 
-  // Host file upload handler
-  const handleLocalFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Rename / move within the device filesystem (os.rename)
+  const handleRename = async (file) => {
+    const from = getFullPath(file.name);
+    const input = prompt(`Rename / move "${from}" to (path relative to the current folder, or absolute with a leading /)`, file.name);
+    if (input === null) return;
+    const err = validateName(input);
+    if (err) { alert(err); return; }
+    const to = input.trim().startsWith('/') ? input.trim() : getFullPath(input.trim());
+    if (to === from) return;
+    setIsExecuting(true);
+    try {
+      const output = await executeInRawRepl(buildRenameScript(from, to));
+      const r = parseMarker(output, '__MV_OK__', '__MV_ERR__');
+      if (!r.ok) throw new Error(r.error);
+      onLogMessage?.(`[MICROPYTHON] Renamed "${from}" -> "${to}"`, 'sys');
+      await handleScanFiles(currentPath);
+    } catch (e) {
+      alert(`Rename failed: ${e.message}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
 
-    const target = getFullPath(file.name);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      await handleSaveFileContent(target, new Uint8Array(event.target.result));
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    };
-    reader.readAsArrayBuffer(file);
+  // Run a script that is stored on the device (exec of its source) and show its output
+  const [runOutput, setRunOutput] = useState(null); // { title, text }
+  const handleRunFile = async (file) => {
+    if (!isConnected) return;
+    const fullPath = getFullPath(file.name);
+    setIsExecuting(true);
+    onLogMessage?.(`[MICROPYTHON EXEC] run ${fullPath}`, 'tx');
+    setRunOutput({ title: `run ${fullPath}`, text: 'Running... (a script that never returns will time out; use Stop)' });
+    try {
+      const output = await executeInRawRepl(buildRunFileScript(fullPath), 30000);
+      setRunOutput({ title: `run ${fullPath}`, text: output || '(no output)' });
+      onLogMessage?.(`[MICROPYTHON OUTPUT]
+${output}`, 'rx');
+    } catch (err) {
+      setRunOutput({ title: `run ${fullPath}`, text: `Error: ${err.message}` });
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  // File list view state
+  const [fileFilter, setFileFilter] = useState('');
+  const [sortKey, setSortKey] = useState('name');
+  const [sortDesc, setSortDesc] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const shownFiles = sortFilterEntries(deviceFiles, { filter: fileFilter, key: sortKey, desc: sortDesc });
+  const toggleSort = (k) => {
+    if (sortKey === k) setSortDesc((d) => !d);
+    else { setSortKey(k); setSortDesc(false); }
+  };
+
+  // Upload one or more host files (picker or drag-and-drop) into the current directory
+  const uploadHostFiles = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!isConnected || files.length === 0) return;
+    for (const file of files) {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      try {
+        await handleSaveFileContent(getFullPath(file.name), buf);
+      } catch { /* handleSaveFileContent reports its own errors */ }
+    }
+  };
+  const handleLocalFileUpload = async (e) => {
+    const list = e.target.files;
+    await uploadHostFiles(list);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (!isScanning && !isExecuting) uploadHostFiles(e.dataTransfer?.files);
   };
 
   // Run Quick One-liner
@@ -354,10 +424,7 @@ print("__PY_DATA_END__")
   // Parent dir navigation helper
   const handleGoUp = () => {
     if (currentPath === '.') return;
-    const parts = currentPath.split('/');
-    parts.pop();
-    const parent = parts.join('/') || '.';
-    handleScanFiles(parent);
+    handleScanFiles(parentPath(currentPath));
   };
 
   // 1-Click Package Installer to /lib/
@@ -394,312 +461,256 @@ except:
     }
   };
 
+  const btn = 'px-2 py-1 rounded bg-slate-900 border border-slate-800 hover:border-slate-600 text-slate-300 disabled:opacity-40 transition-colors';
+  const iconBtn = 'p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 hover:border-slate-600 disabled:opacity-40 transition-all';
+  const busy = isScanning || isExecuting;
+
   return (
-    <div className="bg-cyber-darkest border border-cyber-border rounded-xl shadow-xl p-4 flex flex-col gap-3 font-mono text-xs">
+    <div className="flex flex-col gap-2 font-mono text-xs">
       {transfer && (
-        <div className="flex items-center gap-2 bg-slate-950 border border-cyan-800 rounded-lg px-3 py-2 text-[11px] text-slate-300">
+        <div className="flex items-center gap-2 bg-slate-950 border border-cyan-800 rounded-lg px-2 py-1.5 text-[11px] text-slate-300">
           <span className="truncate">{transfer.label}</span>
           <div className="flex-1 h-1.5 bg-slate-800 rounded overflow-hidden">
             <div className="h-full bg-cyan-500" style={{ width: `${transfer.total ? Math.round((transfer.done / transfer.total) * 100) : 0}%` }} />
           </div>
-          <span>{transfer.done}/{transfer.total} B</span>
+          <span className="whitespace-nowrap">{transfer.done}/{transfer.total} B</span>
           <button onClick={cancelTransfer} className="px-2 py-0.5 rounded bg-rose-700 text-white font-bold">CANCEL</button>
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-        <button onClick={() => handleDeviceControl('stop')} disabled={!isConnected} className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40">Stop (Ctrl-C)</button>
-        <button onClick={() => handleDeviceControl('soft')} disabled={!isConnected} className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40">Soft reset</button>
-        <button onClick={() => handleDeviceControl('hard')} disabled={!isConnected} className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40">Hard reset</button>
-        <button onClick={handleMkdir} disabled={!isConnected || isExecuting} className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-40">New folder</button>
-      </div>
-      {/* Top Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-cyber-border">
-        <div className="flex items-center gap-2">
-          <FileCode className="w-4 h-4 text-cyber-amber" />
-          <h2 className="font-bold text-slate-100 tracking-wider">
-            MICROPYTHON / CIRCUITPYTHON WORKBENCH
-          </h2>
-          {platformInfo && (
-            <span className="px-2 py-0.5 rounded text-[10px] bg-amber-500/10 text-cyber-amber border border-amber-500/30 uppercase font-bold">
-              {platformInfo}
-            </span>
-          )}
-        </div>
 
-        {/* View Mode Switcher Pills: Files vs Package Manager (mip) */}
-        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+      {/* Toolbar: view tabs, device control */}
+      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+        <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
           <button
             onClick={() => setSubView('files')}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg font-bold transition-all ${
-              subView === 'files' ? 'bg-amber-600 text-white shadow-amber-glow' : 'text-slate-400 hover:text-slate-200'
-            }`}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md font-bold transition-all ${subView === 'files' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <Folder className="w-3.5 h-3.5" />
             <span>FILES ({deviceFiles.length})</span>
           </button>
           <button
             onClick={() => setSubView('mip')}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg font-bold transition-all ${
-              subView === 'mip' ? 'bg-cyan-600 text-white shadow-cyan-glow' : 'text-slate-400 hover:text-slate-200'
-            }`}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md font-bold transition-all ${subView === 'mip' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <Package className="w-3.5 h-3.5" />
-            <span>PACKAGE MANAGER (mip)</span>
+            <span>MIP</span>
           </button>
         </div>
-
-        {/* Target Board Selector & Actions */}
-        <div className="flex flex-wrap items-center gap-2">
-          {boards.length > 0 && onSelectBoard && (
-            <div className="flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800 text-[11px]">
-              <span className="text-slate-500 font-bold">TARGET:</span>
-              <select
-                value={activeBoardId}
-                onChange={(e) => onSelectBoard(e.target.value)}
-                className="bg-transparent text-cyber-cyan font-bold outline-none cursor-pointer"
-              >
-                {boards.map(b => (
-                  <option key={b.id} value={b.id}>{b.name} ({b.baudRate})</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {subView === 'files' && (
-            <>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleLocalFileUpload}
-                className="hidden"
-              />
-
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!isConnected || isScanning || isExecuting}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-slate-500 disabled:opacity-50 transition-all"
-                title="Upload script or config file from PC to on-chip flash"
-              >
-                <Upload className="w-3.5 h-3.5 text-cyber-cyan" />
-                <span>UPLOAD</span>
-              </button>
-
-              <button
-                onClick={() => setIsNewFileModal(true)}
-                disabled={!isConnected || isScanning || isExecuting}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-slate-500 disabled:opacity-50 transition-all"
-              >
-                <Plus className="w-3.5 h-3.5 text-cyber-emerald" />
-                <span>NEW SCRIPT</span>
-              </button>
-
-              <button
-                onClick={() => handleScanFiles(currentPath)}
-                disabled={!isConnected || isScanning || isExecuting}
-                className="flex items-center gap-1 px-3 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-cyber-amber font-bold border border-amber-500/40 hover:border-amber-400 disabled:opacity-50 transition-all"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
-                <span>{isScanning ? 'SCANNING...' : 'SCAN FILES'}</span>
-              </button>
-            </>
-          )}
-        </div>
+        {platformInfo && (
+          <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-cyber-amber border border-amber-500/30 uppercase font-bold">
+            {platformInfo}
+          </span>
+        )}
+        {boards.length > 0 && onSelectBoard && (
+          <label className="flex items-center gap-1 bg-slate-950 px-1.5 py-1 rounded-lg border border-slate-800">
+            <span className="text-slate-500 font-bold">TARGET:</span>
+            <select
+              value={activeBoardId}
+              onChange={(e) => onSelectBoard(e.target.value)}
+              className="bg-transparent text-cyber-cyan font-bold outline-none cursor-pointer"
+            >
+              {boards.map(b => (
+                <option key={b.id} value={b.id}>{b.name} ({b.baudRate})</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <span className="flex-1" />
+        <button onClick={() => handleDeviceControl('stop')} disabled={!isConnected} className={btn} title="Send Ctrl-C twice to interrupt the running program">Stop</button>
+        <button onClick={() => handleDeviceControl('soft')} disabled={!isConnected} className={btn} title="Soft reset (Ctrl-C, Ctrl-C, Ctrl-D)">Soft reset</button>
+        <button onClick={() => handleDeviceControl('hard')} disabled={!isConnected} className={btn} title="Hard reset (machine.reset()); the serial connection may drop">Hard reset</button>
       </div>
 
       {subView === 'files' ? (
         <>
-          {/* Breadcrumb Path & Storage Gauge */}
-          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950 p-2 rounded-lg border border-slate-800">
-            <div className="flex items-center gap-2 text-xs">
-              <FolderTree className="w-4 h-4 text-cyber-cyan" />
-              <span className="text-slate-500 uppercase font-bold">DIRECTORY:</span>
-              <span className="text-slate-200 font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                /{currentPath === '.' ? '' : currentPath}
-              </span>
-              {currentPath !== '.' && (
-                <button
-                  onClick={handleGoUp}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-cyber-amber border border-slate-800 text-[11px]"
-                  title="Navigate to parent directory"
-                >
-                  <CornerLeftUp className="w-3 h-3" />
-                  <span>UP</span>
-                </button>
-              )}
-            </div>
-
-            {storageInfo.totalKb > 0 && (
-              <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                <HardDrive className="w-3.5 h-3.5 text-cyber-cyan" />
-                <span>{storageInfo.freeKb} KB Free / {storageInfo.totalKb} KB Total</span>
-              </div>
+          {/* Path, storage, actions */}
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1.5 rounded-lg border border-slate-800">
+            <FolderTree className="w-3.5 h-3.5 text-cyber-cyan shrink-0" />
+            <span className="text-slate-200 font-bold bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 break-all">
+              /{currentPath === '.' ? '' : currentPath}
+            </span>
+            {currentPath !== '.' && (
+              <button onClick={handleGoUp} className={`${btn} flex items-center gap-1 !py-0.5 text-cyber-amber`} title="Navigate to parent directory">
+                <CornerLeftUp className="w-3 h-3" /><span>UP</span>
+              </button>
             )}
+            {storageInfo.totalKb > 0 && (
+              <span className="flex items-center gap-1 text-[11px] text-slate-400" title="Free / total flash from os.statvfs('/')">
+                <HardDrive className="w-3 h-3 text-cyber-cyan" />
+                {storageInfo.freeKb} / {storageInfo.totalKb} KB free
+              </span>
+            )}
+            <span className="flex-1" />
+            <input type="file" multiple ref={fileInputRef} onChange={handleLocalFileUpload} className="hidden" />
+            <button onClick={() => fileInputRef.current?.click()} disabled={!isConnected || busy} className={`${btn} flex items-center gap-1`} title="Upload one or more files from the PC into this folder (you can also drop files on the list)">
+              <Upload className="w-3.5 h-3.5 text-cyber-cyan" /><span>UPLOAD</span>
+            </button>
+            <button onClick={() => setIsNewFileModal(true)} disabled={!isConnected || busy} className={`${btn} flex items-center gap-1`} title="Create a new script on the device">
+              <Plus className="w-3.5 h-3.5 text-cyber-emerald" /><span>NEW</span>
+            </button>
+            <button onClick={handleMkdir} disabled={!isConnected || busy} className={btn} title="Create a folder in the current directory">Folder</button>
+            <button
+              onClick={() => handleScanFiles(currentPath)}
+              disabled={!isConnected || busy}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-cyber-amber font-bold border border-amber-500/40 hover:border-amber-400 disabled:opacity-50 transition-all"
+              title="List this directory"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+              <span>{isScanning ? 'SCANNING...' : 'SCAN'}</span>
+            </button>
           </div>
 
-          {/* File List Table */}
-          <div className="bg-slate-950 rounded-lg border border-slate-800 overflow-hidden">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-400 text-[10px] uppercase bg-slate-900/60">
-                  <th className="py-2 px-3">Type</th>
-                  <th className="py-2 px-3">Filename</th>
-                  <th className="py-2 px-3">Size</th>
-                  <th className="py-2 px-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {currentPath !== '.' && (
-                  <tr 
-                    onClick={handleGoUp}
-                    className="border-b border-slate-900 hover:bg-slate-900/50 cursor-pointer text-cyber-amber transition-colors"
-                  >
-                    <td className="py-2 px-3 w-10">
-                      <Folder className="w-4 h-4 text-cyber-amber" />
-                    </td>
-                    <td colSpan="3" className="py-2 px-3 font-mono font-bold">
-                      .. [Parent Directory]
-                    </td>
+          {/* File list (drop files here to upload) */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            className={`bg-slate-950 rounded-lg border overflow-hidden ${dragOver ? 'border-cyan-400' : 'border-slate-800'}`}
+          >
+            <div className="flex items-center gap-1.5 px-2 py-1 border-b border-slate-800 bg-slate-900/60">
+              <Search className="w-3 h-3 text-slate-500 shrink-0" />
+              <input
+                type="text"
+                value={fileFilter}
+                onChange={(e) => setFileFilter(e.target.value)}
+                placeholder="Filter files"
+                aria-label="Filter files"
+                className="flex-1 min-w-0 bg-transparent text-slate-200 placeholder-slate-600 outline-none text-[11px]"
+              />
+              {fileFilter && <span className="text-[10px] text-slate-500">{shownFiles.length}/{deviceFiles.length}</span>}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 text-[10px] uppercase bg-slate-900/40">
+                    <th className="py-1 px-2 w-8" />
+                    {[['name', 'Name'], ['size', 'Size']].map(([k, label]) => (
+                      <th key={k} className="py-1 px-2" aria-sort={sortKey === k ? (sortDesc ? 'descending' : 'ascending') : 'none'}>
+                        <button onClick={() => toggleSort(k)} className="flex items-center gap-0.5 uppercase hover:text-slate-200" title={`Sort by ${label.toLowerCase()}`}>
+                          {label}
+                          {sortKey === k && (sortDesc ? <ArrowDown className="w-3 h-3" /> : <ArrowUp className="w-3 h-3" />)}
+                        </button>
+                      </th>
+                    ))}
+                    <th className="py-1 px-2 text-right">Actions</th>
                   </tr>
-                )}
-
-                {deviceFiles.length === 0 ? (
-                  <tr>
-                    <td colSpan="4" className="py-8 text-center text-slate-500">
-                      {isConnected 
-                        ? 'No files detected in this directory. Click "SCAN FILES" to query the MicroPython filesystem.' 
-                        : 'Device not connected. Connect serial port to browse on-chip files.'}
-                    </td>
-                  </tr>
-                ) : (
-                  deviceFiles.map((file, idx) => (
-                    <tr 
-                      key={file.name || idx} 
-                      className="border-b border-slate-900 hover:bg-slate-900/40 transition-colors"
-                    >
-                      <td className="py-2 px-3 w-10">
-                        {file.isDir ? (
-                          <Folder className="w-4 h-4 text-cyber-amber" />
-                        ) : file.name.endsWith('.py') ? (
-                          <FileCode className="w-4 h-4 text-cyber-cyan" />
-                        ) : (
-                          <FileText className="w-4 h-4 text-slate-400" />
-                        )}
-                      </td>
-                      <td 
-                        onClick={() => {
-                          if (file.isDir) {
-                            const next = currentPath === '.' ? file.name : `${currentPath}/${file.name}`;
-                            handleScanFiles(next);
-                          }
-                        }}
-                        className={`py-2 px-3 font-mono font-bold ${file.isDir ? 'text-cyber-amber cursor-pointer hover:underline' : 'text-slate-200'}`}
-                      >
-                        {file.name} {file.isDir && '/'}
-                      </td>
-                      <td className="py-2 px-3 text-slate-400 font-mono text-[11px]">
-                        {file.size > 0 ? `${file.size} B` : file.isDir ? '<DIR>' : '-'}
-                      </td>
-                      <td className="py-2 px-3 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {file.isDir ? (
-                            <button
-                              onClick={() => {
-                                const next = currentPath === '.' ? file.name : `${currentPath}/${file.name}`;
-                                handleScanFiles(next);
-                              }}
-                              className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-cyber-amber border border-slate-800 text-[11px] font-bold"
-                            >
-                              ENTER
-                            </button>
-                          ) : (
-                            <>
-                              <button
-                                onClick={() => handleReadFile(file.name)}
-                                disabled={isExecuting}
-                                className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-cyber-cyan border border-slate-800 hover:border-cyan-500/50 text-[11px] font-bold transition-all"
-                                title="View / Edit in browser"
-                              >
-                                EDIT
-                              </button>
-                              <button
-                                onClick={() => handleDownloadFile(file.name)}
-                                disabled={isExecuting}
-                                className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 hover:border-slate-600 transition-all"
-                                title="Download to PC"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          )}
-                          <button
-                            onClick={() => handleDeleteFile(file.name)}
-                            disabled={isExecuting}
-                            className="p-1 rounded bg-slate-900 hover:bg-rose-950/60 text-slate-400 hover:text-cyber-rose border border-slate-800 hover:border-rose-900/50 transition-all"
-                            title="Delete from on-chip flash"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                </thead>
+                <tbody>
+                  {currentPath !== '.' && (
+                    <tr onClick={handleGoUp} className="border-b border-slate-900 hover:bg-slate-900/50 cursor-pointer text-cyber-amber transition-colors">
+                      <td className="py-1 px-2"><Folder className="w-4 h-4 text-cyber-amber" /></td>
+                      <td colSpan="3" className="py-1 px-2 font-bold">.. [Parent Directory]</td>
+                    </tr>
+                  )}
+                  {shownFiles.length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className="py-6 px-2 text-center text-slate-500">
+                        {deviceFiles.length > 0
+                          ? 'No files match the filter.'
+                          : isConnected
+                            ? 'No files listed. Click SCAN to read the device filesystem, or drop files here to upload.'
+                            : 'Device not connected. Connect a serial port to browse on-chip files.'}
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    shownFiles.map((file, idx) => (
+                      <tr key={file.name || idx} className="border-b border-slate-900 hover:bg-slate-900/40 transition-colors">
+                        <td className="py-1 px-2">
+                          {file.isDir ? (
+                            <Folder className="w-4 h-4 text-cyber-amber" />
+                          ) : file.name.endsWith('.py') ? (
+                            <FileCode className="w-4 h-4 text-cyber-cyan" />
+                          ) : (
+                            <FileText className="w-4 h-4 text-slate-400" />
+                          )}
+                        </td>
+                        <td
+                          onClick={() => { if (file.isDir) handleScanFiles(joinPath(currentPath, file.name)); }}
+                          className={`py-1 px-2 font-bold break-all ${file.isDir ? 'text-cyber-amber cursor-pointer hover:underline' : 'text-slate-200'}`}
+                        >
+                          {file.name}{file.isDir && '/'}
+                        </td>
+                        <td className="py-1 px-2 text-slate-400 text-[11px] whitespace-nowrap">
+                          {file.size > 0 ? formatSize(file.size) : file.isDir ? '<DIR>' : '-'}
+                        </td>
+                        <td className="py-1 px-2">
+                          <div className="flex items-center justify-end gap-1">
+                            {file.isDir ? (
+                              <button onClick={() => handleScanFiles(joinPath(currentPath, file.name))} className={`${btn} !py-0.5 text-cyber-amber font-bold`}>ENTER</button>
+                            ) : (
+                              <>
+                                {file.name.endsWith('.py') && (
+                                  <button onClick={() => handleRunFile(file)} disabled={!isConnected || isExecuting} className={`${iconBtn} text-cyber-emerald`} title="Run this script on the device and show its output" aria-label={`Run ${file.name}`}>
+                                    <Play className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <button onClick={() => handleReadFile(file.name)} disabled={isExecuting} className={`${btn} !py-0.5 text-cyber-cyan font-bold`} title="View / Edit in browser">EDIT</button>
+                                <button onClick={() => handleDownloadFile(file.name)} disabled={isExecuting} className={iconBtn} title="Download to PC" aria-label={`Download ${file.name}`}>
+                                  <Download className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
+                            <button onClick={() => handleRename(file)} disabled={isExecuting} className={iconBtn} title="Rename / move" aria-label={`Rename ${file.name}`}>
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => handleDeleteFile(file)} disabled={isExecuting} className={`${iconBtn} hover:text-cyber-rose`} title={file.isDir ? 'Delete folder and all its contents' : 'Delete from on-chip flash'} aria-label={`Delete ${file.name}`}>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          {/* Quick REPL One-liner execution bar */}
-          <div className="flex items-center gap-2 bg-slate-950 p-2 rounded-lg border border-slate-800">
-            <Terminal className="w-4 h-4 text-cyber-cyan shrink-0" />
-            <span className="text-[10px] text-slate-500 uppercase font-bold shrink-0">EXECUTE REPL:</span>
+          {/* One-liner REPL */}
+          <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-lg border border-slate-800">
+            <Terminal className="w-3.5 h-3.5 text-cyber-cyan shrink-0" />
             <input
               type="text"
               value={quickCode}
               onChange={(e) => setQuickCode(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleRunQuickCode()}
               placeholder="e.g. import machine; machine.Pin(2, machine.Pin.OUT).value(1)"
-              className="flex-1 bg-transparent text-slate-200 placeholder-slate-600 outline-none font-mono text-xs"
+              aria-label="Python one-liner to run on the device"
+              className="flex-1 min-w-0 bg-transparent text-slate-200 placeholder-slate-600 outline-none text-xs"
             />
             <button
               onClick={handleRunQuickCode}
               disabled={!isConnected || isExecuting}
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyber-cyan border border-cyan-500/40 text-xs font-bold transition-all shrink-0"
+              className="flex items-center gap-1 px-2 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyber-cyan border border-cyan-500/40 text-xs font-bold transition-all shrink-0 disabled:opacity-40"
             >
               <Play className="w-3 h-3" />
               <span>RUN</span>
             </button>
           </div>
+
+          {runOutput && (
+            <div className="bg-slate-950 rounded-lg border border-slate-800">
+              <div className="flex items-center justify-between px-2 py-1 border-b border-slate-800 text-[10px] text-slate-500 uppercase">
+                <span className="truncate">Output: {runOutput.title}</span>
+                <button onClick={() => setRunOutput(null)} className="hover:text-slate-200" title="Clear output" aria-label="Clear output"><X className="w-3 h-3" /></button>
+              </div>
+              <pre className="p-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-[11px] text-slate-200">{runOutput.text}</pre>
+            </div>
+          )}
         </>
       ) : (
         /* Package Manager (mip / ViperIDE style) */
-        <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2">
-              <Package className="w-5 h-5 text-cyber-cyan" />
-              <div>
-                <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
-                  OFFLINE DRIVERS (bundled) + mip
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
-                    VIPERIDE / MIP INTEGRATION
-                  </span>
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  Deploy verified sensor and display drivers directly into your microcontroller's <code className="text-cyber-amber">/lib</code> directory.
-                </p>
-              </div>
-            </div>
-
-            {/* Driver Search Input */}
-            <div className="relative w-64">
-              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Search drivers (OLED, BME280, AHT20)..."
-                value={driverSearch}
-                onChange={e => setDriverSearch(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-slate-200 text-xs outline-none focus:border-cyan-500"
-              />
-            </div>
+        <div className="space-y-2 bg-slate-950 p-2 rounded-lg border border-slate-800">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 top-2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search bundled drivers (OLED, BME280, AHT20)..."
+              aria-label="Search bundled drivers"
+              value={driverSearch}
+              onChange={e => setDriverSearch(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-7 pr-2 py-1.5 text-slate-200 text-xs outline-none focus:border-cyan-500"
+            />
           </div>
 
           {/* Real mip: name, github: spec or URL (fetched in the browser, https + allow-listed hosts) */}
@@ -707,9 +718,10 @@ except:
             <input
               type="text"
               placeholder="mip install: umqtt.simple, github:org/repo/path, or https://.../package.json"
+              aria-label="mip package to install"
               value={customPackageName}
               onChange={e => setCustomPackageName(e.target.value)}
-              className="flex-1 min-w-[16rem] bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-slate-200 text-xs outline-none focus:border-cyan-500"
+              className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-800 rounded-lg px-2 py-1.5 text-slate-200 text-xs outline-none focus:border-cyan-500"
             />
             <button
               onClick={handleMipInstall}
@@ -718,56 +730,47 @@ except:
             >
               mip install
             </button>
-            {mipStatus && <span className="text-[11px] text-slate-400 w-full">{mipStatus}</span>}
+            {mipStatus && <span className="text-[11px] text-slate-400 w-full break-all">{mipStatus}</span>}
           </div>
 
+          <details className="text-[11px] text-slate-400">
+            <summary className="cursor-pointer text-slate-300">How installs work</summary>
+            <p className="mt-1">The browser downloads packages (https, micropython.org and raw.githubusercontent.com only) and writes them to <code className="text-cyber-amber">/lib</code> on the board, which needs no network. Bundled drivers install offline.</p>
+          </details>
+
           {/* Drivers Grid */}
-          <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-3 pt-1">
+          <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-2">
             {MICROPYTHON_DRIVERS
-              .filter(d => 
-                !driverSearch || 
-                d.name.toLowerCase().includes(driverSearch.toLowerCase()) || 
+              .filter(d =>
+                !driverSearch ||
+                d.name.toLowerCase().includes(driverSearch.toLowerCase()) ||
                 d.description.toLowerCase().includes(driverSearch.toLowerCase()) ||
                 d.category.toLowerCase().includes(driverSearch.toLowerCase())
               )
               .map(pkg => (
-                <div 
-                  key={pkg.id} 
-                  className="bg-slate-900/70 p-3.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between space-y-2.5"
-                >
+                <div key={pkg.id} className="bg-slate-900/70 p-2 rounded-lg border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between gap-2">
                   <div className="space-y-1">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="font-bold text-slate-200 text-xs">{pkg.name}</span>
-                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950 text-cyan-400 border border-slate-800 uppercase font-bold">
-                        {pkg.category}
-                      </span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950 text-cyan-400 border border-slate-800 uppercase font-bold">{pkg.category}</span>
                     </div>
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      {pkg.description}
-                    </p>
+                    <p className="text-[11px] text-slate-400 leading-snug">{pkg.description}</p>
                   </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[10px]">
-                    <span className="text-slate-500 font-mono">
-                      /lib/{pkg.filename} ({pkg.size})
-                    </span>
+                  <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-800/80 text-[10px]">
+                    <span className="text-slate-500 break-all">/lib/{pkg.filename} ({pkg.size})</span>
                     <button
                       onClick={() => handleInstallPackage(pkg)}
                       disabled={!isConnected || isExecuting}
-                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg font-bold transition-all shadow-sm ${
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg font-bold transition-all shrink-0 ${
                         !isConnected
                           ? 'opacity-40 cursor-not-allowed bg-slate-800 text-slate-500'
                           : installingDriverId === pkg.id
                             ? 'bg-amber-600 text-white animate-pulse'
-                            : 'bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-slate-950 font-extrabold shadow-cyan-glow'
+                            : 'bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-400 hover:to-cyan-500 text-slate-950 font-extrabold'
                       }`}
                     >
-                      {installingDriverId === pkg.id ? (
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Download className="w-3 h-3" />
-                      )}
-                      <span>{installingDriverId === pkg.id ? 'FLASHING...' : 'INSTALL TO /lib/'}</span>
+                      {installingDriverId === pkg.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                      <span>{installingDriverId === pkg.id ? 'FLASHING...' : 'INSTALL'}</span>
                     </button>
                   </div>
                 </div>

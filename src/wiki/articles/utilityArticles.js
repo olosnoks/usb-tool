@@ -10,7 +10,7 @@ export const UTILITY_ARTICLES = [
     toolId: 'micropython',
     category: 'utilities',
     title: 'MicroPython REPL & File Manager — WebFS & Raw Mode Studio',
-    summary: 'Master MicroPython Raw REPL control sequences (0x01-0x04), on-board file browsing with checksummed chunked transfers, in-browser editing, one-liner execution, stop/reset controls, mip package installs and the bundled driver installer.',
+    summary: 'Master MicroPython Raw REPL control sequences (0x01-0x04), on-board file browsing with checksummed chunked transfers, in-browser editing, one-liner execution, running scripts on the board, rename and recursive delete, multi-file and drag-and-drop upload, stop/reset controls, mip package installs and the bundled driver installer.',
     tags: ['MicroPython', 'CircuitPython', 'Raw REPL', 'File Manager', 'LittleFS', 'FAT', 'boot.py', 'main.py', 'mip', 'WebFS'],
     readTime: '22 min read',
     content: `
@@ -85,17 +85,24 @@ The **PACKAGE MANAGER (mip)** tab has two parts.
 ### 3. Step-by-Step Walkthrough
 
 1. Connect your MicroPython or CircuitPython board with the app's serial connection (set the port and baud rate in the Terminal / connection controls; the workbench uses that shared port and has no baud selector of its own). If several boards are connected, pick one in the **TARGET** selector.
-2. Use the control row above the header if needed: **Stop (Ctrl-C)** interrupts a running program, **Soft reset** sends Ctrl-C, Ctrl-C, Ctrl-D, **Hard reset** (after a confirmation) runs \`machine.reset()\` and the serial connection may drop, and **New folder** prompts for a name and creates it in the current directory.
-3. Click **SCAN FILES**:
+2. Use the buttons at the right of the top toolbar if needed: **Stop** interrupts a running program (Ctrl-C twice), **Soft reset** sends Ctrl-C, Ctrl-C, Ctrl-D, and **Hard reset** (after a confirmation) runs \`machine.reset()\` and the serial connection may drop. The **FILES** and **MIP** tabs switch views, and the toolbar also holds the platform badge and the **TARGET** board selector when several boards are configured.
+3. Click **SCAN**:
    - The workbench interrupts any running loop, enters Raw REPL, reads \`sys.platform\` and flash usage, and lists the current directory. The platform shows as a badge in the header.
 4. **Navigate**: click a folder name or **ENTER**; use **UP** or the \`.. [Parent Directory]\` row to go back.
 5. **Edit File**: click **EDIT** on a text file. A plain text editor with a line-number gutter opens.
+   - **Run**: the green play button on a \`.py\` row runs it on the board with \`exec(open(path).read())\` and shows the output in the panel under the one-liner bar (also copied to the session log). The run waits up to 30 seconds; a script that never returns will time out, so use **Stop**.
+   - **Rename / move**: the pencil button prompts for a new name and calls \`os.rename\`. A name with a leading \`/\` is an absolute path, otherwise it is relative to the current folder; the target folder must already exist and names containing \`..\` are refused.
+   - **Filter and sort**: the filter box above the list narrows it by name (case-insensitive), and the Name and Size headers sort it (folders always stay first).
 6. **Download File**: click the download icon on a file row to save it to your computer (chunked and checksummed, with a progress bar and **CANCEL**).
-7. **Upload File**: click **UPLOAD** and choose a file; it is written into the current directory (there is no drag-and-drop).
-8. **NEW SCRIPT**: enter a filename and initial content, then **CREATE & FLASH**.
+7. **Upload Files**: click **UPLOAD** and choose one or more files, or drag files from your computer onto the file list; they are written one after another into the current directory (existing files with the same name are overwritten without asking).
+8. **NEW** (new script): enter a filename and initial content, then **CREATE & FLASH**. **Folder** prompts for a name and creates it in the current directory.
 9. Click **SAVE TO ON-CHIP FLASH** in the editor to write the file. It does not reboot the board; reset it yourself (or use the one-liner below) to run the new code.
-10. The trash icon deletes a file (after a confirmation). It uses \`os.remove\`, so it only removes files, not folders.
-11. **EXECUTE REPL**: type a one-liner and press Enter or **RUN**; the output appears in the session log.
+10. The trash icon deletes a file or folder after a confirmation. Folders are removed recursively, with everything inside them (the confirmation says so); this cannot be undone.
+11. One-liner bar: type a line of Python and press Enter or **RUN**; the output appears in the panel below it and in the session log.
+
+**Limits**: all operations go through the raw REPL, so a program that is busy in a loop must be stopped first. Size and flash figures depend on what the port's \`os\` module reports. Run needs the script to be readable by \`open()\` and small enough to fit in RAM.
+
+**Similar tools**: mpremote (\`fs cp/rm -r/mv\`, \`run\`), Thonny, rshell and ViperIDE offer the same kind of file and run operations; this tool does not provide mpremote's \`mount\` or a full interactive terminal.
 
 ---
 
