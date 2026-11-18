@@ -1,13 +1,14 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Usb, Smartphone, TerminalSquare, Upload, Download, Wifi, Power, ShieldAlert, Sparkles, Loader2, Play, Folder, FileText,
-  ChevronRight, Package, ScrollText, Monitor, Square, Trash2, RefreshCw, Info, FolderDown, X
+  ChevronRight, Package, ScrollText, Monitor, Square, Trash2, RefreshCw, Info, FolderDown, X, Video, Copy
 } from 'lucide-react';
 import { AdbConnection, requestAdbDevice, defaultKeyStore } from '../../utils/adbDriver';
 import {
   parseGetprop, deviceSummary, parseBattery, parseWmSize, LogcatPoller, LOG_LEVELS, parsePackages, installApk, installMultiple, uninstallPackage,
   packagePaths, packageVersion, KEYCODES, tapCommand, inputTextCommand, TerminalText, apkSetFromArchive, deviceInstallProfile,
-  pullDirectory, directoryHandleSink, createZipSink, runBugreport
+  pullDirectory, directoryHandleSink, createZipSink, runBugreport,
+  swipeCommand, swipeDuration, screenrecordCommand, parseIpAddresses, adbConnectCommand, compileLogcatQuery
 } from '../../utils/adbTools';
 import StatusBadge from '../common/StatusBadge';
 
@@ -62,6 +63,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   const [battery, setBattery] = useState(null);
   const [screenSize, setScreenSize] = useState(null);
   const [tcpipPort, setTcpipPort] = useState('5555');
+  const [ips, setIps] = useState(null); // [{ iface, ip }] from the device
 
   // Shell
   const [cmd, setCmd] = useState('getprop ro.product.model');
@@ -99,6 +101,8 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   const [screen, setScreen] = useState(null); // { url, bytes }
   const [autoScreen, setAutoScreen] = useState(false);
   const [typeText, setTypeText] = useState('');
+  const [recSeconds, setRecSeconds] = useState('10');
+  const dragRef = useRef(null); // pointer-down point on the screenshot, for swipes
 
   const queue = useRef(Promise.resolve());
   const webUsbAvailable = typeof navigator !== 'undefined' && 'usb' in navigator;
@@ -409,8 +413,14 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   }, [logcatOn, adb]);
 
   const levelIdx = LOG_LEVELS.indexOf(minLevel);
-  const filterLower = logFilter.toLowerCase();
-  const shownLogcat = logcat.filter((e) => LOG_LEVELS.indexOf(e.level) >= levelIdx && (!filterLower || e.tag.toLowerCase().includes(filterLower) || e.message.toLowerCase().includes(filterLower) || String(e.pid) === logFilter));
+  const logQuery = compileLogcatQuery(logFilter);
+  const shownLogcat = logcat.filter((e) => LOG_LEVELS.indexOf(e.level) >= levelIdx && logQuery.test(e));
+
+  const clearDeviceLog = () => guard('logcat -c', async () => {
+    await adb.shell('logcat -c');
+    setLogcat([]);
+    addLog('Device log buffers cleared (logcat -c).', 'ok');
+  });
 
   // --- Screen -----------------------------------------------------------------
 
@@ -445,13 +455,39 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
     }
   });
 
-  const onScreenClick = (e) => {
+  const imgPoint = (e) => {
     const img = e.currentTarget;
     const rect = img.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * img.naturalWidth;
-    const y = ((e.clientY - rect.top) / rect.height) * img.naturalHeight;
-    input(tapCommand(x, y));
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * img.naturalWidth,
+      y: ((e.clientY - rect.top) / rect.height) * img.naturalHeight,
+      t: Date.now()
+    };
   };
+  const onScreenDown = (e) => { dragRef.current = imgPoint(e); };
+  /** A short press is a tap; a drag of more than ~2% of the screen width is a swipe with the drag's duration. */
+  const onScreenUp = (e) => {
+    const a = dragRef.current;
+    dragRef.current = null;
+    if (!a) return;
+    const b = imgPoint(e);
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    if (dist > e.currentTarget.naturalWidth * 0.02) input(swipeCommand(a.x, a.y, b.x, b.y, swipeDuration(b.t - a.t)));
+    else input(tapCommand(b.x, b.y));
+  };
+
+  const recordScreen = () => guard('record', async () => {
+    const signal = newCancel();
+    const secs = Math.min(180, Math.max(1, Number(recSeconds) || 10));
+    const remote = `/sdcard/usbtool-rec-${Date.now()}.mp4`;
+    addLog(`Recording the screen for ${secs} s (screenrecord)...`, 'info');
+    const out = await adb.shell(screenrecordCommand(remote, { seconds: secs }));
+    if (/error|not found|inaccessible/i.test(out)) throw new Error(out.trim().split(/\r?\n/)[0] || 'screenrecord failed');
+    const target = await openSaveTarget(`screen-${Date.now()}.mp4`);
+    try { await adb.pullTo(remote, target.writable, { signal, onProgress: showProgress('saving') }); await target.finish(); } catch (err) { await target.abort(); throw err; }
+    await adb.shell(`rm ${quote(remote)}`);
+    addLog('Screen recording saved (the device copy was deleted).', 'ok');
+  });
 
   // --- Wireless / reboot ----------------------------------------------------------
 
@@ -461,13 +497,23 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
     addLog(`Now run "adb connect <phone-ip>:${tcpipPort}" from a computer on the same network.`, 'info');
   });
 
+  const detectIps = () => guard('ip', async () => {
+    const found = parseIpAddresses(await adb.shell('ip -o -4 addr show'));
+    setIps(found);
+    if (!found.length) addLog('The device reports no IPv4 address (is Wi-Fi on?).', 'err');
+  });
+
+  const copyText = async (text) => {
+    try { await navigator.clipboard.writeText(text); addLog(`Copied: ${text}`, 'ok'); } catch (e) { addLog(`Could not copy: ${e.message}`, 'err'); }
+  };
+
   const handleReboot = (target) => guard('reboot', async () => {
     addLog(`Rebooting to ${target || 'system'}...`, 'info');
     await adb.reboot(target);
     await disconnect();
   });
 
-  const btn = 'flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 font-bold disabled:opacity-40';
+  const btn = 'flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 font-bold disabled:opacity-40';
   const btnSm = 'px-1.5 py-0.5 rounded border border-slate-700 text-slate-300 hover:text-cyan-300 disabled:opacity-40';
   const inp = 'bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 outline-none';
 
@@ -475,46 +521,43 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
   const pkgShown = (packages || []).filter((p) => !pkgFilter || p.name.toLowerCase().includes(pkgFilter.toLowerCase()));
 
   return (
-    <div className="space-y-4 font-mono text-xs">
+    <div className="space-y-2 font-mono text-xs">
 
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <p className="text-[11px] text-slate-400 max-w-3xl">
-              Connect to an Android device with <b>USB debugging</b> enabled (Settings → Developer options): device info, an interactive shell,
-              streaming file transfer (folders and files over 4 GiB included), app install (single APK, split APKs, .apks/.xapk bundles) and APK backup,
-              live logcat, screenshots with tap control, wireless ADB, bugreport and reboot.
-              The phone asks "Allow USB debugging?" the first time; tap <b>Always allow</b> so it remembers this browser&apos;s key.
-            </p>
-          </div>
-          <StatusBadge status={status} label={status === 'online' ? 'ADB' : status === 'warning' ? 'ERR' : 'IDLE'} value={status === 'online' ? 'Connected' : 'Offline'} />
-        </div>
-
-        {!webUsbAvailable && (
-          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200">
-            <ShieldAlert className="w-4 h-4 shrink-0" /> WebUSB needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.
-          </div>
-        )}
-
-        <div className="pt-3 flex flex-wrap items-center gap-2">
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           {!adb ? (
-            <button onClick={() => connect()} disabled={!webUsbAvailable || !!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 text-xs font-bold disabled:opacity-40">
+            <button onClick={() => connect()} disabled={!webUsbAvailable || !!busy} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 text-xs font-bold disabled:opacity-40">
               {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} CONNECT ADB (WEBUSB)
             </button>
           ) : (
-            <button onClick={disconnect} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
+            <button onClick={disconnect} className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
               <Power className="w-3.5 h-3.5" /> DISCONNECT
             </button>
           )}
           {busy && busy !== 'connect' && <span className="text-slate-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> {busy}{progress?.pct != null ? ` ${progress.pct}%` : ''}{progress?.label ? ` · ${progress.label}` : ''}</span>}
           {busy && busy !== 'connect' && cancelRef.current && <button onClick={() => cancelRef.current?.abort()} className={btnSm}><X className="w-3 h-3 inline" /> CANCEL</button>}
+          <span className="ml-auto"><StatusBadge status={status} label={status === 'online' ? 'ADB' : status === 'warning' ? 'ERR' : 'IDLE'} value={status === 'online' ? 'Connected' : 'Offline'} /></span>
         </div>
-        <p className="mt-2 text-[11px] text-slate-500">{statusMsg}{banner ? ` — ${banner}` : ''}</p>
+        <p className="mt-1.5 text-[11px] text-slate-500 break-words">{statusMsg}{banner ? ` — ${banner}` : ''}</p>
+        {!webUsbAvailable && (
+          <div className="mt-2 flex items-start gap-2 p-2 rounded border border-amber-500/40 bg-amber-500/10 text-amber-200">
+            <ShieldAlert className="w-4 h-4 shrink-0" /> WebUSB needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.
+          </div>
+        )}
+        <details className="mt-1.5 text-[11px] text-slate-400">
+          <summary className="cursor-pointer text-slate-500 hover:text-slate-300">About this tool</summary>
+          <p className="mt-1">
+            Connect to an Android device with <b>USB debugging</b> enabled (Settings → Developer options): device info, an interactive shell,
+            streaming file transfer (folders and files over 4 GiB included), app install (single APK, split APKs, .apks/.xapk bundles) and APK backup,
+            live logcat with search, screenshots with tap and swipe control, screen recording, wireless ADB, bugreport and reboot.
+            The phone asks &quot;Allow USB debugging?&quot; the first time; tap <b>Always allow</b> so it remembers this browser&apos;s key.
+          </p>
+        </details>
       </div>
 
       {adb && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
-          <div className="flex flex-wrap gap-1 border-b border-slate-800 pb-2">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2">
+          <div className="flex flex-wrap gap-1 border-b border-slate-800 pb-1.5">
             {TABS.map(([id, label, Icon]) => (
               <button
                 key={id}
@@ -523,7 +566,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
                   if (id === 'files' && !entries) openDir(cwd);
                   if (id === 'apps' && !packages) loadPackages();
                 }}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded font-bold border ${tab === id ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-slate-900 text-slate-400 border-slate-800'}`}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded font-bold border ${tab === id ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-slate-900 text-slate-400 border-slate-800'}`}
               >
                 <Icon className="w-3.5 h-3.5" /> {label}
               </button>
@@ -531,23 +574,23 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
           </div>
 
           {tab === 'device' && (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {props && (
                 <div className="grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-3 gap-2">
                   {deviceSummary(props).map(([k, v]) => (
-                    <div key={k} className="bg-slate-950 border border-slate-800 rounded p-2">
+                    <div key={k} className="bg-slate-950 border border-slate-800 rounded px-2 py-1">
                       <div className="text-[10px] text-slate-500 font-bold uppercase">{k}</div>
                       <div className="text-slate-200 break-all">{v}</div>
                     </div>
                   ))}
                   {battery?.level !== null && battery && (
-                    <div className="bg-slate-950 border border-slate-800 rounded p-2">
+                    <div className="bg-slate-950 border border-slate-800 rounded px-2 py-1">
                       <div className="text-[10px] text-slate-500 font-bold uppercase">Battery</div>
                       <div className="text-slate-200">{battery.level}% · {battery.status} · {battery.plugged} · {battery.temperature}°C · {battery.voltage?.toFixed(2)} V · {battery.health}</div>
                     </div>
                   )}
                   {screenSize && (
-                    <div className="bg-slate-950 border border-slate-800 rounded p-2">
+                    <div className="bg-slate-950 border border-slate-800 rounded px-2 py-1">
                       <div className="text-[10px] text-slate-500 font-bold uppercase">Screen</div>
                       <div className="text-slate-200">{screenSize.width} × {screenSize.height}</div>
                     </div>
@@ -560,11 +603,28 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
                 <button onClick={forgetKey} disabled={!!busy} className={btn} title="Delete this browser's ADB key"><Trash2 className="w-3.5 h-3.5" /> FORGET KEY</button>
                 {props && <button onClick={() => saveBytes(Object.entries(props).map(([k, v]) => `[${k}]: [${v}]`).join('\n'), 'getprop.txt', 'text/plain')} className={btn}><Download className="w-3.5 h-3.5" /> ALL PROPERTIES</button>}
               </div>
-              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
-                <span className="font-bold text-slate-200 flex items-center gap-2"><Wifi className="w-4 h-4 text-emerald-400" /> WIRELESS</span>
-                <span className="text-slate-500">port</span>
-                <input value={tcpipPort} onChange={(e) => setTcpipPort(e.target.value)} className={`${inp} w-20`} />
-                <button onClick={handleTcpip} disabled={!!busy} className={btn}>RESTART ADB OVER TCP/IP</button>
+              <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-slate-200 flex items-center gap-2"><Wifi className="w-4 h-4 text-emerald-400" /> WIRELESS</span>
+                  <label className="text-slate-500" htmlFor="adb-tcpip-port">port</label>
+                  <input id="adb-tcpip-port" value={tcpipPort} onChange={(e) => setTcpipPort(e.target.value)} className={`${inp} w-16`} />
+                  <button onClick={handleTcpip} disabled={!!busy} className={btn}>RESTART ADB OVER TCP/IP</button>
+                  <button onClick={detectIps} disabled={!!busy} className={btn} title="Read the phone's IPv4 addresses (ip addr)">FIND IP</button>
+                </div>
+                {ips && ips.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    {ips.map((x) => {
+                      const c = adbConnectCommand(x.ip, tcpipPort);
+                      return (
+                        <div key={`${x.iface}${x.ip}`} className="flex flex-wrap items-center gap-2">
+                          <span className="text-slate-500">{x.iface}</span>
+                          <code className="text-cyan-300 break-all">{c}</code>
+                          <button onClick={() => copyText(c)} className={btnSm} title="Copy this command (run it in a terminal on a computer on the same network)"><Copy className="w-3 h-3 inline" /> COPY</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
                 <span className="font-bold text-slate-200 flex items-center gap-2"><Power className="w-4 h-4 text-amber-400" /> REBOOT</span>
@@ -592,7 +652,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
                   <button onClick={() => { termRef.current.clear(); setTerm(''); }} className={btn}><Trash2 className="w-3.5 h-3.5" /> CLEAR</button>
                   {!shellV2 && <span className="text-amber-300">This device does not advertise shell_v2 (it needs Android 7+); use the one-shot box below.</span>}
                 </div>
-                <pre ref={termBoxRef} className="bg-black border border-slate-800 rounded p-2 h-72 overflow-auto text-slate-200 whitespace-pre-wrap break-all">{term || (termOn ? '' : 'Press START for a shell on the device (pty, stdout/stderr, exit status).')}</pre>
+                <pre ref={termBoxRef} className="bg-black border border-slate-800 rounded p-2 h-56 @lg:h-72 overflow-auto text-slate-200 whitespace-pre-wrap break-all">{term || (termOn ? '' : 'Press START for a shell on the device (pty, stdout/stderr, exit status).')}</pre>
                 <div className="flex items-center gap-2">
                   <span className="text-emerald-400">&gt;</span>
                   <input
@@ -679,7 +739,7 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
               <div className="flex flex-wrap items-center gap-2">
                 <button onClick={() => loadPackages()} disabled={!!busy} className={btn}><RefreshCw className="w-3.5 h-3.5" /> REFRESH</button>
                 <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={showSystem} onChange={(e) => { setShowSystem(e.target.checked); loadPackages(e.target.checked); }} className="accent-emerald-500" /> include system apps</label>
-                <input value={pkgFilter} onChange={(e) => setPkgFilter(e.target.value)} placeholder="filter" className={`${inp} w-48`} />
+                <input value={pkgFilter} onChange={(e) => setPkgFilter(e.target.value)} placeholder="filter" aria-label="Filter packages" className={`${inp} w-full @md:w-48`} />
                 <span className="ml-auto flex items-center gap-2">
                   <input type="file" multiple accept=".apk,.apks,.xapk,.apkm" ref={apkRef} className="text-slate-400 text-[11px]" title="One .apk, several .apk files of one app (split APKs), or one .apks/.xapk/.apkm bundle" />
                   <button onClick={installFromFile} disabled={!!busy} className={btn}><Upload className="w-3.5 h-3.5" /> INSTALL</button>
@@ -715,12 +775,14 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
                 <select value={minLevel} onChange={(e) => setMinLevel(e.target.value)} className={inp}>
                   {LOG_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
                 </select>
-                <input value={logFilter} onChange={(e) => setLogFilter(e.target.value)} placeholder="tag, text or PID" className={`${inp} w-56`} />
-                <button onClick={() => setLogcat([])} className={btn}><Trash2 className="w-3.5 h-3.5" /> CLEAR</button>
-                <button onClick={() => saveBytes(logcat.map((e) => e.raw).join('\n') + '\n', `logcat-${Date.now()}.txt`, 'text/plain')} disabled={!logcat.length} className={btn}><Download className="w-3.5 h-3.5" /> SAVE</button>
+                <input value={logFilter} onChange={(e) => setLogFilter(e.target.value)} placeholder="text, tag:X, pid:N, -skip, /regex/" title="Terms are ANDed: plain text, tag:Name, pid:123, -word to exclude, /regex/i" aria-label="Logcat search" className={`${inp} w-full @md:w-56`} />
+                <button onClick={() => setLogcat([])} className={btn} title="Clear the lines shown here"><Trash2 className="w-3.5 h-3.5" /> CLEAR</button>
+                <button onClick={clearDeviceLog} disabled={!!busy || logcatOn} className={btn} title="Run logcat -c on the device (stop the live view first)">CLEAR DEVICE</button>
+                <button onClick={() => saveBytes(shownLogcat.map((e) => e.raw).join('\n') + '\n', `logcat-${Date.now()}.txt`, 'text/plain')} disabled={!shownLogcat.length} className={btn} title="Save the lines currently shown (after level and search filters)"><Download className="w-3.5 h-3.5" /> SAVE</button>
+                {logQuery.error && <span className="text-rose-400">{logQuery.error}</span>}
                 <span className="text-slate-500">{shownLogcat.length} / {logcat.length} lines{logcatOn ? ' · polling every second' : ''}</span>
               </div>
-              <div className="bg-black border border-slate-800 rounded p-2 h-96 overflow-y-auto text-[11px] leading-snug">
+              <div className="bg-black border border-slate-800 rounded p-2 h-72 @lg:h-96 overflow-y-auto text-[11px] leading-snug">
                 {shownLogcat.slice(-1500).map((e, i) => (
                   <div key={i} className="whitespace-pre-wrap break-all">
                     <span className="text-slate-600">{e.time}</span>{' '}
@@ -740,23 +802,28 @@ export default function AdbWorkbench({ initialTab = 'device' }) {
                 <button onClick={() => guard('screen', grabScreen)} disabled={!!busy} className={btn}><Monitor className="w-3.5 h-3.5" /> CAPTURE</button>
                 <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={autoScreen} onChange={(e) => setAutoScreen(e.target.checked)} className="accent-emerald-500" /> refresh every 1.5 s</label>
                 {screen && <button onClick={() => saveBytes(screen.bytes, `screen-${Date.now()}.png`, 'image/png')} className={btn}><Download className="w-3.5 h-3.5" /> SAVE PNG</button>}
-                <span className="text-slate-500">Click the screenshot to tap there.</span>
+                <span className="text-slate-500">Click the screenshot to tap, drag to swipe.</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button onClick={recordScreen} disabled={!!busy} className={btn} title="Runs screenrecord on the device, then saves the MP4"><Video className="w-3.5 h-3.5" /> RECORD</button>
+                <input value={recSeconds} onChange={(e) => setRecSeconds(e.target.value)} aria-label="Recording length in seconds" className={`${inp} w-14`} />
+                <span className="text-slate-500">seconds (max 180; the phone is busy while it records)</span>
               </div>
               <div className="flex flex-wrap gap-1">
                 {[['HOME', 'HOME'], ['BACK', 'BACK'], ['APPS', 'APP_SWITCH'], ['POWER', 'POWER'], ['VOL +', 'VOLUME_UP'], ['VOL −', 'VOLUME_DOWN'], ['WAKE', 'WAKEUP'], ['ENTER', 'ENTER'], ['DEL', 'DEL']].map(([label, key]) => (
                   <button key={key} onClick={() => input(`input keyevent ${KEYCODES[key]}`)} disabled={!!busy} className={btnSm}>{label}</button>
                 ))}
-                <input value={typeText} onChange={(e) => setTypeText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && typeText) { input(inputTextCommand(typeText)); setTypeText(''); } }} placeholder="type text, Enter to send" className={`${inp} w-56 ml-2`} />
+                <input value={typeText} onChange={(e) => setTypeText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && typeText) { input(inputTextCommand(typeText)); setTypeText(''); } }} placeholder="type text, Enter to send" aria-label="Text to type on the device" className={`${inp} w-full @md:w-56 @md:ml-2`} />
               </div>
-              {screen && <img src={screen.url} alt="Device screen" onClick={onScreenClick} className="max-h-[70vh] border border-slate-800 rounded cursor-crosshair" />}
+              {screen && <img src={screen.url} alt="Device screen" onPointerDown={onScreenDown} onPointerUp={onScreenUp} draggable={false} className="max-h-[70vh] max-w-full border border-slate-800 rounded cursor-crosshair touch-none select-none" />}
             </div>
           )}
         </div>
       )}
 
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 shadow-xl">
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2">
         <span className="text-[11px] font-bold text-slate-400">LOG</span>
-        <div className="mt-1 max-h-48 overflow-y-auto space-y-0.5">
+        <div className="mt-1 max-h-32 overflow-y-auto space-y-0.5">
           {log.length === 0 && <p className="text-slate-600 text-[11px]">No activity yet.</p>}
           {log.map((e, i) => (
             <div key={i} className="text-[11px] flex gap-2">

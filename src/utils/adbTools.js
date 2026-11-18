@@ -305,6 +305,73 @@ export const KEYCODES = {
 export function tapCommand(x, y) { return `input tap ${Math.round(x)} ${Math.round(y)}`; }
 export function swipeCommand(x1, y1, x2, y2, ms = 300) { return `input swipe ${[x1, y1, x2, y2].map(Math.round).join(' ')} ${ms}`; }
 
+/** Swipe duration in ms from how long the user dragged, kept in a range Android accepts well. */
+export function swipeDuration(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n)) return 300;
+  return Math.min(2000, Math.max(50, Math.round(n)));
+}
+
+/** `screenrecord` command line. Android caps one recording at 180 s; bitRateMbps is in Mbit/s. */
+export function screenrecordCommand(path, { seconds = 10, bitRateMbps = 4, size = '' } = {}) {
+  const t = Math.min(180, Math.max(1, Math.round(Number(seconds)) || 10));
+  const br = Math.min(50, Math.max(1, Number(bitRateMbps) || 4));
+  const sz = /^\d{2,5}x\d{2,5}$/.test(size) ? ` --size ${size}` : '';
+  return `screenrecord --time-limit ${t} --bit-rate ${Math.round(br * 1e6)}${sz} ${quote(path)}`;
+}
+
+/** `ip -o -4 addr show` (or `ip addr`) output -> [{ iface, ip }], skipping loopback. */
+export function parseIpAddresses(text) {
+  const out = [];
+  let iface = '';
+  for (const line of String(text).split(/\r?\n/)) {
+    const header = line.match(/^\d+:\s+([^\s:@]+)/);
+    if (header) iface = header[1];
+    const m = line.match(/inet\s+(\d+\.\d+\.\d+\.\d+)/);
+    if (!m) continue;
+    const name = header ? header[1] : iface;
+    if (m[1].startsWith('127.') || name === 'lo') continue;
+    out.push({ iface: name, ip: m[1] });
+  }
+  return out;
+}
+
+/** The desktop command that connects to a device after `tcpip`. */
+export function adbConnectCommand(ip, port = 5555) {
+  return `adb connect ${ip}:${Number(port) || 5555}`;
+}
+
+/**
+ * Logcat search. Whitespace-separated terms are ANDed: `tag:Foo`, `pid:123`, `-word` (exclude),
+ * `/regex/i` (regular expression on tag + message; no spaces, use s), anything else is a case-insensitive substring.
+ * A bare number also matches the PID.
+ */
+export function compileLogcatQuery(query) {
+  const preds = [];
+  for (const raw of String(query || '').trim().split(/\s+/).filter(Boolean)) {
+    let term = raw; let neg = false;
+    if (term.length > 1 && term[0] === '-') { neg = true; term = term.slice(1); }
+    let test;
+    const re = term.match(/^\/(.+)\/(i?)$/);
+    if (re) {
+      let rx;
+      try { rx = new RegExp(re[1], re[2]); } catch (e) { return { error: `Bad regular expression: ${e.message}`, test: () => true }; }
+      test = (e) => rx.test(`${e.tag} ${e.message}`);
+    } else if (/^tag:/i.test(term)) {
+      const v = term.slice(4).toLowerCase();
+      test = (e) => e.tag.toLowerCase().includes(v);
+    } else if (/^pid:/i.test(term)) {
+      const v = term.slice(4);
+      test = (e) => String(e.pid) === v;
+    } else {
+      const v = term.toLowerCase();
+      test = (e) => e.tag.toLowerCase().includes(v) || e.message.toLowerCase().includes(v) || String(e.pid) === term;
+    }
+    preds.push(neg ? (e) => !test(e) : test);
+  }
+  return { error: null, test: (e) => preds.every((p) => p(e)) };
+}
+
 /** Text for `input text`: spaces become %s and shell metacharacters are escaped. */
 export function inputTextCommand(text) {
   const escaped = String(text).replace(/([\\"'`$&|;<>()*?#~!{}[\]])/g, '\\$1').replace(/ /g, '%s');

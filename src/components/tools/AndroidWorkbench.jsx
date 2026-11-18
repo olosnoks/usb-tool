@@ -15,19 +15,19 @@ export default function AndroidWorkbench({ initialMode = 'adb' }) {
   const Tab = ({ id, icon: Icon, label }) => (
     <button
       onClick={() => setMode(id)}
-      className={`px-3 py-1.5 text-sm rounded-t border-b-2 inline-flex items-center gap-1.5 ${
+      className={`px-2.5 py-1 text-xs rounded-t border-b-2 inline-flex items-center gap-1.5 ${
         mode === id
           ? 'border-emerald-500 text-emerald-300 bg-slate-900'
           : 'border-transparent text-gray-400 hover:text-gray-200'
       }`}
     >
-      <Icon size={14} /> {label}
+      <Icon size={13} /> {label}
     </button>
   );
 
   return (
     <div className="w-full min-w-0 max-w-full">
-      <div className="flex gap-1 border-b border-slate-800 px-2 pt-2">
+      <div className="flex gap-1 border-b border-slate-800 pb-0 mb-2">
         <Tab id="adb" icon={Terminal} label="ADB" />
         <Tab id="fastboot" icon={Smartphone} label="Fastboot" />
       </div>
