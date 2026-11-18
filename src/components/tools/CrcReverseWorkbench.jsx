@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Hash, Calculator, Search, Copy, Check, Square, Play } from 'lucide-react';
+import { Hash, Calculator, Search, Copy, Check, Square, Play, SlidersHorizontal } from 'lucide-react';
 import {
   allChecksums,
   matchExpected,
@@ -7,6 +7,17 @@ import {
   parseSampleText,
   reverseCrc,
   locateCrc,
+  CRC_CATALOGUE,
+  findCrcModel,
+  crcOf,
+  hexOf,
+  normalizeModel,
+  parseRevengModel,
+  revengString,
+  verifyFrames,
+  appendCrc,
+  parseHexLines,
+  generateCode,
 } from '../../utils/crcReverse.js';
 
 /**
@@ -19,7 +30,17 @@ const TABS = [
   ['calc', 'Calculator', Calculator],
   ['reverse', 'Reverse', Hash],
   ['locate', 'Locate', Search],
+  ['model', 'Model', SlidersHorizontal],
 ];
+
+const EMPTY_MODEL = { width: '16', poly: '0x1021', init: '0xffff', refin: false, refout: false, xorout: '0x0000' };
+
+/** Form fields for a candidate or catalogue entry. */
+function fieldsFrom(c) {
+  const w = c.width;
+  const h = (v) => `0x${hexOf(v, w)}`;
+  return { width: String(w), poly: h(c.poly), init: h(c.init), refin: !!c.refin, refout: !!c.refout, xorout: h(c.xorout) };
+}
 
 const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs font-mono text-gray-200';
 const btnCls = 'px-3 py-1.5 rounded text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-40';
@@ -90,14 +111,14 @@ function CalcTab() {
   const visible = list.filter((c) => !filter || c.name.toLowerCase().includes(filter.toLowerCase()));
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <select value={mode} onChange={(e) => setMode(e.target.value)} className={inputCls} aria-label="Input encoding">
           <option value="hex">Hex bytes</option>
           <option value="ascii">ASCII text</option>
         </select>
-        <input value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="Expected value (hex, optional)" aria-label="Expected checksum" className={`${inputCls} w-56`} />
-        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name" aria-label="Filter algorithms" className={`${inputCls} w-44`} />
+        <input value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="Expected value (hex, optional)" aria-label="Expected checksum" className={`${inputCls} w-full @sm:w-56`} />
+        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name" aria-label="Filter algorithms" className={`${inputCls} w-full @sm:w-44`} />
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} spellCheck={false} aria-label="Input bytes" className={`${inputCls} w-full`} />
       {bytes.error && <ErrorList errors={[bytes.error]} />}
@@ -127,7 +148,7 @@ function CalcTab() {
   );
 }
 
-function ReverseTab({ onLogMessage }) {
+function ReverseTab({ onLogMessage, onUseModel }) {
   const [layout, setLayout] = useState('tail');
   const [tailBytes, setTailBytes] = useState(2);
   const [orders, setOrders] = useState({ be: true, le: false });
@@ -167,7 +188,7 @@ function ReverseTab({ onLogMessage }) {
   const canRun = !running && parsed.samples.length > 0 && parsed.errors.length === 0 && Object.values(orders).some(Boolean);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
         <label className="flex items-center gap-1">Layout
           <select value={layout} onChange={(e) => setLayout(e.target.value)} className={inputCls} aria-label="Sample layout">
@@ -227,6 +248,14 @@ function ReverseTab({ onLogMessage }) {
                 {c.source !== 'sum' && !c.determined && <span className="text-amber-300">init/xorout not fully determined</span>}
               </div>
               {c.revEng && <div className="text-gray-300 break-all mt-1">{c.revEng}</div>}
+              {c.revEng && c.source !== 'sum' && (
+                <div className="mt-1 flex gap-3">
+                  <CopyButton text={c.revEng} label="Copy" />
+                  <button type="button" onClick={() => onUseModel?.(fieldsFrom(c), c.byteOrder)} className="text-[10px] text-cyan-400 hover:text-cyan-300">
+                    Use in Model tab
+                  </button>
+                </div>
+              )}
               {c.source === 'sum' && <div className="text-gray-400 mt-1">width {c.width}; matches every sample</div>}
             </div>
           ))}
@@ -269,7 +298,7 @@ function LocateTab() {
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="text-[11px] text-slate-500">
         Enter one frame. Its last <em>k</em> bytes are treated as a stored checksum; every range that ends just before them is tested against each catalogue CRC (width up to 8k bits) and each simple sum, in both byte orders.
       </div>
@@ -305,30 +334,147 @@ function LocateTab() {
   );
 }
 
+function ModelTab({ fields, setFields, order, setOrder }) {
+  const [revText, setRevText] = useState('');
+  const [revError, setRevError] = useState('');
+  const [framesText, setFramesText] = useState('');
+  const [action, setAction] = useState('verify');
+  const [lang, setLang] = useState('c');
+  const set = (k, v) => setFields((f) => ({ ...f, [k]: v }));
+
+  const model = useMemo(() => {
+    try {
+      return { value: normalizeModel(fields), error: '' };
+    } catch (e) {
+      return { value: null, error: e.message };
+    }
+  }, [fields]);
+  const check = model.value ? `0x${hexOf(crcOf(new TextEncoder().encode('123456789'), model.value), model.value.width)}` : '';
+  const frames = useMemo(() => {
+    try {
+      return { value: parseHexLines(framesText), error: '' };
+    } catch (e) {
+      return { value: [], error: e.message };
+    }
+  }, [framesText]);
+  const rows = useMemo(() => {
+    if (!model.value || frames.error || !frames.value.length) return [];
+    return action === 'verify' ? verifyFrames(model.value, frames.value, order) : appendCrc(model.value, frames.value, order);
+  }, [model, frames, action, order]);
+  const code = useMemo(() => (model.value ? generateCode(model.value, lang) : ''), [model, lang]);
+
+  const loadRev = (text) => {
+    setRevText(text);
+    if (!text.trim()) { setRevError(''); return; }
+    try {
+      const m = parseRevengModel(text);
+      setFields(fieldsFrom(m));
+      setRevError('');
+    } catch (e) {
+      setRevError(e.message);
+    }
+  };
+  const loadPreset = (name) => {
+    const e = name && findCrcModel(name);
+    if (e) setFields(fieldsFrom(e));
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+        <select defaultValue="" onChange={(e) => loadPreset(e.target.value)} className={`${inputCls} max-w-[11rem]`} aria-label="Load catalogue model">
+          <option value="">Load catalogue model...</option>
+          {CRC_CATALOGUE.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+        <input value={revText} onChange={(e) => loadRev(e.target.value)} placeholder="Paste RevEng line: width=16 poly=0x1021 ..." aria-label="RevEng model string" className={`${inputCls} flex-1 min-w-[10rem]`} />
+      </div>
+      <ErrorList errors={revError ? [revError] : []} />
+      <div className="grid grid-cols-2 @md:grid-cols-6 gap-2 text-[11px] text-slate-400">
+        {[['width', 'Width'], ['poly', 'Poly'], ['init', 'Init'], ['xorout', 'XorOut']].map(([k, label]) => (
+          <label key={k} className="flex flex-col gap-0.5">{label}
+            <input value={fields[k]} onChange={(e) => set(k, e.target.value)} spellCheck={false} className={inputCls} aria-label={label} />
+          </label>
+        ))}
+        <label className="flex items-center gap-1 self-end pb-1.5"><input type="checkbox" checked={fields.refin} onChange={(e) => set('refin', e.target.checked)} /> refin</label>
+        <label className="flex items-center gap-1 self-end pb-1.5"><input type="checkbox" checked={fields.refout} onChange={(e) => set('refout', e.target.checked)} /> refout</label>
+      </div>
+      <ErrorList errors={model.error ? [model.error] : []} />
+      {model.value && (
+        <div className="p-2 border border-slate-800 rounded bg-slate-950 text-[11px] font-mono text-gray-300 break-all">
+          {revengString(model.value)} <CopyButton text={revengString(model.value)} />
+          <div className="text-slate-500">check = CRC of ASCII "123456789"; compare with {check} in any catalogue.</div>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+        <select value={action} onChange={(e) => setAction(e.target.value)} className={inputCls} aria-label="Frame action">
+          <option value="verify">Verify frames (CRC at tail)</option>
+          <option value="append">Append CRC to payloads</option>
+        </select>
+        <select value={order} onChange={(e) => setOrder(e.target.value)} className={inputCls} aria-label="Stored byte order">
+          <option value="be">big-endian</option>
+          <option value="le">little-endian</option>
+        </select>
+      </div>
+      <textarea value={framesText} onChange={(e) => setFramesText(e.target.value)} rows={4} spellCheck={false} aria-label="Frames for custom model" placeholder="One hex frame per line" className={`${inputCls} w-full`} />
+      <ErrorList errors={frames.error ? [frames.error] : []} />
+      {rows.length > 0 && (
+        <div className="border border-slate-800 rounded divide-y divide-slate-900 text-[11px] font-mono">
+          {rows.map((r, i) => (
+            <div key={i} className={`px-2 py-1 break-all ${action === 'verify' ? (r.ok ? 'text-emerald-300' : 'text-red-300') : 'text-gray-200'}`}>
+              {action === 'verify'
+                ? `#${i + 1} ${r.error || (r.ok ? `OK ${r.stored}` : `MISMATCH stored ${r.stored}, computed ${r.computed}`)}`
+                : `#${i + 1} crc ${r.crc}: ${r.frame}`}
+            </div>
+          ))}
+          {action === 'append' && <div className="px-2 py-1"><CopyButton text={rows.map((r) => r.frame).join('\n')} label="Copy frames" /></div>}
+        </div>
+      )}
+      <details className="border border-slate-800 rounded p-2">
+        <summary className="text-xs text-slate-400 cursor-pointer">Generate reference code</summary>
+        <div className="mt-2 space-y-1">
+          <div className="flex items-center gap-2">
+            <select value={lang} onChange={(e) => setLang(e.target.value)} className={inputCls} aria-label="Code language">
+              <option value="c">C</option>
+              <option value="python">Python</option>
+              <option value="js">JavaScript (BigInt)</option>
+            </select>
+            {code && <CopyButton text={code} label="Copy code" />}
+          </div>
+          <pre className="max-h-64 overflow-auto bg-slate-950 border border-slate-800 rounded p-2 text-[11px] font-mono text-gray-300">{code || 'Fix the model fields above.'}</pre>
+          <div className="text-[10px] text-slate-500">Bit-at-a-time reference implementation; slow but short. Not table-driven.</div>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 export default function CrcReverseWorkbench({ onLogMessage }) {
   const [tab, setTab] = useState('calc');
+  const [fields, setFields] = useState(EMPTY_MODEL);
+  const [order, setOrder] = useState('be');
   return (
-    <div className="p-3 space-y-3 text-gray-200 font-sans">
-      <div className="flex items-center gap-2">
-        <Hash size={16} className="text-cyan-400" />
-        <h2 className="text-sm font-semibold">CRC Reverse &amp; Checksum Catalogue</h2>
-        <span className="text-[10px] text-slate-500">offline, RevEng parameters</span>
-      </div>
-      <div className="flex gap-1 border-b border-slate-800">
+    <div className="space-y-2 text-gray-200 font-sans">
+      <div className="flex gap-1 border-b border-slate-800 overflow-x-auto">
         {TABS.map(([id, label, Icon]) => (
           <button
             key={id}
             type="button"
             onClick={() => setTab(id)}
-            className={`px-3 py-1.5 text-xs inline-flex items-center gap-1.5 border-b-2 ${tab === id ? 'border-cyan-500 text-cyan-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+            className={`px-2.5 py-1 text-xs inline-flex items-center gap-1.5 border-b-2 ${tab === id ? 'border-cyan-500 text-cyan-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
           >
             <Icon size={12} /> {label}
           </button>
         ))}
       </div>
       {tab === 'calc' && <CalcTab />}
-      {tab === 'reverse' && <ReverseTab onLogMessage={onLogMessage} />}
+      {tab === 'reverse' && (
+        <ReverseTab
+          onLogMessage={onLogMessage}
+          onUseModel={(f, o) => { setFields(f); if (o) setOrder(o); setTab('model'); }}
+        />
+      )}
       {tab === 'locate' && <LocateTab />}
+      {tab === 'model' && <ModelTab fields={fields} setFields={setFields} order={order} setOrder={setOrder} />}
     </div>
   );
 }
