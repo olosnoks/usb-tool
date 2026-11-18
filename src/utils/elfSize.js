@@ -565,3 +565,99 @@ export function toCsv(rows, columns) {
   const body = rows.map((r) => columns.map((c) => esc(r[c.key])).join(','));
   return [head, ...body].join('\r\n') + '\r\n';
 }
+
+/* ---------------- size(1) style totals ---------------- */
+
+/**
+ * Berkeley-format totals like `arm-none-eabi-size`: text = allocated read-only sections,
+ * data = allocated writable sections with file contents, bss = allocated writable NOBITS.
+ * dec = text + data + bss.
+ */
+export function berkeleySize(sections) {
+  let text = 0;
+  let data = 0;
+  let bss = 0;
+  for (const s of sections || []) {
+    if (!s.loaded) continue;
+    if (s.type === SHT_NOBITS) {
+      if ((s.flags & SHF_WRITE) !== 0) bss += s.size;
+      continue; // read-only NOBITS (e.g. .tbss) occupies nothing
+    }
+    if ((s.flags & SHF_WRITE) !== 0) data += s.size;
+    else text += s.size;
+  }
+  const dec = text + data + bss;
+  return { text, data, bss, dec, hex: dec.toString(16) };
+}
+
+/** Text of the Berkeley line, laid out like `size` output (header plus one row). */
+export function berkeleyLine(totals, filename = '') {
+  const heads = ['text', 'data', 'bss', 'dec'];
+  const cols = [totals.text, totals.data, totals.bss, totals.dec].map(String);
+  const w = heads.map((h, i) => Math.max(h.length, cols[i].length) + 3);
+  const head = heads.map((h, i) => h.padStart(w[i])).join('') + '     hex filename';
+  const row = cols.map((c, i) => c.padStart(w[i])).join('') + ' ' + totals.hex.padStart(7) + (filename ? ` ${filename}` : '');
+  return `${head}\n${row}`;
+}
+
+/* ---------------- Budgets ---------------- */
+
+/** Parses "64K", "1.5M", "512KiB", "0x10000", "65536" to bytes. Returns null when not a positive size. */
+export function parseSizeInput(text) {
+  const t = String(text ?? '').trim().replace(/\s+/g, '');
+  if (!t) return null;
+  if (/^0x[0-9a-f]+$/i.test(t)) return Number.parseInt(t, 16) || null;
+  const m = /^(\d+(?:\.\d+)?)(k|m|g)?(?:i?b)?$/i.exec(t);
+  if (!m) return null;
+  const mult = { k: 1024, m: 1024 * 1024, g: 1024 ** 3 }[(m[2] || '').toLowerCase()] || 1;
+  const n = Math.round(Number(m[1]) * mult);
+  return n > 0 ? n : null;
+}
+
+/** { used, limit, pct, free, over, level: 'ok'|'warn'|'high'|'over' } for a byte budget. */
+export function budgetStatus(used, limit) {
+  if (!limit) return null;
+  const pct = (used / limit) * 100;
+  const level = used > limit ? 'over' : pct > 90 ? 'high' : pct > 70 ? 'warn' : 'ok';
+  return { used, limit, pct, free: limit - used, over: used > limit, level };
+}
+
+/** Common parts for the budget dropdown (flash, RAM in bytes). Check your own linker script. */
+export const MCU_PRESETS = [
+  { id: 'custom', label: 'custom', flash: 0, ram: 0 },
+  { id: 'atmega328p', label: 'ATmega328P (32K / 2K)', flash: 32768, ram: 2048 },
+  { id: 'stm32f103c8', label: 'STM32F103C8 (64K / 20K)', flash: 65536, ram: 20480 },
+  { id: 'stm32f411ce', label: 'STM32F411CE (512K / 128K)', flash: 524288, ram: 131072 },
+  { id: 'rp2040', label: 'RP2040 (2M QSPI / 264K)', flash: 2097152, ram: 270336 },
+  { id: 'nrf52840', label: 'nRF52840 (1M / 256K)', flash: 1048576, ram: 262144 },
+  { id: 'esp32c3', label: 'ESP32-C3 (4M / 400K)', flash: 4194304, ram: 409600 },
+];
+
+/* ---------------- Markdown report ---------------- */
+
+const mdCell = (s) => String(s ?? '').replace(/\|/g, '\|').replace(/`/g, "'").replace(/\r?\n/g, ' ');
+const signed = (n) => (n > 0 ? `+${n}` : String(n));
+
+/**
+ * Markdown size-delta report for a PR comment. `rows` come from diffRows; `totals` is optional
+ * { fa, fb, ra, rb }. Lists the `top` largest growths and the `top` largest reductions.
+ */
+export function deltaMarkdown({ title = 'Size delta', label = 'item', totals = null, rows = [], top = 10 } = {}) {
+  const out = [`### ${mdCell(title)}`, ''];
+  if (totals) {
+    out.push('| Region | A | B | Delta |', '|---|---:|---:|---:|');
+    out.push(`| FLASH | ${totals.fa} | ${totals.fb} | ${signed(totals.fb - totals.fa)} |`);
+    out.push(`| RAM | ${totals.ra} | ${totals.rb} | ${signed(totals.rb - totals.ra)} |`, '');
+  }
+  const grew = rows.filter((r) => r.delta > 0).slice(0, top);
+  const shrank = rows.filter((r) => r.delta < 0).slice(-top).reverse();
+  const table = (list) => {
+    out.push(`| ${mdCell(label)} | A | B | Delta |`, '|---|---:|---:|---:|');
+    for (const r of list) out.push(`| \`${mdCell(r.key || '(unnamed)')}\` | ${r.before} | ${r.after} | ${signed(r.delta)} |`);
+    out.push('');
+  };
+  if (grew.length) { out.push('**Largest growth** (bytes)', ''); table(grew); }
+  if (shrank.length) { out.push('**Largest reduction** (bytes)', ''); table(shrank); }
+  if (!grew.length && !shrank.length) out.push('No size changes.', '');
+  return out.join('\n');
+}

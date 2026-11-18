@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Ruler, Upload, Trash2, FileDown, Search, LayoutGrid, GitCompare, List, Layers } from 'lucide-react';
+import { Ruler, Upload, Trash2, FileDown, Search, LayoutGrid, GitCompare, List, Layers, Copy } from 'lucide-react';
 import {
   isElf, parseElf, parseMapFile, aggregateMap, filterSymbols, groupByNamespace, formatBytes,
   buildTree, layoutTree, capItems, diffRows, toCsv,
+  berkeleySize, berkeleyLine, parseSizeInput, budgetStatus, MCU_PRESETS, deltaMarkdown,
 } from '../../utils/elfSize.js';
 
 /**
@@ -43,7 +44,7 @@ function UsageBar({ pct }) {
   const p = Math.min(100, Math.max(0, pct || 0));
   const color = pct > 90 ? 'bg-rose-500' : pct > 70 ? 'bg-amber-500' : 'bg-cyan-500';
   return (
-    <div className="w-40 h-2 bg-slate-800 rounded overflow-hidden" role="meter" aria-valuenow={Math.round(p)} aria-valuemin={0} aria-valuemax={100}>
+    <div className="w-28 @md:w-40 h-2 bg-slate-800 rounded overflow-hidden" role="meter" aria-valuenow={Math.round(p)} aria-valuemin={0} aria-valuemax={100}>
       <div className={`h-full ${color}`} style={{ width: `${p}%` }} />
     </div>
   );
@@ -83,12 +84,61 @@ function Stat({ label, value, sub }) {
   );
 }
 
+function SizeLine({ elf }) {
+  const text = useMemo(() => berkeleyLine(berkeleySize(elf.sections), elf.name), [elf]);
+  const copy = () => navigator.clipboard?.writeText(text).catch(() => {});
+  return (
+    <details className="bg-slate-950 border border-slate-800 rounded p-2">
+      <summary className="text-[11px] text-slate-400 cursor-pointer">size-style totals (same columns as arm-none-eabi-size)</summary>
+      <pre className="mt-1 text-[11px] font-mono text-cyan-300 overflow-x-auto" aria-label="Berkeley size output">{text}</pre>
+      <button onClick={copy} className={btnCls} title="Copy to clipboard"><Copy size={11} /> Copy</button>
+    </details>
+  );
+}
+
+function BudgetPanel({ elf }) {
+  const [preset, setPreset] = useState('custom');
+  const [flashTxt, setFlashTxt] = useState('');
+  const [ramTxt, setRamTxt] = useState('');
+  const pick = (id) => {
+    setPreset(id);
+    const p = MCU_PRESETS.find((x) => x.id === id);
+    if (p && p.flash) { setFlashTxt(String(p.flash)); setRamTxt(String(p.ram)); }
+  };
+  const flash = budgetStatus(elf.flashBytes, parseSizeInput(flashTxt));
+  const ram = budgetStatus(elf.ramBytes, parseSizeInput(ramTxt));
+  const row = (label, st) => st && (
+    <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+      <span className="w-12 text-slate-400">{label}</span>
+      <UsageBar pct={st.pct} />
+      <span className={st.over ? 'text-rose-400' : 'text-gray-300'}>
+        {st.pct.toFixed(1)}% ({formatBytes(st.used)} / {formatBytes(st.limit)}, {st.over ? `${formatBytes(-st.free)} over` : `${formatBytes(st.free)} free`})
+      </span>
+    </div>
+  );
+  return (
+    <div className="bg-slate-950 border border-slate-800 rounded p-2 space-y-1">
+      <div className="flex flex-wrap gap-2 items-center">
+        <span className="text-[11px] text-slate-400">Budget</span>
+        <select aria-label="MCU preset" value={preset} onChange={(e) => pick(e.target.value)} className={inputCls}>
+          {MCU_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+        <input aria-label="Flash limit" placeholder="flash e.g. 64K" value={flashTxt} onChange={(e) => { setFlashTxt(e.target.value); setPreset('custom'); }} className={`${inputCls} w-28`} />
+        <input aria-label="RAM limit" placeholder="RAM e.g. 20K" value={ramTxt} onChange={(e) => { setRamTxt(e.target.value); setPreset('custom'); }} className={`${inputCls} w-28`} />
+      </div>
+      {row('FLASH', flash)}
+      {row('RAM', ram)}
+      {!flash && !ram && <div className="text-[10px] text-slate-600">Enter limits (64K, 0.5M, 0x10000) to see usage against your part. Presets are datasheet sizes; check your linker script.</div>}
+    </div>
+  );
+}
+
 function SummaryTab({ slot }) {
   const elf = slot.elf;
   const map = slot.map;
   if (!elf && !map) return <Empty>Load an ELF (.elf, .axf, .out) and/or a GNU ld map (.map) for build A.</Empty>;
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {elf && (
         <section className="space-y-2">
           <div className="flex flex-wrap gap-2">
@@ -98,6 +148,8 @@ function SummaryTab({ slot }) {
             <Stat label="Sections" value={elf.sections.filter((s) => s.loaded).length} sub={`${elf.sections.length} total`} />
             <Stat label="Symbols" value={elf.symbols.length} sub={elf.symbolTableName || 'no symbol table'} />
           </div>
+          <SizeLine elf={elf} />
+          <BudgetPanel elf={elf} />
           <div className="text-[11px] text-slate-400">Loaded sections ({elf.name})</div>
           <Table
             head={['Section', 'Type', 'Flags', 'Region', 'Address', 'LMA', 'Size', 'Flash', 'RAM']}
@@ -379,6 +431,10 @@ function CompareTab({ a, b }) {
     { key: 'before', label: 'build A bytes' }, { key: 'after', label: 'build B bytes' }, { key: 'delta', label: 'delta bytes' }, { key: 'status', label: 'status' },
   ]));
 
+  const copyMd = () => navigator.clipboard?.writeText(deltaMarkdown({
+    title: `Size delta: ${active}`, label: active === 'symbols' ? 'symbol' : active === 'sections' ? 'section' : active === 'objects' ? 'object' : 'library', totals, rows: shown,
+  })).catch(() => {});
+
   return (
     <div className="space-y-2">
       {totals && (
@@ -403,7 +459,8 @@ function CompareTab({ a, b }) {
           <Search size={12} className="text-slate-500" />
           <input aria-label="Filter compare" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="filter" className="bg-transparent text-xs font-mono py-1 outline-none w-40" />
         </div>
-        <button onClick={exportCsv} className={`${btnCls} ml-auto`}><FileDown size={11} /> Export CSV</button>
+        <button onClick={copyMd} className={`${btnCls} ml-auto`} title="Copy a Markdown table of the biggest changes (for a PR comment)"><Copy size={11} /> Copy Markdown</button>
+        <button onClick={exportCsv} className={btnCls}><FileDown size={11} /> Export CSV</button>
       </div>
       <div className="text-[11px] text-slate-500 font-mono">{shown.length} of {rows.length} rows. Sorted by growth (largest increase first). Duplicate symbol names are summed.</div>
       <Table
@@ -453,7 +510,7 @@ export default function ElfSizeWorkbench({ onLogMessage }) {
   const slotPicker = (key) => {
     const s = slots[key];
     return (
-      <div className="bg-slate-950 border border-slate-800 rounded p-2 flex-1 min-w-[16rem]">
+      <div className="bg-slate-950 border border-slate-800 rounded p-2 flex-1 min-w-[14rem]">
         <div className="flex items-center justify-between mb-1">
           <span className="text-[11px] text-slate-300">{SLOT_LABEL[key]}</span>
           <button onClick={() => clear(key)} className="text-[10px] text-slate-500 hover:text-rose-400 inline-flex items-center gap-1" disabled={!s.elf && !s.map}><Trash2 size={10} /> clear</button>
@@ -479,23 +536,18 @@ export default function ElfSizeWorkbench({ onLogMessage }) {
   };
 
   return (
-    <div className="p-3 text-gray-200 space-y-3">
-      <div className="flex items-center gap-2">
-        <Ruler size={16} className="text-cyan-400" />
-        <h2 className="text-sm font-semibold">ELF / Map Size Analyzer</h2>
-        <span className="text-[10px] text-slate-500">offline: files are read in this browser only</span>
-        {busy && <span className="text-[10px] text-amber-400">reading...</span>}
-      </div>
-      <div className="flex flex-wrap gap-2">
+    <div className="text-gray-200 space-y-2" aria-label="ELF / Map Size Analyzer">
+      {busy && <div className="text-[10px] text-amber-400">reading...</div>}
+      <div className="flex flex-wrap gap-2" title="Offline: files are read in this browser only">
         {slotPicker('A')}
         {slotPicker('B')}
       </div>
-      <div className="flex gap-1 border-b border-slate-800">
+      <div className="flex gap-0.5 border-b border-slate-800 overflow-x-auto">
         {TABS.map(([id, label, Icon]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`px-3 py-1.5 text-xs inline-flex items-center gap-1 border-b-2 -mb-px ${tab === id ? 'border-cyan-400 text-cyan-300' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+            className={`px-2 py-1 text-[11px] whitespace-nowrap inline-flex items-center gap-1 border-b-2 -mb-px ${tab === id ? 'border-cyan-400 text-cyan-300' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
           >
             <Icon size={12} /> {label}
           </button>
