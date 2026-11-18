@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Usb, Power, ShieldAlert, Search, Loader2, Folder, FileText, Download, ChevronRight, Trash2, Square, Hash, FileUp, ScanSearch } from 'lucide-react';
+import { Usb, Power, ShieldAlert, Search, Loader2, Folder, FileText, Download, ChevronRight, Trash2, Square, Hash, FileUp, ScanSearch, ChevronLeft, FileDown } from 'lucide-react';
 import { MassStorageDevice, requestMassStorageDevice } from '../../utils/massStorageDriver';
 import { DiskReader, readPartitionTable, detectFilesystem, openVolume, fileSectorReader } from '../../utils/diskImage';
 import { imageRange, verifyRange, badSectorMap, formatImageLog } from '../../utils/imaging';
 import { carve } from '../../utils/carve';
+import { compareHash, parseSearchPattern, searchSectors, fileListingCsv, hexDumpText } from '../../utils/massStorageTools';
 import StatusBadge from '../common/StatusBadge';
 
 import { confirmAction, useSessionError } from '../../utils/sessionLog';
@@ -47,6 +48,12 @@ export default function MassStorageWorkbench() {
   const [carving, setCarving] = useState(null); // { label, done, total } while running
   const [carved, setCarved] = useState(null); // { label, base, files, scannedBytes, cancelled }
   const [carvePreview, setCarvePreview] = useState(null); // { name, url?, bytes }
+  const [expectedHash, setExpectedHash] = useState('');
+  const [findText, setFindText] = useState('');
+  const [findMode, setFindMode] = useState('hex');
+  const [findNote, setFindNote] = useState('');
+  const [finding, setFinding] = useState(false);
+  const cancelFind = useRef(false);
   const readerRef = useRef(null);
   const sourceRef = useRef(null);
   const devRef = useRef(null);
@@ -58,7 +65,7 @@ export default function MassStorageWorkbench() {
 
   // Release the claimed interface and stop long jobs if the tool is closed.
   useEffect(() => () => {
-    cancelDump.current = true; cancelCarve.current = true;
+    cancelDump.current = true; cancelCarve.current = true; cancelFind.current = true;
     devRef.current?.close().catch(() => {});
   }, []);
   useEffect(() => () => { if (carvePreview?.url) URL.revokeObjectURL(carvePreview.url); }, [carvePreview]);
@@ -66,6 +73,7 @@ export default function MassStorageWorkbench() {
   const reset = () => {
     setInquiry(null); setCapacity(null); setSector(null); setTable(null); setBrowser(null);
     setPreview(null); setDump(null); setCarved(null); setCarvePreview(null); setCarving(null);
+    setExpectedHash(''); setFindNote('');
   };
 
   const scanPartitions = async (src) => {
@@ -137,7 +145,7 @@ export default function MassStorageWorkbench() {
   };
 
   const disconnect = async () => {
-    cancelDump.current = true; cancelCarve.current = true;
+    cancelDump.current = true; cancelCarve.current = true; cancelFind.current = true;
     try { await dev?.close(); } catch (e) { /* ignore */ }
     devRef.current = null; sourceRef.current = null;
     setDev(null); setSource(null); setStatus('offline'); reset();
@@ -152,6 +160,48 @@ export default function MassStorageWorkbench() {
       setSector({ lba: n, data: await source.readSectors(n, 1) });
     } catch (err) { setError(err.message); }
     finally { setBusy(''); }
+  };
+
+  const stepSector = async (delta) => {
+    if (!source) return;
+    const cur = sector ? sector.lba : parseInt(lba, 10) || 0;
+    const n = cur + delta;
+    if (n < 0 || n >= source.blocks) return;
+    setLba(String(n));
+    setBusy('read'); setError('');
+    try { setSector({ lba: n, data: await source.readSectors(n, 1) }); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(''); }
+  };
+
+  /** Search forward from the sector after the current one for a hex or text pattern. */
+  const findNext = async () => {
+    const src = sourceRef.current;
+    if (!src) return;
+    setError(''); setFindNote('');
+    let pattern;
+    try { pattern = parseSearchPattern(findText, findMode); } catch (err) { setFindNote(err.message); return; }
+    const from = sector ? sector.lba + 1 : Math.max(0, parseInt(lba, 10) || 0);
+    if (from >= src.blocks) { setFindNote('No more sectors after this one.'); return; }
+    cancelFind.current = false; setFinding(true); setFindNote('Searching...');
+    try {
+      const r = await searchSectors({
+        readSectors: src.readSectors, startLba: from, sectors: src.blocks - from, blockSize: src.blockSize, pattern,
+        chunkSectors: 256, shouldCancel: () => cancelFind.current,
+        onProgress: (p) => setFindNote(`Searching... ${fmtBytes(p.done * src.blockSize)} of ${fmtBytes(p.total * src.blockSize)}`)
+      });
+      if (r.hit) {
+        setLba(String(r.hit.lba));
+        setSector({ lba: r.hit.lba, data: await src.readSectors(r.hit.lba, 1), mark: { offset: r.hit.offset, length: pattern.length } });
+        setFindNote(`Found at LBA ${r.hit.lba.toLocaleString()}, offset ${r.hit.offset} (byte ${r.hit.byteOffset.toLocaleString()}). Press FIND NEXT to continue.`);
+      } else setFindNote(r.cancelled ? 'Search cancelled.' : `Not found in ${fmtBytes(r.scanned * src.blockSize)} searched after LBA ${from - 1}.`);
+    } catch (err) { setError(err.message); setFindNote(''); }
+    finally { setFinding(false); }
+  };
+
+  const saveSectorDump = () => {
+    if (!sector) return;
+    saveBlob([hexDumpText(sector.data, sector.lba * source.blockSize)], `sector-${sector.lba}.txt`, 'text/plain');
   };
 
   // --- File browser ---------------------------------------------------------
@@ -199,6 +249,13 @@ export default function MassStorageWorkbench() {
       setPreview({ name: entry.name, text: isText ? new TextDecoder().decode(data) : null, bytes: data, truncated: entry.size > data.length });
     } catch (err) { setError(err.message); }
     finally { setBusy(''); }
+  };
+
+  const exportListing = () => {
+    if (!browser) return;
+    const dir = `/${browser.path.map((p) => p.name).join('/')}`;
+    const name = `${(browser.part.fs?.label || `partition${browser.part.index}`).replace(/[^\w.-]+/g, '_')}${dir.replace(/[^\w.-]+/g, '_')}-listing.csv`;
+    saveBlob([fileListingCsv(browser.entries.filter((e) => showDeleted || !e.deleted), dir)], name, 'text/csv');
   };
 
   // --- Imaging / hashing ----------------------------------------------------
@@ -338,33 +395,41 @@ export default function MassStorageWorkbench() {
   const online = !!source;
 
   return (
-    <div className="space-y-4 font-mono text-xs">
+    <div className="space-y-2 font-mono text-xs">
 
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <p className="text-[11px] text-slate-400 max-w-3xl">
-              Open a raw disk image (.img / .dd / .raw / .bin) or inspect a drive: SCSI identity and capacity, partition table (MBR / GPT), filesystems,
-              FAT and exFAT browsing with deleted-file recovery, raw sectors, MD5 / SHA-1 / SHA-256 hashes, imaging that survives bad sectors, and signature file carving.
-              Read-only: nothing is ever written to the source, and no WRITE command is implemented.
-              Chrome blocks WebUSB from the mass-storage class on most systems, so image files are the dependable route; reading an image never leaves your browser.
-            </p>
-          </div>
-          <StatusBadge status={status} label={status === 'online' ? (isFile ? 'IMAGE' : 'SCSI') : status === 'warning' ? 'ERR' : 'IDLE'} value={isFile ? 'Image file' : dev ? 'Connected' : 'Offline'} />
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2">
+        <input ref={fileInput} type="file" className="hidden" data-testid="image-file-input" onChange={(e) => openImage(e.target.files?.[0])} />
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => fileInput.current?.click()} disabled={!!busy || working} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 text-xs font-bold disabled:opacity-40">
+            {busy === 'open' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />} OPEN DISK IMAGE FILE
+          </button>
+          {!dev ? (
+            <button onClick={() => connect()} disabled={!webUsbAvailable || !!busy || working} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-700 text-slate-300 text-xs font-bold disabled:opacity-40" title="Chrome normally refuses WebUSB access to the mass-storage class">
+              {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} LIVE DRIVE (WEBUSB, EXPERIMENTAL)
+            </button>
+          ) : null}
+          {online && (
+            <button onClick={disconnect} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
+              <Power className="w-3.5 h-3.5" /> {isFile ? 'CLOSE IMAGE' : 'DISCONNECT'}
+            </button>
+          )}
+          <span className="ml-auto">
+            <StatusBadge status={status} label={status === 'online' ? (isFile ? 'IMAGE' : 'SCSI') : status === 'warning' ? 'ERR' : 'IDLE'} value={isFile ? 'Image file' : dev ? 'Connected' : 'Offline'} />
+          </span>
         </div>
 
         {!webUsbAvailable && (
-          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200">
+          <div className="flex items-start gap-2 p-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200">
             <ShieldAlert className="w-4 h-4 shrink-0" /> WebUSB needs a Chromium browser (Chrome/Edge) over HTTPS or localhost. Opening a disk image file works in any browser.
           </div>
         )}
         {error && (
-          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 font-bold">
+          <div className="flex items-start gap-2 p-2 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 font-bold">
             <ShieldAlert className="w-4 h-4 shrink-0" />
             <div className="space-y-2">
               <div>{error}</div>
               {blockedKind && (
-                <button onClick={() => fileInput.current?.click()} className="flex items-center gap-1.5 px-3 py-1 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 font-bold">
+                <button onClick={() => fileInput.current?.click()} className="flex items-center gap-1.5 px-2 py-1 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 font-bold">
                   <FileUp className="w-3.5 h-3.5" /> OPEN DISK IMAGE FILE INSTEAD
                 </button>
               )}
@@ -372,27 +437,20 @@ export default function MassStorageWorkbench() {
           </div>
         )}
 
-        <input ref={fileInput} type="file" className="hidden" data-testid="image-file-input" onChange={(e) => openImage(e.target.files?.[0])} />
-        <div className="pt-3 flex flex-wrap items-center gap-2">
-          <button onClick={() => fileInput.current?.click()} disabled={!!busy || working} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 text-xs font-bold disabled:opacity-40">
-            {busy === 'open' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />} OPEN DISK IMAGE FILE
-          </button>
-          {!dev ? (
-            <button onClick={() => connect()} disabled={!webUsbAvailable || !!busy || working} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs font-bold disabled:opacity-40" title="Chrome normally refuses WebUSB access to the mass-storage class">
-              {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} LIVE DRIVE (WEBUSB, EXPERIMENTAL)
-            </button>
-          ) : null}
-          {online && (
-            <button onClick={disconnect} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
-              <Power className="w-3.5 h-3.5" /> {isFile ? 'CLOSE IMAGE' : 'DISCONNECT'}
-            </button>
-          )}
-        </div>
-        {!online && <p className="pt-2 text-[10px] text-slate-500">Live drive mode is experimental: Chrome usually blocks the storage class for WebUSB, and the page then explains why.</p>}
+        <details className="text-[11px] text-slate-400">
+          <summary className="cursor-pointer text-slate-500 hover:text-slate-300">About this tool</summary>
+          <p className="pt-1">
+            Open a raw disk image (.img / .dd / .raw / .bin) or inspect a drive: SCSI identity and capacity, partition table (MBR / GPT), filesystems,
+            FAT and exFAT browsing with deleted-file recovery, raw sectors with byte search, MD5 / SHA-1 / SHA-256 hashes with an expected-hash check, imaging that survives bad sectors, and signature file carving.
+            Read-only: nothing is ever written to the source, and no WRITE command is implemented.
+            Chrome blocks WebUSB from the mass-storage class on most systems, so image files are the dependable route; reading an image never leaves your browser.
+            Live drive mode is experimental and, if it connects, claims the drive from the operating system.
+          </p>
+        </details>
       </div>
 
       {isFile && capacity && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl grid grid-cols-2 @sm:grid-cols-4 gap-3">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 grid grid-cols-2 @lg:grid-cols-4 gap-2">
           <Field label="Image file" value={source.label} />
           <Field label="Size" value={`${fmtBytes(capacity.totalBytes)} (${capacity.totalBytes.toLocaleString()} B)`} />
           <Field label="Sectors (512 B)" value={capacity.blocks.toLocaleString()} />
@@ -401,7 +459,7 @@ export default function MassStorageWorkbench() {
       )}
 
       {inquiry && capacity && !isFile && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl grid grid-cols-2 @sm:grid-cols-4 gap-3">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 grid grid-cols-2 @lg:grid-cols-4 gap-2">
           <Field label="Vendor" value={inquiry.vendor} />
           <Field label="Product" value={inquiry.product} />
           <Field label="Revision" value={inquiry.revision} />
@@ -414,7 +472,7 @@ export default function MassStorageWorkbench() {
       )}
 
       {online && table && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-bold text-slate-200">
               PARTITIONS{' '}
@@ -423,10 +481,10 @@ export default function MassStorageWorkbench() {
               </span>
             </span>
             <div className="flex flex-wrap items-center gap-2">
-              <button onClick={() => runCarve(isFile ? source.label : 'drive', 0, capacity.blocks)} disabled={!!busy || working} className="flex items-center gap-1 px-3 py-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold disabled:opacity-40">
+              <button onClick={() => runCarve(isFile ? source.label : 'drive', 0, capacity.blocks)} disabled={!!busy || working} className="flex items-center gap-1 px-2 py-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold disabled:opacity-40">
                 <ScanSearch className="w-3.5 h-3.5" /> CARVE FILES (WHOLE {isFile ? 'IMAGE' : 'DRIVE'})
               </button>
-              <button onClick={() => dumpRange(isFile ? `${source.label}-full` : `${inquiry?.product || 'drive'}-full`, 0, capacity.blocks)} disabled={!!busy || working} className="flex items-center gap-1 px-3 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold disabled:opacity-40">
+              <button onClick={() => dumpRange(isFile ? `${source.label}-full` : `${inquiry?.product || 'drive'}-full`, 0, capacity.blocks)} disabled={!!busy || working} className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold disabled:opacity-40">
                 {isFile ? <Hash className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />} {isFile ? 'HASH IMAGE' : 'IMAGE WHOLE DRIVE'} ({fmtBytes(capacity.totalBytes)})
               </button>
             </div>
@@ -443,7 +501,7 @@ export default function MassStorageWorkbench() {
           )}
           {table.partitions.length === 0 && <div className="text-slate-500">No partitions found (a blank drive, or a layout this tool doesn't read). You can still hash it, view sectors, or carve files from the whole {isFile ? 'image' : 'drive'}.</div>}
           {table.partitions.length > 0 && (
-            <table className="w-full text-[11px]">
+            <div className="overflow-x-auto"><table className="w-full min-w-[30rem] text-[11px]">
               <thead className="text-slate-500 text-left">
                 <tr><th className="py-1">#</th><th>TYPE</th><th>NAME</th><th>START LBA</th><th>SIZE</th><th>FILESYSTEM</th><th /></tr>
               </thead>
@@ -472,7 +530,7 @@ export default function MassStorageWorkbench() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
           {dump && (
             <div className="bg-slate-950 border border-slate-800 rounded p-2 space-y-1">
@@ -502,6 +560,7 @@ export default function MassStorageWorkbench() {
                       {dump.verify.ok ? 'Verify pass: re-read matches the image.' : `Verify pass MISMATCH: re-read SHA-256 ${dump.verify.sha256}. The source gave different data on the second read.`}
                     </div>
                   )}
+                  <HashCheck value={expectedHash} onChange={setExpectedHash} hashes={dump.hashes} />
                   <div className="pl-5"><button onClick={downloadLog} className={`${btnSm} border-slate-700 text-slate-300`}>DOWNLOAD LOG (HASHES{dump.badRanges?.length ? ' + BAD RANGES' : ''})</button></div>
                 </div>
               )}
@@ -524,13 +583,13 @@ export default function MassStorageWorkbench() {
       )}
 
       {carved && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2">
           <div className="font-bold text-slate-200">
             CARVED FILES <span className="text-slate-500 font-normal">({carved.label}: {carved.files.length} found in {fmtBytes(carved.scannedBytes)} scanned{carved.cancelled ? ', cancelled early' : ''})</span>
           </div>
           {carved.files.length === 0 && <div className="text-slate-500">No JPEG, PNG, GIF, PDF, ZIP/Office, SQLite or MP4/MOV files with intact structure were found in the scanned area.</div>}
           {carved.files.length > 0 && (
-            <table className="w-full text-[11px]">
+            <div className="overflow-x-auto"><table className="w-full min-w-[30rem] text-[11px]">
               <thead className="text-slate-500 text-left"><tr><th className="py-1">TYPE</th><th>OFFSET (DISK)</th><th>SIZE</th><th /></tr></thead>
               <tbody>
                 {carved.files.map((f, i) => (
@@ -545,7 +604,7 @@ export default function MassStorageWorkbench() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
           <p className="text-[10px] text-slate-500">
             Carving matches file signatures and the length each format records for itself. Fragmented files come out only as far as their first contiguous run, and a match is a candidate, not proof the file is whole: open the result before relying on it.
@@ -561,7 +620,7 @@ export default function MassStorageWorkbench() {
       )}
 
       {browser && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2">
           <div className="flex flex-wrap items-center gap-1">
             <span className="font-bold text-slate-200 mr-2">FILES ({browser.vol.type}, read-only)</span>
             <button onClick={() => showDir([])} className="text-cyan-300 hover:underline">{browser.part.fs?.label || `partition ${browser.part.index}`}</button>
@@ -571,11 +630,14 @@ export default function MassStorageWorkbench() {
                 <button onClick={() => showDir(browser.path.slice(0, i + 1))} className="text-cyan-300 hover:underline">{p.name}</button>
               </span>
             ))}
-            <label className="ml-auto flex items-center gap-1 text-slate-400">
+            <button onClick={exportListing} className={`${btnSm} border-slate-700 text-slate-300 ml-auto mr-2 flex items-center gap-1`} title="Download this directory listing (name, type, size, modified, attributes, deleted) as CSV">
+              <FileDown className="w-3 h-3" /> CSV
+            </button>
+            <label className="flex items-center gap-1 text-slate-400">
               <input type="checkbox" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} className="accent-rose-500" /> show deleted
             </label>
           </div>
-          <table className="w-full text-[11px]">
+          <div className="overflow-x-auto"><table className="w-full min-w-[30rem] text-[11px]">
             <thead className="text-slate-500 text-left"><tr><th className="py-1">NAME</th><th>SIZE</th><th>MODIFIED (UTC)</th><th>ATTR</th><th /></tr></thead>
             <tbody>
               {browser.entries.filter((e) => showDeleted || !e.deleted).map((e, i) => (
@@ -606,7 +668,7 @@ export default function MassStorageWorkbench() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
           {browser.entries.some((e) => e.deleted) && (
             <p className="text-[10px] text-slate-500">
               Deleted files are recovered by reading contiguous clusters from their first cluster. That works for files that were not fragmented and whose space has not been reused.
@@ -624,14 +686,29 @@ export default function MassStorageWorkbench() {
       )}
 
       {online && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold text-slate-200">SECTOR VIEWER</span>
-            <span className="text-slate-500">LBA</span>
-            <input value={lba} onChange={(e) => setLba(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && readSector()} className="w-28 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
-            <button onClick={readSector} disabled={!!busy} className="flex items-center gap-1 px-3 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold disabled:opacity-40"><Search className="w-3.5 h-3.5" /> {busy === 'read' ? 'READING...' : 'READ SECTOR'}</button>
+            <label className="text-slate-500" htmlFor="ms-lba">LBA</label>
+            <input id="ms-lba" value={lba} onChange={(e) => setLba(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && readSector()} className="w-24 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
+            <button onClick={() => stepSector(-1)} disabled={!!busy || finding} aria-label="Previous sector" title="Previous sector" className={`${btnSm} border-slate-700 text-slate-300`}><ChevronLeft className="w-3.5 h-3.5" /></button>
+            <button onClick={() => stepSector(1)} disabled={!!busy || finding} aria-label="Next sector" title="Next sector" className={`${btnSm} border-slate-700 text-slate-300`}><ChevronRight className="w-3.5 h-3.5" /></button>
+            <button onClick={readSector} disabled={!!busy || finding} className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold disabled:opacity-40"><Search className="w-3.5 h-3.5" /> {busy === 'read' ? 'READING...' : 'READ SECTOR'}</button>
+            {sector && <button onClick={saveSectorDump} className={`${btnSm} border-slate-700 text-slate-300 flex items-center gap-1`} title="Save this sector as a hex dump text file"><FileDown className="w-3 h-3" /> DUMP</button>}
           </div>
-          {sector && <HexView lba={sector.lba} data={sector.data} />}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-slate-500" htmlFor="ms-find">FIND</label>
+            <select value={findMode} onChange={(e) => setFindMode(e.target.value)} aria-label="Search type" className="bg-slate-950 border border-slate-800 rounded px-1 py-1 text-slate-200">
+              <option value="hex">hex</option>
+              <option value="text">text</option>
+            </select>
+            <input id="ms-find" value={findText} onChange={(e) => setFindText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !finding && findNext()} placeholder={findMode === 'hex' ? '55 AA' : 'text'} className="flex-1 min-w-[8rem] bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
+            {finding
+              ? <button onClick={() => { cancelFind.current = true; }} className="flex items-center gap-1 px-2 py-1 rounded border border-rose-500/40 text-rose-300"><Square className="w-3 h-3" /> CANCEL</button>
+              : <button onClick={findNext} disabled={!!busy || working} className={`${btnSm} border-amber-500/40 text-amber-300`} title="Search forward from the sector after the one shown, to the end of the disk">FIND NEXT</button>}
+          </div>
+          {findNote && <div className="text-[11px] text-slate-400" role="status">{findNote}</div>}
+          {sector && <HexView lba={sector.lba} data={sector.data} mark={sector.mark} />}
         </div>
       )}
     </div>
@@ -662,7 +739,21 @@ function BadSectorMap({ dump }) {
   );
 }
 
-function HexView({ lba, data }) {
+/** Expected-hash box: paste a published checksum and see whether it matches the computed one. */
+function HashCheck({ value, onChange, hashes }) {
+  const r = compareHash(value, hashes);
+  return (
+    <div className="pl-5 flex flex-wrap items-center gap-2 text-[11px]">
+      <label htmlFor="ms-expected" className="text-slate-500">EXPECTED</label>
+      <input id="ms-expected" value={value} onChange={(e) => onChange(e.target.value)} placeholder="paste MD5 / SHA-1 / SHA-256" className="flex-1 min-w-[10rem] bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-slate-200" />
+      {r.state === 'match' && <span className="font-bold text-emerald-300" role="status">MATCH ({r.algo.toUpperCase()})</span>}
+      {r.state === 'mismatch' && <span className="font-bold text-rose-300" role="status">NO MATCH ({r.algo.toUpperCase()})</span>}
+      {r.state === 'invalid' && <span className="text-amber-300" role="status">not a 32, 40 or 64 digit hex hash</span>}
+    </div>
+  );
+}
+
+function HexView({ lba, data, mark }) {
   const rows = [];
   for (let off = 0; off < data.length; off += 16) {
     const slice = data.subarray(off, off + 16);
@@ -670,12 +761,13 @@ function HexView({ lba, data }) {
     const ascii = Array.from(slice).map((b) => (b >= 32 && b <= 126 ? String.fromCharCode(b) : '·')).join('');
     rows.push({ off, hex, ascii });
   }
+  const marked = (r) => mark && r.off + 16 > mark.offset && r.off < mark.offset + mark.length;
   return (
     <div>
       <div className="text-[11px] text-slate-500 mb-1">{lba !== null ? `LBA ${lba} — ` : ''}{data.length} bytes</div>
       <div className="bg-slate-950 border border-slate-800 rounded p-2 max-h-80 overflow-auto text-[11px] leading-snug">
         {rows.map((r) => (
-          <div key={r.off} className="flex gap-3 whitespace-pre">
+          <div key={r.off} className={`flex gap-3 whitespace-pre ${marked(r) ? 'bg-amber-500/15' : ''}`}>
             <span className="text-slate-600">{r.off.toString(16).padStart(4, '0')}</span>
             <span className="text-cyan-300">{r.hex.padEnd(47, ' ')}</span>
             <span className="text-purple-300">{r.ascii}</span>
@@ -688,7 +780,7 @@ function HexView({ lba, data }) {
 
 function Field({ label, value }) {
   return (
-    <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+    <div className="bg-slate-950 p-2 rounded-lg border border-slate-800">
       <span className="text-[10px] text-slate-500 font-bold uppercase block">{label}</span>
       <span className="text-slate-200 font-semibold break-all">{value ?? '—'}</span>
     </div>
