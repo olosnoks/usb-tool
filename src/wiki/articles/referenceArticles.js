@@ -351,14 +351,20 @@ Repeats of the same line from the same tool within 2 seconds fold into one entry
 
 | Control | Purpose |
 | :--- | :--- |
-| **REPORT (.MD)** | Downloads a Markdown report (redacted unless you tick the box below). |
+| **MD** | Downloads a Markdown report (redacted unless you tick the box below). |
+| **CSV** | Downloads the shown entries as CSV with columns \`time\` (ISO 8601), \`seq\`, \`tool\`, \`level\`, \`count\`, \`text\`. Cells starting with \`=\`, \`+\`, \`-\` or \`@\` get a leading apostrophe so spreadsheets do not run them as formulas. Same redaction rule. |
 | **JSON** | Downloads the log as JSON (same redaction rule). |
-| **COPY REPORT** | Copies the Markdown report to the clipboard. |
+| **COPY** | Copies the Markdown report to the clipboard. |
 | **Include unredacted text in exports** | Off by default. Turn it on only when you need the raw text. |
 | **Preview export** / **Hide export preview** | Shows exactly what the report will contain, so you can check it before sharing. |
 | **OPEN JSON LOG** | Loads a previously exported JSON log for read-only viewing; **BACK TO THIS SESSION** returns. |
 | **CLEAR** | Empties the log after a confirmation (hidden while viewing an imported log). |
-| Tool selector, level buttons (\`info\`, \`ok\`, \`warn\`, \`error\`, \`action\`, \`device\`), **search** | Filter the table. Exports contain only the entries matching the current filters. |
+| Tool selector, **time window** (all time, last 1, 5, 15 or 60 minutes), level buttons (\`info\`, \`ok\`, \`warn\`, \`error\`, \`action\`, \`device\`; each shows its entry count), **search** | Filter the table. Exports contain only the entries matching the current filters. |
+| **Follow newest** / **Wrap long lines** | Keep the list scrolled to the newest entry; wrap long lines or scroll them sideways. |
+| **About / search syntax** | Collapsible help at the top of the panel. |
+
+#### Search syntax
+Terms are separated by spaces and all must match. \`word\` is a case-insensitive substring; \`"a phrase"\` keeps spaces; \`/regex/\` is a case-insensitive regular expression tested against the text and the tool name; \`tool:adb\` matches part of the tool name; \`level:error\` matches a level exactly. A leading \`-\` excludes, for example \`tool:flash -/retry/ level:warn\`. An invalid regex shows a message and is ignored.
 | Note box + **ADD** | Appends a note (for example "swapped to the 3.3 V supply"). |
 
 #### Redaction
@@ -388,6 +394,9 @@ Entries use millisecond timestamps (\`t\`), an optional \`data\` object (device 
 
 - **Subsystem:** [\`src/utils/sessionLog.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/sessionLog.js) — in-memory entry list persisted to session storage, subscriber notify hooks, device-picker capture, and Markdown/JSON export and import.
 - **Component:** [\`src/components/tools/SessionLogPanel.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/SessionLogPanel.jsx) — filterable event table, level filters, notes, import/export controls.
+- **Filter and CSV helpers:** [\`src/utils/sessionLogFilter.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/sessionLogFilter.js) — query parser, time window, level counts, CSV export (tests in \`tests/sessionLogFilter.test.js\`).
+
+**Similar tools:** Chrome DevTools Console (level toggles, regex and negative filters), Android Studio Logcat (key:value queries, negation) and Windows Event Viewer (filtered views, CSV export). The panel borrows their filtering ideas and adds CSV; it does not sign or hash entries.
 - **Tests:** [\`tests/sessionLog.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/sessionLog.test.js).
 `
   }
