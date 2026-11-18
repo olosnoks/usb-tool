@@ -21,7 +21,7 @@ The **MIDI Monitor & SysEx Librarian** is a Web MIDI workbench. It shows the MID
 
 ## Ports
 
-The header shows an **Output** selector used by the Send tab and the latency test. The port panel lists every input (with a checkbox to listen to it) and every output, with its name, manufacturer and state (connected or disconnected). Unticking an input stops the monitor and the SysEx capture from listening to it. Port changes are picked up automatically; the Refresh button re-reads the list.
+The top bar has an **Enable MIDI** (later **Ports**, to re-read the list) button and an **Output** selector used by the Send tab and the latency test. The port panel lists every input (with a checkbox to listen to it) and every output, with its name, manufacturer and state (connected or disconnected). Unticking an input stops the monitor and the SysEx capture from listening to it. Port changes are picked up automatically; the Refresh button re-reads the list.
 
 ## Monitor tab
 
@@ -49,7 +49,10 @@ Each received message is shown on one line with the time (seconds since the page
 - **Category checkboxes** hide or show each message category. The **Hide clock + sensing** button hides the high-rate clock and active-sensing traffic, which otherwise fills the list.
 - **Note names** chooses how note numbers are labelled. C4 = 60 is the scientific convention used by many manufacturers. C3 = 60 is used by Yamaha, Ableton and Logic. The MIDI number itself is unchanged.
 - **Pause** freezes the list. The tool keeps decoding while paused, so the clock tempo and RPN state stay current.
-- **Export JSON** saves the stored messages (up to 3000) with their timestamps and raw hex.
+- **Search** filters the visible list. Type one or more words; a message must contain all of them in its decoded text, raw hex, category or port name (case-insensitive). For example \`cc 74\` or \`90 3c\`.
+- **JSON** and **CSV** save the stored messages (up to 3000) with their timestamps and raw hex. CSV columns are time_ms, direction, port, category, channel, text and raw_hex. Both export everything stored, not just what the search and category filters show.
+- **Copy** puts the visible lines on the clipboard as plain text (time, direction, port, decoded text, raw hex).
+- **Statistics** (a collapsible line under the filters) shows how many messages are stored, the count per category, and the average messages per second over the stored time span. It is a quick way to see what is flooding the log.
 
 **Decode raw bytes** (inside the Monitor tab) takes a pasted stream of hex bytes, for example \`90 3C 64 3E 64 F8 F0 7E 7F 06 01 F7\`. It handles running status (a repeated status byte can be left out), real-time bytes inside other messages, and SysEx interrupted by a status byte. Pasted data has no timing, so no clock tempo is estimated.
 
@@ -104,6 +107,10 @@ Results show the count, timeouts, minimum, median, mean, maximum and standard de
 | Sent SysEx is ignored | Check the delay (a device may need more time between messages) and that the dump is complete. Truncated imports are marked in the library. |
 | Latency test times out every time | There is no loopback route from the chosen output to the chosen input. Connect them, or pick a virtual loopback port pair. |
 | "Could not save the SysEx library" | localStorage is full. Export the dumps you need to .syx and delete the rest. |
+
+## Similar tools
+
+This tool covers the same ground as MIDI-OX (Windows), MIDI Monitor by Snoize (macOS) and Hexler's Protokol, which also log messages, filter them and export or copy the list. Those desktop apps can also route and remap MIDI, which this tool does not do.
 
 ## Related tools in this app
 
