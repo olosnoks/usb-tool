@@ -128,8 +128,12 @@ export function parseDfuSuffix(input) {
 
   const suffix = bytes.subarray(bytes.length - 16);
   // Signature: suffix[8..10] = 'D','F','U'; suffix[11] = bLength (16).
+  // Real DFU 1.1 files store the bytes 'U','F','D' (0x55 0x46 0x44, "DFU" read backwards);
+  // the reversed 'D','F','U' order is also accepted for files written by older versions of this tool.
   const sigOk =
-    suffix[8] === 0x44 && suffix[9] === 0x46 && suffix[10] === 0x55 && suffix[11] === 16;
+    ((suffix[8] === 0x55 && suffix[9] === 0x46 && suffix[10] === 0x44) ||
+      (suffix[8] === 0x44 && suffix[9] === 0x46 && suffix[10] === 0x55)) &&
+    suffix[11] === 16;
 
   if (!sigOk) {
     return { present: false, valid: false, payload: bytes };
