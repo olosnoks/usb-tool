@@ -150,6 +150,11 @@ The mode selector offers **Matches**, **matchAll (all)** and **Split**.
 - **Highlighted** shows matches in the test string with a count; an empty match is drawn as a thin marker.
 - **Match details** lists each match's position and text, numbered groups (\`—\` if a group did not participate), named groups, and group indices when \`d\` is on. Split mode lists the parts.
 - **Replace** takes \`$1\`, \`$<name>\` and the other JavaScript replacement tokens and shows the result.
+- The line above the match details shows how many matches are unique, the share of the text they cover, and how long the last run took in milliseconds.
+- **Export** (shown when there are matches) copies or downloads the match list as **JSON** (index, text, groups, named groups), **CSV** (one column per group, quoted where needed), **one match per line**, or **unique matches**. It is built in the browser; nothing is uploaded.
+
+## Backtracking warning
+While you type, a quick static check warns about shapes that often backtrack badly: a repeated group that itself contains \`*\`, \`+\` or \`{n,}\` (for example \`(a+)+\`), a repeated group with empty or duplicate alternatives (\`(a|a)+\`), and several \`.*\` in one pattern. It is a hint only: it can miss risky patterns and flag safe ones. The Timeout is the real protection.
 
 ## Explanation
 The **Explanation** section breaks the pattern into a tree of tokens with a plain-language description and quantifier. It says "Cannot explain" with a reason for patterns it cannot parse.
@@ -159,6 +164,9 @@ Under **Test cases**, **+ Add test case** adds a line of text with an expectatio
 
 ## Code generator
 Choose **JavaScript**, **Python**, **PHP**, **Go** or **C#** to get code with the current pattern, flags, test string and replacement, then **Copy**. Other engines differ from JavaScript (lookbehind, named-group syntax, Unicode classes), so test the result in the target language.
+
+## Quick reference
+The collapsed **Quick reference** lists common tokens; click one to append it to the end of the pattern.
 
 ## Share link
 **Share link** copies a URL that restores the pattern, flags, test string, replacement, mode and test cases from the page hash. The state is in the link itself; avoid putting secrets in the test string before sharing it.
@@ -170,6 +178,9 @@ Choose **JavaScript**, **Python**, **PHP**, **Go** or **C#** to get code with th
 
 ## Limits
 This is the **JavaScript** flavour only; PCRE, Python \`re\`, .NET and RE2 differ in details.
+
+## Similar tools
+regex101 (explanations, debugger, many flavours), RegExr (cheatsheet, community patterns) and Regexper (railroad diagrams). This tool does not have a step debugger, other regex flavours or diagrams; it has no account or saved-pattern server, because everything stays in the browser.
 `,
   },
   {

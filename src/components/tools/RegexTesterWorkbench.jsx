@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Copy, Check, AlertTriangle, Link2 } from 'lucide-react';
+import { Copy, Check, AlertTriangle, Link2, Download } from 'lucide-react';
 import {
   ENGINE_LABEL, DEFAULT_TIMEOUT_MS, LANGUAGES, PATTERN_LIBRARY,
   normalizeFlags, createRegexRunner, timeoutMessage, highlightSegments, caseVerdict,
   explainPattern, generateCode, decodeState, encodeState, buildPermalink,
 } from '../../utils/regexTools.js';
+import { lintPattern, exportMatches, matchStats, insertToken } from '../../utils/regexExtras.js';
 
 /**
  * Regex tester (regex101-style), fully client-side — no network. Build a
@@ -30,8 +31,8 @@ const FLAGS = [
 
 const CHEATS = [
   ['\\d', 'digit'], ['\\w', 'word char'], ['\\s', 'whitespace'], ['.', 'any char'],
-  ['^ $', 'start / end'], ['[abc]', 'set'], ['[^abc]', 'negated set'], ['a|b', 'alt'],
-  ['a*', '0+'], ['a+', '1+'], ['a?', '0 or 1'], ['a{2,4}', 'range'],
+  ['^ $', 'start / end', '^$'], ['[abc]', 'set'], ['[^abc]', 'negated set'], ['a|b', 'alt', '|'],
+  ['a*', '0+', '*'], ['a+', '1+', '+'], ['a?', '0 or 1', '?'], ['a{2,4}', 'range', '{2,4}'],
   ['(…)', 'group'], ['(?<n>…)', 'named'], ['(?:…)', 'non-capture'], ['\\b', 'word boundary'],
   ['(?=…)', 'lookahead'], ['(?<=…)', 'lookbehind'],
 ];
@@ -83,6 +84,8 @@ export default function RegexTesterWorkbench() {
   const [result, setResult] = useState({ matches: [], error: '' });
   const [caseResults, setCaseResults] = useState([]);
   const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(null);
+  const [exportFmt, setExportFmt] = useState('json');
   const runnerRef = useRef(null);
 
   if (!runnerRef.current) {
@@ -110,8 +113,10 @@ export default function RegexTesterWorkbench() {
     runner.setTimeoutMs(timeoutMs);
     setRunning(true);
     const timer = setTimeout(async () => {
+      const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const res = await runner.run({ pattern, flags, text, replacement, mode });
       if (cancelled || res.superseded) return;
+      setElapsed((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
       setResult(res);
       if (res.timedOut || res.error) { setCaseResults([]); setRunning(false); return; }
       const out = [];
@@ -128,6 +133,8 @@ export default function RegexTesterWorkbench() {
   const matches = result.matches || [];
   const error = result.timedOut ? timeoutMessage(result.timeoutMs || timeoutMs) : result.error;
   const segments = useMemo(() => highlightSegments(text, matches), [text, matches]);
+  const lint = useMemo(() => lintPattern(pattern), [pattern]);
+  const stats = useMemo(() => matchStats(matches, text), [matches, text]);
   const explanation = useMemo(() => explainPattern(pattern), [pattern]);
   const code = useMemo(() => {
     try { return generateCode(lang, { pattern, flags, text, replacement }); } catch (e) { return `// ${e.message}`; }
@@ -150,11 +157,21 @@ export default function RegexTesterWorkbench() {
     setPattern(p.pattern); setFlags(p.flags); setText(p.sample); setMode('matches');
   };
 
+  const exportText = () => exportMatches(matches, exportFmt);
+  const downloadMatches = () => {
+    const ext = { json: 'json', csv: 'csv', lines: 'txt', unique: 'txt' }[exportFmt];
+    const type = exportFmt === 'json' ? 'application/json' : exportFmt === 'csv' ? 'text/csv' : 'text/plain';
+    const url = URL.createObjectURL(new Blob([exportText()], { type }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `regex-matches.${ext}`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const setCase = (i, patch) => setCases((cs) => cs.map((c, k) => (k === i ? { ...c, ...patch } : c)));
 
   return (
-    <div className="w-full min-w-0 max-w-full text-gray-200">
-      <div className="flex flex-wrap items-center gap-2 mb-2 text-[11px] text-slate-400">
+    <div className="w-full min-w-0 max-w-full text-gray-200 text-xs">
+      <div className="flex flex-wrap items-center gap-1.5 mb-1.5 text-[11px] text-slate-400">
         <span>Engine: <span className="text-slate-200">{ENGINE_LABEL}</span></span>
         <span className="flex-1" />
         <select onChange={loadLibrary} defaultValue="" aria-label="Pattern library" className="bg-slate-900 border border-slate-800 rounded px-1 py-0.5">
@@ -172,7 +189,7 @@ export default function RegexTesterWorkbench() {
       </div>
 
       {/* Pattern row */}
-      <div className="flex items-stretch gap-1 mb-2 font-mono text-sm">
+      <div className="flex items-stretch gap-1 mb-1.5 font-mono text-sm">
         <span className="flex items-center text-slate-500 px-1">/</span>
         <input
           value={pattern}
@@ -196,7 +213,7 @@ export default function RegexTesterWorkbench() {
       </div>
 
       {/* Flags */}
-      <div className="flex flex-wrap gap-1 mb-3">
+      <div className="flex flex-wrap gap-1 mb-2">
         {FLAGS.map(({ f, label, desc }) => (
           <button
             key={f}
@@ -218,20 +235,26 @@ export default function RegexTesterWorkbench() {
           <AlertTriangle size={13} /> {error}
         </div>
       )}
+      {!error && lint.map((l) => (
+        <div key={l.id} role="note" data-testid="regex-lint" className={`mb-1.5 px-2 py-1 border rounded text-[11px] flex items-center gap-1.5 ${l.severity === 'warn' ? 'border-amber-900 bg-amber-950/30 text-amber-300' : 'border-slate-800 bg-slate-900 text-slate-400'}`}>
+          <AlertTriangle size={12} /> {l.message}
+        </div>
+      ))}
       {result.truncated && !error && <div className="mb-2 text-xs text-amber-300">Stopped at the match limit; later matches are not shown.</div>}
 
-      <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(18rem,1fr))]">
+      <div className="grid gap-2 @lg:grid-cols-2">
         <div>
           <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Test string</div>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             spellCheck={false}
-            rows={6}
+            rows={5}
             className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-xs font-mono text-gray-200 resize-y"
           />
-          <div className="text-[10px] uppercase tracking-wide text-slate-500 mt-2 mb-1">
+          <div className="text-[10px] uppercase tracking-wide text-slate-500 mt-1.5 mb-1">
             Highlighted ({matches.length} match{matches.length === 1 ? '' : 'es'}){running && ' …'}
+            {!error && elapsed !== null && <span className="normal-case ml-1 text-slate-600" data-testid="regex-stats">{matches.length ? `${stats.unique} unique, ${stats.percent}% of text, ` : ''}{elapsed < 1 ? '<1' : Math.round(elapsed)} ms</span>}
           </div>
           <div className="bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono whitespace-pre-wrap break-words max-h-48 overflow-auto" data-testid="regex-highlight">
             {segments.map((s, i) => {
@@ -246,7 +269,20 @@ export default function RegexTesterWorkbench() {
         </div>
 
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">{mode === 'split' ? 'Split parts' : 'Match details'}</div>
+          <div className="flex items-center gap-1 mb-1">
+            <div className="text-[10px] uppercase tracking-wide text-slate-500 flex-1">{mode === 'split' ? 'Split parts' : 'Match details'}</div>
+            {mode !== 'split' && matches.length > 0 && (
+              <>
+                <select value={exportFmt} onChange={(e) => setExportFmt(e.target.value)} aria-label="Export format" className="bg-slate-900 border border-slate-800 rounded px-1 text-[10px] text-slate-300">
+                  <option value="json">JSON</option><option value="csv">CSV</option><option value="lines">Matches, one per line</option><option value="unique">Unique matches</option>
+                </select>
+                <button onClick={() => copy('export', exportText())} title="Copy the match list in the chosen format" className="p-1 bg-slate-800 rounded hover:bg-slate-700 text-gray-300">
+                  {copied === 'export' ? <Check size={11} /> : <Copy size={11} />}
+                </button>
+                <button onClick={downloadMatches} title="Download the match list in the chosen format" className="p-1 bg-slate-800 rounded hover:bg-slate-700 text-gray-300"><Download size={11} /></button>
+              </>
+            )}
+          </div>
           <div className="bg-slate-950 border border-slate-800 rounded p-2 max-h-48 overflow-auto text-xs font-mono">
             {mode === 'split' ? (
               result.split
@@ -272,7 +308,7 @@ export default function RegexTesterWorkbench() {
             )}
           </div>
 
-          <div className="text-[10px] uppercase tracking-wide text-slate-500 mt-2 mb-1">Replace</div>
+          <div className="text-[10px] uppercase tracking-wide text-slate-500 mt-1.5 mb-1">Replace</div>
           <input
             value={replacement}
             onChange={(e) => setReplacement(e.target.value)}
@@ -287,7 +323,7 @@ export default function RegexTesterWorkbench() {
         </div>
       </div>
 
-      <details className="mt-3" open>
+      <details className="mt-2">
         <summary className="cursor-pointer text-[11px] text-slate-400 hover:text-gray-200">Explanation</summary>
         <div className="mt-2 bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono max-h-56 overflow-auto" data-testid="regex-explain">
           {explanation.error && <div className="text-amber-300">Cannot explain: {explanation.error}</div>}
@@ -295,7 +331,7 @@ export default function RegexTesterWorkbench() {
         </div>
       </details>
 
-      <details className="mt-3">
+      <details className="mt-2">
         <summary className="cursor-pointer text-[11px] text-slate-400 hover:text-gray-200">Test cases ({cases.length})</summary>
         <div className="mt-2 space-y-1">
           {cases.map((c, i) => {
@@ -319,7 +355,7 @@ export default function RegexTesterWorkbench() {
         </div>
       </details>
 
-      <details className="mt-3">
+      <details className="mt-2">
         <summary className="cursor-pointer text-[11px] text-slate-400 hover:text-gray-200">Code generator</summary>
         <div className="mt-2">
           <div className="flex items-center gap-2 mb-1">
@@ -335,11 +371,11 @@ export default function RegexTesterWorkbench() {
         </div>
       </details>
 
-      <details className="mt-3">
-        <summary className="cursor-pointer text-[11px] text-slate-400 hover:text-gray-200">Quick reference</summary>
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[11px] text-slate-400 hover:text-gray-200">Quick reference (click to append)</summary>
         <div className="mt-2 grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(10rem,1fr))] text-[11px]">
-          {CHEATS.map(([tok, desc]) => (
-            <div key={tok} className="flex gap-2"><code className="text-cyan-300 min-w-[4.5rem]">{tok}</code><span className="text-slate-500">{desc}</span></div>
+          {CHEATS.map(([tok, desc, ins = tok]) => (
+            <button key={tok} onClick={() => setPattern((p) => insertToken(p, ins))} title={`Append ${tok} to the pattern`} className="flex gap-2 text-left hover:bg-slate-900 rounded px-0.5"><code className="text-cyan-300 min-w-[4.5rem]">{tok}</code><span className="text-slate-500">{desc}</span></button>
           ))}
         </div>
       </details>
