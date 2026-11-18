@@ -1271,7 +1271,7 @@ ADB and Fastboot share the **Android** tool (tabs **ADB** / **Fastboot**; the si
     toolId: 'dfu',
     category: 'programmers',
     title: 'WebUSB DFU Flasher — STM32 & DfuSe Firmware Download',
-    summary: 'Flash firmware onto microcontrollers with USB DFU 1.1 and ST DfuSe bootloaders directly from the browser: layout-aware sector erase, DFU suffix check, .bin / .dfu / .hex files, read-back and verify, alt-setting selection, and detach to DFU mode.',
+    summary: 'Flash firmware onto microcontrollers with USB DFU 1.1 and ST DfuSe bootloaders directly from the browser: layout-aware sector erase, DFU suffix check, .bin / .dfu / .hex files, read-back, verify and compare-with-file, .dfu export, vector-table sanity check, dfu-util command export, alt-setting selection, and detach to DFU mode.',
     tags: ['DFU', 'DfuSe', 'STM32', 'Firmware', 'WebUSB', 'Bootloader', 'Flasher', 'GD32', 'ARM'],
     readTime: '16 min read',
     content: `
@@ -1332,12 +1332,16 @@ That means a base of \`0x08000000\` and sectors of 4 x 16 KB, 1 x 64 KB and 7 x 
    - The Device panel shows **Interface**, **Transfer** size, **DFU ver** and **Mode** (**DfuSe (ST)** or **DFU 1.1**). If the device has several alternate settings (internal flash, option bytes, external flash...), pick one in **Memory / alt-setting**; the sector count and address range of the selected one are shown, and **Target flash address** and the read length default to its start and size.
 3. **Select Firmware File:**
    - Click **Load .bin / .dfu / .hex** and choose a raw binary (\`.bin\`), an Intel HEX file (\`.hex\`, which supplies its own start address), or a structured ST DfuSe image (\`.dfu\` / \`.dfuse\`). If the file has a DFU suffix, its CRC and target VID:PID are shown; a mismatch with the connected device prompts a confirmation. **Clear** unloads the file.
+   - Under the file name the tool shows extra checks. For a raw image whose first two words look like a Cortex-M vector table (stack pointer in RAM, odd reset vector) it prints them and warns if the reset vector lies outside the image or the selected memory (a sign it was linked for another address). Other data is not checked. On a device with a sector layout it also shows an **Erase plan** (how many sectors and bytes will be erased, or why the image does not fit).
+   - **Save as .dfu** (raw \`.bin\` / \`.hex\` only) packs the loaded image and its target address into a standard DfuSe container with a DFU suffix and downloads it. If a device is connected, the suffix carries its VID:PID and the selected alt setting; otherwise it uses wildcard IDs (\`ffff:ffff\`).
    - For a \`.bin\` on a DfuSe device, set the **Target flash address** (defaults to the start of the selected memory, \`0x08000000\` on STM32). Erasing then works in this order: the device's own sector layout if it reported one (the **Erase page size** box is hidden); otherwise the **Erase page size** you enter (STM32F1: 1024 or 2048); otherwise the explicit **Mass erase** option. If none applies the flash is refused rather than guessed. A \`.dfu\` file carries its own addresses and alternate-setting targets.
 4. **Flash:**
    - Choose the options: **Verify after write (read back)** (on by default), **Jump to application after flash** (on by default), and **Mass erase (wipes the whole flash; asks to confirm)**, which wipes the whole flash after a confirmation and is only used when the device reported no sector layout.
    - Click **Flash Firmware**. The tool erases, then streams blocks of the interface's transfer size (read from the DFU functional descriptor, 1024 bytes if absent) with \`DFU_DNLOAD\`, polling \`DFU_GETSTATUS\` between blocks, and runs the manifestation phase. On DfuSe, **Verify** then reads each written range back with \`DFU_UPLOAD\` and compares it, naming the first differing address on a mismatch. Plain DFU 1.1 downloads have no read-back verification.
-5. **Read back (optional):**
+5. **Read back or compare (optional):**
+   - **Compare with file** reads the device back over the loaded file's range(s) and reports the first differing address, without writing anything. It needs a DfuSe device or a device with a reported layout.
    - **Read length (bytes)**, a **From address** field (DfuSe) and **Read device to .bin** dump the device with \`DFU_UPLOAD\` to a file named like \`dfu-read-<address>-<length>.bin\`. The read stops at the requested length or at the first short packet, so a protected device may return less than you asked for.
+   - The collapsible **dfu-util equivalent** section shows the matching \`dfu-util\` command lines (\`-d vid:pid -a alt -D file -s addr:leave\` to flash, \`-U file -s addr:length\` to read) with **Copy** buttons. It is only text for the CLI tool; this page never runs it.
 6. **Reboot to Application:**
    - With **Jump to application after flash** ticked, the tool sends the DfuSe leave sequence (set address plus a zero-length download) and the device starts the new firmware. Untick it to stay in DFU mode, for example to flash another alt setting. If a plain DFU device does not restart by itself, tie BOOT0 back to GND and press reset. **Disconnect** just releases the device.
 
@@ -1345,9 +1349,12 @@ That means a base of \`0x08000000\` and sectors of 4 x 16 KB, 1 x 64 KB and 7 x 
 
 ### 4. Implementation & Architecture
 
+Similar tools: dfu-util (CLI), STM32CubeProgrammer and the legacy ST DfuSe Demo (GUI), dfuse-pack (.dfu packer). This page covers download, upload, verify and .dfu packing in the browser; it does not edit option bytes or run on non-WebUSB browsers.
+
 - **Driver:** [\`src/utils/dfuDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/dfuDriver.js) — USB DFU 1.1 / DfuSe driver: state machine polling, DFU interface and functional-descriptor discovery, DfuSe memory-layout parsing and sector-erase planning, DFU suffix and DfuSe image parsing, block chunking, upload, verify, leave and detach.
 - **Workbench:** [\`src/components/tools/DfuFlasher.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/DfuFlasher.jsx) — device panel with alt-setting picker, firmware loader (.bin / .dfu / .hex) with DFU-suffix check, address/page-size inputs, erase/verify/leave options, read-back, progress bar and session log.
-- **Tests:** [\`tests/dfuDriver.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/dfuDriver.test.js).
+- **Helpers:** [\`src/utils/dfuExtras.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/dfuExtras.js) — .dfu container writer, vector-table check, erase-plan summary, dfu-util command builder. The DFU suffix signature is written as the standard bytes \`55 46 44\` ("UFD"); the reader accepts that and the reversed order.
+- **Tests:** [\`tests/dfuExtras.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/dfuExtras.test.js), [\`tests/dfuDriver.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/dfuDriver.test.js).
 `
   }
 ];

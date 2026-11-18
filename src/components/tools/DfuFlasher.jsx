@@ -1,7 +1,8 @@
 import React, { useState, useRef, useCallback } from 'react';
 import {
   Usb,
-  Download,
+  Package,
+  Copy,
   Cpu,
   AlertTriangle,
   CheckCircle2,
@@ -20,6 +21,12 @@ import {
   parseDfuSuffix,
   parseDfuSeImage
 } from '../../utils/dfuDriver';
+import {
+  buildDfuSeFile,
+  inspectCortexMImage,
+  summarizeErasePlan,
+  buildDfuUtilCommand
+} from '../../utils/dfuExtras';
 import { parseIntelHex } from '../../utils/firmwareParser';
 import StatusBadge from '../common/StatusBadge';
 
@@ -404,20 +411,115 @@ export default function DfuFlasher() {
   const stLikely = ifaceInfo?.bcdDFU === 0x011a;
   const needsAddress = firmware && !firmware.dfuse.isDfuSe && (stLikely || Boolean(region));
 
+  // --- Extras: image list, inspection, verify-only, .dfu export, CLI command ---
+  const parsedTarget = parseInt(targetAddress, 16);
+  const currentElements = () => {
+    if (!firmware) return [];
+    if (firmware.dfuse.isDfuSe) return firmware.dfuse.targets.flatMap((t) => t.elements);
+    return Number.isFinite(parsedTarget) ? [{ address: parsedTarget, data: firmware.payload }] : [];
+  };
+
+  const inspection =
+    firmware && !firmware.dfuse.isDfuSe && Number.isFinite(parsedTarget)
+      ? inspectCortexMImage(firmware.payload, parsedTarget, region)
+      : null;
+  const erasePlan =
+    firmware && region && !firmware.dfuse.isDfuSe && Number.isFinite(parsedTarget)
+      ? summarizeErasePlan(region.sectors, parsedTarget, firmware.payload.length)
+      : null;
+
+  const download = (bytes, name) => {
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const handleExportDfu = () => {
+    try {
+      const els = currentElements();
+      if (!els.length) throw new Error('Enter a valid target address (hex) first.');
+      const bytes = buildDfuSeFile(els, {
+        alternate: selectedAlt?.alternate ?? 0,
+        vid: device?.vendorId,
+        pid: device?.productId
+      });
+      const base = (firmware.name || 'firmware').replace(/\.[^.]+$/, '');
+      download(bytes, `${base}.dfu`);
+      addLog(
+        `Exported ${base}.dfu (${bytes.length} bytes, ${els.length} element(s)${device ? ', suffix targets the connected device' : ', wildcard VID/PID'}).`,
+        'ok'
+      );
+    } catch (err) {
+      addLog(`Export failed: ${err.message}`, 'err');
+    }
+  };
+
+  const handleVerifyOnly = async () => {
+    if (!dfu || !firmware) return;
+    const els = currentElements();
+    if (!els.length) {
+      addLog('Enter a valid target address (hex) first.', 'err');
+      return;
+    }
+    setIsReading(true);
+    setProgress(0);
+    try {
+      for (const el of els) {
+        addLog(`Comparing device with file @ 0x${el.address.toString(16)} (${el.data.length} bytes)…`, 'info');
+        const v = await dfu.verify(el.data, { address: el.address });
+        if (!v.ok) {
+          throw new Error(`Differs at 0x${(el.address + v.mismatchOffset).toString(16)} (offset ${v.mismatchOffset})`);
+        }
+      }
+      setProgress(100);
+      setStatus('online');
+      setStatusMsg('Device contents match the loaded file.');
+      addLog('✓ Device contents match the loaded file.', 'ok');
+    } catch (err) {
+      setStatus('warning');
+      setStatusMsg(`Compare: ${err.message}`);
+      addLog(`✗ Compare: ${err.message}`, 'err');
+    } finally {
+      setIsReading(false);
+    }
+  };
+
+  const cliText = (upload) =>
+    buildDfuUtilCommand({
+      vid: device?.vendorId,
+      pid: device?.productId,
+      alt: selectedAlt?.alternate ?? 0,
+      address: upload ? parseInt(readAddress, 16) : parsedTarget,
+      fileName: upload ? 'read.bin' : firmware?.name,
+      leave: leaveAfter,
+      dfuse: Boolean(dfu?.dfuse || region || stLikely) && !(firmware?.dfuse?.isDfuSe && !upload),
+      upload,
+      length: parseInt(readLength, 10)
+    });
+  const copyCli = async (upload) => {
+    const text = cliText(upload);
+    try {
+      await navigator.clipboard.writeText(text);
+      addLog(`Copied (for the dfu-util CLI, not run here): ${text}`, 'ok');
+    } catch {
+      addLog(`dfu-util equivalent: ${text}`, 'info');
+    }
+  };
+
+  const busy = isFlashing || isReading;
+  const inputCls =
+    'w-full px-2 py-1 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500';
+  const btnCls =
+    'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-600/50 text-slate-200 text-xs font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed';
+
   return (
-    <div className="w-full max-w-5xl mx-auto p-4 space-y-4 text-slate-200">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-cyan-950/60 border border-cyan-500/30">
-            <Download className="w-6 h-6 text-cyan-400" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-400">
-              USB DFU 1.1 &amp; ST DfuSe firmware download — STM32, nRF, and any DFU-class device
-            </p>
-          </div>
-        </div>
+    <div className="space-y-2 text-slate-200">
+      {/* Status bar */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-[11px] text-slate-400 flex-1 min-w-0 break-words">{statusMsg}</p>
         <StatusBadge
           status={status}
           label={status === 'online' ? 'DFU' : status === 'connecting' ? 'LINK' : 'IDLE'}
@@ -427,8 +529,8 @@ export default function DfuFlasher() {
       </div>
 
       {!webUsbAvailable && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-950/40 border border-amber-500/30 text-amber-300 text-sm">
-          <ShieldAlert className="w-5 h-5 shrink-0" />
+        <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-950/40 border border-amber-500/30 text-amber-300 text-xs">
+          <ShieldAlert className="w-4 h-4 shrink-0" />
           <span>
             WebUSB isn&apos;t available here. Use a Chromium browser (Chrome, Edge, Opera) served over
             HTTPS or localhost.
@@ -436,56 +538,51 @@ export default function DfuFlasher() {
         </div>
       )}
 
-      {/* Connection panel */}
-      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-3">
-        <div className="flex items-center gap-2">
-          <Usb className="w-4 h-4 text-cyan-400" />
-          <span className="text-sm font-semibold text-slate-300">Device</span>
+      {/* Device */}
+      <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-700/50 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Usb className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="text-xs font-semibold text-slate-300">Device</span>
+          <div className="flex gap-2 ml-auto flex-wrap">
+            {!device ? (
+              <button
+                onClick={handleConnect}
+                disabled={!webUsbAvailable || status === 'connecting'}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-cyan-600/80 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold transition"
+              >
+                {status === 'connecting' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />}
+                Select DFU Device
+              </button>
+            ) : (
+              <button
+                onClick={handleDisconnect}
+                disabled={busy}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-900/60 hover:bg-rose-800 border border-rose-500/30 text-rose-200 text-xs font-semibold transition disabled:opacity-40"
+              >
+                <Power className="w-3.5 h-3.5" />
+                Disconnect
+              </button>
+            )}
+            {ifaceInfo?.runtimeOnly && (
+              <button
+                onClick={handleDetach}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-amber-700/70 hover:bg-amber-600 text-white text-xs font-semibold transition"
+              >
+                <Power className="w-3.5 h-3.5" />
+                Detach to DFU mode
+              </button>
+            )}
+          </div>
         </div>
-        <p className="text-xs text-slate-400">{statusMsg}</p>
-        <div className="flex gap-2">
-          {!device ? (
-            <button
-              onClick={handleConnect}
-              disabled={!webUsbAvailable || status === 'connecting'}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600/80 hover:bg-cyan-500 disabled:opacity-40 text-white text-sm font-semibold transition"
-            >
-              {status === 'connecting' ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Usb className="w-4 h-4" />
-              )}
-              Select DFU Device
-            </button>
-          ) : (
-            <button
-              onClick={handleDisconnect}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rose-900/60 hover:bg-rose-800 border border-rose-500/30 text-rose-200 text-sm font-semibold transition"
-            >
-              <Power className="w-4 h-4" />
-              Disconnect
-            </button>
-          )}
-        </div>
-
-        {ifaceInfo?.runtimeOnly && (
-          <button
-            onClick={handleDetach}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-700/70 hover:bg-amber-600 text-white text-sm font-semibold transition"
-          >
-            <Power className="w-4 h-4" />
-            Detach to DFU mode
-          </button>
-        )}
 
         {ifaceInfo && !ifaceInfo.runtimeOnly && ifaceInfo.alternates?.length > 0 && (
-          <label className="block text-xs text-slate-400 space-y-1">
+          <label className="block text-[11px] text-slate-400 space-y-1">
             <span>Memory / alt-setting</span>
             <select
               value={altIndex}
               onChange={handleAltChange}
-              disabled={isFlashing}
-              className="w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-xs"
+              disabled={busy}
+              className={inputCls}
             >
               {ifaceInfo.alternates.map((a, i) => (
                 <option key={i} value={i}>
@@ -494,10 +591,10 @@ export default function DfuFlasher() {
               ))}
             </select>
             {selectedAlt?.layoutError && (
-              <span className="text-rose-400">Layout not understood: {selectedAlt.layoutError}</span>
+              <span className="block text-rose-400">Layout not understood: {selectedAlt.layoutError}</span>
             )}
             {region && (
-              <span className="text-slate-500">
+              <span className="block text-slate-500">
                 {region.sectors.length} sector(s), 0x{region.start.toString(16)}–0x{(region.end - 1).toString(16)}
               </span>
             )}
@@ -505,64 +602,68 @@ export default function DfuFlasher() {
         )}
 
         {ifaceInfo && (
-          <div className="grid grid-cols-2 @sm:grid-cols-4 gap-2 text-xs pt-2">
+          <div className="grid grid-cols-2 @md:grid-cols-5 gap-1.5 text-[11px]">
+            <InfoCell label="VID:PID" value={`${device?.vendorId?.toString(16).padStart(4, '0')}:${device?.productId?.toString(16).padStart(4, '0')}`} />
             <InfoCell label="Interface" value={`#${ifaceInfo.interfaceNumber}`} />
             <InfoCell label="Transfer" value={`${ifaceInfo.transferSize} B`} />
-            <InfoCell
-              label="DFU ver"
-              value={ifaceInfo.bcdDFU ? `0x${ifaceInfo.bcdDFU.toString(16)}` : '1.1'}
-            />
+            <InfoCell label="DFU ver" value={ifaceInfo.bcdDFU ? `0x${ifaceInfo.bcdDFU.toString(16)}` : '1.1'} />
             <InfoCell label="Mode" value={stLikely || region ? 'DfuSe (ST)' : 'DFU 1.1'} />
           </div>
         )}
       </div>
 
-      {/* Firmware panel */}
-      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-3">
-        <div className="flex items-center gap-2">
-          <FileCode className="w-4 h-4 text-amber-400" />
-          <span className="text-sm font-semibold text-slate-300">Firmware</span>
-        </div>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".bin,.dfu,.dfuse,.hex"
-          onChange={handleFile}
-          className="hidden"
-        />
+      {/* Firmware */}
+      <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-700/50 space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/50 text-slate-200 text-sm font-semibold transition"
-          >
-            <FileCode className="w-4 h-4" />
-            Load .bin / .dfu / .hex
-          </button>
-          {firmware && (
-            <button
-              onClick={() => {
-                setFirmware(null);
-                setProgress(0);
-              }}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800/60 hover:bg-slate-700 border border-slate-600/40 text-slate-400 text-xs transition"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Clear
+          <FileCode className="w-3.5 h-3.5 text-amber-400" />
+          <span className="text-xs font-semibold text-slate-300">Firmware</span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".bin,.dfu,.dfuse,.hex"
+            onChange={handleFile}
+            className="hidden"
+            aria-label="Firmware file"
+          />
+          <div className="flex gap-1.5 ml-auto flex-wrap">
+            <button onClick={() => fileInputRef.current?.click()} className={btnCls}>
+              <FileCode className="w-3.5 h-3.5" />
+              Load .bin / .dfu / .hex
             </button>
-          )}
+            {firmware && !firmware.dfuse.isDfuSe && (
+              <button
+                onClick={handleExportDfu}
+                className={btnCls}
+                title="Pack the loaded image into a DfuSe .dfu file (with DFU suffix) and download it"
+              >
+                <Package className="w-3.5 h-3.5" />
+                Save as .dfu
+              </button>
+            )}
+            {firmware && (
+              <button
+                onClick={() => {
+                  setFirmware(null);
+                  setProgress(0);
+                }}
+                className={`${btnCls} !text-slate-400`}
+                title="Unload the firmware file"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Clear
+              </button>
+            )}
+          </div>
         </div>
 
         {firmware && (
-          <div className="text-xs text-slate-300 space-y-1">
+          <div className="text-[11px] text-slate-300 space-y-0.5">
             <div>
               <span className="text-slate-500">File:</span> {firmware.name}{' '}
               <span className="text-slate-500">({firmware.payload.length} bytes payload)</span>
             </div>
             {firmware.suffix.present && (
-              <div
-                className={firmware.suffix.valid ? 'text-emerald-400' : 'text-rose-400'}
-              >
+              <div className={firmware.suffix.valid ? 'text-emerald-400' : 'text-rose-400'}>
                 DFU suffix {firmware.suffix.valid ? 'CRC OK' : 'CRC MISMATCH'} • targets{' '}
                 {firmware.suffix.idVendor.toString(16).padStart(4, '0')}:
                 {firmware.suffix.idProduct.toString(16).padStart(4, '0')}
@@ -571,8 +672,20 @@ export default function DfuFlasher() {
             {firmware.dfuse.isDfuSe && (
               <div className="text-cyan-400">
                 DfuSe container • {firmware.dfuse.targets.length} target(s),{' '}
-                {firmware.dfuse.targets.reduce((a, t) => a + t.elements.length, 0)} element(s) —
-                addresses embedded in file
+                {firmware.dfuse.targets.reduce((a, t) => a + t.elements.length, 0)} element(s) — addresses embedded in file
+              </div>
+            )}
+            {inspection?.findings.map((f, i) => (
+              <div key={i} className={f.level === 'warn' ? 'text-amber-400' : 'text-slate-500'}>
+                {f.level === 'warn' ? '⚠ ' : ''}
+                {f.msg}
+              </div>
+            ))}
+            {erasePlan && (
+              <div className={erasePlan.error ? 'text-rose-400' : 'text-slate-400'}>
+                {erasePlan.error
+                  ? `Erase plan: ${erasePlan.error}`
+                  : `Erase plan: ${erasePlan.sectors} sector(s), ${erasePlan.bytes} bytes will be erased.`}
               </div>
             )}
           </div>
@@ -580,28 +693,28 @@ export default function DfuFlasher() {
 
         {/* Address controls for raw .bin on ST DfuSe bootloaders */}
         {needsAddress && (
-          <div className="grid @sm:grid-cols-2 gap-3 pt-1">
-            <label className="text-xs text-slate-400 space-y-1">
+          <div className="grid @md:grid-cols-2 gap-2">
+            <label className="text-[11px] text-slate-400 space-y-1">
               <span>Target flash address</span>
               <input
                 value={targetAddress}
                 onChange={(e) => setTargetAddress(e.target.value)}
-                className="w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-sm"
+                className={inputCls}
                 placeholder="0x08000000"
               />
             </label>
             {!region && (
-              <label className="text-xs text-slate-400 space-y-1">
-                <span>Erase page size (bytes; only used when the device reports no layout)</span>
+              <label className="text-[11px] text-slate-400 space-y-1">
+                <span>Erase page size (bytes; only if the device reports no layout)</span>
                 <input
                   value={erasePageSize}
                   onChange={(e) => setErasePageSize(e.target.value)}
-                  className="w-full px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-sm"
+                  className={inputCls}
                   placeholder="2048"
                 />
               </label>
             )}
-            <div className="@sm:col-span-2 flex items-start gap-2 text-[11px] text-slate-500">
+            <div className="@md:col-span-2 flex items-start gap-1.5 text-[11px] text-slate-500">
               <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               {region
                 ? 'Erase uses the device-reported sector layout: only sectors overlapping the image are erased.'
@@ -611,12 +724,12 @@ export default function DfuFlasher() {
         )}
       </div>
 
-      {/* Flash action + progress */}
-      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-3">
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+      {/* Actions */}
+      <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-700/50 space-y-2">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400">
           <label className="flex items-center gap-1.5">
             <input type="checkbox" checked={verifyAfter} onChange={(e) => setVerifyAfter(e.target.checked)} className="accent-cyan-500" />
-            Verify after write (read back)
+            Verify after write
           </label>
           <label className="flex items-center gap-1.5">
             <input type="checkbox" checked={leaveAfter} onChange={(e) => setLeaveAfter(e.target.checked)} className="accent-cyan-500" />
@@ -624,85 +737,95 @@ export default function DfuFlasher() {
           </label>
           {/* with a reported sector layout the flasher erases exactly the sectors the image covers,
               so mass erase does not apply (the driver only mass-erases when no layout is known) */}
-          <label className={`flex items-center gap-1.5 ${region ? 'text-slate-500' : 'text-rose-300'}`}
-            title={region ? 'Not used: this device reports its sector layout, so only the sectors the image covers are erased.' : undefined}>
+          <label
+            className={`flex items-center gap-1.5 ${region ? 'text-slate-500' : 'text-rose-300'}`}
+            title={region ? 'Not used: this device reports its sector layout, so only the sectors the image covers are erased.' : undefined}
+          >
             <input type="checkbox" checked={massErase && !region} disabled={!!region} onChange={(e) => setMassErase(e.target.checked)} className="accent-rose-500" />
-            {region ? 'Mass erase (not needed: per-sector erase from the device layout)' : 'Mass erase (wipes the whole flash; asks to confirm)'}
+            {region ? 'Mass erase (not needed: per-sector erase)' : 'Mass erase (wipes whole flash; asks to confirm)'}
           </label>
         </div>
-        <div className="flex flex-wrap items-end gap-2 text-xs text-slate-400">
+
+        <button
+          onClick={handleFlash}
+          disabled={!dfu || !firmware || busy || ifaceInfo?.runtimeOnly}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-amber-600/90 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold transition"
+        >
+          {isFlashing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+          {isFlashing ? `Flashing… ${progress}%` : 'Flash Firmware'}
+        </button>
+
+        <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+          <div className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 transition-all duration-150" style={{ width: `${progress}%` }} />
+        </div>
+
+        <div className="flex flex-wrap items-end gap-2 text-[11px] text-slate-400">
           <label className="space-y-1">
             <span>Read length (bytes)</span>
-            <input
-              value={readLength}
-              onChange={(e) => setReadLength(e.target.value)}
-              className="w-32 block px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-sm"
-            />
+            <input value={readLength} onChange={(e) => setReadLength(e.target.value)} className={`${inputCls} w-28 block`} />
           </label>
           {(region || dfu?.dfuse) && (
             <label className="space-y-1">
               <span>From address</span>
-              <input
-                value={readAddress}
-                onChange={(e) => setReadAddress(e.target.value)}
-                className="w-32 block px-2 py-1.5 rounded bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-sm"
-              />
+              <input value={readAddress} onChange={(e) => setReadAddress(e.target.value)} className={`${inputCls} w-28 block`} />
             </label>
           )}
           <button
             onClick={handleRead}
-            disabled={!dfu || ifaceInfo?.runtimeOnly || isFlashing || isReading}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/50 text-slate-200 text-sm font-semibold transition disabled:opacity-40"
+            disabled={!dfu || ifaceInfo?.runtimeOnly || busy}
+            className={btnCls}
           >
-            {isReading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            {isReading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
             Read device to .bin
           </button>
-        </div>
-        <button
-          onClick={handleFlash}
-          disabled={!dfu || !firmware || isFlashing || isReading || ifaceInfo?.runtimeOnly}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-amber-600/90 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold transition"
-        >
-          {isFlashing ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <Zap className="w-5 h-5" />
-          )}
-          {isFlashing ? `Flashing… ${progress}%` : 'Flash Firmware'}
-        </button>
-
-        <div className="h-2.5 w-full rounded-full bg-slate-800 overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 transition-all duration-150"
-            style={{ width: `${progress}%` }}
-          />
+          <button
+            onClick={handleVerifyOnly}
+            disabled={!dfu || !firmware || ifaceInfo?.runtimeOnly || busy || !(dfu?.dfuse || region)}
+            className={btnCls}
+            title="Read the device back and compare with the loaded file, without writing anything (DfuSe only)"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Compare with file
+          </button>
         </div>
 
-        <div className="flex items-start gap-2 text-[11px] text-slate-500">
+        <details className="text-[11px] text-slate-400">
+          <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-300">dfu-util equivalent</summary>
+          <div className="mt-1.5 space-y-1.5">
+            <p className="text-slate-500">
+              Text for the dfu-util command-line tool. This app does not run it; copy it to a terminal if you want the CLI to repeat the operation.
+            </p>
+            <code className="block p-1.5 rounded bg-slate-950 border border-slate-800 font-mono text-cyan-300 break-all">{cliText(false)}</code>
+            <code className="block p-1.5 rounded bg-slate-950 border border-slate-800 font-mono text-cyan-300 break-all">{cliText(true)}</code>
+            <div className="flex gap-1.5">
+              <button onClick={() => copyCli(false)} className={btnCls} title="Copy the download command">
+                <Copy className="w-3.5 h-3.5" /> Copy flash
+              </button>
+              <button onClick={() => copyCli(true)} className={btnCls} title="Copy the read command">
+                <Copy className="w-3.5 h-3.5" /> Copy read
+              </button>
+            </div>
+          </div>
+        </details>
+
+        <div className="flex items-start gap-1.5 text-[11px] text-slate-500">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
-          DFU writes directly to flash. A wrong address, page size, or firmware image can brick the
-          device. Verify your target before flashing.
+          DFU writes directly to flash. A wrong address, page size, or firmware image can brick the device. Verify your target before flashing.
         </div>
       </div>
 
       {/* Log */}
-      <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
+      <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 space-y-1">
         <div className="flex items-center gap-2">
-          <Cpu className="w-4 h-4 text-slate-400" />
-          <span className="text-sm font-semibold text-slate-300">Session Log</span>
+          <Cpu className="w-3.5 h-3.5 text-slate-400" />
+          <span className="text-xs font-semibold text-slate-300">Session Log</span>
         </div>
-        <div className="font-mono text-xs space-y-0.5 max-h-56 overflow-y-auto">
+        <div className="font-mono text-[11px] space-y-0.5 max-h-48 overflow-y-auto">
           {log.length === 0 && <div className="text-slate-600">No activity yet.</div>}
           {log.map((entry, i) => (
             <div
               key={i}
-              className={
-                entry.kind === 'err'
-                  ? 'text-rose-400'
-                  : entry.kind === 'ok'
-                    ? 'text-emerald-400'
-                    : 'text-slate-400'
-              }
+              className={entry.kind === 'err' ? 'text-rose-400' : entry.kind === 'ok' ? 'text-emerald-400' : 'text-slate-400'}
             >
               <span className="text-slate-600">{entry.ts}</span> {entry.msg}
             </div>
@@ -715,7 +838,7 @@ export default function DfuFlasher() {
 
 function InfoCell({ label, value }) {
   return (
-    <div className="px-2 py-1.5 rounded bg-slate-950/60 border border-slate-800">
+    <div className="px-2 py-1 rounded bg-slate-950/60 border border-slate-800">
       <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
       <div className="text-cyan-300 font-mono">{value}</div>
     </div>
