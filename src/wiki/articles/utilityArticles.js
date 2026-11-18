@@ -791,13 +791,17 @@ When the device sends an input report, WebHID hands you the report id and a \`Da
 | :--- | :--- |
 | **OPEN HID DEVICE** | Browser picker; opens the device and subscribes to its input reports. **CLOSE** disconnects. The count of already-allowed devices updates when devices are plugged in or removed. |
 | **DESCRIPTOR DECODER** | Needs no device. Paste a HID report descriptor as hex (space, comma or \`0x\` separated, a C array with comments, or \`usbhid-dump\` / \`lsusb -v\` style lines with offset prefixes; prose header lines are ignored) and press **DECODE**. It shows the byte count, the top-level usages, whether report IDs are used, each report's layout with its fields, and an item-by-item listing. A malformed token is reported with its line number. Nothing is sent to any device. |
-| **LIVE INPUT** | The most recent report as raw hex and as decoded, named fields (array items such as pressed keys list the active usages). A report whose id is not declared in the device's descriptor is shown raw with a notice, rather than being decoded against the wrong layout. |
+| **LIVE INPUT** | The most recent report as raw hex and as decoded, named fields (array items such as pressed keys list the active usages). Bytes that changed since the previous report with the same id are highlighted in amber, which helps when reverse-engineering a vendor report. A report whose id is not declared in the device's descriptor is shown raw with a notice, rather than being decoded against the wrong layout. |
 | **REPORT DESCRIPTOR** | Every collection's input / output / feature reports with their sizes and fields (constant padding shows as \`pad\`). |
+| **REPORT LOG** | Every input report as a line with time since the first logged report, delta since the previous one, report id and hex, changed bytes highlighted. Filter by report id or by a hex substring; pause, copy the shown lines as text, download them as CSV (index, time, delta, id, length, hex) or clear. The last 500 reports are kept and the newest 200 shown. |
+| **Export (download icon)** | Next to CLOSE once a device is open: saves the vendor/product id, name and every collection's reports and fields (name, bit size, count, logical min/max) as JSON. No live data is included. |
 | **SEND REPORTS** | Pick an output report, enter hex bytes and press **SEND**; if the device exposes keyboard LED usages, toggle buttons for them appear. For feature reports, **GET** reads one and **SET** writes the hex bytes you typed (after a confirmation). A small log shows what was sent and received. |
 | **REPORT RATE** | Rate (Hz), mean interval, jitter, min, max and sample count over the last 3 seconds of input reports. |
 | **RECORD & PLAY BACK** | **RECORD** / **STOP** capture input reports with timing; **SAVE** downloads them as JSON and **OPEN** loads a saved file; **PLAY** feeds them back through the decoder with their original timing. Playback only drives the on-screen decoder; nothing is typed or clicked on your computer. |
 
 There is no simulated demo device: the tool needs a real HID device.
+
+Similar tools: HID Explorer (a WebHID device viewer), USB Device Tree Viewer and the Linux \`usbhid-dump\` / \`hidrd\` utilities cover descriptor and report viewing; this tool combines descriptor decoding, live logging and report sending in the browser. Limits: WebHID needs Chrome or Edge, and the browser hides the keyboard and mouse that the OS already uses, so those usually cannot be opened.
 
 ---
 
@@ -805,6 +809,7 @@ There is no simulated demo device: the tool needs a real HID device.
 
 - **Driver:** [\`src/utils/hidInspector.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/hidInspector.js) — pure functions: usage-page/usage naming, \`describeCollections\` to summarize the descriptor, \`readBits\` for LSB-first signed/unsigned bit extraction, and \`decodeReport\` to turn report bytes into named fields (handling both variable and array items).
 - **Workbench:** [\`src/components/tools/HidInspectorWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/HidInspectorWorkbench.jsx) subscribes to \`inputreport\` events and renders the decoded fields live.
+- **Log helpers:** [\`src/utils/hidLog.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/hidLog.js) — byte diffing, log filtering, CSV/text export and descriptor JSON export, tested in \`tests/hidLog.test.js\`.
 - **Tests:** [\`tests/hidInspector.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/hidInspector.test.js) decodes a boot mouse (buttons + signed motion) and a boot keyboard (modifiers + key array) from raw report bytes.
 
 ---

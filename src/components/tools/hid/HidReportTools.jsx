@@ -127,8 +127,8 @@ export default function HidReportTools({ device, info, meta, addTap, inject }) {
   };
 
   return (
-    <div className="grid grid-cols-1 @lg:grid-cols-2 gap-4 text-xs">
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+    <div className="grid grid-cols-1 @lg:grid-cols-2 gap-2 text-xs @lg:col-span-2">
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2">
         <div className="font-bold text-slate-200 flex items-center gap-1.5"><Send className="w-3.5 h-3.5 text-cyan-400" /> SEND REPORTS</div>
         {outputs.length ? (
           <div className="space-y-1.5">
@@ -175,7 +175,7 @@ export default function HidReportTools({ device, info, meta, addTap, inject }) {
         </div>
       </div>
 
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2">
         <div className="font-bold text-slate-200 flex items-center gap-1.5"><Gauge className="w-3.5 h-3.5 text-emerald-400" /> REPORT RATE</div>
         {rate ? (
           <div className="grid grid-cols-3 gap-1.5">

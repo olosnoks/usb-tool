@@ -5,7 +5,7 @@ import {
   Power,
   ShieldAlert,
   Activity,
-  Send
+  Download
 } from 'lucide-react';
 import {
   describeCollections,
@@ -18,6 +18,8 @@ import {
 import StatusBadge from '../common/StatusBadge';
 import HidReportTools from './hid/HidReportTools';
 import HidDescriptorDecoder from './hid/HidDescriptorDecoder';
+import HidReportLog from './hid/HidReportLog';
+import { diffBytes, deviceInfoJson } from '../../utils/hidLog';
 
 import { useSessionError } from '../../utils/sessionLog';
 
@@ -31,6 +33,7 @@ export default function HidInspectorWorkbench() {
   const reportMapRef = useRef({}); // reportId -> describedReport
   const listenerRef = useRef(null);
   const tapsRef = useRef(new Set());
+  const prevBytesRef = useRef({}); // reportId -> last bytes, for changed-byte highlighting
   // Subscribe to every input report (reportId, bytes, timestamp ms); returns the unsubscribe.
   const addTap = useCallback((fn) => { tapsRef.current.add(fn); return () => tapsRef.current.delete(fn); }, []);
 
@@ -70,7 +73,9 @@ export default function HidInspectorWorkbench() {
     for (const tap of tapsRef.current) tap(reportId, bytes, t);
     let fields = [];
     try { if (described) fields = decodeReport(described, dataView); } catch (e) { /* undecodable */ }
-    setLastReport({ reportId, hex: hexDump(bytes), fields, unknownId: !described });
+    const changed = diffBytes(prevBytesRef.current[reportId], bytes);
+    prevBytesRef.current[reportId] = Uint8Array.from(bytes);
+    setLastReport({ reportId, hex: hexDump(bytes), fields, unknownId: !described, changed });
   };
 
   const connect = async () => {
@@ -101,67 +106,68 @@ export default function HidInspectorWorkbench() {
     setInfo(null);
     setMeta(null);
     setLastReport(null);
+    prevBytesRef.current = {};
+  };
+
+  const exportInfo = () => {
+    const url = URL.createObjectURL(new Blob([deviceInfoJson(meta, info)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `hid-${(meta?.productName || 'device').replace(/\W+/g, '_')}-descriptor.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   useEffect(() => () => stopEverything(), []); // cleanup on unmount
 
   return (
-    <div className="space-y-4 font-mono text-xs">
+    <div className="space-y-2 font-mono text-xs">
 
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <p className="text-[11px] text-slate-400 max-w-3xl">
-              Inspect any HID device — keyboard, mouse, game controller, or a vendor gadget — and watch its input reports decode
-              live into named fields (buttons, axes, keys). Measure its report rate, record and play back reports, and send output
-              or feature reports (keyboard LEDs, vendor settings) when you choose to.
-            </p>
-          </div>
-          <StatusBadge status={device ? 'online' : 'offline'} label="HID" value={device ? 'Live' : 'Idle'} pulse={!!device} />
-        </div>
-
-        {!webHidAvailable && (
-          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200">
-            <ShieldAlert className="w-4 h-4 shrink-0" /> WebHID needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.
-          </div>
-        )}
-        {error && (
-          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 font-bold">
-            <ShieldAlert className="w-4 h-4 shrink-0" /> {error}
-          </div>
-        )}
-
-        <div className="pt-3 flex flex-wrap items-center gap-2">
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           {!device ? (
-            <>
-              <button onClick={connect} disabled={!webHidAvailable} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-xs font-bold disabled:opacity-40">
-                <Usb className="w-3.5 h-3.5" /> OPEN HID DEVICE
-              </button>
-            </>
+            <button onClick={connect} disabled={!webHidAvailable} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-xs font-bold disabled:opacity-40">
+              <Usb className="w-3.5 h-3.5" /> OPEN HID DEVICE
+            </button>
           ) : (
-            <button onClick={disconnect} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
+            <button onClick={disconnect} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
               <Power className="w-3.5 h-3.5" /> CLOSE
+            </button>
+          )}
+          {info && (
+            <button onClick={exportInfo} title="Download the device identity and decoded descriptor as JSON" aria-label="Export descriptor JSON" className="p-1.5 rounded border border-slate-700 text-slate-300 hover:border-cyan-500/50">
+              <Download className="w-3.5 h-3.5" />
             </button>
           )}
           {granted.length > 0 && !device && (
             <span className="text-[11px] text-slate-500">{granted.length} device(s) already allowed</span>
           )}
+          {meta && <span className="text-[11px] text-slate-500 truncate">{meta.vendorId?.toString(16).padStart(4, '0')}:{meta.productId?.toString(16).padStart(4, '0')} — {meta.productName || '(no name)'}</span>}
+          <span className="flex-1" />
+          <StatusBadge status={device ? 'online' : 'offline'} label="HID" value={device ? 'Live' : 'Idle'} pulse={!!device} />
         </div>
-        {meta && <p className="mt-2 text-[11px] text-slate-500">{meta.vendorId?.toString(16).padStart(4, '0')}:{meta.productId?.toString(16).padStart(4, '0')} — {meta.productName || '(no name)'}</p>}
+        {!webHidAvailable && (
+          <div className="mt-2 flex items-start gap-2 p-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200">
+            <ShieldAlert className="w-4 h-4 shrink-0" /> WebHID needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.
+          </div>
+        )}
+        {error && (
+          <div className="mt-2 flex items-start gap-2 p-2 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 font-bold">
+            <ShieldAlert className="w-4 h-4 shrink-0" /> {error}
+          </div>
+        )}
       </div>
 
       <HidDescriptorDecoder />
 
       {info && (
-        <div className="grid grid-cols-1 @lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 @lg:grid-cols-2 gap-2">
           {/* Live input */}
-          <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
+          <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2">
             <span className="font-bold text-slate-200 flex items-center gap-2"><Activity className="w-4 h-4 text-emerald-400" /> LIVE INPUT</span>
             {!lastReport ? (
               <p className="text-slate-500">Move / press the device to see reports…</p>
             ) : (
               <>
-                <div className="text-[11px] text-slate-500">Report {lastReport.reportId} — <span className="text-cyan-300">{lastReport.hex}</span></div>
+                <div className="text-[11px] text-slate-500">Report {lastReport.reportId} — {lastReport.hex.split(' ').map((b, bi) => <span key={bi} className={lastReport.changed?.includes(bi) ? 'text-amber-300 font-bold' : 'text-cyan-300'}>{b} </span>)}<span className="text-slate-600">(changed bytes highlighted)</span></div>
                 {lastReport.unknownId && (
                   <div className="text-[11px] text-amber-300">Report id {lastReport.reportId} is not in this device's descriptor, so it is shown raw and not decoded.</div>
                 )}
@@ -179,6 +185,8 @@ export default function HidInspectorWorkbench() {
             )}
           </div>
 
+          <HidReportLog addTap={addTap} />
+
           <HidReportTools
             device={device}
             info={info}
@@ -188,7 +196,7 @@ export default function HidInspectorWorkbench() {
           />
 
           {/* Report descriptor */}
-          <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
+          <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2">
             <span className="font-bold text-slate-200">REPORT DESCRIPTOR</span>
             {info.map((col, ci) => (
               <div key={ci} className="space-y-1 border-l-2 border-slate-800 pl-2">
