@@ -71,3 +71,47 @@ export function buildTelemetryCsv(samples, config = {}) {
   });
   return [head.map((h) => (/[",\n]/.test(h) ? `"${h.replace(/"/g, '""')}"` : h)).join(','), ...rows].join('\n');
 }
+
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+/**
+ * Classify a value against optional per-channel limits.
+ * cfg: { warnLow, warnHigh, alarmLow, alarmHigh } (any may be missing). Alarm wins over warn.
+ * Returns 'ok' | 'warn' | 'alarm'.
+ */
+export function thresholdState(value, cfg = {}) {
+  if (!Number.isFinite(value)) return 'ok';
+  const aH = num(cfg.alarmHigh), aL = num(cfg.alarmLow), wH = num(cfg.warnHigh), wL = num(cfg.warnLow);
+  if ((aH !== undefined && value >= aH) || (aL !== undefined && value <= aL)) return 'alarm';
+  if ((wH !== undefined && value >= wH) || (wL !== undefined && value <= wL)) return 'warn';
+  return 'ok';
+}
+
+/**
+ * Update rate (Hz) per channel from the timestamped sample log, using samples in the last windowMs.
+ * Needs at least 2 samples in the window; otherwise the channel is omitted (nothing invented).
+ */
+export function channelRates(samples, now, windowMs = 5000) {
+  const times = {};
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const s = samples[i];
+    if (now - s.t > windowMs) break;
+    for (const [k] of s.pairs) (times[k] ||= []).push(s.t);
+  }
+  const rates = {};
+  for (const [k, ts] of Object.entries(times)) {
+    const span = ts[0] - ts[ts.length - 1];
+    if (ts.length >= 2 && span > 0) rates[k] = ((ts.length - 1) * 1000) / span;
+  }
+  return rates;
+}
+
+/** Count of channels currently in each non-ok state. */
+export function countAlerts(channels, config = {}) {
+  let warn = 0, alarm = 0;
+  for (const [k, c] of Object.entries(channels)) {
+    const s = thresholdState(c.value, config[k]);
+    if (s === 'alarm') alarm++; else if (s === 'warn') warn++;
+  }
+  return { warn, alarm };
+}

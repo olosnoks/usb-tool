@@ -260,13 +260,17 @@ By default the scale is **auto-ranging**: the minimum and maximum are the lowest
 ### 2. The Panels
 
 - **Attitude Horizon**: an artificial horizon driven by the \`pitch\` and \`roll\` channels, with the current pitch/roll in degrees in its header.
-- **Circular Speedometer**: pick any channel from the dropdown (or click a metric card) to show it on the dial, with its value, unit, and observed MIN / MAX underneath. Before any data arrives it shows \`NO DATA\` / \`waiting for data\`.
-- **Live Telemetry Feeds**: one card per channel with the latest value, a sparkline of recent samples, the lowest and highest values seen (arrows down and up), and the name / unit / gauge min / gauge max fields. Click a card to put it on the speedometer.
+- **Gauge** (circular speedometer): pick any channel from the dropdown (or click a metric card) to show it on the dial, with its value, unit, and observed MIN / MAX underneath. The arc turns amber or red while that channel is past its warning or alarm limit. Before any data arrives it shows \`NO DATA\` / \`waiting for data\`.
+- **Live Telemetry Feeds**: one card per channel with the latest value, a sparkline of recent samples, the lowest and highest values seen (arrows down and up) and the update rate in Hz (measured over the last 5 seconds, shown only once at least two samples fall in that window). Open the card's **setup / limits** section to edit the name, unit, gauge min / gauge max and the four limits. Click a card to put it on the gauge.
 - **History length** (\`20 / 100 / 500 samples\`): how many points each sparkline keeps.
+- **Pause / Resume**: freezes the display (cards, gauge, horizon). Incoming samples are still recorded for CSV, but they are not applied to the cards, so min / max and sparklines skip them. Resume continues from the next received line.
+- **Clear**: forgets every channel and empties the CSV sample log (your names, units and limits are kept).
 - **CSV**: downloads every sample received (up to the tool's rolling log limit) as \`telemetry-<time>.csv\`, one row per line with an ISO timestamp column and one column per channel, using your names and units in the header. Disabled until data has arrived.
 - **RESET STATS**: collapses every channel's min and max to its current value, so the auto-range starts over.
 
-There are no warning or danger zones or peak-hold markers.
+**Limits**: each channel has four optional numeric limits: warn low, warn high, alarm low and alarm high. A value at or below a low limit, or at or above a high limit, marks the channel as warning (amber card) or alarm (red card, alarm wins). The toolbar shows how many channels are currently in warning or alarm. Limits are checked in the browser against received values only; they do not trigger any sound, notification or output to the device, and they are not saved between sessions. There are no peak-hold markers beyond the observed min / max.
+
+**Similar tools**: Serial Studio, Arduino Serial Plotter, SerialPlot and Grafana-style dashboards. Unlike those, this tool needs no install, but it has no custom frame parser, plot export or saved dashboard layouts.
 
 ---
 
