@@ -53,7 +53,7 @@ import DebugFeaturesPanel from '../src/components/tools/cmsis/DebugFeaturesPanel
 import { CmsisDapClient } from '../src/utils/cmsisDapDriver';
 
 // Layout & Core Tabs
-import Header from '../src/components/layout/Header';
+import { TaskbarTray } from '../src/components/layout/TaskbarControls';
 import Desktop from '../src/components/layout/Desktop';
 import TerminalDeck from '../src/components/tabs/TerminalTab';
 import FlasherTab from '../src/components/tabs/FlasherTab';
@@ -239,12 +239,8 @@ describe('UI Workbench Render Sanity Check', () => {
     expect(chefEl.type).not.toBe(duckyEl.type);
   });
 
-  it('renders Header without a wiki link (each tool window has its own) and a swatch-only theme picker', () => {
-    const html = renderToString(
-      <SerialProvider>
-        <Header activeTool="flasher" />
-      </SerialProvider>
-    );
+  it('renders the taskbar tray without a wiki link (each tool window has its own) and a swatch-only theme picker', () => {
+    const html = renderToString(<TaskbarTray onOpenCommandPalette={() => {}} />);
 
     expect(html).not.toContain('./wiki/');
     expect(html).toContain('aria-label="App colour theme"');

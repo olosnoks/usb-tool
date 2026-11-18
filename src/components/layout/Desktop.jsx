@@ -15,7 +15,8 @@ export default function Desktop({
   state, viewport, onViewport, renderTool, metaFor,
   onFocus, onMove, onResize, onMinimize, onToggleMaximize, onClose, onTile, onCascade, onCloseAll,
   onZoomStep, onToggleFit, onDuplicate, onSnap, onResetZoom,
-  onLaunch, onOpenPinouts, onOpenHardwareIntel, activeTool
+  onLaunch, onOpenPinouts, onOpenHardwareIntel, activeTool,
+  drawer, serialControls, tray
 }) {
   const ref = useRef(null);
   const rectRef = useRef({ left: 0, top: 0 });
@@ -110,10 +111,17 @@ export default function Desktop({
         ))}
       </div>
 
-      {/* Taskbar: Start button, one button per window, then tile / cascade / close-all */}
-      <div data-testid="taskbar" className="shrink-0 h-9 border-t border-slate-800 bg-slate-950/90 backdrop-blur flex items-center gap-1 px-2 font-mono text-[11px]">
+      {/* The serial terminal drawer slides up from the taskbar */}
+      {drawer}
+
+      {/* Taskbar: Start (Skon logo), serial controls, one button per window, tray, then tile / cascade / close-all.
+          On narrow screens it wraps onto a second row rather than squeezing the window list to nothing. */}
+      <div data-testid="taskbar" className="shrink-0 min-h-9 border-t border-slate-800 bg-slate-950/90 backdrop-blur flex flex-wrap items-center gap-1 px-2 py-1 font-mono text-[11px]">
         <StartButton onLaunch={onLaunch} onOpenPinouts={onOpenPinouts} onOpenHardwareIntel={onOpenHardwareIntel} activeTool={activeTool} />
-        <div className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto">
+        {serialControls && <div className="h-5 w-px bg-slate-800 mx-0.5 hidden sm:block" />}
+        {serialControls}
+        {serialControls && <div className="h-5 w-px bg-slate-800 mx-0.5 hidden sm:block" />}
+        <div className="flex-1 min-w-[6rem] flex items-center gap-1 overflow-x-auto">
           {[...state.windows].sort((a, b) => (a.openedAt || 0) - (b.openedAt || 0)).map((w) => {
             const Icon = metaFor?.(w.toolId)?.icon;
             const active = state.focusedId === w.id && !w.minimized;
@@ -128,6 +136,7 @@ export default function Desktop({
             );
           })}
         </div>
+        {tray}
         <button onClick={onTile} disabled={!anyOpen} title="Tile the open windows in a grid" className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"><LayoutGrid className="w-3.5 h-3.5" /></button>
         <button onClick={onCascade} disabled={!anyOpen} title="Cascade the open windows" className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30"><Layers className="w-3.5 h-3.5" /></button>
         <button onClick={onCloseAll} title="Close every window" className="p-1.5 rounded text-slate-400 hover:text-rose-300 hover:bg-slate-800"><X className="w-3.5 h-3.5" /></button>

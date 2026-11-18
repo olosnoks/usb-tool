@@ -68,6 +68,36 @@ const Fido2Workbench = React.lazy(() => import('./tools/Fido2Workbench'));
 const SessionLogPanel = React.lazy(() => import('./tools/SessionLogPanel'));
 const BleExplorer = React.lazy(() => import('./tools/BleExplorer'));
 const WardriveGeneratorWorkbench = React.lazy(() => import('./tools/WardriveGeneratorWorkbench'));
+const WebNfcWorkbench = React.lazy(() => import('./tools/WebNfcWorkbench'));
+const UsbPowerMeterWorkbench = React.lazy(() => import('./tools/UsbPowerMeterWorkbench'));
+const SmartCardWorkbench = React.lazy(() => import('./tools/SmartCardWorkbench'));
+const RtlSdrWorkbench = React.lazy(() => import('./tools/RtlSdrWorkbench'));
+const RnodeLoraWorkbench = React.lazy(() => import('./tools/RnodeLoraWorkbench'));
+const PowerProfilerWorkbench = React.lazy(() => import('./tools/PowerProfilerWorkbench'));
+const PicobootWorkbench = React.lazy(() => import('./tools/PicobootWorkbench'));
+const MqttClientWorkbench = React.lazy(() => import('./tools/MqttClientWorkbench'));
+const MidiMonitorWorkbench = React.lazy(() => import('./tools/MidiMonitorWorkbench'));
+const MeshtasticWorkbench = React.lazy(() => import('./tools/MeshtasticWorkbench'));
+const KeyboardTesterWorkbench = React.lazy(() => import('./tools/KeyboardTesterWorkbench'));
+const IsmDecoderWorkbench = React.lazy(() => import('./tools/IsmDecoderWorkbench'));
+const InputTesterWorkbench = React.lazy(() => import('./tools/InputTesterWorkbench'));
+const I2cAddressRefWorkbench = React.lazy(() => import('./tools/I2cAddressRefWorkbench'));
+const GcodeSenderWorkbench = React.lazy(() => import('./tools/GcodeSenderWorkbench'));
+const FpgaProgrammerWorkbench = React.lazy(() => import('./tools/FpgaProgrammerWorkbench'));
+const FirmwareConverterWorkbench = React.lazy(() => import('./tools/FirmwareConverterWorkbench'));
+const FirmwareAnalyzerWorkbench = React.lazy(() => import('./tools/FirmwareAnalyzerWorkbench'));
+const FlightControllerWorkbench = React.lazy(() => import('./tools/FlightControllerWorkbench'));
+const EspPartitionEditorWorkbench = React.lazy(() => import('./tools/EspPartitionEditorWorkbench'));
+const EspBacktraceWorkbench = React.lazy(() => import('./tools/EspBacktraceWorkbench'));
+const CrsfTelemetryWorkbench = React.lazy(() => import('./tools/CrsfTelemetryWorkbench'));
+const ElfSizeWorkbench = React.lazy(() => import('./tools/ElfSizeWorkbench'));
+const ElectronicsCalcWorkbench = React.lazy(() => import('./tools/ElectronicsCalcWorkbench'));
+const CrcReverseWorkbench = React.lazy(() => import('./tools/CrcReverseWorkbench'));
+const BtHciLogWorkbench = React.lazy(() => import('./tools/BtHciLogWorkbench'));
+const BitConverterWorkbench = React.lazy(() => import('./tools/BitConverterWorkbench'));
+const BinaryDecoderWorkbench = React.lazy(() => import('./tools/BinaryDecoderWorkbench'));
+const AtModemWorkbench = React.lazy(() => import('./tools/AtModemWorkbench'));
+const ArduinoUploaderWorkbench = React.lazy(() => import('./tools/ArduinoUploaderWorkbench'));
 
 const ALL_ITEMS = SIDEBAR_SECTIONS.flatMap((s) => s.items || []);
 
@@ -106,6 +136,36 @@ export const KNOWN_TOOL_IDS = [
   'owasp-zap', 'pwned-passwords', 'cert-inspect', 'api-client',
   'db-browser', 'regex-tester', 'jwt-inspector',
   'ip-calculator', 'hash-calculator', 'crtsh-finder', 'osint-clients', 'web-analyzer', 'url-inspector',
+  'arduino-uploader',
+  'at-modem',
+  'binary-decoder',
+  'bit-converter',
+  'bt-hci-log',
+  'crc-reverse',
+  'electronics-calc',
+  'elf-size',
+  'elrs-crsf',
+  'esp-backtrace',
+  'esp-partition-editor',
+  'fc-configurator',
+  'firmware-analyzer',
+  'firmware-converter',
+  'fpga-programmer',
+  'gcode-sender',
+  'i2c-address-ref',
+  'input-tester',
+  'ism-decoder',
+  'keyboard-tester',
+  'meshtastic',
+  'midi-monitor',
+  'mqtt-client',
+  'picoboot',
+  'power-profiler',
+  'rnode-lora',
+  'rtl-sdr',
+  'smartcard',
+  'usb-power-meter',
+  'web-nfc',
   'warhog-sd', 'warhog-config', 'warhog-console', 'warhog-flasher', 'warhog-pinouts'
 ];
 
@@ -225,6 +285,36 @@ export function renderTool(toolId, serial) {
     case 'osint-clients': return <OsintClientsWorkbench onLogMessage={addLog} />;
     case 'web-analyzer': return <WebAnalyzerWorkbench onLogMessage={addLog} />;
     case 'url-inspector': return <WebAnalyzerWorkbench onLogMessage={addLog} initialTab="links" />;
+    case 'arduino-uploader': return <ArduinoUploaderWorkbench onLogMessage={addLog} />;
+    case 'at-modem': return <AtModemWorkbench onLogMessage={addLog} />;
+    case 'binary-decoder': return <BinaryDecoderWorkbench onLogMessage={addLog} />;
+    case 'bit-converter': return <BitConverterWorkbench onLogMessage={addLog} />;
+    case 'bt-hci-log': return <BtHciLogWorkbench onLogMessage={addLog} />;
+    case 'crc-reverse': return <CrcReverseWorkbench onLogMessage={addLog} />;
+    case 'electronics-calc': return <ElectronicsCalcWorkbench onLogMessage={addLog} />;
+    case 'elf-size': return <ElfSizeWorkbench onLogMessage={addLog} />;
+    case 'elrs-crsf': return <CrsfTelemetryWorkbench onLogMessage={addLog} />;
+    case 'esp-backtrace': return <EspBacktraceWorkbench onLogMessage={addLog} />;
+    case 'esp-partition-editor': return <EspPartitionEditorWorkbench onLogMessage={addLog} />;
+    case 'fc-configurator': return <FlightControllerWorkbench onLogMessage={addLog} />;
+    case 'firmware-analyzer': return <FirmwareAnalyzerWorkbench onLogMessage={addLog} />;
+    case 'firmware-converter': return <FirmwareConverterWorkbench onLogMessage={addLog} />;
+    case 'fpga-programmer': return <FpgaProgrammerWorkbench onLogMessage={addLog} />;
+    case 'gcode-sender': return <GcodeSenderWorkbench onLogMessage={addLog} />;
+    case 'i2c-address-ref': return <I2cAddressRefWorkbench onLogMessage={addLog} />;
+    case 'input-tester': return <InputTesterWorkbench onLogMessage={addLog} />;
+    case 'ism-decoder': return <IsmDecoderWorkbench onLogMessage={addLog} />;
+    case 'keyboard-tester': return <KeyboardTesterWorkbench onLogMessage={addLog} />;
+    case 'meshtastic': return <MeshtasticWorkbench onLogMessage={addLog} />;
+    case 'midi-monitor': return <MidiMonitorWorkbench onLogMessage={addLog} />;
+    case 'mqtt-client': return <MqttClientWorkbench onLogMessage={addLog} />;
+    case 'picoboot': return <PicobootWorkbench onLogMessage={addLog} />;
+    case 'power-profiler': return <PowerProfilerWorkbench onLogMessage={addLog} />;
+    case 'rnode-lora': return <RnodeLoraWorkbench onLogMessage={addLog} />;
+    case 'rtl-sdr': return <RtlSdrWorkbench onLogMessage={addLog} />;
+    case 'smartcard': return <SmartCardWorkbench onLogMessage={addLog} />;
+    case 'usb-power-meter': return <UsbPowerMeterWorkbench onLogMessage={addLog} />;
+    case 'web-nfc': return <WebNfcWorkbench onLogMessage={addLog} />;
     default:
       return (
         <div className="py-16 text-center font-mono text-xs text-slate-500">

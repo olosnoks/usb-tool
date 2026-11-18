@@ -12,6 +12,7 @@ import { UTILITY_ARTICLES } from './articles/utilityArticles';
 import { REFERENCE_ARTICLES } from './articles/referenceArticles';
 import { WEBAPP_ARTICLES } from './articles/webappArticles';
 import { CRYPTO_DATA_ARTICLES } from './articles/cryptoDataArticles';
+import { NEW_TOOL_ARTICLES } from './articles/newToolArticles';
 
 export const WIKI_CATEGORIES = [
   { id: 'all', name: 'All Guides', icon: 'BookOpen' },
@@ -34,5 +35,6 @@ export const WIKI_ARTICLES = [
   ...UTILITY_ARTICLES,
   ...REFERENCE_ARTICLES,
   ...WEBAPP_ARTICLES,
-  ...CRYPTO_DATA_ARTICLES
+  ...CRYPTO_DATA_ARTICLES,
+  ...NEW_TOOL_ARTICLES
 ];
