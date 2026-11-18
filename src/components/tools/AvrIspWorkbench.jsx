@@ -9,11 +9,13 @@ import {
   Upload,
   RefreshCw,
   Eraser,
-  Download
+  Download,
+  Copy
 } from 'lucide-react';
 import { AvrIspClient, fuseHazards, toIntelHex, uploadViaBootloader, ARDUINO_BOARDS } from '../../utils/avrIspDriver';
 import { SerialLink } from '../../utils/serialLink';
 import { parseIntelHex } from '../../utils/firmwareParser';
+import { decodeFuses, toggleFuseBit, parseHexByte, avrdudeCommands, avrdudeBootloaderCommand, imageFit } from '../../utils/avrFuseDecode';
 
 import { confirmAction } from '../../utils/sessionLog';
 const hex2 = (n) => (n ?? 0).toString(16).padStart(2, '0').toUpperCase();
@@ -240,36 +242,69 @@ export default function AvrIspWorkbench() {
 
   const ready = isConnected && !busy;
 
+  // Fuse bytes as typed (falls back to what the chip holds when a field is not a hex byte).
+  const draftFuses = (() => {
+    if (!fuses) return null;
+    const out = {};
+    for (const [k] of FUSE_FIELDS) {
+      const v = parseHexByte(draft[k]);
+      out[k] = Number.isNaN(v) ? fuses[k] : v;
+    }
+    return out;
+  })();
+  const decoded = draftFuses ? decodeFuses(chipInfo, draftFuses) : null;
+  const fit = imageFit(image, chipInfo);
+  const imageLabel = image
+    ? `${image.name} (${image.data.length} B @ 0x${image.startAddress.toString(16)}${fit ? `, ${fit.percent}% of flash` : ''})`
+    : null;
+  const commands = mode === 'isp'
+    ? avrdudeCommands({ chip: chipInfo, fuses: draftFuses, image })
+    : [{ label: 'Upload sketch', cmd: avrdudeBootloaderCommand({ partId: 'm328p', baud, imageName: image?.name || 'sketch.hex' }) }];
+
+  const toggleBit = (fuse, mask) => setDraft((d) => {
+    const cur = parseHexByte(d[fuse]);
+    const base = Number.isNaN(cur) ? fuses[fuse] : cur;
+    return { ...d, [fuse]: `0x${hex2(toggleFuseBit(base, mask))}` };
+  });
+
+  const copy = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setResult('SUCCESS: avrdude command copied. Run it yourself with avrdude installed; this page does not run it.');
+    } catch {
+      setResult('ERROR: The clipboard is not available; select the command text and copy it manually.');
+    }
+  };
+
+  const btn = 'py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-bold text-[11px] disabled:opacity-40 focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400';
+  const panel = 'bg-[#030712] border border-cyber-border rounded-lg p-2.5';
+  const progressLabel = { burn: 'Burning bootloader...', read: 'Reading flash...', verify: 'Verifying flash...', 'eeprom-read': 'Reading EEPROM...', 'eeprom-write': 'Writing EEPROM...', erase: 'Erasing...', bootloader: 'Uploading through the bootloader...' }[busy] || 'Writing flash...';
+
   return (
-    <div className="space-y-4 font-mono text-xs">
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <div className="flex gap-1 mb-2">
-              {[['isp', 'ISP PROGRAMMER (ARDUINOISP)'], ['bootloader', 'ARDUINO BOOTLOADER UPLOAD']].map(([id, label]) => (
-                <button
-                  key={id}
-                  onClick={() => setMode(id)}
-                  disabled={!!busy}
-                  className={`px-2.5 py-1 rounded border text-[11px] font-bold disabled:opacity-40 ${mode === id ? 'bg-amber-500/20 text-amber-300 border-amber-500/50' : 'bg-slate-900 text-slate-400 border-slate-800'}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <p className="text-[11px] text-slate-400">
-              {mode === 'isp'
-                ? 'Uses an Arduino running the ArduinoISP sketch (or any STK500v1 programmer) at 19200 baud. Wire programmer pins 10/11/12/13 to the target’s RESET/MOSI/MISO/SCK.'
-                : 'Uploads a sketch to an Arduino that already has a bootloader, like avrdude -c arduino. No programmer, fuses or chip erase involved.'}
-            </p>
+    <div className="space-y-2 font-mono text-xs">
+      <div className={`${panel} space-y-2`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex gap-1" role="tablist" aria-label="Programming mode">
+            {[['isp', 'ISP (ARDUINOISP)'], ['bootloader', 'BOOTLOADER UPLOAD']].map(([id, label]) => (
+              <button
+                key={id}
+                role="tab"
+                aria-selected={mode === id}
+                onClick={() => setMode(id)}
+                disabled={!!busy}
+                className={`px-2 py-1 rounded border text-[11px] font-bold disabled:opacity-40 ${mode === id ? 'bg-amber-500/20 text-amber-300 border-amber-500/50' : 'bg-slate-900 text-slate-400 border-slate-800'}`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
-          <div className={`flex items-center gap-2 ${mode === 'isp' ? '' : 'hidden'}`}>
+          <div className={`flex items-center gap-1.5 ${mode === 'isp' ? '' : 'hidden'}`}>
             {!isConnected ? (
               <button
                 onClick={handleConnectHardware}
                 disabled={!!busy}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold text-xs disabled:opacity-40"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold text-[11px] disabled:opacity-40"
               >
                 <Usb className="w-3.5 h-3.5" />
                 <span>{busy === 'connect' ? 'CONNECTING...' : 'CONNECT ARDUINOISP (SERIAL)'}</span>
@@ -279,7 +314,8 @@ export default function AvrIspWorkbench() {
                 <button
                   onClick={() => run('identify', identify)}
                   disabled={!ready}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-slate-700 text-xs font-bold disabled:opacity-40"
+                  title="Read the signature and fuses again"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 text-cyan-300 border border-slate-700 text-[11px] font-bold disabled:opacity-40"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${busy === 'identify' ? 'animate-spin' : ''}`} />
                   <span>RE-READ CHIP</span>
@@ -287,9 +323,9 @@ export default function AvrIspWorkbench() {
                 <button
                   onClick={handleDisconnect}
                   disabled={!!busy}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold"
+                  className="px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[11px] font-bold"
                 >
-                  <span>DISCONNECT</span>
+                  DISCONNECT
                 </button>
               </>
             )}
@@ -297,13 +333,13 @@ export default function AvrIspWorkbench() {
         </div>
 
         {mode === 'isp' && isConnected && chipInfo && (
-          <div className="pt-3 grid grid-cols-2 @sm:grid-cols-4 gap-3 text-[11px]">
-            <Card label="Target Microcontroller" value={chipInfo.name} sub={chipInfo.family} color="text-amber-300" />
+          <div className="grid grid-cols-2 @lg:grid-cols-4 gap-2 text-[11px]">
+            <Card label="Target" value={chipInfo.name} sub={chipInfo.family} color="text-amber-300" />
             <Card label="Signature" value={`0x${(chipInfo.signature ?? 0).toString(16).toUpperCase().padStart(6, '0')}`} sub="Read over ISP" color="text-cyan-300" />
             <Card
-              label="Flash Memory"
+              label="Flash"
               value={chipInfo.flashSize ? `${(chipInfo.flashSize / 1024).toFixed(0)} KB` : 'unknown'}
-              sub={chipInfo.pageSize ? `${chipInfo.pageSize}-byte pages · EEPROM ${chipInfo.eepromSize} B` : 'Not in the chip list'}
+              sub={chipInfo.pageSize ? `${chipInfo.pageSize} B pages · EEPROM ${chipInfo.eepromSize} B` : 'Not in the chip list'}
               color="text-emerald-300"
             />
             <Card
@@ -314,43 +350,82 @@ export default function AvrIspWorkbench() {
             />
           </div>
         )}
+
+        <details className="text-[11px] text-slate-400">
+          <summary className="cursor-pointer text-slate-300 font-bold">Setup help</summary>
+          <p className="mt-1 leading-relaxed">
+            {mode === 'isp'
+              ? 'Uses an Arduino running the ArduinoISP sketch (or any STK500v1 programmer) at 19200 baud. Wire programmer pins 10/11/12/13 to the target’s RESET/MOSI/MISO/SCK, plus VCC and GND.'
+              : 'Uploads a sketch to an Arduino that already has a bootloader, like avrdude -c arduino. No programmer, fuses or chip erase involved.'}
+          </p>
+        </details>
       </div>
 
       {result && (
-        <div className={`p-2.5 rounded-lg border text-xs font-bold flex items-start gap-2 ${
+        <div role="status" className={`p-2 rounded-lg border text-[11px] font-bold flex items-start gap-2 ${
           result.startsWith('SUCCESS') ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40' : 'bg-rose-500/10 text-rose-300 border-rose-500/40'
         }`}>
           {result.startsWith('SUCCESS') ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
-          <span>{result}</span>
+          <span className="break-words min-w-0">{result}</span>
         </div>
       )}
 
-      <div className={`grid grid-cols-1 @lg:grid-cols-3 gap-4 ${mode === 'isp' ? '' : 'hidden'}`}>
-        <div className="@lg:col-span-2 bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-            <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
-              <Sliders className="w-4 h-4 text-cyan-400" />
+      <input type="file" ref={fileRef} accept=".hex,.ihx" className="hidden" onChange={handleFile} />
+
+      <div className={`grid grid-cols-1 @lg:grid-cols-3 gap-2 ${mode === 'isp' ? '' : 'hidden'}`}>
+        <div className={`@lg:col-span-2 ${panel} space-y-2`}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-bold text-slate-200 flex items-center gap-1.5">
+              <Sliders className="w-3.5 h-3.5 text-cyan-400" />
               <span>FUSES AND LOCK BITS</span>
             </span>
-            <span className="text-[10px] text-slate-500">0 = programmed. Edit, then write.</span>
+            <span className="text-[10px] text-slate-500">0 = programmed</span>
           </div>
 
-          <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 @md:grid-cols-4 gap-2">
             {FUSE_FIELDS.map(([k, label, color]) => (
-              <div key={k} className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
-                <span className="text-[10px] text-slate-500 uppercase font-bold block">{label}</span>
-                <div className={`text-xl font-extrabold ${color}`}>{fuses ? `0x${hex2(fuses[k])}` : '--'}</div>
+              <div key={k} className="bg-slate-950 p-2 rounded-lg border border-slate-800 space-y-1">
+                <label htmlFor={`avr-fuse-${k}`} className="text-[10px] text-slate-500 uppercase font-bold block">{label}</label>
+                <div className={`text-lg font-extrabold leading-none ${color}`}>{fuses ? `0x${hex2(fuses[k])}` : '--'}</div>
                 <div className="text-[10px] text-slate-500 tracking-widest">{fuses ? bits(fuses[k]) : '--------'}</div>
                 <input
+                  id={`avr-fuse-${k}`}
                   type="text"
                   value={draft[k] ?? ''}
                   onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
                   disabled={!isConnected || k === 'lock' || (k === 'efuse' && client.chip?.noEfuse)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs disabled:opacity-40"
+                  className="w-full bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 text-slate-200 text-xs disabled:opacity-40"
                 />
               </div>
             ))}
           </div>
+
+          {decoded && (
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-2 space-y-1.5" aria-label="Decoded fuses">
+              <div className="text-[11px] text-slate-300">
+                <span className="text-amber-300 font-bold">{decoded.clock.source}</span>
+                {decoded.clock.divide8 ? ', divided by 8' : ''}
+                {decoded.clock.mhz != null ? ` = ${+decoded.clock.mhz.toFixed(3)} MHz` : ' (speed set by the crystal or clock input)'}
+                {` · ${decoded.clock.startup} · boot section ${decoded.bootBytes} B · BOD ${decoded.bod}`}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {decoded.flags.map((f) => (
+                  <button
+                    key={f.name}
+                    onClick={() => toggleBit(f.fuse, f.mask)}
+                    disabled={!ready}
+                    aria-pressed={f.programmed}
+                    title={`${f.desc}. Click to ${f.programmed ? 'unprogram' : 'program'} (edits the field above; nothing is written until WRITE FUSES).`}
+                    className={`px-1.5 py-0.5 rounded border text-[10px] font-bold disabled:opacity-40 ${f.programmed ? 'bg-amber-500/20 text-amber-300 border-amber-500/50' : 'bg-slate-900 text-slate-500 border-slate-800'}`}
+                  >
+                    {f.name}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-500">Highlighted = programmed (bit 0). Layout for the ATmega48/88/168/328 family.</p>
+            </div>
+          )}
+
           {chipInfo?.defaultFuses && (
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
               <span>Arduino defaults for {chipInfo.name}: L=0x{hex2(chipInfo.defaultFuses.lfuse)} H=0x{hex2(chipInfo.defaultFuses.hfuse)} E=0x{hex2(chipInfo.defaultFuses.efuse)}</span>
@@ -365,7 +440,7 @@ export default function AvrIspWorkbench() {
           <button
             onClick={handleWriteFuses}
             disabled={!ready || !fuses}
-            className="w-full py-2 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold text-xs disabled:opacity-40"
+            className="w-full py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold text-[11px] disabled:opacity-40"
           >
             {busy === 'fuses' ? 'WRITING FUSES...' : 'WRITE FUSES'}
           </button>
@@ -374,34 +449,30 @@ export default function AvrIspWorkbench() {
           </p>
         </div>
 
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-            <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
-              <Zap className="w-4 h-4 text-amber-400" />
-              <span>FLASH & BOOTLOADER</span>
-            </span>
-          </div>
+        <div className={`${panel} space-y-2`}>
+          <span className="font-bold text-slate-200 flex items-center gap-1.5">
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>FLASH & BOOTLOADER</span>
+          </span>
 
-          <input type="file" ref={fileRef} accept=".hex,.ihx" className="hidden" onChange={handleFile} />
           <button
             onClick={() => fileRef.current?.click()}
-            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-xs font-bold"
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-[11px] font-bold"
           >
-            <Upload className="w-3.5 h-3.5" />
-            <span>{image ? `${image.name} (${image.data.length} B @ 0x${image.startAddress.toString(16)})` : 'LOAD .HEX FILE'}</span>
+            <Upload className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{imageLabel || 'LOAD .HEX FILE'}</span>
           </button>
-          <p className="text-[10px] text-slate-500 leading-relaxed">
-            For a bootloader, load the matching file from the Arduino IDE, for example
-            hardware/arduino/avr/bootloaders/optiboot/optiboot_atmega328.hex.
-          </p>
+          {fit && !fit.fits && (
+            <p className="text-[11px] text-rose-300 font-bold">The image ends at 0x{fit.end.toString(16)}, past the {chipInfo.flashSize} bytes of flash on this chip.</p>
+          )}
 
           {['flash', 'burn', 'read', 'verify', 'eeprom-read', 'eeprom-write', 'erase', 'bootloader'].includes(busy) && (
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-amber-300 font-bold">
-                <span>{{ burn: 'Burning bootloader...', read: 'Reading flash...', verify: 'Verifying flash...', 'eeprom-read': 'Reading EEPROM...', 'eeprom-write': 'Writing EEPROM...', erase: 'Erasing...', bootloader: 'Uploading through the bootloader...' }[busy] || 'Writing flash...'}</span>
+                <span>{progressLabel}</span>
                 <span>{progress}%</span>
               </div>
-              <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
+              <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
                 <div className="h-full bg-gradient-to-r from-amber-500 to-emerald-400" style={{ width: `${progress}%` }} />
               </div>
             </div>
@@ -410,32 +481,32 @@ export default function AvrIspWorkbench() {
           <button
             onClick={handleFlash}
             disabled={!ready || !image}
-            className="w-full py-2 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold text-xs disabled:opacity-40"
+            className="w-full py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold text-[11px] disabled:opacity-40"
           >
             ERASE, WRITE & VERIFY HEX
           </button>
           <button
             onClick={handleBurn}
             disabled={!ready || !image || !chipInfo?.defaultFuses}
-            title={chipInfo && !chipInfo.defaultFuses ? 'The Arduino fuse defaults for this chip are not known.' : ''}
-            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 font-extrabold text-xs disabled:opacity-40"
+            title={chipInfo && !chipInfo.defaultFuses ? 'The Arduino fuse defaults for this chip are not known.' : 'Erase, set the chip’s Arduino default fuses, write the hex and lock the boot section'}
+            className="w-full py-1.5 rounded-lg bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 font-extrabold text-[11px] disabled:opacity-40"
           >
             {busy === 'burn' ? 'PROGRAMMING BOOTLOADER...' : 'BURN AS BOOTLOADER (FUSES + LOCK)'}
           </button>
-          <label className="flex items-start gap-1.5 text-[10px] text-slate-400 leading-relaxed">
+          <label className="flex items-start gap-1.5 text-[10px] text-slate-400 leading-snug">
             <input type="checkbox" checked={preserveEeprom} onChange={(e) => setPreserveEeprom(e.target.checked)} className="accent-amber-500 mt-0.5" />
-            <span>Keep EEPROM: read it before an erase and write it back afterwards. Without this, ERASE wipes the EEPROM unless the EESAVE fuse is programmed (checked from the high fuse before each erase).</span>
+            <span>Keep EEPROM across an erase (read first, written back after). Otherwise the erase wipes it unless EESAVE is programmed.</span>
           </label>
           <button
             onClick={handleErase}
             disabled={!ready}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/30 font-bold text-[11px] disabled:opacity-40"
+            className="w-full flex items-center justify-center gap-1.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/30 font-bold text-[11px] disabled:opacity-40"
           >
             <Eraser className="w-3.5 h-3.5" />
             <span>CHIP ERASE</span>
           </button>
 
-          <div className="pt-2 border-t border-slate-800 space-y-2">
+          <div className="pt-2 border-t border-slate-800 space-y-1.5">
             <span className="text-[10px] text-slate-500 uppercase font-bold block">Read, verify, EEPROM</span>
             <label className="flex items-center gap-1.5 text-[10px] text-slate-400">
               <input type="checkbox" checked={hexOut} onChange={(e) => setHexOut(e.target.checked)} className="accent-cyan-500" />
@@ -443,38 +514,38 @@ export default function AvrIspWorkbench() {
             </label>
             <input type="file" ref={verifyRef} accept=".hex,.ihx,.bin" className="hidden" onChange={handleVerifyFile} />
             <input type="file" ref={eepromRef} accept=".hex,.eep,.bin" className="hidden" onChange={handleWriteEeprom} />
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={handleReadFlash} disabled={!ready || !chipInfo?.flashSize} className="flex items-center justify-center gap-1 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-cyan-300 font-bold text-[11px] disabled:opacity-40">
+            <div className="grid grid-cols-2 gap-1.5">
+              <button onClick={handleReadFlash} disabled={!ready || !chipInfo?.flashSize} className={`${btn} flex items-center justify-center gap-1 text-cyan-300`}>
                 <Download className="w-3.5 h-3.5" /><span>READ FLASH</span>
               </button>
-              <button onClick={() => verifyRef.current?.click()} disabled={!ready || !chipInfo?.flashSize} className="py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-emerald-300 font-bold text-[11px] disabled:opacity-40">
-                VERIFY AGAINST FILE
+              <button onClick={() => verifyRef.current?.click()} disabled={!ready || !chipInfo?.flashSize} className={`${btn} text-emerald-300`}>
+                VERIFY FILE
               </button>
-              <button onClick={handleReadEeprom} disabled={!ready || !chipInfo?.eepromSize} className="flex items-center justify-center gap-1 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-cyan-300 font-bold text-[11px] disabled:opacity-40">
+              <button onClick={handleReadEeprom} disabled={!ready || !chipInfo?.eepromSize} className={`${btn} flex items-center justify-center gap-1 text-cyan-300`}>
                 <Download className="w-3.5 h-3.5" /><span>READ EEPROM</span>
               </button>
-              <button onClick={() => eepromRef.current?.click()} disabled={!ready || !chipInfo?.eepromSize} className="py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-amber-300 font-bold text-[11px] disabled:opacity-40">
-                WRITE EEPROM FILE
+              <button onClick={() => eepromRef.current?.click()} disabled={!ready || !chipInfo?.eepromSize} className={`${btn} text-amber-300`}>
+                WRITE EEPROM
               </button>
             </div>
-            <p className="text-[10px] text-slate-500">EEPROM goes through ISP byte commands, so a 4 KB EEPROM takes a while at 19200 baud. Writes only touch bytes that differ and are read back.</p>
+            <p className="text-[10px] text-slate-500">EEPROM uses ISP byte commands: slow at 19200 baud. Writes touch only differing bytes and are read back.</p>
           </div>
         </div>
       </div>
 
       {mode === 'bootloader' && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3 max-w-xl">
-          <div className="flex items-center gap-1.5 pb-2 border-b border-slate-800 font-bold text-slate-200 text-xs">
-            <Zap className="w-4 h-4 text-amber-400" />
+        <div className={`${panel} space-y-2`}>
+          <div className="flex items-center gap-1.5 font-bold text-slate-200">
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
             <span>UPLOAD THROUGH THE ARDUINO BOOTLOADER (STK500v1)</span>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 @sm:grid-cols-2 gap-2">
             <label className="space-y-1">
               <span className="text-[10px] text-slate-500 uppercase font-bold block">Board</span>
               <select
                 value={board}
                 onChange={(e) => { setBoard(e.target.value); setBaud(ARDUINO_BOARDS[e.target.value].baud); }}
-                className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs"
+                className="w-full bg-slate-900 border border-slate-800 rounded px-1.5 py-1 text-slate-200 text-xs"
               >
                 {Object.entries(ARDUINO_BOARDS).map(([id, b]) => <option key={id} value={id}>{b.name}</option>)}
               </select>
@@ -484,7 +555,7 @@ export default function AvrIspWorkbench() {
               <select
                 value={baud}
                 onChange={(e) => setBaud(Number(e.target.value))}
-                className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs"
+                className="w-full bg-slate-900 border border-slate-800 rounded px-1.5 py-1 text-slate-200 text-xs"
               >
                 {[115200, 57600, 38400, 19200].map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
@@ -492,15 +563,18 @@ export default function AvrIspWorkbench() {
           </div>
           <button
             onClick={() => fileRef.current?.click()}
-            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-xs font-bold"
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-[11px] font-bold"
           >
-            <Upload className="w-3.5 h-3.5" />
-            <span>{image ? `${image.name} (${image.data.length} B @ 0x${image.startAddress.toString(16)})` : 'LOAD SKETCH .HEX FILE'}</span>
+            <Upload className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{image ? `${image.name} (${image.data.length} B @ 0x${image.startAddress.toString(16)}, ${Math.round((image.startAddress + image.data.length) / ARDUINO_BOARDS[board].appLimit * 1000) / 10}% of ${ARDUINO_BOARDS[board].appLimit} B app space)` : 'LOAD SKETCH .HEX FILE'}</span>
           </button>
+          {image && image.startAddress + image.data.length > ARDUINO_BOARDS[board].appLimit && (
+            <p className="text-[11px] text-rose-300 font-bold">The image is larger than the {ARDUINO_BOARDS[board].appLimit} bytes this bootloader leaves for a sketch.</p>
+          )}
           {busy === 'bootloader' && (
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-amber-300 font-bold"><span>Uploading...</span><span>{progress}%</span></div>
-              <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
+              <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
                 <div className="h-full bg-gradient-to-r from-amber-500 to-emerald-400" style={{ width: `${progress}%` }} />
               </div>
             </div>
@@ -508,16 +582,39 @@ export default function AvrIspWorkbench() {
           <button
             onClick={handleBootloaderUpload}
             disabled={!!busy || !image}
-            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 font-extrabold text-xs disabled:opacity-40"
+            className="w-full py-1.5 rounded-lg bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 font-extrabold text-[11px] disabled:opacity-40"
           >
             {busy === 'bootloader' ? 'UPLOADING...' : 'UPLOAD SKETCH'}
           </button>
-          <p className="text-[10px] text-slate-500 leading-relaxed">
-            The board is reset with the serial DTR line, then talks STK500v1 (optiboot or ATmegaBOOT). Pages are written and read back; fuses and the chip erase command are never sent.
-            The image must be the sketch (starting at 0), not a bootloader, and must stay below the bootloader. Boards with other bootloaders (Mega 2560 uses STK500v2, Leonardo/Micro use AVR109) are not supported here.
-            The Nano&apos;s old bootloader runs at 57600; a Pro Mini is normally 57600 too, and an Uno or new-bootloader Nano is 115200.
-          </p>
+          <details className="text-[10px] text-slate-500">
+            <summary className="cursor-pointer text-slate-400 font-bold">Details and limits</summary>
+            <p className="mt-1 leading-relaxed">
+              The board is reset with the serial DTR line, then talks STK500v1 (optiboot or ATmegaBOOT). Pages are written and read back; fuses and the chip erase command are never sent.
+              The image must be the sketch (starting at 0), not a bootloader, and must stay below the bootloader. Boards with other bootloaders (Mega 2560 uses STK500v2, Leonardo/Micro use AVR109) are not supported here.
+              The Nano&apos;s old bootloader runs at 57600; a Pro Mini is normally 57600 too, and an Uno or new-bootloader Nano is 115200.
+            </p>
+          </details>
         </div>
+      )}
+
+      {commands.length > 0 && commands.every((c) => c.cmd) && (
+        <details className={panel}>
+          <summary className="cursor-pointer text-slate-300 font-bold text-[11px]">Export as avrdude commands</summary>
+          <div className="mt-2 space-y-1.5">
+            <p className="text-[10px] text-slate-500">Text for the avrdude command-line tool, built from the chip, fuse fields and loaded file above. Replace &lt;port&gt; with your serial port. This page does not run avrdude.</p>
+            {commands.map((c) => (
+              <div key={c.label} className="space-y-0.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-slate-400">{c.label}</span>
+                  <button onClick={() => copy(c.cmd)} title="Copy to clipboard" className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-slate-700 text-cyan-300 text-[10px]">
+                    <Copy className="w-3 h-3" /><span>COPY</span>
+                  </button>
+                </div>
+                <code className="block bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-[10px] text-slate-200 break-all select-all">{c.cmd}</code>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
     </div>
   );
@@ -525,9 +622,9 @@ export default function AvrIspWorkbench() {
 
 function Card({ label, value, sub, color }) {
   return (
-    <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+    <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 min-w-0">
       <span className="text-[10px] text-slate-500 uppercase font-bold block">{label}</span>
-      <span className={`font-extrabold text-sm ${color}`}>{value}</span>
+      <span className={`font-extrabold text-sm ${color} break-words`}>{value}</span>
       <span className="text-[10px] text-slate-400 block">{sub}</span>
     </div>
   );
