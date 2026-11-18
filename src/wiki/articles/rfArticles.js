@@ -791,6 +791,19 @@ One shared writer produces every WiGLE CSV in the app. It writes a \`WigleWifi-1
 
 ---
 
+### 4b. NMEA/UBX Toolkit Tab
+
+A fourth tab, **NMEA/UBX Toolkit**, works without any hardware except for the send buttons. Everything is calculated in the browser.
+- **NMEA checksum and field decoder:** paste a sentence. It shows the talker and type, whether the \`*HH\` checksum matches (XOR of the characters between \`$\` and \`*\`), and labels the fields of GGA, RMC, GLL, VTG, GSA and GSV. **Fix checksum** rewrites the sentence with the correct value.
+- **UBX frame builder and decoder:** type a rate in Hz to send \`UBX-CFG-RATE\` (period is 1000/Hz ms, limited to 25-65535 ms), switch a single NMEA message (GGA, GLL, GSA, GSV, RMC, VTG) on or off with \`UBX-CFG-MSG\`, or poll MON-VER, MON-HW, CFG-RATE, CFG-PRT and CFG-NAV5. Sending needs a connected GPS serial port; the answer shows up in the raw stream. The hex box decodes any pasted bytes, finds each \`B5 62\` frame and checks its Fletcher-8 checksum. It names common messages and summarises ACK/NAK, CFG-RATE, CFG-PRT, CFG-MSG and CFG-NAV5 payloads.
+- **Coordinate converter and distance:** enter a position as decimal degrees, degrees and decimal minutes, or degrees-minutes-seconds; it shows all three plus the 6-character Maidenhead grid. An optional second point gives the great-circle distance and initial bearing (haversine, spherical earth, so about 0.5% accuracy).
+
+The window's tab bar also holds **GPS Wardriver & NMEA**, **u-blox UBX Config** and **Demo Vector Generator**. Limits: the UBX controls only work with u-blox receivers that accept UBX-CFG messages (M10 and newer use a different configuration interface for some settings), and a receiver in a different binary protocol will ignore them.
+
+*Similar tools:* u-blox u-center (packet console and message view), gpsd with \`gpspipe\`/\`ubxtool\`, GPSMon, and the online NMEA checksum calculators.
+
+---
+
 ### 5. Step-by-Step Engineering Walkthroughs
 
 #### Walkthrough A: Configuring a u-blox NEO-8M for 10Hz Vehicle Tracking
