@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Music, Piano, Keyboard, Send, Download, Upload, Trash2, Timer, Square, Pause, Play, RefreshCw, Plug } from 'lucide-react';
+import { Copy, Piano, Keyboard, Send, Download, Upload, Trash2, Timer, Square, Pause, Play, RefreshCw, Plug } from 'lucide-react';
 import {
   describeMessage, createDecodeState, noteName, MESSAGE_CATEGORIES, NOTE_NAMES, OCTAVE_CONVENTIONS,
   parseHexBytes, parseStream, splitSyx, buildSyx, noteOnBytes, noteOffBytes, controlChangeBytes,
   programChangeBytes, identityRequestBytes, latencyStats, keyboardOffset, toHex,
 } from '../../utils/midiTools.js';
+import { matchesQuery, logToCsv, logToText, logStats } from '../../utils/midiLogTools.js';
 
 /**
  * Web MIDI monitor, sender, SysEx librarian and loopback latency test.
@@ -74,7 +75,7 @@ function LogRow({ e, convention }) {
       <span className="text-slate-500 w-36 shrink-0 truncate" title={e.dir === 'out' ? e.to : e.from}>{e.dir === 'out' ? e.to : e.from}</span>
       <span className="text-slate-500 w-20 shrink-0 truncate">{e.category}</span>
       <span className="text-gray-200 break-all flex-1 min-w-0">{text}</span>
-      <span className="text-slate-600 hidden lg:inline shrink-0 max-w-[12rem] truncate" title={raw}>{raw.length > 36 ? `${raw.slice(0, 36)}...` : raw}</span>
+      <span className="text-slate-600 hidden @xl:inline shrink-0 max-w-[12rem] truncate" title={raw}>{raw.length > 36 ? `${raw.slice(0, 36)}...` : raw}</span>
     </div>
   );
 }
@@ -97,7 +98,7 @@ function PortList({ ports, disabledIds, onToggleInput }) {
     </div>
   );
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950 border border-slate-800 rounded p-2">
+    <div className="grid grid-cols-1 @md:grid-cols-2 gap-2 bg-slate-950 border border-slate-800 rounded p-2">
       <Section title="Inputs (receive)" list={ports.inputs} isInput />
       <Section title="Outputs (send)" list={ports.outputs} isInput={false} />
     </div>
@@ -125,6 +126,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
   const [outId, setOutId] = useState('');
   const [convention, setConvention] = useState('C4');
   const [paused, setPaused] = useState(false);
+  const [query, setQuery] = useState('');
   const [channelFilter, setChannelFilter] = useState('all');
   const [hiddenCats, setHiddenCats] = useState(() => new Set());
   const [, setTick] = useState(0);
@@ -358,6 +360,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
       const e = all[i];
       if (channelFilter !== 'all' && e.channel !== undefined && e.channel !== channelFilter) continue;
       if (hiddenCats.has(e.category)) continue;
+      if (query && !matchesQuery(e, query)) continue;
       out.push(e);
     }
     return out;
@@ -366,6 +369,19 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
   const exportLogJson = () => {
     const rows = logRef.current.map(({ id, ...rest }) => rest);
     downloadBlob(new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' }), `midi-log-${Date.now()}.json`);
+  };
+
+  const exportLogCsv = () => {
+    downloadBlob(new Blob([logToCsv(logRef.current)], { type: 'text/csv' }), `midi-log-${Date.now()}.csv`);
+  };
+
+  const copyLog = async () => {
+    try {
+      await navigator.clipboard.writeText(logToText(visibleEntries().reverse()));
+      say('Copied the visible log lines to the clipboard.');
+    } catch (e) {
+      say(`Copy failed: ${e.message || e}`, 'error');
+    }
   };
 
   // ---- Monitor tab: decode pasted raw bytes (running status handled, no timing) ----
@@ -501,6 +517,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
 
   const stats = latencyStats(latSamples);
   const visible = visibleEntries();
+  const stats2 = logStats(logRef.current);
   const libSelected = library.filter((en) => selected.has(en.id));
   const outList = ports.outputs;
   const inList = ports.inputs;
@@ -516,19 +533,17 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
   const keyWidth = Math.max(1, whiteCount) * 32;
 
   return (
-    <div className="p-3 space-y-3 text-gray-200 text-sm">
+    <div className="space-y-2 text-gray-200 text-xs">
       <div className="flex flex-wrap items-center gap-2">
-        <Music size={18} className="text-rose-400" />
-        <h2 className="font-semibold text-base">MIDI Monitor &amp; SysEx Librarian</h2>
-        <span className="text-[10px] text-slate-500 border border-slate-800 rounded px-1.5 py-0.5">Web MIDI, Chromium only</span>
-        <div className="ml-auto flex items-center gap-2">
-          {!access ? (
-            <button className={btnCyan} onClick={enableMidi} disabled={!isMidiSupported()}>
-              <Plug size={12} /> Enable MIDI
-            </button>
-          ) : (
-            <button className={btn} onClick={() => refreshPorts(access)}><RefreshCw size={12} /> Refresh ports</button>
-          )}
+        {!access ? (
+          <button className={btnCyan} onClick={enableMidi} disabled={!isMidiSupported()}>
+            <Plug size={12} /> Enable MIDI
+          </button>
+        ) : (
+          <button className={btn} onClick={() => refreshPorts(access)} title="Re-read the port list"><RefreshCw size={12} /> Ports</button>
+        )}
+        <span className="text-[10px] text-slate-500 border border-slate-800 rounded px-1.5 py-0.5">MIDI Monitor: Web MIDI, Chromium only</span>
+        <div className="ml-auto">
           <PortSelect label="Output" value={outId} onChange={setOutId} list={outList} />
         </div>
       </div>
@@ -540,10 +555,13 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
       )}
 
       {!access && isMidiSupported() && (
-        <div className="p-2 border border-slate-800 rounded bg-slate-950 text-xs text-slate-400 space-y-1">
+        <details className="p-2 border border-slate-800 rounded bg-slate-950 text-xs text-slate-400">
+          <summary className="cursor-pointer">MIDI Monitor needs browser permission (details)</summary>
+          <div className="mt-1 space-y-1">
           <div>Clicking <span className="text-cyan-300">Enable MIDI</span> asks the browser for MIDI access. The browser shows a permission prompt; this tool requests SysEx as well, so the prompt covers SysEx receive and send.</div>
           <div>Nothing is read from your MIDI devices until you allow it. If you deny the prompt, allow MIDI again from the site settings icon in the address bar, then press Enable MIDI.</div>
-        </div>
+          </div>
+        </details>
       )}
 
       {access && <PortList ports={ports} disabledIds={disabledIds} onToggleInput={toggleInput} />}
@@ -557,7 +575,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`px-3 py-1.5 text-xs border-b-2 -mb-px ${tab === id ? 'border-rose-400 text-rose-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+            className={`px-2.5 py-1 text-xs border-b-2 -mb-px ${tab === id ? 'border-rose-400 text-rose-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
           >
             {label}
           </button>
@@ -571,7 +589,10 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
               {paused ? <><Play size={12} /> Resume</> : <><Pause size={12} /> Pause</>}
             </button>
             <button className={btn} onClick={() => { logRef.current = []; setTick((n) => n + 1); }}><Trash2 size={12} /> Clear</button>
-            <button className={btn} onClick={exportLogJson} disabled={logRef.current.length === 0}><Download size={12} /> Export JSON</button>
+            <button className={btn} onClick={exportLogJson} disabled={logRef.current.length === 0} title="Save all stored messages as JSON"><Download size={12} /> JSON</button>
+            <button className={btn} onClick={exportLogCsv} disabled={logRef.current.length === 0} title="Save all stored messages as CSV"><Download size={12} /> CSV</button>
+            <button className={btn} onClick={copyLog} disabled={visible.length === 0} title="Copy the visible lines as text"><Copy size={12} /> Copy</button>
+            <input type="search" className={`${inputCls} w-36`} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search text, hex, port" aria-label="Search the log" />
             <label className="text-xs text-slate-400 flex items-center gap-1">
               Channel
               <select className={inputCls} value={channelFilter} onChange={(e) => setChannelFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}>
@@ -597,12 +618,22 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
               </label>
             ))}
           </div>
-          <div className="text-[10px] text-slate-500">
+          <details className="text-[10px] text-slate-500">
+            <summary className="cursor-pointer">Statistics and filter notes</summary>
+            <div className="mt-1 space-y-1">
+              <div className="font-mono text-slate-400">
+                {stats2.total} stored{stats2.perSecond !== null ? `, ${stats2.perSecond.toFixed(1)} msg/s over ${(stats2.spanMs / 1000).toFixed(1)} s` : ''}
+                {Object.entries(stats2.byCategory).map(([c, n]) => `  ${c}: ${n}`).join('')}
+              </div>
+              <div>
             Channel filter hides channel messages on other channels; system and SysEx messages always show. Press Pause to freeze the list.
             Clock BPM and RPN assembly are computed from every message even while paused.
-          </div>
+            Search matches the decoded text, raw hex, category and port name; CSV and JSON export all stored messages, Copy exports the visible lines.
+              </div>
+            </div>
+          </details>
           {!access && <div className="text-xs text-slate-600">Enable MIDI to start monitoring.</div>}
-          <div className="bg-slate-950 border border-slate-800 rounded p-2 h-80 overflow-auto">
+          <div className="bg-slate-950 border border-slate-800 rounded p-2 h-72 overflow-auto">
             {visible.length === 0 && <div className="text-xs text-slate-600">No messages yet.</div>}
             {visible.map((e) => <LogRow key={e.id} e={e} convention={convention} />)}
           </div>
@@ -627,7 +658,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'send' && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {!access && <div className="text-xs text-slate-600">Enable MIDI and pick an output in the header to send.</div>}
           <div className="flex flex-wrap items-center gap-3 text-xs">
             <label className="flex items-center gap-1 text-slate-400">
@@ -649,7 +680,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
             </label>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800 rounded p-3 space-y-2">
+          <div className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2">
             <div className="flex items-center gap-2 text-xs text-slate-400">
               <Piano size={14} /> Note keyboard
               <span className="text-slate-600 ml-auto flex items-center gap-1"><Keyboard size={12} /> computer keys: A W S E D F T G Y H U J K O L P ; (click the window first, not a text box)</span>
@@ -681,8 +712,8 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
             <div className="text-[10px] text-slate-500">Notes sent with the chosen channel and velocity. Releasing the mouse or a key sends Note Off.</div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="bg-slate-950 border border-slate-800 rounded p-3 space-y-2">
+          <div className="grid grid-cols-1 @lg:grid-cols-3 gap-2">
+            <div className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2">
               <div className="text-xs text-slate-400">Control change</div>
               <div className="flex items-center gap-2 text-xs">
                 <label className="flex items-center gap-1">CC
@@ -698,7 +729,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
                 <button className={btn} onClick={() => sendBytes(controlChangeBytes(channel, ccNum, ccVal))} disabled={!access}><Send size={11} /> Send</button>
               </div>
             </div>
-            <div className="bg-slate-950 border border-slate-800 rounded p-3 space-y-2">
+            <div className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2">
               <div className="text-xs text-slate-400">Program change</div>
               <label className="flex items-center gap-1 text-xs">Program
                 <input type="number" min={0} max={127} className={`${inputCls} w-20`} value={pcNum}
@@ -706,7 +737,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
               </label>
               <button className={btn} onClick={() => sendBytes(programChangeBytes(channel, pcNum))} disabled={!access}><Send size={11} /> Send program change</button>
             </div>
-            <div className="bg-slate-950 border border-slate-800 rounded p-3 space-y-2">
+            <div className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2">
               <div className="text-xs text-slate-400">Universal SysEx</div>
               <button className={btn} onClick={() => sendBytes(identityRequestBytes(0x7F))} disabled={!access}>
                 <Send size={11} /> Identity Request (F0 7E 7F 06 01 F7)
@@ -715,7 +746,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
             </div>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800 rounded p-3 space-y-2">
+          <div className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2">
             <div className="text-xs text-slate-400">Raw hex (one MIDI message; a SysEx must include F0 ... F7)</div>
             <div className="flex gap-2">
               <input className={`${inputCls} flex-1`} value={rawHex} onChange={(e) => setRawHex(e.target.value)} placeholder="90 3C 7F   or   F0 7E 7F 06 01 F7" aria-label="Raw hex message" />
@@ -726,7 +757,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'sysex' && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <label className="flex items-center gap-1 text-slate-300">
               <input type="checkbox" checked={captureOn} onChange={(e) => setCaptureOn(e.target.checked)} />
@@ -777,8 +808,8 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'latency' && (
-        <div className="space-y-3">
-          <div className="bg-slate-950 border border-slate-800 rounded p-3 text-xs text-slate-400 space-y-1">
+        <div className="space-y-2">
+          <div className="bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-400 space-y-1">
             <div>Loopback round-trip test. The output must be routed back into the input: a MIDI cable from the output port's MIDI OUT to the input's MIDI IN, or a virtual loopback port (for example loopMIDI or the IAC bus) that feeds the same name back.</div>
             <div>Each trial sends Note On {TEST_NOTE} on channel {TEST_CHANNEL}, waits for the same note to come back (1 s timeout), then sends Note Off. Times are measured in the browser from the send call to the event timestamp on receipt, so they include driver, USB and browser scheduling. They are not hardware-grade measurements.</div>
             <div>Without a loopback route every trial times out and no latency is reported.</div>
@@ -796,7 +827,7 @@ export default function MidiMonitorWorkbench({ onLogMessage }) {
               : <button className={btn} onClick={() => { latAbortRef.current = true; }}><Square size={12} /> Stop</button>}
             {latProgress && <span className="text-slate-500">{latProgress}</span>}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+          <div className="grid grid-cols-2 @md:grid-cols-4 @xl:grid-cols-7 gap-2 text-xs">
             {[['Samples', stats.count ?? 0], ['Timeouts', latTimeouts], ['Min', fmtMs(stats.min)], ['Median', fmtMs(stats.median)], ['Mean', fmtMs(stats.mean)], ['Max', fmtMs(stats.max)], ['Std dev', fmtMs(stats.stdev)]].map(([k, v]) => (
               <div key={k} className="bg-slate-950 border border-slate-800 rounded p-2">
                 <div className="text-[10px] text-slate-500">{k}</div>
