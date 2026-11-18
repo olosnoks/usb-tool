@@ -9,7 +9,7 @@ export default function RoamingTab({
   setRoamHistory
 }) {
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-2 space-y-2">
       {/* Top Controls & KPI Cards */}
       <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3">
         <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl">

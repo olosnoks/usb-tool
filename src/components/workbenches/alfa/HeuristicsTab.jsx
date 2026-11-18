@@ -7,7 +7,7 @@ export default function HeuristicsTab({
   setSelectedItem
 }) {
   return (
-    <div className="p-4 space-y-4 max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+    <div className="p-2 space-y-2 max-h-[75vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
       {/* Summary KPIs */}
       <div className="grid grid-cols-1 @sm:grid-cols-4 gap-3">
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3">

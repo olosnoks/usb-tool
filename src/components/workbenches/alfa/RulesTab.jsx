@@ -20,7 +20,7 @@ export default function RulesTab({
   setStatusMessage
 }) {
   return (
-    <div className="p-4 space-y-5">
+    <div className="p-2 space-y-3">
       {/* Top KPI Cards */}
       <div className="grid grid-cols-1 @sm:grid-cols-4 gap-3">
         <div className="bg-slate-900/90 border border-amber-500/30 rounded-xl p-3">
