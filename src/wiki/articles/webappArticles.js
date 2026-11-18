@@ -279,9 +279,24 @@ Passive subdomain discovery from **Certificate Transparency** logs. The tool ask
 ---
 
 ### Using it
-Enter a base domain (a pasted URL, path or leading \`*.\` is stripped) and press **Find subdomains**. Two boxes shape the query: **exclude expired** and **dedupe** (both are passed to crt.sh).
+Enter a base domain (a pasted URL, path or leading \`*.\` is stripped) and press **Look up**. Two boxes shape the query: **exclude expired** and **dedupe** (both are passed to crt.sh). A summary line gives hosts, distinct certificates, crt.sh records and the route used.
 
-For each host the most recently logged certificate wins. The table shows **Host**, **Issuer**, **Not after** and a badge (**expired**, or **expires in Nd** within 30 days). A star marks a name that also appeared as a wildcard (\`*.example.com\`). Only names inside the base domain are kept. A summary line gives unique hosts, cert records, expired count and the route used; below it are the top issuers. The **filter…** box narrows by host or issuer, and **.txt** (host list), **.csv** and **.json** export the filtered rows (CSV cells that look like formulas are neutralised).
+Four tabs show the result:
+- **Hosts**: one row per hostname, using the most recently logged certificate. Columns are **Host**, **Issuer**, **Not after** and a badge (**expired**, or **expires in Nd** within 30 days). A star marks a name that also appeared as a wildcard (\`*.example.com\`).
+- **Certificates**: one row per distinct certificate with all its names, issuer, validity dates and log date. A precertificate and its final certificate (same issuer and serial) are merged into one.
+- **Duplicates**: certificates that cover exactly the same set of names, such as renewals and reissues. Each entry shows how many exist, how many are still unexpired, the issuers and the log dates. Many unexpired copies can point to automation that reissues too often or to several teams ordering for the same name.
+- **Recent**: certificates first logged within the last 7, 30, 90 or 365 days (selectable). Use it to spot issuance you did not expect.
+
+Only names inside the base domain are kept.
+
+### Monitoring controls
+- **Expiry** chips count items that are expired, due within 7, 30 or 90 days, later, or without a date. Click a chip to filter the table; click it again to clear. The counts follow the current tab (hosts or certificates).
+- **Issuers** chips show the top issuers by crt.sh record. Click one to filter by it.
+- **Expected issuers** (collapsed): type the CA names you use, comma separated (for example \`Let's Encrypt, Google Trust Services\`). Certificates from any other issuer get an **unexpected CA** badge in the Certificates and Recent tabs. Matching is a case-insensitive substring match on the issuer name. An empty box flags nothing.
+- **filter…** narrows by host/name or issuer.
+
+### Exporting
+**.txt** (host list, Hosts tab only), **.csv** and **.json** export the rows currently shown (hosts on the Hosts tab, certificates on the other tabs), after filters. **report** downloads a Markdown report for the whole lookup: counts, expiry buckets, issuers, certificates expiring within 30 days, unexpected issuers (if you set any), duplicates and a table of all certificates. CSV cells that look like formulas are neutralised.
 
 ### How the request travels
 crt.sh sends no CORS headers, so a page cannot call it directly. The tool tries, in order:
@@ -294,6 +309,11 @@ The summary shows which route answered ("site relay", "proxy" or "direct"). On a
 ### Notes
 - crt.sh can be slow or rate-limited; "did not return JSON" usually means that, or a proxy problem.
 - CT data shows what was issued, not what is live. To inspect one certificate, use the Certificate Inspector.
+- This is a one-off lookup, not continuous monitoring: nothing is stored or alerted between visits. For alerts on new issuance use a service such as Cert Spotter or Facebook's CT monitoring.
+- Log dates and expiry come from crt.sh and are shown in UTC. Very large domains may be truncated or time out on crt.sh's side.
+
+### Similar tools
+crt.sh's own web search, SSLMate Cert Spotter and its CT Search API, Facebook's Certificate Transparency monitoring, and MerkleMap. Those add live alerting or API access; this tool adds no account or API key and runs in the browser.
 `,
   },
   {
