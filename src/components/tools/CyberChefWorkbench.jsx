@@ -1198,7 +1198,7 @@ export default function CyberChefWorkbench() {
       : 'cyberchef-theme-cyberpunk bg-[#0c0d12] text-slate-200 font-mono';
 
   return (
-    <div className={`flex flex-col gap-4 p-2 rounded-2xl transition-colors duration-200 ${themeClass}`}>
+    <div className={`flex flex-col gap-2 rounded-xl transition-colors duration-200 ${themeClass}`}>
       {/* Theme Embedded Styles */}
       <style>{`
         .cyberchef-theme-matrix .bg-\\[\\#171920\\],
@@ -1234,16 +1234,10 @@ export default function CyberChefWorkbench() {
       `}</style>
 
       {/* Top Header Card */}
-      <div className="bg-[#171920] border border-[#2b303c] rounded-2xl p-4 flex flex-col @md:flex-row items-center justify-between gap-3 shadow-xl">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
-            <Sparkles className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-400">
-              Web Worker data pipeline with {allOps.length} operations, Breakpoints, Auto-Bake, Presets, and Magic v2 Chaining.
-            </p>
-          </div>
+      <div className="bg-[#171920] border border-[#2b303c] rounded-xl p-2 flex flex-col @md:flex-row items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+          <p className="text-[11px] text-slate-400">{allOps.length} operations · Web Worker pipeline</p>
         </div>
 
         {/* Action Controls */}
