@@ -24,6 +24,7 @@ import { UntarOperation } from './compression.js';
 import { cryptanalysisOperations } from './Cryptanalysis.js';
 import { textOperations } from './textOps.js';
 import { encodingOperations } from './encodingOps.js';
+import { extraOperations } from './extraOps.js';
 
 export const ALL_OPERATIONS = [
   ...dataFormatOperations,
@@ -43,6 +44,7 @@ export const ALL_OPERATIONS = [
   ...flowControlOperations,
   ...textOperations,
   ...encodingOperations,
+  ...extraOperations,
   ...customOperations
 ];
 

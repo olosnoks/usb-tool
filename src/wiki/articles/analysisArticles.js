@@ -1388,7 +1388,7 @@ Clicking the **"Charts"** tab in the Output Deck exposes deep structural telemet
 
 ---
 
-### 10. Comprehensive Operation Suites Reference (169 Operations)
+### 10. Comprehensive Operation Suites Reference
 
 | Module | Key Operations | Description & Underlying Engines |
 | :--- | :--- | :--- |
@@ -1397,16 +1397,22 @@ Clicking the **"Charts"** tab in the Output Deck exposes deep structural telemet
 | **Parsing** | Parse JWT, Parse X.509, Parse ASN.1, Parse IPv6, Parse URI, Parse User Agent, JSON Beautify/Minify, XML Beautify | Token verification via \`jwt-decode\`, RFC 5952 IPv6 formatting, ASN.1 DER parser, and structural formatters. |
 | **Extractors** | Extract IPs, Domains, URLs, Emails, MACs, Hashes, Base64 | High-performance regex scanners isolating indicators of compromise (IOCs) and encoded strings. |
 | **Networking** | Change IP Format, Generate UUID, Parse MAC address | Hex, decimal, octal, dotted-quad IP conversions and RFC 4122 v4 UUID generators. |
-| **Forensics** | Detect File Type, Extract EXIF, Identify Hash | Magic bytes file signature analyzer, EXIF metadata extractor, and hash format identifier. |
+| **Forensics** | Detect File Type, Extract EXIF, Identify Hash, Shannon entropy | Magic bytes file signature analyzer, EXIF metadata extractor, and hash format identifier. |
 | **Flow Control** | Fork, Merge, Register, Subsection, Label, Jump | Multi-branch splitting, register persistence, regex sub-scoping, and controlled execution loops. |
-| **Arithmetic / Logic** | Sum, Mean, Median, Bit-shift, Bitwise AND/OR/XOR | Multi-radix numeric computations, statistical aggregations, and bit-level logic operations. |
+| **Arithmetic / Logic** | Sum, Mean, Median, Bit-shift, Bitwise AND/OR/XOR, Bitwise NOT, Rotate bits | Multi-radix numeric computations, statistical aggregations, and bit-level logic operations. |
 | **Date / Time** | From UNIX Timestamp, To UNIX Timestamp, Parse DateTime | Epoch seconds/milliseconds bidirectional conversions and ISO 8601 UTC timestamp parsing. |
 | **Data Format** | To/From Base32, Base45, Base58, Base62, Base85, Hexdump, Decimal, Binary, Base64, Hex, URL, CSV / JSON, PEM | Radix converters, Bitcoin Base58, RFC 1924 Base85, and Wireshark-compatible hexdump formats. |
 | **Hashing** | MD4, MD5, SHA-1, SHA-2 (224/256/384/512/512-256), SHA-3, RIPEMD-160, NTLM Hash, HMAC, BLAKE2b, BLAKE2s, CRC-8/16/32/64, custom CRC, Fletcher-16/32, Adler-32 | Cryptographic digests including Keccak and RFC 7693 BigInt BLAKE2b-512, keyed HMAC, and checksums. |
-| **Text** | Find / Replace, Regular expression, To Upper / Lower case, Sort, Unique, Head, Tail, Remove whitespace, Remove null bytes, Count occurrences, Strings, Swap endianness, Reverse, Add line numbers, Diff | Line- and string-level text processing. |
-| **Encoding** | To / From HTML Entity, Punycode, Quoted Printable, Encode text / Decode text | Entity, IDN and character-set conversions (the character-set operations use CyberChef's code-page names). |
+| **Text** | Find / Replace, Regular expression, To Upper / Lower case, Sort, Unique, Head, Tail, Remove whitespace, Remove null bytes, Count occurrences, Strings, Swap endianness, Reverse, Add line numbers, Diff, Text statistics | Line- and string-level text processing. |
+| **Encoding** | To / From HTML Entity, Punycode, Quoted Printable, Encode text / Decode text, Escape string / Unescape string | Entity, IDN and character-set conversions (the character-set operations use CyberChef's code-page names). |
 | **Obfuscation** | CharCode Array, Hex Escape, Unicode Escape, PowerShell Slicing, Ducky Jitter | Payload evasion, format scrambling, and keystroke rate-limiter evasion. |
 | **User / Scripting** | Custom Script | Sandboxed user-defined JavaScript execution in strict mode for custom algorithms and ad-hoc transformations. |
+
+---
+
+Recent additions: **Bitwise NOT** and **Rotate bits** (ROL/ROR inside each byte, 0 to 7 positions), **Shannon entropy** (bits per byte of the input, 0 to 8; high values suggest compressed or encrypted data), **Text statistics** (bytes, characters, words, lines, distinct byte values) and **Escape string / Unescape string** (backslash escapes for newline, tab, hex bytes and Unicode code points; unknown escapes are left unchanged). The window header was also made more compact.
+
+Similar tools: the official GCHQ CyberChef, Cryptii, dCode, Ciphey and Burp Suite Decoder. This workbench keeps CyberChef's recipe model and runs fully in your browser.
 
 ---
 
