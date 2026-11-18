@@ -147,7 +147,7 @@ Improv packets are framed with a human-readable header followed by binary payloa
 +--------------+---------+-----------+--------+---------------+--------------------+
 
 Packet types: 0x01 Current State, 0x02 Error State, 0x03 RPC Command, 0x04 RPC Result.
-RPC commands: 0x01 Wi-Fi Settings (SSID + password), 0x02 Get Current State, 0x03 Get Device Info, 0x04 Scan Networks.
+RPC commands: 0x01 Wi-Fi Settings (SSID + password), 0x02 Get Current State, 0x03 Get Device Info, 0x04 Scan Networks, 0x05 Identify (the workbench has an Identify button; only newer firmware answers it).
 RPC data is: command byte, length of the rest, then length-prefixed strings.
 \`\`\`
 
@@ -177,7 +177,7 @@ for (let i = 0; i < packetBytes.length; i++) {
 - **\`0x01\` (Invalid RPC Packet)**: Frame header missing or checksum mismatch.
 - **\`0x02\` (Unknown Command)**: Unsupported packet type.
 - **\`0x03\` (Unable to Connect)**: Incorrect Wi-Fi password or out-of-range SSID.
-- **\`0x04\` (Not Authorized)**: Provisioning attempted without required physical authorization. The workbench has no dedicated text for this code and shows it as a generic error code.
+- **\`0x04\` (Not Authorized)**: Provisioning attempted without required physical authorization. The workbench shows it as "not authorized (press the button on the device first)".
 - **\`0xFF\` (Unknown Error)**.
 
 </details>
@@ -191,13 +191,25 @@ for (let i = 0; i < packetBytes.length; i++) {
    - **IMPROV RPC (Standard)**: for firmware that implements the Improv serial protocol (for example ESPHome or ESP Web Tools firmware). On connect the workbench sends *Get Current State* and *Get Device Info*; the device line shows the returned firmware name, version, chip and device name.
    - **MICROPYTHON REPL**: types a \`network.WLAN\` scan or connect one-liner into the normal REPL.
    - **ESP-AT CMD**: sends \`AT+CWLAP\` to scan and \`AT+CWMODE=1\` + \`AT+CWJAP\` to connect.
-3. Click **SCAN APs** (optional). The device's networks are listed with signal in dBm and a lock icon for secured networks; click one to fill the SSID. If the device never answers, the scan gives up after 15 seconds.
-4. Type the **Network SSID** and **Wi-Fi Password** (the lock icon toggles password visibility).
-5. Click **CONNECT BOARD TO WI-FI**:
+3. Click **Scan APs** (optional). The device's networks are listed with signal in dBm and a lock icon for secured networks; click one to fill the SSID. If the device never answers, the scan gives up after 15 seconds.
+4. Type the **Network SSID** and **Wi-Fi password** (the eye icon toggles visibility). Before sending, the workbench checks lengths in bytes: SSID 1 to 32, password at most 63. It shows errors in red (Connect stays disabled) and warnings in amber (password shorter than 8, or empty for an open network).
+5. Click **Connect board to Wi-Fi**. If the device sends no result within 30 seconds the workbench stops waiting and says so:
    - In Improv mode the workbench sends the Wi-Fi Settings RPC. The status banner follows the state the device reports (provisioning, then provisioned) and shows the URL the device returns, if any, as an **OPEN** button.
    - In the MicroPython and ESP-AT modes the workbench watches the text output for an IP address (for example from \`ifconfig\` or \`CIFSR\`) or a failure message.
 
-> The MicroPython and AT modes send plain text to whatever is on the port; they are best-effort fallbacks, not a standard protocol.
+> The MicroPython and AT modes send plain text to whatever is on the port; they are best-effort fallbacks, not a standard protocol. SSID and password are escaped (quotes, commas and backslashes for AT; a quoted Python string for MicroPython), so names such as \`O'Neil's "Wi-Fi"\` do not break the command.
+
+#### Other controls
+- **State** (Improv mode): asks the device for its current state and device info again.
+- **Identify** (Improv mode): sends RPC 0x05. Firmware that supports it may blink an LED; older firmware replies "unknown RPC command", which appears in the status line and packet log.
+- **Packet log and export** (collapsible section): in Improv mode it shows the hex of the exact Wi-Fi Settings frame that Connect will send (with a copy button) and a list of every Improv packet received, decoded (state, error, result). In MicroPython mode it shows a multi-line Python snippet to paste into Thonny or mpremote; the preview masks the password unless the eye is on, and the copy button copies the real one. Nothing is stored; the log keeps the last 60 packets.
+
+#### Limits
+- It needs a Web Serial connection (Chrome or Edge) and a device that is running the matching firmware. Nothing is simulated: scans and states are only what the device sends.
+- Improv over Bluetooth LE is not supported here, only the serial transport. A device that needs a physical button press stays in "Authorization required" until you press it.
+
+#### Similar tools
+The Improv web SDK and ESP Web Tools dialog (browser, provision after flashing), the ESPHome Dashboard and \`esphome logs\` CLI, and Home Assistant's Improv integration. This workbench works on its own over the shared serial connection and adds the fallbacks and frame/packet visibility.
 
 ---
 
