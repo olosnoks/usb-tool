@@ -448,20 +448,26 @@ The tool has three tabs: **Passwords**, **Email** and **Breach catalog**.
 ## Passwords tab
 
 ### Privacy model
-Each password is hashed **in the browser** (SHA-1, or NTLM in NTLM mode). Only the first 5 hex characters of the hash are sent to the HaveIBeenPwned range API, which returns every suffix with that prefix; the match is made locally. The password and full hash never leave the page. The \`Add-Padding\` header hides how many matches a prefix had. Requests go through the proxy bar when one is set, otherwise directly. Passwords are never logged: logs and tables show a masked form such as \`p•••(12)\` (first character and length).
+The **Privacy: what is sent and what is not** section at the top of the tab is collapsed by default and repeats this. Each password is hashed **in the browser** (SHA-1, or NTLM in NTLM mode). Only the first 5 hex characters of the hash are sent to the HaveIBeenPwned range API, which returns every suffix with that prefix; the match is made locally. The password and full hash never leave the page. The \`Add-Padding\` header hides how many matches a prefix had. Requests go through the proxy bar when one is set, otherwise directly. Passwords are never logged: logs and tables show a masked form such as \`p•••(12)\` (first character and length).
 
 ### Sources
 Choose the source with the buttons **Type or paste**, **Password manager CSV** and **Hashes**.
 
-- **Type or paste:** one password per line, with an optional **Trim whitespace** box. Results can be revealed per row with **show** / **hide**.
+- **Type or paste:** one password per line, with an optional **Trim whitespace** box. Results can be revealed per row with **show** / **hide**. When the box holds exactly one password, a **strength panel** appears (see below).
 - **Password manager CSV:** **Choose password export (.csv)** reads a Bitwarden, 1Password, Chrome or Firefox export (up to 5,000 entries). The report shows site and username, never the password, and flags entries that share a password (\`reused ×N\`). The file stays in this tab, passwords are hashed locally and dropped from memory when the run ends. Delete the export file afterwards.
 - **Hashes:** one 40-digit SHA-1 (or 32-digit NTLM) hash per line; invalid lines are skipped.
+
+### Strength feedback
+For a single typed password the panel shows a meter (Very weak to Strong), length, an estimate in bits, estimated crack times for four attacker models (online throttled, online unthrottled, offline slow hash, offline fast hash), warnings and suggestions, and the exact range URL that would be requested (only the 5-character prefix; the remaining hash characters stay in the tab). The estimate is a small local heuristic: it recognises a short list of very common passwords (including simple letter swaps like \`@\` for \`a\`), repeats, sequences like \`abcd\`, keyboard runs like \`qwerty\` and years. It is **not** zxcvbn and is not a guarantee; treat it as a rough guide. For batches (list and CSV), each row also gets a Strength column and the summary adds a **weak** count (Very weak or Weak).
 
 ### Hash type and NTLM
 The **Hash** selector offers **SHA-1 (standard)** and **NTLM (HIBP NTLM range)**. NTLM mode uses the same k-anonymity range API with \`?mode=ntlm\`; it only reports how often a hash appears in breaches and cannot recover a password.
 
 ### Running
-**Check Passwords** (or **Check Hashes**) sends one request per distinct 5-character prefix (a per-run cache avoids repeats), sequentially. Progress shows entries checked and requests made; **Cancel** stops the run and keeps the rows already checked. The summary reports checked / compromised counts and reuse. A red count means the password appears in known breaches and should not be used. **Export masked report (CSV)** saves site, username, masked password, count and status (never the password).
+**Check Passwords** (or **Check Hashes**) sends one request per distinct 5-character prefix (a per-run cache avoids repeats), sequentially. Progress shows entries checked and requests made; **Cancel** stops the run and keeps the rows already checked. The summary reports checked / compromised counts and reuse. A red count means the password appears in known breaches and should not be used. After a run, **Show problems only** filters the table to rows that are breached, reused or weak, which is the quick way to see what to change in a password-manager export. **Export masked report (CSV)** saves site, username, masked password, count and status (never the password; the CSV does not include the strength column). Nothing is stored: results, CSV contents and strength analysis are held in memory and dropped when you clear, change source or close the tool.
+
+### Similar tools
+The same range API is used by the HIBP website, 1Password Watchtower, Bitwarden's Exposed Passwords report (which also flags reused and weak items, using zxcvbn) and many password managers. This tool covers the same three checks (exposed, reused, weak) in one page, without an account.
 
 ---
 
