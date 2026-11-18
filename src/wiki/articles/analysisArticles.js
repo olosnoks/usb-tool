@@ -974,7 +974,7 @@ Over the visible sample window the plotter shows, for each channel:
 - **Mean**: the arithmetic mean of the window.
 - **RMS**: $V_{rms} = \sqrt{\frac{1}{N}\sum_{i=1}^N x_i^2}$
 
-By default the vertical axis is auto-scaled with 10% padding; untick **Auto-scale** to set a fixed Min/Max. Each channel card also has **scale**, **offset** and **unit** boxes (x1, +0, unit) that convert raw readings (for example ADC counts to volts) for the plot, statistics and exports. There is no moving-average filter or frequency counter; use the **FFT** view for frequency content.
+By default the vertical axis is auto-scaled with 10% padding; untick **Auto** to set a fixed Min/Max. Each channel card also has **scale**, **offset** and **unit** boxes (x1, +0, unit) that convert raw readings (for example ADC counts to volts) for the plot, statistics and exports. Each card also shows **Pk-Pk** (Max minus Min) and **Freq**, an estimate from rising crossings of the window mean (with 10% hysteresis) using the real sample timestamps; it shows \`--\` when the signal is flat or has fewer than two cycles in the window. For a full spectrum use the **FFT** view.
 
 </details>
 
@@ -986,10 +986,11 @@ The plotter has no connect button of its own: it plots whatever numeric text arr
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **Firmware Sketches** | Button | Opens a modal with copy-ready Arduino C++ (ESP32 / Uno), MicroPython (ESP32 / Pico) and Key:Value Named Channels snippets (**Copy Code**). |
+| **Firmware Sketches** (\`</>\` icon) | Icon button | Opens a modal with copy-ready Arduino C++ (ESP32 / Uno), MicroPython (ESP32 / Pico) and Key:Value Named Channels snippets (**Copy Code**). |
 | **TIME / FFT / XY** | Buttons | View mode. TIME is the scrolling waveform with a real time axis; FFT shows the spectrum of one channel (pick **Channel**; **Rate Hz** defaults to the rate measured from the sample timestamps); XY plots one channel against another (pick **X** and **Y**). |
+| **Parser and filter** | Collapsible section | Holds the **Delimiter** (custom separator, blank is auto), **Columns** (e.g. \`0,2,3\`) and **Smooth** (trailing moving average over 1 to 200 samples, 1 = off) boxes. Smooth changes only the drawn trace; statistics, cursors, FFT and CSV export use the unsmoothed values. |
 | **Window selector** | Dropdown | Visible history: 50, 100, 150, 300, 500, 1000 or 5000 Samples. The buffer itself holds up to 50,000 samples. |
-| **Auto-scale / Min / Max** | Checkbox + number inputs | Auto-scale (on by default) fits the Y axis to the visible channels plus 10% padding. Untick it to enable the Min and Max inputs and fix the Y range. |
+| **Auto / Min / Max** | Checkbox + number inputs | **Auto** (auto-scale, on by default) fits the Y axis to the visible channels plus 10% padding. Untick it to enable the Min and Max inputs and fix the Y range. |
 | **Pause / Resume** | Icon button | Freezes the display on a snapshot. Samples **keep being recorded** in the background, and Resume lets the display catch up. |
 | **Trigger** | Checkbox + controls | Enables an edge trigger: **channel**, **rising / falling / either**, **level**, **pre** and **post** sample counts and **single** (one-shot). Click **Arm**; the status text shows armed, capturing or captured, and the captured window is displayed. |
 | **Reset view (n.nnx)** | Button | Appears when zoomed or panned; double-clicking the canvas does the same. |
@@ -997,8 +998,9 @@ The plotter has no connect button of its own: it plots whatever numeric text arr
 | **Export the plot as PNG** (icon) | Icon button | Saves the canvas as \`serial-plot-<timestamp>.png\`. |
 | **Save plot config / Load plot config** (icons) | Icon buttons | Save or restore the window, scale, delimiter, columns, view, per-channel scale/offset/unit, hidden channels and trigger settings as \`plotter-config.json\`. |
 | **Clear Waveform Data** | Icon button | Empties the buffer. |
-| **Canvas viewport** | Canvas | Grid, dashed zero line when in range, one colored trace per channel, auto-scaled (or fixed Min/Max). Scroll the mouse wheel to zoom, drag to pan back through history, hover for a crosshair readout of every channel at that moment. |
-| **Channel cards** | Cards | Per channel: label, current value, Min / Max / Mean / RMS over the window, **scale / offset / unit** inputs, and an eye button to hide or show its trace. |
+| **Canvas viewport** | Canvas | Grid, dashed zero line when in range, one colored trace per channel, auto-scaled (or fixed Min/Max). Scroll the mouse wheel to zoom, drag to pan back through history, hover for a crosshair readout of every channel at that moment. In TIME view, click (without dragging) to place cursor **A**, click again for cursor **B**; a third click clears both. |
+| **Cursor measurement** | Readout bar | With A and B placed, shows the time difference (ms), the value difference of the first visible channel (with its unit) and 1/dt in Hz. Cursors are tied to their samples, so they scroll with the data and disappear from the readout when a cursor leaves the visible window. **Clear cursors** removes them. |
+| **Channel cards** | Cards | Per channel: label, current value, Min / Max / Mean / RMS / Pk-Pk / Freq over the window, **scale / offset / unit** inputs, and an eye button to hide or show its trace. |
 
 ---
 
@@ -1015,7 +1017,13 @@ The plotter has no connect button of its own: it plots whatever numeric text arr
 2. Connect to the ESP32 from the app header at **115,200 baud** (the plotter uses the shared connection), then open the **Oscilloscope Plotter**.
 3. The canvas starts plotting the analog value at 100 Hz as channel **CH 0**.
 4. Wave your hand over the photodiode and watch the real-time dip; the CH 0 card shows the current, min, avg and max over the window.
-5. Click the **Pause** button to freeze the trace for a closer look (recording continues behind it), zoom with the mouse wheel, then export the CSV or a PNG of the plot.
+5. Click the **Pause** button to freeze the trace for a closer look (recording continues behind it), zoom with the mouse wheel, click two points on the trace to read the time between them, then export the CSV or a PNG of the plot.
+
+---
+
+### Similar tools
+
+The Arduino IDE Serial Plotter, SerialPlot, Better Serial Plotter and Serial Studio cover the same job. Compared with them, this plotter runs in the browser with no install, adds a trigger, FFT and XY views and per-channel scaling, and has cursors, smoothing and a frequency estimate. It does not do binary framing, networking or a scripting engine like SerialPlot or Serial Studio.
 
 ---
 

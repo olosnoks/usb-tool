@@ -50,4 +50,11 @@ describe('SerialPlotter ingestion through subscribeRx', () => {
     expect(html).toContain('>fft<');
     expect(html).toContain('>xy<');
   });
+
+  it('renders the compact toolbar, smoothing control and cursor hint', () => {
+    const { html } = mount();
+    expect(html).toContain('aria-label="Smoothing window (samples)"');
+    expect(html).toContain('Click the plot to place cursor A');
+    expect(html).not.toContain('REAL-TIME SERIAL OSCILLOSCOPE');
+  });
 });
