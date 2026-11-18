@@ -121,12 +121,12 @@ export default function OsintClientsWorkbench({ onLogMessage }) {
   const Active = TABS.find((t) => t.id === tab).comp;
   return (
     <div className="w-full min-w-0 max-w-full text-gray-200">
-      <div className="mb-3 p-2 border border-slate-800 rounded bg-slate-900/40 text-[11px] text-slate-400 flex items-start gap-1.5">
-        <Radar size={13} className="text-cyan-400 shrink-0 mt-0.5" />
-        <span>These call each vendor's API with your own key (saved locally in this browser) via the proxy. Most vendor APIs block cross-origin browser calls, so a proxy is usually required. Assess only what you're authorized to.</span>
-      </div>
+      <details className="mb-2 text-[11px] text-slate-400">
+        <summary className="cursor-pointer inline-flex items-center gap-1.5"><Radar size={13} className="text-cyan-400" /> Own assets only; how keys and requests work</summary>
+        <p className="mt-1 p-2 border border-slate-800 rounded bg-slate-900/40">These call each vendor's API with your own key (saved locally in this browser). Shodan goes through this site's relay; other vendors usually need the proxy because they block cross-origin browser calls. Look up only hosts and domains you own or are authorized to assess.</p>
+      </details>
       <ProxyConfig onLogMessage={log} />
-      <div className="flex rounded overflow-hidden border border-slate-800 text-xs mb-3 w-fit">
+      <div className="flex rounded overflow-hidden border border-slate-800 text-xs mb-2 w-fit">
         {TABS.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} className={`px-3 py-1.5 inline-flex items-center gap-1.5 ${tab === t.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>
             <Globe size={12} /> {t.label}
