@@ -141,3 +141,56 @@ export function mapPoints(rows, cap = MAP_POINT_CAP) {
   if (pts.length <= cap) return { points: pts, total: pts.length, capped: false };
   return { points: pts.sort((a, b) => rssiOf(b) - rssiOf(a)).slice(0, cap), total: pts.length, capped: true };
 }
+
+// ---- GPX export, track stats, band split ------------------------------------
+export function rowsToGpx(rows, name = 'Warhog log') {
+  const wpts = strongestFixRows(rows).map((r) => {
+    const desc = `${r.mac} ${r.type} ${r.auth || ''} ch ${r.ch ?? 'n/a'} ${r.rssi ?? 'n/a'} dBm`.replace(/\s+/g, ' ').trim();
+    return `  <wpt lat="${r.lat}" lon="${r.lon}">\n    <name>${escapeXml(r.ssid || r.mac)}</name>\n    <desc>${escapeXml(desc)}</desc>\n  </wpt>`;
+  });
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Skon's USB Tool" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>${escapeXml(name)}</name></metadata>\n${wpts.join('\n')}\n</gpx>\n`;
+}
+
+export function haversineKm(a, b) {
+  const R = 6371.0088, rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+// Route covered, from rows with a fix ordered by FirstSeen. Hops over maxHopKm
+// between consecutive sightings are treated as GPS glitches/gaps and not added.
+export function trackStats(rows, maxHopKm = 5) {
+  const pts = (rows || []).filter((r) => hasFix(r) && /^\d{4}-/.test(r.seen || '')).sort((a, b) => (a.seen < b.seen ? -1 : a.seen > b.seen ? 1 : 0));
+  let km = 0, skippedHops = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const d = haversineKm(pts[i - 1], pts[i]);
+    if (d > maxHopKm) skippedHops++; else km += d;
+  }
+  const all = (rows || []).filter(hasFix);
+  const bbox = all.length ? {
+    minLat: Math.min(...all.map((r) => r.lat)), maxLat: Math.max(...all.map((r) => r.lat)),
+    minLon: Math.min(...all.map((r) => r.lon)), maxLon: Math.max(...all.map((r) => r.lon))
+  } : null;
+  return { km, skippedHops, bbox, fixRows: all.length };
+}
+
+export function bandOf(r) {
+  if (r.type === 'BLE') return 'BLE';
+  const f = r.freq;
+  if (typeof f === 'number') { if (f >= 5925) return '6 GHz'; if (f >= 4900) return '5 GHz'; if (f >= 2400) return '2.4 GHz'; }
+  if (typeof r.ch === 'number') return r.ch > 14 ? '5 GHz' : '2.4 GHz';
+  return 'Unknown';
+}
+
+export function bandHistogram(rows) {
+  const order = ['2.4 GHz', '5 GHz', '6 GHz', 'BLE', 'Unknown'];
+  const m = new Map();
+  for (const r of rows || []) { const k = bandOf(r); m.set(k, (m.get(k) || 0) + 1); }
+  return toList(m, (a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+}
+
+// One row per MAC (best sighting) as a WiGLE CSV: removes repeat sightings.
+export function dedupeWigleCsv(rows, opts = {}) {
+  return rowsToWigleCsv(mergeWigleLogs([rows]), opts);
+}

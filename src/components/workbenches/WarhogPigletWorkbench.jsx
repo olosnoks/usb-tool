@@ -558,111 +558,53 @@ export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
   const statusTone = tkStatus.tone === 'ok' ? 'text-emerald-300' : tkStatus.tone === 'bad' ? 'text-rose-300' : 'text-slate-400';
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto p-2 @sm:p-4 text-slate-200">
-      {/* Header Banner */}
-      <div className="bg-[#10131a] border border-amber-500/30 rounded-xl p-4 @sm:p-5 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-40 bg-gradient-to-bl from-amber-500/10 to-transparent pointer-events-none" />
-        <div className="flex flex-col @md:flex-row items-start @md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2.5">
-              <span className="text-2xl">🐗</span>
-              <h1 className="text-xl @sm:text-2xl font-black tracking-wider text-slate-100 uppercase">
-                WARHOG &amp; PIGLET TOOLSUITE
-              </h1>
-              <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                WT Protocol v1
-              </span>
-            </div>
-            <p className="text-xs @sm:text-sm text-slate-400 max-w-2xl">
-              The Piglet Toolkit from the WarHog web flasher: connect your <strong className="text-amber-400">Piglet</strong> over USB to browse its SD card, view WiGLE logs, and edit <code className="text-cyan-300">wardriver.cfg</code> through the firmware&apos;s <code className="text-amber-300">SerialTool</code> WT protocol.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <a
-              href="https://github.com/olosnoks/warhog"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-amber-500/50 text-xs font-semibold text-slate-300 hover:text-amber-300 transition"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>GitHub: olosnoks/warhog</span>
-            </a>
-          </div>
-        </div>
-
-        {/* Tab Navigation */}
-        <div className="flex flex-wrap items-center gap-2 mt-5 pt-4 border-t border-slate-800">
+    <div className="space-y-2 text-slate-200">
+      {/* Tabs + project link (the window title bar already names the tool) */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {[
+          ['sd', Cable, 'SD Card', 'SD Card File Explorer (USB)'],
+          ['config', Sliders, 'wardriver.cfg', 'wardriver.cfg Editor'],
+          ['live', Monitor, `Console (${tkConnected ? 'Live' : 'Closed'})`, 'Live Console'],
+          ['flasher', Flame, 'Flasher', 'Web Flasher'],
+          ['pinouts', Cpu, 'Pinouts', 'Hardware Pinouts']
+        ].map(([id, Icon, label, tip]) => (
           <button
+            key={id}
             type="button"
-            onClick={() => setActiveTab('sd')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              activeTab === 'sd'
+            title={tip}
+            aria-pressed={activeTab === id}
+            onClick={() => setActiveTab(id)}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+              activeTab === id
                 ? 'bg-amber-500 text-slate-950 shadow-md'
                 : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
             }`}
           >
-            <Cable className="w-3.5 h-3.5" />
-            <span>SD Card File Explorer (USB)</span>
+            <Icon className="w-3.5 h-3.5" />
+            <span>{label}</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('config')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              activeTab === 'config'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Sliders className="w-3.5 h-3.5" />
-            <span>wardriver.cfg Editor</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('live')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              activeTab === 'live'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Monitor className="w-3.5 h-3.5" />
-            <span>Live Console ({tkConnected ? 'Live' : 'Closed'})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('flasher')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              activeTab === 'flasher'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Flame className="w-3.5 h-3.5" />
-            <span>Web Flasher</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('pinouts')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-              activeTab === 'pinouts'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-            }`}
-          >
-            <Cpu className="w-3.5 h-3.5" />
-            <span>Hardware Pinouts</span>
-          </button>
-        </div>
+        ))}
+        <a
+          href="https://github.com/olosnoks/warhog"
+          target="_blank"
+          rel="noreferrer"
+          title="GitHub: olosnoks/warhog"
+          className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-900 border border-slate-700 hover:border-amber-500/50 text-[11px] font-semibold text-slate-300 hover:text-amber-300"
+        >
+          <ExternalLink className="w-3 h-3" />
+          <span>olosnoks/warhog</span>
+        </a>
       </div>
+      <details className="text-[11px] text-slate-500">
+        <summary className="cursor-pointer hover:text-slate-300">About this tool</summary>
+        <p className="mt-1 text-slate-400">
+          Connect your <strong className="text-amber-400">Piglet</strong> over USB to browse its SD card, view WiGLE logs, and edit <code className="text-cyan-300">wardriver.cfg</code> through the firmware&apos;s <code className="text-amber-300">SerialTool</code> WT protocol.
+        </p>
+      </details>
 
       {/* Piglet Toolkit connection bar (shared by the SD, config and console tabs) */}
       {(activeTab === 'sd' || activeTab === 'config' || activeTab === 'live') && (
-        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center gap-3">
+        <div className="bg-[#12151c] border border-slate-800 rounded-lg p-2 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={handleConnect}
@@ -760,7 +702,7 @@ export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
           {/* Screen mirror + Core monitor, side by side on wide windows */}
           <div className="grid grid-cols-1 @lg:grid-cols-[minmax(0,620px)_1fr] gap-4 items-start">
             <PigletScreenMirror client={client} connected={tkConnected} log={log} />
-            <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5">
+            <div className="bg-[#12151c] border border-slate-800 rounded-lg p-2.5">
               <div className="flex items-center gap-2 pb-3 mb-3 border-b border-slate-800">
                 <Gauge className="w-4 h-4 text-amber-400" />
                 <h2 className="font-bold text-slate-100 text-sm">WarHog Core Monitor</h2>
@@ -771,7 +713,7 @@ export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
           </div>
 
           {/* Serial console, full width beneath */}
-          <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5 space-y-4">
+          <div className="bg-[#12151c] border border-slate-800 rounded-lg p-2.5 space-y-2">
             <div className="flex flex-col @sm:flex-row items-start @sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
@@ -872,7 +814,7 @@ export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
 
       {/* TAB 5: WEB FLASHER */}
       {activeTab === 'flasher' && (
-        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5 space-y-5">
+        <div className="bg-[#12151c] border border-slate-800 rounded-lg p-2.5 space-y-2">
           <div className="flex flex-col @sm:flex-row items-start @sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
@@ -896,7 +838,7 @@ export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
 
           <WarhogBoardCarousel presets={HARDWARE_PRESETS} flasherUrl={FLASHER_URL} />
 
-          <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+          <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
             <h3 className="font-bold text-xs text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
               <Terminal className="w-3.5 h-3.5 text-cyan-400" />
               <span>PlatformIO CLI Flashing (Direct Toolchain)</span>
@@ -918,7 +860,7 @@ export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
 
       {/* TAB 6: HARDWARE PINOUTS */}
       {activeTab === 'pinouts' && (
-        <div className="bg-[#12151c] border border-slate-800 rounded-xl p-4 @sm:p-5 space-y-4">
+        <div className="bg-[#12151c] border border-slate-800 rounded-lg p-2.5 space-y-2">
           <div className="space-y-1 pb-3 border-b border-slate-800">
             <div className="flex items-center gap-2">
               <Cpu className="w-4 h-4 text-emerald-400" />
@@ -931,7 +873,7 @@ export default function WarhogPigletWorkbench({ initialTab = 'sd' }) {
 
           <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-3">
             {HARDWARE_PINOUTS.map((h, i) => (
-              <div key={i} className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+              <div key={i} className="p-2.5 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
                 <div className="font-bold text-xs text-amber-300">{h.board}</div>
                 <div className="text-xs space-y-1 text-slate-300">
                   <div>
