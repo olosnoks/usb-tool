@@ -95,9 +95,17 @@ Flashing a BIOS chip directly on a motherboard using a spring-loaded SOIC-8 test
 3. In Skon's USB Tool, open the **Hardware Programmers Suite** and select the **CH341A BIOS Flash** tab.
 4. Click **CONNECT CH341A (WEBUSB)** and choose the device. The tool reads the JEDEC ID and status registers immediately and fills the Detected Flash Chip / Flash Capacity / JEDEC ID cards, e.g. \`0xEF4018\` Winbond W25Q128 16 MB. **READ JEDEC ID** repeats the query. An ID of \`FF FF FF\` or \`00 00 00\` means no chip answered (check the clip, pin 1 and the 3.3 V jumper).
 5. Click **DUMP FULL CHIP** (or **DUMP 64 KB** for a quick test). A progress bar shows the transfer; the first 2,048 bytes appear in the buffer preview. Click **SAVE DUMP (.BIN)** to save a backup (\`bios-dump-<chip>-<time>.bin\`).
+   - **READ RANGE** reads only part of the chip into the buffer: enter a **start** and a **length** (decimal or \`0x\` hex) and click it. The range is checked against the detected chip size.
+   - The buffer line shows its **CRC32** and **SHA-256**, recomputed whenever the buffer changes, so you can confirm that two dumps match (read the chip twice and compare the sums before trusting a dump).
+   - **BLANK CHECK CHIP** reads the whole chip and reports whether every byte is \`FF\` (erased), or how many bytes are not and where the first one is. It does not change the buffer. **BLANK?** does the same check on the buffer.
+   - **COPY flashrom CMD** copies a text command line (\`flashrom -p ch341a_spi -w image.bin\`) for the same job on a PC with flashrom installed. It is only text; this tool does not run flashrom.
 6. Click **LOAD .BIN FILE** and select the replacement image (\`.bin\`, \`.rom\`; the file is used as raw bytes, an Intel HEX file is not converted).
 7. Optionally use **FILE vs CHIP** or **FILE vs BUFFER** to compare a file against the chip or the buffer; differing byte ranges are listed.
 8. Click **WRITE BUFFER TO FLASH** and confirm. The image is written from address 0, sector by sector: sectors that already match are skipped, sectors needing a 0-to-1 change are erased, only changed pages are programmed, and every sector is read back and verified. A summary reports sectors erased, pages programmed and sectors skipped. **CHIP ERASE** (confirmation required) is available separately.
+
+The CH341A window is laid out compactly: a connection bar (with a **Notes** toggle for the short description), a toolbar, the three cards (status and protection, compare, I2C EEPROM) and the buffer preview. It uses the window's width, so it stays usable in a narrow window.
+
+**Similar tools**: flashrom (CLI, \`ch341a_spi\` programmer), NeoProgrammer / AsProgrammer (Windows GUI), and the vendor CH341A programmer utilities. Unlike them this tool runs in the browser over WebUSB; it does not support chip layouts or multi-file projects, and Intel HEX files are not converted.
 
 For a 24Cxx EEPROM, put it in the programmer's 8-pin socket, choose the type and device address in the **I2C EEPROM (24Cxx)** card, then use **READ EEPROM** (loads the buffer) or **WRITE EEPROM** (writes the buffer, verified by read-back). A missing chip reads as all \`FF\`.
 
