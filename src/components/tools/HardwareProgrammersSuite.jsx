@@ -1,10 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { setCurrentTool } from '../../utils/sessionLog';
-import { Cpu, HardDrive, Layers, Zap, CheckCircle2 } from 'lucide-react';
+import { Cpu, HardDrive, Layers, Zap } from 'lucide-react';
 import Ch341aProgrammer from './Ch341aProgrammer';
 import CmsisDapDebugger from './CmsisDapDebugger';
 import JtagWorkbench from './JtagWorkbench';
 import AvrIspWorkbench from './AvrIspWorkbench';
+
+const TABS = [
+  { id: 'ch341a', label: 'CH341A BIOS Flash', short: 'CH341A', Icon: HardDrive, active: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
+  { id: 'cmsis-dap', label: 'CMSIS-DAP Debugger', short: 'CMSIS-DAP', Icon: Cpu, active: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' },
+  { id: 'jtag', label: 'JTAG / SVF Player', short: 'JTAG', Icon: Layers, active: 'bg-purple-500/20 text-purple-300 border-purple-500/40' },
+  { id: 'avr', label: 'AVR ISP & Bootloader', short: 'AVR', Icon: Zap, active: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' }
+];
 
 export default function HardwareProgrammersSuite({ initialTab = 'ch341a' }) {
   const [activeSubTab, setActiveSubTab] = useState(
@@ -27,67 +34,25 @@ export default function HardwareProgrammersSuite({ initialTab = 'ch341a' }) {
   }, [activeSubTab]);
 
   return (
-    <div className="w-full space-y-4">
-      {/* Suite Header & Sub-Navigation */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-400">
-            <Cpu className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-400">
-              SPI/I2C BIOS flash, ARM Cortex-M SWD halt/step, JTAG boundary scan & AVR ISP bootloaders
-            </p>
-          </div>
-        </div>
-
-        {/* Tab Switcher */}
-        <div className="flex flex-wrap items-center bg-slate-950 p-1 rounded-lg border border-slate-800 gap-1">
+    <div className="w-full space-y-2">
+      {/* Sub-navigation */}
+      <div role="tablist" aria-label="Programmer" className="flex flex-wrap items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 gap-0.5">
+        {TABS.map(({ id, label, short, Icon, active }) => (
           <button
-            onClick={() => setActiveSubTab('ch341a')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'ch341a'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+            key={id}
+            role="tab"
+            aria-selected={activeSubTab === id}
+            title={label}
+            onClick={() => setActiveSubTab(id)}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold transition ${
+              activeSubTab === id ? `${active} border shadow-sm` : 'text-slate-400 hover:text-slate-200 border border-transparent'
             }`}
           >
-            <HardDrive className="w-3.5 h-3.5" />
-            <span>CH341A BIOS Flash</span>
+            <Icon className="w-3.5 h-3.5" />
+            <span className="hidden @sm:inline">{label}</span>
+            <span className="@sm:hidden">{short}</span>
           </button>
-          <button
-            onClick={() => setActiveSubTab('cmsis-dap')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'cmsis-dap'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Cpu className="w-3.5 h-3.5" />
-            <span>CMSIS-DAP Debugger</span>
-          </button>
-          <button
-            onClick={() => setActiveSubTab('jtag')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'jtag'
-                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>JTAG / SVF Player</span>
-          </button>
-          <button
-            onClick={() => setActiveSubTab('avr')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'avr'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Zap className="w-3.5 h-3.5" />
-            <span>AVR ISP & Bootloader</span>
-          </button>
-        </div>
+        ))}
       </div>
 
       {/* Active Tab View */}

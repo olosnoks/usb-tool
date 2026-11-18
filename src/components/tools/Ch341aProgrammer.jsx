@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Cpu,
   HardDrive,
@@ -13,13 +13,17 @@ import {
   Layers,
   FileCode,
   Zap,
-  Sliders
+  Sliders,
+  Copy,
+  Hash,
+  Eraser
 } from 'lucide-react';
 import {
   Ch341aClient,
   EEPROM_DATABASE,
   diffBuffers
 } from '../../utils/ch341aDriver';
+import { parseRange, blankCheck, crc32Hex, sha256Hex, flashromCommand } from '../../utils/ch341aTools';
 import HexViewer from '../common/HexViewer';
 import StatusBadge from '../common/StatusBadge';
 
@@ -46,6 +50,46 @@ export default function Ch341aProgrammer() {
   const [eepromType, setEepromType] = useState('24C02');
   const [eepromAddr, setEepromAddr] = useState('50');
   const [error, setError] = useSessionError('CH341A');
+  const [rangeStart, setRangeStart] = useState('0');
+  const [rangeLen, setRangeLen] = useState('0x1000');
+  const [blankResult, setBlankResult] = useState(null);
+  const [hashes, setHashes] = useState(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const [copied, setCopied] = useState('');
+
+  // Checksums of the current buffer, recomputed whenever it changes.
+  useEffect(() => {
+    setBlankResult(null);
+    if (!loadedBuffer) { setHashes(null); return undefined; }
+    let cancelled = false;
+    const crc = crc32Hex(loadedBuffer);
+    setHashes({ crc, sha: '...' });
+    sha256Hex(loadedBuffer).then((sha) => { if (!cancelled) setHashes({ crc, sha: sha || 'unavailable' }); });
+    return () => { cancelled = true; };
+  }, [loadedBuffer]);
+
+  const handleReadRange = () => {
+    const r = parseRange(rangeStart, rangeLen, chipInfo?.sizeBytes);
+    if (!r.ok) { setError(r.error); return; }
+    job(`Reading ${r.length} bytes at ${hex(r.start)}...`, async () => {
+      setProgress({ percent: 0, current: 0, total: r.length });
+      const data = await client.readFlash(r.start, r.length, (pct, cur, tot) => setProgress({ percent: pct, current: cur, total: tot }));
+      showBuffer(data, 'rx');
+    });
+  };
+
+  const handleBlankCheckChip = () => {
+    const size = chipInfo?.sizeBytes;
+    if (!size) { setError('Chip size unknown; use READ RANGE and BLANK? on the buffer instead.'); return; }
+    job('Blank check: reading chip...', async () => {
+      const data = await client.readFlash(0, size, (pct, cur, tot) => setProgress({ percent: pct, current: cur, total: tot }));
+      setBlankResult({ source: 'chip', ...blankCheck(data) });
+    });
+  };
+
+  const copyText = async (key, text) => {
+    try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 1500); } catch { setError('Clipboard not available.'); }
+  };
 
   const showBuffer = (data, type) => {
     setLoadedBuffer(data);
@@ -205,156 +249,123 @@ export default function Ch341aProgrammer() {
     reader.readAsArrayBuffer(file);
   };
 
-  return (
-    <div className="flex flex-col gap-4 font-mono">
-      {/* Programmer Header Card */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <p className="text-[11px] text-slate-400">
-              Read, write and verify 25-series SPI NOR flash (BIOS, routers, GPUs, IoT) and 24-series I2C EEPROMs with a CH341A over WebUSB: chip detection with SFDP fallback, write protection, smart erase-and-write, and dump comparison. On Windows the CH341A needs the WinUSB driver (Zadig).
-            </p>
-          </div>
+  const btn = 'flex items-center gap-1 px-2 py-1 rounded-md bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] font-bold transition-all disabled:opacity-50';
+  const card = 'bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2';
+  const field = 'bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300';
+  const stat = (label, value, sub, color) => (
+    <div className="min-w-0">
+      <span className="text-[9px] text-slate-500 font-bold uppercase">{label}</span>
+      <div className={`${color} font-bold truncate`}>{value}</div>
+      {sub && <div className="text-[10px] text-slate-400 truncate">{sub}</div>}
+    </div>
+  );
 
+  return (
+    <div className="flex flex-col gap-2 font-mono text-xs">
+      {/* Connection bar */}
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             {!isConnected ? (
-              <>
-                <button
-                  onClick={handleConnectHardware}
-                  disabled={isBusy}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-amber-glow transition-all active:scale-95 disabled:opacity-50"
-                >
-                  <Cpu className="w-3.5 h-3.5" />
-                  <span>CONNECT CH341A (WEBUSB)</span>
-                </button>
-              </>
+              <button
+                onClick={handleConnectHardware}
+                disabled={isBusy}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-[11px] shadow-amber-glow transition-all active:scale-95 disabled:opacity-50"
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>CONNECT CH341A (WEBUSB)</span>
+              </button>
             ) : (
               <button
                 onClick={handleDisconnect}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[11px] font-bold"
               >
                 <span>DISCONNECT</span>
               </button>
             )}
+            <span className="text-[10px] text-slate-500">VID 1A86 PID 5512</span>
           </div>
+          <button type="button" onClick={() => setShowHelp((v) => !v)} aria-expanded={showHelp} className="text-[10px] text-slate-400 hover:text-slate-200 underline">
+            {showHelp ? 'Hide notes' : 'Notes'}
+          </button>
         </div>
+        {showHelp && (
+          <p className="mt-2 text-[11px] text-slate-400">
+            Read, write and verify 25-series SPI NOR flash (BIOS, routers, GPUs, IoT) and 24-series I2C EEPROMs with a CH341A over WebUSB: chip detection with SFDP fallback, write protection, smart erase-and-write, ranged reads, blank check, checksums and dump comparison. On Windows the CH341A needs the WinUSB driver (Zadig). Many cheap boards drive 5 V logic: check pin 28 before clipping onto a 3.3 V chip.
+          </p>
+        )}
 
-        {/* Chip Identification & Info Banner */}
         {isConnected && chipInfo && (
-          <div className="pt-3 grid grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-4 gap-3 text-xs">
-            <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-              <span className="text-[10px] text-slate-500 font-bold uppercase">Detected Flash Chip</span>
-              <div className="text-amber-300 font-bold text-sm mt-0.5">{chipInfo.model}</div>
-              <div className="text-[10px] text-slate-400">{chipInfo.manufacturer}</div>
-            </div>
-
-            <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-              <span className="text-[10px] text-slate-500 font-bold uppercase">Flash Capacity</span>
-              <div className="text-cyan-300 font-bold text-sm mt-0.5">
-                {chipInfo.sizeBytes ? `${chipInfo.sizeBytes >= 1048576 ? `${chipInfo.sizeBytes / 1048576} MB` : `${chipInfo.sizeBytes / 1024} KB`} (${chipInfo.sizeBytes} bytes)` : 'unknown'}
-              </div>
-              <div className="text-[10px] text-slate-400">Page: {chipInfo.pageSize}B • Sector: {chipInfo.sectorSize / 1024}KB</div>
-            </div>
-
-            <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-              <span className="text-[10px] text-slate-500 font-bold uppercase">JEDEC ID (0x9F)</span>
-              <div className="text-emerald-400 font-mono font-bold text-sm mt-0.5">
-                0x{chipInfo.jedecId?.toString(16).toUpperCase() || 'EF4018'}
-              </div>
-              <div className="text-[10px] text-slate-400">{chipInfo.guessed ? `Not in the database; size from ${chipInfo.sizeFrom || 'nowhere'}` : 'SPI mode 0'}</div>
-            </div>
-
-            <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-              <span className="text-[10px] text-slate-500 font-bold uppercase">Programmer Hardware</span>
-              <div className="text-purple-300 font-bold text-sm mt-0.5">
-                CH341A USB
-              </div>
-              <div className="text-[10px] text-slate-400">VID 0x1A86 PID 0x5512</div>
-            </div>
+          <div className="mt-2 pt-2 border-t border-slate-800 grid grid-cols-2 @lg:grid-cols-4 gap-2">
+            {stat('Flash chip', chipInfo.model, chipInfo.manufacturer, 'text-amber-300')}
+            {stat('Capacity', chipInfo.sizeBytes ? (chipInfo.sizeBytes >= 1048576 ? `${chipInfo.sizeBytes / 1048576} MB` : `${chipInfo.sizeBytes / 1024} KB`) : 'unknown', `Page ${chipInfo.pageSize}B, sector ${chipInfo.sectorSize / 1024}KB`, 'text-cyan-300')}
+            {stat('JEDEC ID', `0x${chipInfo.jedecId?.toString(16).toUpperCase() || 'EF4018'}`, chipInfo.guessed ? `Not in database; size from ${chipInfo.sizeFrom || 'nowhere'}` : 'SPI mode 0', 'text-emerald-400')}
+            {stat('Programmer', 'CH341A USB', 'WebUSB', 'text-purple-300')}
           </div>
         )}
       </div>
 
-      {/* Action Toolbar */}
+      {/* Action toolbar */}
       {isConnected && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-xl">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleIdentify}
-              disabled={isBusy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 text-xs font-bold transition-all disabled:opacity-50"
-            >
-              <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
-              <span>READ JEDEC ID</span>
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 space-y-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button onClick={handleIdentify} disabled={isBusy} title="Query JEDEC ID (0x9F)" className={`${btn} text-slate-200`}>
+              <RefreshCw className="w-3.5 h-3.5 text-cyan-400" /><span>JEDEC ID</span>
             </button>
-
-            <button
-              onClick={() => handleReadFlash(65536)}
-              disabled={isBusy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/40 text-xs font-bold transition-all disabled:opacity-50"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>DUMP 64 KB</span>
+            <button onClick={() => handleReadFlash(65536)} disabled={isBusy} title="Read the first 64 KB" className={`${btn} text-amber-300 border-amber-500/40`}>
+              <Download className="w-3.5 h-3.5" /><span>DUMP 64 KB</span>
             </button>
-
-            <button
-              onClick={() => handleReadFlash(chipInfo?.sizeBytes || 1048576)}
-              disabled={isBusy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 text-xs font-bold transition-all disabled:opacity-50"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>DUMP FULL CHIP</span>
+            <button onClick={() => handleReadFlash(chipInfo?.sizeBytes || 1048576)} disabled={isBusy} title="Read the whole chip into the buffer" className={`${btn} text-amber-300 bg-amber-500/20 border-amber-500/50`}>
+              <Download className="w-3.5 h-3.5" /><span>DUMP FULL CHIP</span>
             </button>
-
-            <button
-              onClick={handleWriteFlash}
-              disabled={isBusy || !loadedBuffer}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs shadow-emerald-glow transition-all disabled:opacity-50"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              <span>WRITE BUFFER TO FLASH</span>
+            <button onClick={handleWriteFlash} disabled={isBusy || !loadedBuffer} title="Erase changed sectors, program and verify" className="flex items-center gap-1 px-2 py-1 rounded-md bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-[11px] shadow-emerald-glow transition-all disabled:opacity-50">
+              <Play className="w-3.5 h-3.5 fill-current" /><span>WRITE BUFFER TO FLASH</span>
             </button>
+            <span className="flex-1" />
+            <input type="file" ref={fileInputRef} onChange={handleFileLoad} accept=".bin,.rom,.hex" className="hidden" />
+            <button onClick={() => fileInputRef.current?.click()} title="Load a .bin image into the buffer" className={`${btn} text-slate-300`}>
+              <Upload className="w-3.5 h-3.5 text-cyan-400" /><span>LOAD .BIN FILE</span>
+            </button>
+            {loadedBuffer && (
+              <button onClick={handleSaveBin} title="Save the buffer as a .bin file" className={`${btn} text-emerald-400`}>
+                <Download className="w-3.5 h-3.5" /><span>SAVE DUMP (.BIN)</span>
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileLoad}
-              accept=".bin,.rom,.hex"
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-bold transition-all"
-            >
-              <Upload className="w-3.5 h-3.5 text-cyan-400" />
-              <span>LOAD .BIN FILE</span>
+          {/* Ranged read + blank check */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-800">
+            <label className="flex items-center gap-1 text-slate-500">start
+              <input value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} aria-label="Range start (decimal or 0x hex)" className={`w-20 ${field}`} />
+            </label>
+            <label className="flex items-center gap-1 text-slate-500">length
+              <input value={rangeLen} onChange={(e) => setRangeLen(e.target.value)} aria-label="Range length in bytes (decimal or 0x hex)" className={`w-20 ${field}`} />
+            </label>
+            <button onClick={handleReadRange} disabled={isBusy} title="Read only this range into the buffer" className={`${btn} text-amber-300 border-amber-500/40`}>
+              <Download className="w-3.5 h-3.5" /><span>READ RANGE</span>
             </button>
-
-            {loadedBuffer && (
-              <button
-                onClick={handleSaveBin}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-slate-800 text-xs font-bold transition-all"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>SAVE DUMP (.BIN)</span>
-              </button>
+            <button onClick={handleBlankCheckChip} disabled={isBusy} title="Read the whole chip and check that every byte is FF (the buffer is not changed)" className={`${btn} text-slate-200`}>
+              <Eraser className="w-3.5 h-3.5 text-cyan-400" /><span>BLANK CHECK CHIP</span>
+            </button>
+            {blankResult && (
+              <span className={blankResult.blank ? 'text-emerald-300' : 'text-amber-300'}>
+                {blankResult.source === 'chip' ? 'Chip' : 'Buffer'}: {blankResult.blank ? `blank (all FF, ${blankResult.length} B)` : `${blankResult.nonBlankBytes} non-FF bytes, first at ${hex(blankResult.firstNonBlank)}`}
+              </span>
             )}
           </div>
         </div>
       )}
 
       {error && (
-        <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
+        <div className="flex items-start gap-2 p-2 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 font-bold">
           <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
         </div>
       )}
 
       {isConnected && (
-        <div className="grid grid-cols-1 @lg:grid-cols-3 gap-3 text-xs">
+        <div className="grid grid-cols-1 @lg:grid-cols-3 gap-2">
           {/* Status registers and protection */}
-          <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 shadow-xl space-y-2">
+          <div className={card}>
             <div className="font-bold text-slate-200 flex items-center gap-1.5"><Sliders className="w-3.5 h-3.5 text-cyan-400" /> STATUS & WRITE PROTECTION</div>
             {status ? (
               <>
@@ -373,7 +384,7 @@ export default function Ch341aProgrammer() {
               <button onClick={() => job('Reading status registers...', async () => setStatus(await client.readStatus()))} disabled={isBusy} className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-200 font-bold disabled:opacity-40">READ</button>
               <button onClick={() => job('Clearing block protection...', async () => setStatus(await client.unprotect()))} disabled={isBusy} className="px-2 py-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold disabled:opacity-40">UNPROTECT</button>
               <span className="text-slate-500">SR1</span>
-              <input value={srInput} onChange={(e) => setSrInput(e.target.value)} className="w-10 bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300" />
+              <input value={srInput} onChange={(e) => setSrInput(e.target.value)} aria-label="Status register 1 value (hex)" className={`w-10 ${field}`} />
               <button
                 onClick={() => {
                   const v = parseInt(srInput, 16);
@@ -400,9 +411,9 @@ export default function Ch341aProgrammer() {
           </div>
 
           {/* Compare */}
-          <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 shadow-xl space-y-2">
+          <div className={card}>
             <div className="font-bold text-slate-200 flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-purple-400" /> COMPARE</div>
-            <p className="text-slate-500">Compare a .bin file with the chip (reads the same length), or with the buffer below.</p>
+            <p className="text-slate-500">Compare a .bin file with the chip (reads the same length), or with the buffer.</p>
             <input
               type="file"
               ref={compareInputRef}
@@ -439,15 +450,15 @@ export default function Ch341aProgrammer() {
           </div>
 
           {/* I2C EEPROM */}
-          <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 shadow-xl space-y-2">
+          <div className={card}>
             <div className="font-bold text-slate-200 flex items-center gap-1.5"><FileCode className="w-3.5 h-3.5 text-emerald-400" /> I2C EEPROM (24Cxx)</div>
-            <p className="text-slate-500">Put the 24Cxx in the 8-pin socket (the 25-series side is SPI). A missing chip reads as all FF.</p>
+            <p className="text-slate-500">Use the 8-pin socket (the 25-series side is SPI). A missing chip reads as all FF.</p>
             <div className="flex flex-wrap items-center gap-1.5">
-              <select value={eepromType} onChange={(e) => setEepromType(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300">
+              <select value={eepromType} onChange={(e) => setEepromType(e.target.value)} aria-label="EEPROM type" className={field}>
                 {Object.entries(EEPROM_DATABASE).map(([k, v]) => <option key={k} value={k}>{k} ({v.size >= 1024 ? `${v.size / 1024} KB` : `${v.size} B`})</option>)}
               </select>
               <span className="text-slate-500">addr 0x</span>
-              <input value={eepromAddr} onChange={(e) => setEepromAddr(e.target.value)} className="w-8 bg-slate-950 border border-slate-800 rounded px-1 py-1 text-cyan-300" />
+              <input value={eepromAddr} onChange={(e) => setEepromAddr(e.target.value)} aria-label="EEPROM I2C address (hex)" className={`w-8 ${field}`} />
             </div>
             <div className="flex flex-wrap gap-1.5">
               <button
@@ -480,34 +491,54 @@ export default function Ch341aProgrammer() {
         </div>
       )}
 
-      {/* Progress Indicator */}
+      {/* Progress */}
       {isBusy && (
-        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1.5">
-          <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+        <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 space-y-1" role="status">
+          <div className="flex items-center justify-between font-bold text-slate-300">
             <span className="text-amber-400 flex items-center gap-2">
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               <span>{busyAction}</span>
             </span>
             <span>{progress.percent}%</span>
           </div>
-          <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-            <div
-              className="h-full bg-gradient-to-r from-amber-500 to-emerald-400 transition-all duration-100"
-              style={{ width: `${progress.percent}%` }}
-            />
+          <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+            <div className="h-full bg-gradient-to-r from-amber-500 to-emerald-400 transition-all duration-100" style={{ width: `${progress.percent}%` }} />
           </div>
         </div>
       )}
 
-      {/* Built-in Interactive Hex Inspector for Dumped BIOS/Flash */}
+      {/* Buffer preview */}
       {loadedBuffer ? (
         <div className="space-y-2">
-          <div className="flex items-center justify-between text-xs text-slate-400">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-slate-400">
             <span className="font-bold text-slate-200">
-              BUFFER PREVIEW: <strong className="text-amber-400">{(loadedBuffer.length / 1024).toFixed(1)} KB</strong> Loaded
+              BUFFER: <strong className="text-amber-400">{(loadedBuffer.length / 1024).toFixed(1)} KB</strong> <span className="font-normal text-slate-500">(first 2048 bytes shown)</span>
             </span>
-            <span>Showing first 2048 bytes</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button onClick={() => setBlankResult({ source: 'buffer', ...blankCheck(loadedBuffer) })} className={`${btn} text-slate-200`} title="Check whether every buffer byte is FF">
+                <Eraser className="w-3.5 h-3.5 text-cyan-400" /><span>BLANK?</span>
+              </button>
+              <button
+                onClick={() => copyText('cmd', flashromCommand({ action: 'write', file: 'image.bin' }))}
+                className={`${btn} text-slate-300`}
+                title="Copy the equivalent flashrom command line. This tool does not run flashrom."
+              >
+                <Copy className="w-3.5 h-3.5" /><span>{copied === 'cmd' ? 'COPIED' : 'COPY flashrom CMD'}</span>
+              </button>
+            </div>
           </div>
+          {blankResult && !isConnected && (
+            <div className={blankResult.blank ? 'text-emerald-300' : 'text-amber-300'}>
+              Buffer: {blankResult.blank ? `blank (all FF, ${blankResult.length} B)` : `${blankResult.nonBlankBytes} non-FF bytes, first at ${hex(blankResult.firstNonBlank)}`}
+            </div>
+          )}
+          {hashes && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
+              <Hash className="w-3.5 h-3.5 text-purple-400" />
+              <span>CRC32 <span className="text-cyan-300 select-all">{hashes.crc}</span></span>
+              <span className="min-w-0 break-all">SHA-256 <span className="text-cyan-300 select-all">{hashes.sha}</span></span>
+            </div>
+          )}
           <HexViewer
             byteStream={hexByteStream}
             onClear={() => {
@@ -518,9 +549,9 @@ export default function Ch341aProgrammer() {
           />
         </div>
       ) : (
-        <div className="bg-slate-950/60 border border-dashed border-slate-800 rounded-xl p-8 text-center text-slate-500 flex flex-col items-center gap-2">
-          <HardDrive className="w-8 h-8 text-slate-600 stroke-[1.5]" />
-          <span>Connect programmer and click "DUMP FLASH" or load a .bin firmware image to inspect</span>
+        <div className="bg-slate-950/60 border border-dashed border-slate-800 rounded-lg p-4 text-center text-slate-500 flex flex-col items-center gap-1">
+          <HardDrive className="w-6 h-6 text-slate-600 stroke-[1.5]" />
+          <span>Connect the programmer and dump the flash, or load a .bin image to inspect</span>
         </div>
       )}
     </div>
