@@ -599,6 +599,14 @@ SPI flash chips answer the JEDEC command \`0x9F\` with a manufacturer byte and a
 
 Dumps from a chip with flash encryption enabled are read as stored (ciphertext).
 
+7. **Start Offset** accepts \`0x\` hex, \`h\`-suffixed hex or decimal. **Dump Size** accepts bytes, \`0x\` hex or \`K\` / \`M\` suffixes (1024-based, for example \`20K\` or \`4M\`). The DUMP button stays disabled until both parse. A yellow note appears when the offset is not on a 4 KB sector boundary, the size is not a multiple of 4, or the range runs past the detected flash size. These are warnings, not blocks.
+8. **esptool.py equivalent** (collapsed section below the dump row) shows the matching \`esptool.py --chip auto --port <PORT> --baud <baud> read_flash <offset> <length> <file>\` command with a copy button. It is only text for the command-line tool; this page does not run it.
+9. **Last dump** appears after a successful read and holds the data in memory (until you leave the page or dump again). It shows the **MD5** (the digest esptool prints for \`read_flash\`, so you can compare dumps) and the **SHA-256** (Web Crypto), a **Hex** view of the first 512 bytes, a **Strings** view (printable ASCII runs of 6 or more characters across the whole dump, up to 300 entries, each cut at 200 characters) and a **Save .bin** button to download the file again. Strings are useful for spotting readable settings in NVS dumps; they do not decode NVS entries.
+
+The workbench window sits in the desktop shell, so it has no heading of its own. The toolbar holds **IDENTIFY CHIP** and the **Baud** selector.
+
+**Similar tools:** esptool.py (\`read_flash\`, \`flash_id\`, \`chip_id\`, \`read_mac\`), Espressif's browser-based ESP Tool / ESP Web Tools, Flash Download Tool, and \`esp-idf-size\` style analyzers. This tool covers read-only identify, partition table and flash read in the browser; it does not write or erase flash.
+
 ---
 
 ### 3. Upstream Project & Engineering Attribution
