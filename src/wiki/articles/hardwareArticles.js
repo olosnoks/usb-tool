@@ -267,6 +267,14 @@ Every JTAG operation is governed by a 16-state finite state machine inside the t
 5. Click **EXECUTE SVF SEQUENCE**. A progress bar shows the current command; TDO checks run as the script goes, and the result reports the statements run and checks passed, or the failing line.
 6. **PROBE PINS & BOUNDARY SCAN (SAMPLE)**: **READ PROBE PINS** shows the probe's pin levels. For boundary scan, pick the device, enter the IR lengths (TDO end first), the SAMPLE opcode and the boundary length from the device's BSDL file (or click **LOAD BSDL FILE** to fill them in and name the pins), then **SAMPLE BOUNDARY CELLS**. The table lists each port with IN/OUT values and a **DRIVE (EXTEST)** control to force a pin low/high (a confirmation warns this can damage hardware); **RESET TAP** returns the chip to normal.
 
+#### JTAG tab extras
+- **SVF summary**: under the script box, one line counts the statements, IR and DR bits shifted, TDO checks, and a lower-bound run time (shifted bits plus RUNTEST clocks at the script's FREQUENCY, plus fixed RUNTEST seconds). It is computed from the text only, so it works without a probe. Unknown commands and unsupported \`PIO\`/\`PIOMAP\` lines are listed as warnings, and a syntax error (such as a missing \`;\`) shows here and disables **EXECUTE SVF SEQUENCE** until fixed.
+- **Boundary-scan table tools** (after a BSDL file is loaded and cells are sampled): **Filter port or pin** narrows the table by port name or package pin; **SNAPSHOT** saves the current sample and highlights every port whose IN, OUT or driver state differs in later samples (handy with the **live** checkbox while you press a button or move a probe); **CLEAR** stops comparing; **CSV** downloads the table (port, pin, input, output, driving).
+- **OpenOCD chain snippet**: after a scan, a collapsible block lists \`jtag newtap chip tapN -irlen N -expected-id 0x...\` lines in scan order (TDO end first) for use with the OpenOCD command-line tool, with a **COPY** button. This tool does not run OpenOCD; the snippet is only an export. IR lengths come from the IR lengths field or the built-in table, and devices without a known IR length get a comment asking you to add \`-irlen\` from the BSDL file.
+- Rarely needed text (the tool description and how sampling works) sits in collapsible sections to keep the window compact.
+
+**Similar tools:** OpenOCD (chain config and SVF player), UrJTAG (BSDL-driven boundary scan, \`detect\`), Xilinx iMPACT / Vivado Hardware Manager, and Lattice Diamond Programmer. Unlike them, this one runs in the browser through a CMSIS-DAP probe and does not program devices from vendor bitstream formats other than SVF.
+
 ---
 
 ### 4. AVR ISP (In-System Programmer & STK500)
