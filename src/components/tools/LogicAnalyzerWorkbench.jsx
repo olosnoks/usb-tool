@@ -15,7 +15,8 @@ import {
   ChevronRight,
   Crosshair,
   FileUp,
-  Save
+  Save,
+  Copy
 } from 'lucide-react';
 import { SAMPLE_RATES, SumpAnalyzer, Fx2LogicAnalyzer } from '../../utils/logicAnalyzerDriver';
 import {
@@ -32,6 +33,7 @@ import {
   exportSigrok,
   importSigrok
 } from '../../utils/logicDecoders';
+import { nearestEdge, edgesBetween, filterDecoded, sigrokCliCommand } from '../../utils/logicAnalysis';
 import { SerialLink } from '../../utils/serialLink';
 import { parseIntelHex } from '../../utils/firmwareParser';
 
@@ -130,6 +132,10 @@ export default function LogicAnalyzerWorkbench() {
 
   // Software trigger search over the captured buffer.
   const [search, setSearch] = useState({ kind: 'rising', channel: 0, mask: '03', value: '01', maxWidth: 2 });
+
+  // Snap cursors to the nearest edge of this channel (-1 = off); filter text for the decode table.
+  const [snapChannel, setSnapChannel] = useState(-1);
+  const [tableFilter, setTableFilter] = useState('');
 
   const canvasRef = useRef(null);
   const rate = captureRate || sampleRate;
@@ -282,6 +288,11 @@ export default function LogicAnalyzerWorkbench() {
 
   const deltaSeconds = Math.abs(cursorB - cursorA) / rate;
   const frequencyHz = deltaSeconds > 0 ? 1 / deltaSeconds : 0;
+  const abEdges = useMemo(
+    () => (snapChannel >= 0 && samples.length ? edgesBetween(samples, snapChannel, cursorA, cursorB) : null),
+    [snapChannel, samples, cursorA, cursorB]
+  );
+  const shownDecoded = useMemo(() => filterDecoded(decoded, tableFilter), [decoded, tableFilter]);
 
   const clampOffset = (o, vis = visibleSamples) => Math.max(0, Math.min(Math.max(0, samples.length - vis), Math.round(o)));
   const centerOn = (sample, vis = visibleSamples) => setViewOffset(clampOffset(sample - vis / 2, vis));
@@ -299,7 +310,8 @@ export default function LogicAnalyzerWorkbench() {
     if (!samples.length) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * e.currentTarget.width;
-    const sample = Math.round(viewOffset + (x * visibleSamples) / e.currentTarget.width);
+    let sample = Math.round(viewOffset + (x * visibleSamples) / e.currentTarget.width);
+    if (snapChannel >= 0) sample = nearestEdge(samples, snapChannel, sample);
     if (e.shiftKey) setCursorB(sample); else setCursorA(sample);
   };
 
@@ -536,6 +548,17 @@ export default function LogicAnalyzerWorkbench() {
     downloadBlob(rows.map((r) => r.join(',')).join('\n'), `${decoderId}-decode-${stamp()}.csv`, 'text/csv');
   };
 
+  const sigrokCommand = () => sigrokCliCommand(decoderId, cfg.channels, cfg.params, { chName: (n) => names[n] || `D${n}` });
+  const copySigrokCommand = async () => {
+    const cmd = sigrokCommand();
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setNotice(`Copied. Export the capture as .sr first, then run it in sigrok-cli (stacked decoders are not included): ${cmd}`);
+    } catch {
+      setNotice(`Copy failed. Command: ${cmd}`);
+    }
+  };
+
   const guessBaud = () => {
     const g = estimateBaud(samples, Number(cfg.channels.rx), rate);
     if (!g) { setNotice('Not enough edges on that channel to guess a baud rate.'); return; }
@@ -550,14 +573,14 @@ export default function LogicAnalyzerWorkbench() {
   const errors = decoded.filter((d) => d.kind === 'error').length;
 
   return (
-    <div className="flex flex-col gap-4 font-mono">
+    <div className="flex flex-col gap-2 font-mono">
       {error && (
-        <div className="flex items-start gap-2 p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
+        <div className="flex items-start gap-2 p-2 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 text-xs font-bold">
           <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
         </div>
       )}
       {notice && (
-        <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 text-xs">
+        <div className="flex flex-wrap items-center gap-2 p-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 text-xs">
           <span>{notice}</span>
           {fx2Ref.current && source !== 'fx2' && (
             <button onClick={() => fwInputRef.current?.click()} className="flex items-center gap-1 px-2 py-1 rounded border border-cyan-500/50 font-bold">
@@ -570,22 +593,23 @@ export default function LogicAnalyzerWorkbench() {
       <input ref={importRef} type="file" accept=".vcd,.sr" className="hidden" onChange={handleImport} />
       <input ref={sessionRef} type="file" accept=".json" className="hidden" onChange={loadSession} />
 
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <p className="text-[11px] text-slate-400">
+      <div className="bg-[#030712] border border-cyber-border rounded-xl p-2 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+          <details className="text-[11px] text-slate-400 w-full order-last">
+            <summary className="cursor-pointer text-slate-500 font-bold">About this tool</summary>
+            <p className="mt-1">
               Capture from a SUMP device over serial (all the channels it reports, up to 32) or an FX2 "24MHz 8CH" board running fx2lafw over WebUSB (16 in wide mode), or open a VCD / PulseView .sr file or a saved session.
               Decoders: I2C, UART, SPI, 1-Wire, CAN, WS2812, IR (NEC / RC-5) and SWD, with stackable decoders (SPI flash commands, I2C registers / EEPROM, NMEA 0183, CAN UDS / OBD / J1939).
             </p>
-          </div>
+          </details>
 
           <div className="flex flex-wrap items-center gap-2">
             {!source || source === 'file' ? (
               <>
-                <button onClick={handleConnectSump} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
+                <button onClick={handleConnectSump} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
                   <Usb className="w-3.5 h-3.5" /> CONNECT SUMP (SERIAL)
                 </button>
-                <button onClick={handleConnectFx2} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
+                <button onClick={handleConnectFx2} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-900 text-cyan-300 border border-cyan-500/40 text-xs font-bold">
                   <Usb className="w-3.5 h-3.5" /> CONNECT FX2 (USB)
                 </button>
               </>
@@ -597,19 +621,19 @@ export default function LogicAnalyzerWorkbench() {
                 </button>
               </>
             )}
-            <button onClick={() => importRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-xs font-bold">
+            <button onClick={() => importRef.current?.click()} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-xs font-bold">
               <FileUp className="w-3.5 h-3.5" /> OPEN .VCD / .SR
             </button>
-            <button onClick={() => sessionRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-xs font-bold" title="Load a saved session (.json): capture plus settings">
+            <button onClick={() => sessionRef.current?.click()} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-xs font-bold" title="Load a saved session (.json): capture plus settings">
               <FileUp className="w-3.5 h-3.5" /> OPEN SESSION
             </button>
-            <button onClick={saveSession} disabled={!samples.length} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-xs font-bold disabled:opacity-40" title="Save the capture and its settings as JSON">
+            <button onClick={saveSession} disabled={!samples.length} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 text-xs font-bold disabled:opacity-40" title="Save the capture and its settings as JSON">
               <Save className="w-3.5 h-3.5" /> SAVE SESSION
             </button>
             <button
               onClick={handleCapture}
               disabled={isCapturing || !source || source === 'file'}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-xs shadow-cyan-glow transition-all active:scale-95 disabled:opacity-50"
+              className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-xs shadow-cyan-glow transition-all active:scale-95 disabled:opacity-50"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
               <span>{isCapturing ? (progress ? `CAPTURING ${progress}%` : 'CAPTURING...') : 'CAPTURE SIGNAL'}</span>
@@ -617,8 +641,8 @@ export default function LogicAnalyzerWorkbench() {
           </div>
         </div>
 
-        <div className="pt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="pt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5">
               <span className="text-slate-500 font-bold text-[11px]">RATE:</span>
               <select value={sampleRate} onChange={(e) => setSampleRate(Number(e.target.value))} className={select}>
@@ -669,26 +693,39 @@ export default function LogicAnalyzerWorkbench() {
             {source === 'fx2' && sampleRate >= 12000000 && <span className="text-[10px] text-amber-300">At 12 MS/s and above the browser may not keep up with USB, which leaves gaps.</span>}
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-xs">
               <button onClick={() => zoomBy(1 / 2)} className="p-1 rounded text-slate-400 hover:text-slate-200" title="Zoom out"><ZoomOut className="w-3.5 h-3.5" /></button>
               <span className="px-2 font-bold text-slate-300">{zoomLevel < 10 ? zoomLevel.toFixed(1) : Math.round(zoomLevel)}x</span>
               <button onClick={() => zoomBy(2)} className="p-1 rounded text-slate-400 hover:text-slate-200" title="Zoom in"><ZoomIn className="w-3.5 h-3.5" /></button>
               <button onClick={() => { setZoomLevel(1); setViewOffset(0); }} className="p-1 rounded text-slate-400 hover:text-slate-200" title="Fit whole capture"><Maximize2 className="w-3.5 h-3.5" /></button>
             </div>
-            <div className="bg-slate-950 px-3 py-1 rounded-lg border border-slate-800 text-[11px] text-slate-300 flex items-center gap-3">
+            <div className="bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800 text-[11px] text-slate-300 flex flex-wrap items-center gap-x-3">
               <span>ΔT: <strong className="text-cyan-400">{fmtTime(deltaSeconds)}</strong></span>
               <span>1/ΔT: <strong className="text-amber-400">{fmtHz(frequencyHz)}</strong></span>
+              {abEdges && (
+                <span title={`Edges on D${snapChannel} between cursor A and B`}>
+                  D{snapChannel} edges: <strong className="text-emerald-300">{abEdges.rising}↑ {abEdges.falling}↓</strong>
+                  {abEdges.periodSamples > 0 && <> · <strong className="text-emerald-300">{fmtHz(rate / abEdges.periodSamples)}</strong></>}
+                </span>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       {/* Waveform Viewport Canvas */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 shadow-xl flex flex-col gap-2">
+      <div className="bg-[#030712] border border-cyber-border rounded-xl p-2 shadow-xl flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 pb-1 border-b border-slate-800">
-          <span className="font-bold text-slate-200">DIGITAL CHANNELS (D0 - D{channelCount - 1})</span>
-          <span className="text-[10px] text-slate-500">Click: cursor A · Shift-click: cursor B · Wheel: pan · Ctrl+wheel: zoom</span>
+          <span className="font-bold text-slate-200">D0 - D{channelCount - 1}</span>
+          <span className="text-[10px] text-slate-500 hidden @lg:inline">Click: A · Shift-click: B · Wheel: pan · Ctrl+wheel: zoom</span>
+          <label className="flex items-center gap-1 text-[11px]" title="Click places a cursor on the nearest edge of this channel, and the A-B bar counts its edges">
+            <span className="text-slate-500 font-bold">SNAP</span>
+            <select value={snapChannel} onChange={(e) => setSnapChannel(Number(e.target.value))} className={select} aria-label="Snap cursors to edges of channel">
+              <option value={-1}>off</option>
+              {channels.map((c) => <option key={c.id} value={c.id}>D{c.id}</option>)}
+            </select>
+          </label>
           <div className="flex items-center gap-1.5">
             <button onClick={exportVcdFile} disabled={!samples.length} className={btn}><Download className="w-3 h-3" /> VCD</button>
             <button onClick={exportSrFile} disabled={!samples.length} className={btn}><Download className="w-3 h-3" /> PULSEVIEW .SR</button>
@@ -764,7 +801,7 @@ export default function LogicAnalyzerWorkbench() {
       </div>
 
       {/* Protocol decoder */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-3.5 shadow-xl flex flex-col gap-3">
+      <div className="bg-[#030712] border border-cyber-border rounded-xl p-2 shadow-xl flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
           <span className="font-bold text-xs text-slate-200 flex items-center gap-1.5">
             <Layers className="w-3.5 h-3.5 text-cyan-400" /> PROTOCOL DECODER
@@ -782,7 +819,7 @@ export default function LogicAnalyzerWorkbench() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 text-[11px]">
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
           {Object.entries(cfg.channels).map(([role, ch]) => (
             <label key={role} className="flex items-center gap-1">
               <span className="text-slate-500 font-bold uppercase">{role}</span>
@@ -823,6 +860,7 @@ export default function LogicAnalyzerWorkbench() {
           ))}
           {decoderId === 'uart' && <button onClick={guessBaud} disabled={!samples.length} className={btn}>AUTO-BAUD</button>}
           <span className="ml-auto text-slate-500">{decoded.length} items{stackDef ? ` · ${stacked.length} stacked` : ''}{errors ? <span className="text-rose-400"> · {errors} errors</span> : null}</span>
+          <button onClick={copySigrokCommand} className={btn} title={`Copy an equivalent sigrok-cli command (use with the exported .sr file): ${sigrokCommand()}`}><Copy className="w-3 h-3" /> SIGROK-CLI</button>
           <button onClick={exportDecodedCsv} disabled={!decoded.length} className={btn}><Download className="w-3 h-3" /> CSV</button>
         </div>
 
@@ -865,13 +903,20 @@ export default function LogicAnalyzerWorkbench() {
           </div>
         )}
 
+        <input
+          value={tableFilter}
+          onChange={(e) => setTableFilter(e.target.value)}
+          placeholder="Filter decoded items (e.g. nack, 0x68, error)"
+          aria-label="Filter decoded items"
+          className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[11px] text-cyan-300 outline-none"
+        />
         <div className="max-h-64 overflow-y-auto border border-slate-800 rounded">
           <table className="w-full text-[11px]">
             <thead className="sticky top-0 bg-slate-900 text-slate-500">
               <tr><th className="text-left px-2 py-1">TIME</th><th className="text-left px-2 py-1">DURATION</th><th className="text-left px-2 py-1">TYPE</th><th className="text-left px-2 py-1">DECODED</th></tr>
             </thead>
             <tbody>
-              {decoded.slice(0, 2000).map((it, i) => (
+              {shownDecoded.slice(0, 2000).map((it, i) => (
                 <tr key={i} onClick={() => jumpTo(it.start)} className="cursor-pointer hover:bg-slate-900 border-t border-slate-900">
                   <td className="px-2 py-0.5 text-slate-400">{fmtTime(it.start / rate)}</td>
                   <td className="px-2 py-0.5 text-slate-500">{fmtTime((it.end - it.start) / rate)}</td>
@@ -879,19 +924,20 @@ export default function LogicAnalyzerWorkbench() {
                   <td className={`px-2 py-0.5 font-bold ${it.kind === 'error' ? 'text-rose-300' : it.kind === 'control' ? 'text-emerald-300' : 'text-cyan-200'}`}>{it.label}</td>
                 </tr>
               ))}
-              {!decoded.length && (
-                <tr><td colSpan={4} className="px-2 py-3 text-center text-slate-500">{samples.length ? 'Nothing decoded on these channels. Check the channel mapping and options.' : 'Capture or open a file to decode.'}</td></tr>
+              {!shownDecoded.length && (
+                <tr><td colSpan={4} className="px-2 py-3 text-center text-slate-500">{tableFilter && decoded.length ? 'No decoded item matches the filter.' : samples.length ? 'Nothing decoded on these channels. Check the channel mapping and options.' : 'Capture or open a file to decode.'}</td></tr>
               )}
             </tbody>
           </table>
-          {decoded.length > 2000 && <div className="text-[10px] text-slate-500 px-2 py-1">Showing the first 2000 of {decoded.length}; export CSV for all.</div>}
+          {shownDecoded.length > 2000 && <div className="text-[10px] text-slate-500 px-2 py-1">Showing the first 2000 of {shownDecoded.length}; export CSV for all.</div>}
         </div>
       </div>
 
       {/* Channel measurements */}
       {samples.length > 0 && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-3.5 shadow-xl">
+        <div className="bg-[#030712] border border-cyber-border rounded-xl p-2 shadow-xl">
           <div className="font-bold text-xs text-slate-200 mb-2">CHANNEL MEASUREMENTS</div>
+          <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
             <thead className="text-slate-500">
               <tr><th className="text-left px-2">CH</th><th className="text-left px-2">NAME</th><th className="text-left px-2">EDGES</th><th className="text-left px-2">FREQ</th><th className="text-left px-2">DUTY</th><th className="text-left px-2">MIN PULSE</th><th className="text-left px-2">MAX PULSE</th></tr>
@@ -915,6 +961,7 @@ export default function LogicAnalyzerWorkbench() {
               })}
             </tbody>
           </table>
+          </div>
           <p className="text-[10px] text-slate-500 mt-1">Frequency and duty assume a regular signal; for bursty traffic, use the cursors.</p>
         </div>
       )}
