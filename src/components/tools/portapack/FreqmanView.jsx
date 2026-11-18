@@ -2,6 +2,7 @@
 // Extracted as-is; all state and handlers come in as props.
 import { useRef, useState } from 'react';
 import { Download, Trash2, Upload, RotateCcw } from 'lucide-react';
+import { filterFreqList, sortFreqList } from '../../../utils/hackrfCommands';
 
 export default function FreqmanView({
   customFreqInput,
@@ -18,6 +19,9 @@ export default function FreqmanView({
 }) {
   const fileRef = useRef(null);
   const [notice, setNotice] = useState('');
+  const [query, setQuery] = useState('');
+  const [sortBy, setSortBy] = useState('none');
+  const shown = sortFreqList(filterFreqList(driver.freqList, query), sortBy);
   const [, setTick] = useState(0);
   const changed = () => { setTick((t) => t + 1); if (onFreqmanChange) onFreqmanChange(); };
   const onImportFile = async (file) => {
@@ -31,8 +35,8 @@ export default function FreqmanView({
     } catch (e) { setNotice(`Could not read ${file.name}: ${e.message}`); }
   };
   return (
-    <div className="space-y-4 flex-1 flex flex-col">
-      <div className="flex items-center justify-between">
+    <div className="space-y-2 flex-1 flex flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-mono text-slate-400">
           /FREQMAN/ DATABASE ({driver.freqList.length} FREQUENCIES)
         </span>
@@ -59,12 +63,26 @@ export default function FreqmanView({
           </button>
         </div>
       </div>
+      <div className="flex items-center gap-2 text-xs font-mono">
+        <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filter frequencies"
+          placeholder="Filter: name, category, modulation or MHz"
+          className="flex-1 min-w-0 bg-slate-900 border border-slate-700 text-slate-200 px-2 py-1 rounded text-xs focus:outline-none focus:border-purple-500" />
+        <label className="flex items-center gap-1 text-slate-400">Sort
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort frequencies"
+            className="bg-slate-900 border border-slate-700 text-slate-200 px-1.5 py-1 rounded text-xs">
+            <option value="none">Added</option>
+            <option value="freq">Frequency</option>
+            <option value="name">Name</option>
+          </select>
+        </label>
+        <span className="text-slate-500 whitespace-nowrap">{shown.length}/{driver.freqList.length}</span>
+      </div>
       {notice && <div role="status" className="text-[11px] font-mono text-slate-300 bg-slate-900 border border-slate-800 rounded px-2.5 py-1.5">{notice}</div>}
 
       {/* Frequency List Table */}
-      <div className="flex-1 bg-slate-950 border border-slate-800 rounded-xl overflow-y-auto max-h-64 divide-y divide-slate-800/60 font-mono text-xs">
-        {driver.freqList.map((item) => (
-          <div key={item.id} className="p-2.5 flex items-center justify-between hover:bg-slate-900/60 transition">
+      <div className="flex-1 bg-slate-950 border border-slate-800 rounded-lg overflow-y-auto max-h-64 divide-y divide-slate-800/60 font-mono text-xs">
+        {shown.map((item) => (
+          <div key={item.id} className="p-2 flex items-center justify-between hover:bg-slate-900/60 transition">
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-cyan-400">
@@ -97,7 +115,7 @@ export default function FreqmanView({
       </div>
 
       {/* Add Custom Frequency Entry */}
-      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 grid grid-cols-1 @md:grid-cols-4 gap-2">
+      <div className="bg-slate-950 border border-slate-800 rounded-lg p-2 grid grid-cols-1 @md:grid-cols-4 gap-2">
         <input
           type="text"
           value={customFreqInput}

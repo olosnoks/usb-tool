@@ -461,7 +461,7 @@ export default function NativeReceiver() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-mono transition flex items-center gap-2 whitespace-nowrap ${
+                  className={`px-2 py-1 rounded-lg text-xs font-mono transition flex items-center gap-2 whitespace-nowrap ${
                     isActive
                       ? 'bg-purple-600/20 border border-purple-500/40 text-purple-300 font-bold'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
@@ -524,6 +524,7 @@ export default function NativeReceiver() {
 
           {activeTab === 'cli' && (
             <CliView
+              state={state}
               cliInput={cliInput}
               driver={driver}
               handleSendCli={handleSendCli}

@@ -592,7 +592,7 @@ These tabs are **not shown** at the moment. The old Transmit Lab only ran a time
 
 ### 7. FREQMAN Frequency Manager Table
 
-Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The FREQMAN tab can **import** a \`FREQMAN.TXT\` (lines of \`f=,a=,d=,bw=\`), **export** the list, or **reset to presets**. Import reports how many entries were accepted, how many lines were rejected and how many duplicates were skipped; if no line is valid, the current list is left unchanged, otherwise the imported entries replace the list. The list is kept in the browser's local storage, so edits survive a reload (if storage is blocked or full, it just does not persist). The workbench provides built-in presets:
+Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The FREQMAN tab can **import** a \`FREQMAN.TXT\` (lines of \`f=,a=,d=,bw=\`), **export** the list, or **reset to presets**. Import reports how many entries were accepted, how many lines were rejected and how many duplicates were skipped; if no line is valid, the current list is left unchanged, otherwise the imported entries replace the list. A filter box searches name, category, modulation or the start of the MHz value, and a Sort select orders the view by frequency or name (the stored list order does not change). The list is kept in the browser's local storage, so edits survive a reload (if storage is blocked or full, it just does not persist). The workbench provides built-in presets:
 | Preset ID | Frequency | Modulation | Category | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **\`ism-433\`** | 433.920 MHz | NFM (12.5 kHz) | ISM | Keyfobs, wireless doorbells & weather sensors |
@@ -605,6 +605,12 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The FRE
 | **\`aprs-2m\`** | 144.390 MHz | NFM (12.5 kHz) | Ham Radio | Automatic Packet Reporting System |
 | **\`iss-down\`** | 145.800 MHz | NFM (12.5 kHz) | Satellite | International Space Station FM downlink / SSTV |
 | **\`subghz-315\`**| 315.000 MHz | ASK (50.0 kHz) | Automotive | North American car keyfobs & tire sensors |
+
+#### Command-line export and similar tools
+
+The Console & Log tab has a collapsible **Command-line export**. It reads the tuner state (LO, span, LNA, VGA, AMP) and writes ready-to-copy commands: LNA is snapped to 8 dB steps and VGA to 2 dB steps, the sample rate is limited to 2-20 MHz, and the frequency to 1 MHz-6 GHz. The record-time field sets \`-n\` (sample rate x seconds) and shows the approximate file size (2 bytes per sample). Sweep start and stop are whole MHz and the bin width is in kHz. File names are sanitised.
+
+Feature ideas were compared with the official HackRF tools (hackrf_transfer, hackrf_sweep), Gqrx, SDRangel and the PortaPack Mayhem apps (Capture, Looking Glass, Freqman).
 
 ---
 
@@ -626,6 +632,7 @@ Mayhem stores channels in text files under \`/FREQMAN/\` on the SD card. The FRE
 | **Tactical Map tab** | Tab | Leaflet map tracking ADS-B aircraft decoded from the 1090 MHz IQ. |
 | **MAX + REC, capture strip** | Row | Records raw IQ (up to 512 MB) and saves it as .c8 or Mayhem .C16 + .TXT. |
 | **FREQMAN tab** | Panel | Edits channel presets, imports and exports FREQMAN.TXT for the microSD card, and resets to the built-in presets; TUNE opens the receiver on that channel. |
+| **Console & Log tab: Command-line export** | Collapsible | Builds a \`hackrf_transfer -r\` command (current frequency, sample rate, LNA, VGA, AMP, record seconds, \`-n\` sample count) and a \`hackrf_sweep -f start:stop -w bin\` command for the official HackRF tools, with Copy buttons. It only produces text for you to run on a PC; the page does not execute anything. |
 | **Export peaks CSV** | Button | Saves the sweep peak list as \`sweep-peaks-<timestamp>.csv\` (disabled until a sweep has produced peaks). |
 
 ---
