@@ -226,7 +226,7 @@ For real scanning past these limits, build \`public/wasm/portscanner.wasm\` (the
     toolId: 'dns-toolkit',
     category: 'webapp',
     title: 'DNS Toolkit — records, email authentication, DNSSEC & subdomain brute-force',
-    summary: 'One DNS-over-HTTPS lookup shows records, SPF (with include expansion), DMARC, DKIM, MTA-STS, TLS-RPT, BIMI, DNSSEC, multi-resolver agreement and DNSBL status, with Markdown/JSON export; plus subdomain brute-force.',
+    summary: 'One DNS-over-HTTPS lookup shows a health summary, records, SPF (with include expansion), DMARC, DKIM, MTA-STS, TLS-RPT, BIMI, DNSSEC, multi-resolver agreement and DNSBL status, with Markdown/JSON export; a dig-style single-record query; plus subdomain brute-force.',
     tags: ['DNS', 'DoH', 'SPF', 'DMARC', 'DKIM', 'MTA-STS', 'DNSSEC', 'DNSBL', 'Subdomains', 'Recon', 'SecLists'],
     readTime: '3 min read',
     content: `
@@ -237,23 +237,30 @@ Enter a domain and press **Look up**. All queries use **DNS-over-HTTPS** through
 ---
 
 ### What one lookup shows
+- **Health summary:** at the top, a list of errors, warnings and notes worked out from the results below, worst first. It flags, for example, no SPF or DMARC on a domain with MX records, more than one SPF record, \`+all\` or \`?all\`, SPF over 10 lookups, DMARC \`p=none\` or no \`rua\`, a CNAME next to other records, an MX target that is an IP address, a single nameserver, no CAA, a half-configured DNSSEC setup, DNSBL listings and resolver disagreement. These are rules of thumb, not a full audit.
 - **Records:** A, AAAA, CNAME, MX, NS, SOA, CAA and TXT (TXT strings are labelled by type). A record type that fails shows an error chip and the others still render.
 - **Resolver status:** a SERVFAIL or REFUSED from the resolver is reported as an error, not as "no records". NXDOMAIN is a valid empty answer.
 - **SPF:** the record, its \`all\` qualifier (a \`+all\` is flagged), and the real **DNS lookup count** with \`include:\` and \`redirect=\` chains expanded recursively and checked against the limit of 10, with void-lookup counts, errors and warnings.
 - **DMARC:** policy, strength, \`sp\`, \`adkim\`, \`aspf\`, \`pct\`, and the \`rua\` / \`ruf\` report addresses.
-- **DKIM:** the selector in the **DKIM selector** box; tick **also try common selectors** to probe a built-in list (default, google, selector1, selector2, k1, mail and others). "Not found" only means not found for the selectors tried.
+- **DKIM:** each key found is analysed: key type, the RSA key size in bits (read from the published key), and notes for a revoked key (empty \`p=\`), testing mode (\`t=y\`) or a key under 2048 bits. The selector comes from the **DKIM selector** box; tick **also try common selectors** to probe a built-in list (default, google, selector1, selector2, k1, mail and others). "Not found" only means not found for the selectors tried.
 - **MTA-STS, TLS-RPT, BIMI:** published or not, with details. The MTA-STS policy file (\`mta-sts.<domain>/.well-known/mta-sts.txt\`) sends no CORS headers, so it is fetched only when a proxy is configured; otherwise the tool says a proxy is needed.
 - **DNSSEC:** \`validated\`, \`unverified\`, \`incomplete\`, \`unsigned\` or \`error\`, from the DS and DNSKEY records and the resolver's AD flag.
 - **Resolver agreement:** the A and NS answers from three resolvers (dns.google, cloudflare-dns.com, dns.quad9.net) are compared. A difference is often geo-DNS or load balancing, but can also indicate tampering; resolvers that failed are listed.
 - **DNSBL reputation:** the mail servers' IPs are checked against zen.spamhaus.org, bl.spamcop.net and b.barracudacentral.org. A refused query (such as Spamhaus' \`127.255.255.25x\` codes from a public resolver) or a resolver error is shown as **inconclusive**, never as "listed" or "clean".
 
-**Export (.md)** and **Export (.json)** save everything for the domain (the JSON includes resolver agreement).
+**.md** and **.json** save everything for the domain (the Markdown includes the health summary; the JSON includes resolver agreement).
+
+### Single record query (dig)
+Open **Single record query (dig)**, pick a record type (A, AAAA, CNAME, MX, NS, SOA, TXT, CAA, PTR, SRV, DS, DNSKEY, NAPTR, TLSA) and a resolver (dns.google, cloudflare-dns.com or dns.quad9.net), and press **Query** to ask the name in the main box. The answer is shown like dig output: status, answer count, time, the AD flag and each record with its TTL. If the box holds an IPv4 or IPv6 address it is turned into the \`in-addr.arpa\` / \`ip6.arpa\` name and queried as PTR. The line under the answer is the equivalent \`dig\` command; click it to copy it. The tool itself used DNS-over-HTTPS, so the command is only for repeating the query in a terminal.
 
 ### Subdomain brute-force
 Load a **Subdomain list** with the SecLists picker (up to 20,000 words), then press **Brute subdomains**. Each \`word.domain\` is resolved over DoH with bounded concurrency; resolving names are listed with their A records. **Stop** cancels, and **verbose** shows the running log. Run it only against domains you are authorised to test.
 
 ### Limits
-AXFR zone transfers need TCP to the authoritative server and cannot be done from a browser.
+AXFR zone transfers need TCP to the authoritative server and cannot be done from a browser. Queries go to public recursive resolvers, so you cannot query a zone's own nameservers directly or run \`dig +trace\`; a just-changed record may still be cached.
+
+### Similar tools
+Google Admin Toolbox (Dig, Check MX), MXToolbox SuperTool, DNSChecker and the \`dig\` command.
 `,
   },
   {

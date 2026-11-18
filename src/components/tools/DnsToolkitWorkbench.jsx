@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Globe, Mail, Search, RefreshCw, ShieldCheck, ShieldAlert, Server, FileDown, Play, Square } from 'lucide-react';
+import { Globe, Mail, Search, RefreshCw, ShieldCheck, ShieldAlert, Server, FileDown, Play, Square, Copy, Terminal } from 'lucide-react';
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
 import WordlistPicker from './common/WordlistPicker';
@@ -8,6 +8,7 @@ import {
   parseMtaStsTxt, parseMtaStsPolicy, parseTlsRpt, parseBimi, COMMON_DKIM_SELECTORS, compareResolvers, dnssecVerdict,
 } from '../../utils/mailDns.js';
 import { doh, dohProblem, unquote, RESOLVERS } from '../../utils/dnsDoh.js';
+import { ipToArpa, digCommand, parseDkim, healthFindings } from '../../utils/dnsHealth.js';
 
 /**
  * DNS Toolkit — one domain lookup resolves every record type AND the email-auth
@@ -17,6 +18,7 @@ import { doh, dohProblem, unquote, RESOLVERS } from '../../utils/dnsDoh.js';
  * a proxy can be set for networks that block it.
  */
 
+const QUERY_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'SOA', 'TXT', 'CAA', 'PTR', 'SRV', 'DS', 'DNSKEY', 'NAPTR', 'TLSA'];
 const LOOKUP_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'SOA', 'CAA', 'TXT'];
 const TYPE_CODE = { A: 1, NS: 2, CNAME: 5, SOA: 6, MX: 15, TXT: 16, AAAA: 28, CAA: 257 };
 
@@ -34,11 +36,25 @@ async function txtQuery(name, resolver) {
 const txtSafe = (name) => txtQuery(name).then((strings) => ({ strings, error: null }), (e) => ({ strings: [], error: describeNetworkError(e) }));
 const first = (strings, re) => strings.find((t) => re.test(t));
 
+const LEVEL_STYLE = { error: ['text-red-300', '✗'], warn: ['text-amber-300', '⚠'], info: ['text-slate-400', 'i'], ok: ['text-emerald-300', '✓'] };
+
+function HealthSection({ findings }) {
+  const errs = findings.filter((f) => f.level === 'error').length;
+  const warns = findings.filter((f) => f.level === 'warn').length;
+  return (
+    <Section icon={ShieldCheck} title={`Health summary (${errs} error${errs === 1 ? '' : 's'}, ${warns} warning${warns === 1 ? '' : 's'})`} accent={errs ? 'text-red-400' : warns ? 'text-amber-400' : 'text-emerald-400'}>
+      {findings.map((f, idx) => (
+        <div key={idx} className={`flex gap-1.5 ${LEVEL_STYLE[f.level][0]}`}><span className="w-3 shrink-0 text-center">{LEVEL_STYLE[f.level][1]}</span><span>{f.text}</span></div>
+      ))}
+    </Section>
+  );
+}
+
 function Section({ icon: Icon, title, children, accent = 'text-cyan-400', id }) {
   return (
-    <section id={id} className="mb-3">
-      <h3 className={`text-xs font-semibold uppercase tracking-wide mb-1 flex items-center gap-1.5 ${accent}`}><Icon size={13} /> {title}</h3>
-      <div className="bg-slate-950 border border-slate-800 rounded p-2 text-xs font-mono">{children}</div>
+    <section id={id} className="mb-2">
+      <h3 className={`text-xs font-semibold uppercase tracking-wide mb-0.5 flex items-center gap-1.5 ${accent}`}><Icon size={13} /> {title}</h3>
+      <div className="bg-slate-950 border border-slate-800 rounded p-2 text-[11px] font-mono">{children}</div>
     </section>
   );
 }
@@ -55,6 +71,12 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
   const [error, setError] = useState('');
   const [info, setInfo] = useState(null);
 
+  // single-record query (dig-style)
+  const [qType, setQType] = useState('A');
+  const [qResolver, setQResolver] = useState('google');
+  const [qBusy, setQBusy] = useState(false);
+  const [qRes, setQRes] = useState(null);
+
   // subdomain brute-force
   const [subList, setSubList] = useState(null);
   const [subBusy, setSubBusy] = useState(false);
@@ -67,6 +89,25 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
 
   const log = (m) => onLogMessage?.(m);
   const cleanDomain = () => domain.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^\*?\.+/, '');
+
+  const copyText = (t, what) => { navigator.clipboard?.writeText(t).then(() => log(`Copied ${what}`), () => {}); };
+
+  // One record type from one resolver, shown like `dig`. An IP address becomes a PTR query.
+  const runQuery = async () => {
+    const raw = cleanDomain();
+    if (!raw) return;
+    const arpa = ipToArpa(raw);
+    const name = arpa || raw;
+    const type = arpa ? 'PTR' : qType;
+    setQBusy(true); setQRes(null);
+    try {
+      const t0 = performance.now();
+      const r = await dq(name, type, qResolver);
+      setQRes({ name, type, resolver: qResolver, status: r.statusName, ad: r.ad, answers: r.answers, ms: Math.round(performance.now() - t0), problem: dohProblem(r) });
+      log(`${type} ${name} @${RESOLVERS[qResolver].label}: ${r.statusName}, ${r.answers.length} answer(s)`);
+    } catch (e) { setQRes({ name, type, resolver: qResolver, error: describeNetworkError(e) }); }
+    setQBusy(false);
+  };
 
   const lookup = async () => {
     const name = cleanDomain();
@@ -235,7 +276,9 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
     const L = [`# DNS report — ${info?.name || cleanDomain()}`, '', `_Generated ${now} by Skon's USB Tool — DNS Toolkit._`, ''];
     if (info) {
       const i = info;
-      L.push('## Records', '');
+      L.push('## Health summary', '');
+      healthFindings(i).forEach((f) => L.push(`- **${f.level}:** ${f.text}`));
+      L.push('', '## Records', '');
       const rows = [];
       const push = (type, arr) => arr.forEach((r) => rows.push(`| ${type} | ${r.name || i.name} | ${String(r.data).replace(/\|/g, '\\|')} | ${r.TTL ?? ''} |`));
       L.push('| Type | Name | Data | TTL |', '|---|---|---|---|');
@@ -332,41 +375,77 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
   const canExport = !!info || found.length > 0;
 
   return (
-    <div className="w-full min-w-0 max-w-full text-gray-200">
+    <div className="w-full min-w-0 max-w-full text-gray-200 text-xs">
       <ProxyConfig onLogMessage={log} backend="dns" />
-      <div className="flex flex-wrap gap-2 mb-3 items-center">
+      <div className="flex flex-wrap gap-1.5 mb-2 items-center">
         <input
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !busy && lookup()}
-          placeholder="example.com"
-          className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono"
+          placeholder="example.com or an IP"
+          aria-label="Domain or IP address"
+          className="flex-1 min-w-[10rem] bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono"
         />
-        <label className="flex items-center gap-1 text-xs text-slate-500">DKIM selector
-          <input value={dkimSelector} onChange={(e) => setDkimSelector(e.target.value)} className="w-24 bg-slate-900 border border-slate-800 rounded px-2 py-1 font-mono ml-1" />
-        </label>
-        <label className="flex items-center gap-1 text-xs text-slate-500"><input type="checkbox" checked={probeDkim} onChange={(e) => setProbeDkim(e.target.checked)} /> also try common selectors</label>
-        <button onClick={lookup} disabled={busy} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
-          {busy ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />} {busy ? 'Looking up…' : 'Look up'}
+        <button onClick={lookup} disabled={busy} className="px-2.5 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
+          {busy ? <RefreshCw size={12} className="animate-spin" /> : <Search size={12} />} {busy ? 'Looking up…' : 'Look up'}
         </button>
-        <button onClick={exportMd} disabled={!canExport} title={canExport ? 'Export everything for this domain to Markdown' : 'Run a lookup first'} className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-gray-200 rounded text-sm hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
-          <FileDown size={14} /> Export (.md)
+        <button onClick={exportMd} disabled={!canExport} aria-label="Export Markdown" title={canExport ? 'Export everything for this domain to Markdown' : 'Run a lookup first'} className="px-2 py-1 bg-slate-800 border border-slate-700 text-gray-200 rounded text-xs hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
+          <FileDown size={12} /> .md
         </button>
-        <button onClick={exportJson} disabled={!canExport} title={canExport ? 'Export everything for this domain to JSON' : 'Run a lookup first'} className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-gray-200 rounded text-sm hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
-          <FileDown size={14} /> Export (.json)
+        <button onClick={exportJson} disabled={!canExport} aria-label="Export JSON" title={canExport ? 'Export everything for this domain to JSON' : 'Run a lookup first'} className="px-2 py-1 bg-slate-800 border border-slate-700 text-gray-200 rounded text-xs hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
+          <FileDown size={12} /> .json
         </button>
       </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 items-center text-[11px] text-slate-500">
+        <label className="flex items-center gap-1">DKIM selector
+          <input value={dkimSelector} onChange={(e) => setDkimSelector(e.target.value)} className="w-24 bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 font-mono" />
+        </label>
+        <label className="flex items-center gap-1"><input type="checkbox" checked={probeDkim} onChange={(e) => setProbeDkim(e.target.checked)} /> also try common selectors</label>
+      </div>
 
-      {error && <div className="mb-3 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{error}</div>}
+      <details className="mb-2 bg-slate-950 border border-slate-800 rounded">
+        <summary className="px-2 py-1 cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-violet-300 flex items-center gap-1.5 select-none"><Terminal size={12} /> Single record query (dig)</summary>
+        <div className="p-2 pt-1 space-y-1.5">
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <select value={qType} onChange={(e) => setQType(e.target.value)} aria-label="Record type" className="bg-slate-900 border border-slate-800 rounded px-1.5 py-1 font-mono text-[11px]">
+              {QUERY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select value={qResolver} onChange={(e) => setQResolver(e.target.value)} aria-label="Resolver" className="bg-slate-900 border border-slate-800 rounded px-1.5 py-1 font-mono text-[11px]">
+              {Object.entries(RESOLVERS).map(([k, r]) => <option key={k} value={k}>@{r.label}</option>)}
+            </select>
+            <button onClick={runQuery} disabled={qBusy || !cleanDomain()} className="px-2 py-1 bg-violet-900/40 border border-violet-800 text-violet-200 rounded text-[11px] hover:bg-violet-900/60 disabled:opacity-40 inline-flex items-center gap-1">
+              {qBusy ? <RefreshCw size={11} className="animate-spin" /> : <Play size={11} />} Query
+            </button>
+            <span className="text-[10px] text-slate-500">An IP address is looked up as PTR automatically.</span>
+          </div>
+          {qRes && (
+            <div className="font-mono text-[11px]">
+              {qRes.error ? <div className="text-red-300">{qRes.error}</div> : (
+                <>
+                  <div className={qRes.problem ? 'text-red-300' : 'text-slate-400'}>
+                    ;; {qRes.status} · {qRes.answers.length} answer(s) · {qRes.ms} ms{qRes.ad ? ' · AD (DNSSEC validated)' : ''} · @{RESOLVERS[qRes.resolver].label}
+                  </div>
+                  {qRes.answers.map((a, idx) => <div key={idx} className="text-gray-300 break-all">{a.name} <span className="text-slate-600">{a.TTL}</span> {a.typeName} {a.data}</div>)}
+                  {!qRes.answers.length && !qRes.problem && <div className="text-slate-500">(no records)</div>}
+                  <button onClick={() => copyText(digCommand(qRes.name, qRes.type, qRes.resolver), 'dig command')} title="Copy the equivalent dig command to run it yourself (this tool used DNS-over-HTTPS)" className="mt-1 text-[10px] text-slate-400 hover:text-gray-200 inline-flex items-center gap-1"><Copy size={10} /> {digCommand(qRes.name, qRes.type, qRes.resolver)}</button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </details>
+
+      {error && <div className="mb-2 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{error}</div>}
 
       {i && (
         <>
           {Object.keys(i.recErrors).length > 0 && (
-            <div className="mb-3 flex flex-wrap gap-1.5 items-center text-[11px]">
+            <div className="mb-2 flex flex-wrap gap-1.5 items-center text-[11px]">
               <span className="text-slate-500">Lookup errors:</span>
               {Object.entries(i.recErrors).map(([t, m]) => <span key={t} className="px-1.5 py-0.5 rounded bg-red-950/40 border border-red-900 text-red-300" title={m}>{t}: {m}</span>)}
             </div>
           )}
+          <HealthSection findings={healthFindings(i)} />
           <Section id="dns-email" icon={Mail} title="Email authentication" accent="text-emerald-400">
             <div className="mb-2">
               <span className={spf ? 'text-emerald-300' : 'text-red-300'}>SPF: {spf ? 'present' : (i.txtError ? 'unknown (TXT lookup failed)' : 'MISSING')}</span>
@@ -394,7 +473,16 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
             </div>
             <div className="mb-2">
               <span className={i.dkim.length ? 'text-emerald-300' : 'text-slate-400'}>DKIM ({i.dkimSelectors.join(', ') || '—'}): {i.dkim.length ? `found for ${i.dkim.map((d) => d.selector).join(', ')}` : 'not found for the selector(s) tried'}</span>
-              {i.dkim.map((d) => <div key={d.selector} className="pl-3 break-all text-slate-500">{d.selector}: {d.raw}</div>)}
+              {i.dkim.map((d) => {
+                const k = parseDkim(d.raw);
+                return (
+                  <div key={d.selector} className="pl-3">
+                    <div className="text-slate-400">{d.selector}: {k.keyType.toUpperCase()}{k.bits ? ` ${k.bits}-bit` : ''}{k.revoked ? ' · revoked' : ''}{k.testing ? ' · testing (t=y)' : ''}</div>
+                    {k.notes.map((n, idx) => <div key={idx} className={n.level === 'error' ? 'text-red-400' : 'text-amber-400'}>{n.level === 'error' ? '✗' : '⚠'} {n.text}</div>)}
+                    <div className="break-all text-slate-500">{d.raw}</div>
+                  </div>
+                );
+              })}
             </div>
             <div className="mb-2">
               <span className={i.mtaSts ? 'text-emerald-300' : 'text-slate-400'}>MTA-STS: {i.mtaSts ? `published (id ${i.mtaSts.id || '?'})` : (i.mtaStsError ? `unknown (${i.mtaStsError})` : 'not published')}</span>
@@ -432,7 +520,7 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
             {i.dnsblInconclusive.map((d, idx) => (<div key={`inc${idx}`} className="text-amber-300 flex items-center gap-1"><ShieldAlert size={13} /> inconclusive ({d.reason}): {d.ip} ({d.host}) on {d.zone}{d.code ? ` → ${d.code}` : ''}</div>))}
           </Section>
 
-          <div id="dns-records" className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(16rem,1fr))]">
+          <div id="dns-records" className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(16rem,1fr))]">
             <Section icon={Server} title="Mail servers (MX)">
               {i.mx.length === 0 && <div className="text-slate-500">none</div>}
               {[...i.mx].sort((a, b) => Number(a.data.split(/\s+/)[0]) - Number(b.data.split(/\s+/)[0])).map((r, idx) => (<div key={idx} className="text-gray-300">{r.data}</div>))}
@@ -456,7 +544,7 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
       )}
 
       {/* Subdomain brute-force */}
-      <div id="dns-brute" className="mt-4 pt-3 border-t border-slate-800">
+      <div id="dns-brute" className="mt-2 pt-2 border-t border-slate-800">
         <h3 className="text-xs font-semibold uppercase tracking-wide mb-2 text-indigo-300 flex items-center gap-1.5"><Search size={13} /> Subdomain brute-force</h3>
         <div className="text-[11px] text-slate-500 mb-1">Resolves <span className="font-mono">{'{word}'}.{cleanDomain() || 'domain'}</span> via DoH</div>
         <WordlistPicker category="subdomains" max={20000} label="Subdomain list" onLoad={(lines, meta) => { setSubList(lines); log(`Subdomain list: ${lines.length} (${meta.name})`); }} />
@@ -490,7 +578,7 @@ export default function DnsToolkitWorkbench({ onLogMessage, initialTab }) {
         )}
       </div>
 
-      {!i && !error && <p className="text-[10px] text-slate-500 mt-3">One lookup resolves A/AAAA/CNAME/MX/NS/SOA/CAA/TXT and the email-auth posture (SPF/DMARC/DKIM/DNSBL) together. All over DNS-over-HTTPS; browsers can't do TCP AXFR zone transfers. Assess only domains you own or are authorized to test.</p>}
+      {!i && !error && <p className="text-[10px] text-slate-500 mt-2">One lookup resolves A/AAAA/CNAME/MX/NS/SOA/CAA/TXT and the email-auth posture (SPF/DMARC/DKIM/DNSBL) together. All over DNS-over-HTTPS; browsers can't do TCP AXFR zone transfers. Assess only domains you own or are authorized to test.</p>}
     </div>
   );
 }
