@@ -76,7 +76,7 @@ Incoming messages appear in the **Log** with time, direction, topic, QoS, a **RE
 - **JSON** pretty-prints valid JSON and falls back to text with a note.
 - **hex** shows a hex dump with ASCII, up to 4 KB.
 
-The **Topic tree** groups topics by \`/\` levels. Each topic shows how many messages arrived and the **last payload**. Click a topic name to copy it into the publish form. Only incoming messages build the tree.
+The **Topic tree** groups topics by \`/\` levels. Each topic shows how many messages arrived and the **last payload**. Click a topic name to copy it into the publish form. Below the tree a **diff** compares the topic's previous payload with the latest one line by line (JSON is pretty-printed first, so a changed field shows as one removed and one added line). It needs at least two messages on that topic. Only incoming messages build the tree.
 
 The **filter** box narrows both views by topic or payload text. **Pause** holds incoming messages in a queue and applies them on **Resume**; the count of queued and dropped messages is shown. **Export JSON** saves the messages currently in the log with text and base64 payloads. Passwords are never included.
 
@@ -86,15 +86,19 @@ The browser keeps the most recent 1000 messages. The topic tree holds up to 5000
 
 Enter a topic (no \`+\` or \`#\`), a payload, and choose:
 
-- **text** or **hex** payload format (hex accepts spaces, colons and an optional \`0x\`);
+- **text**, **hex** or **base64** payload format (hex accepts spaces, colons and an optional \`0x\`; base64 accepts URL-safe characters and missing padding);
 - **QoS 0** (fire and forget), **QoS 1** (PUBACK) or **QoS 2** (PUBREC, PUBREL, PUBCOMP, exactly once);
 - **retain**, so the broker keeps the message for future subscribers.
 
 Outgoing messages appear in the log marked **OUT**. The result line reports success, or the reason the publish failed. Publishing needs a connection.
 
+- **Recent:** the last 8 distinct messages you published this session appear as buttons under the form. Click one to load its topic, payload, format, QoS and retain flag. The list is kept in memory only and is lost when you close the tool.
+- **Clear retained:** publishes an empty retained message (QoS 1) to the topic in the form, which removes the retained message from the broker.
+- **Copy as MQTTX CLI command:** builds an \`mqttx sub\` command (all your subscription filters) or an \`mqttx pub\` command (the current topic, payload and retain flag) for the MQTTX command-line tool, using \`-l ws\` or \`-l wss\`, the host, port and path from the Broker URL. The text is only copied to the clipboard; nothing is run. The password is written as a \`<password>\` placeholder. It needs a ws:// or wss:// URL.
+
 ## Home Assistant, Tasmota and zigbee2mqtt
 
-The **Hints** card explains the common topic layouts and gives one-click subscribe buttons:
+The collapsible **Home Assistant, Tasmota, zigbee2mqtt** card explains the common topic layouts and gives one-click subscribe buttons:
 
 - **Home Assistant:** \`homeassistant/#\` shows discovery configs; device states are on the topics those configs name.
 - **Tasmota:** \`tele/<topic>/SENSOR\` and \`tele/<topic>/LWT\` (Online or Offline) are telemetry; \`stat/<topic>/RESULT\` holds command results. Commands go to \`cmnd/<topic>/POWER\` with \`ON\`, \`OFF\` or \`TOGGLE\`.
@@ -117,6 +121,10 @@ The **Hints** card explains the common topic layouts and gives one-click subscri
 - **No client certificates.** TLS uses the browser's trust store; the tool does not accept a client certificate.
 - **Public payload visibility.** Topics and payloads are visible to anyone with access to the broker. The tool does not encrypt payloads beyond TLS.
 - **No broker administration.** The tool does not create users or ACLs. A retained message can be cleared by publishing an empty payload with retain ticked.
+
+## Similar tools
+
+Features were compared with MQTT Explorer (topic tree and payload diff), MQTTX (payload formats, CLI) and mosquitto_sub/mosquitto_pub. This tool has no MQTT 5, scripting or TCP support.
 
 ## Related tools
 

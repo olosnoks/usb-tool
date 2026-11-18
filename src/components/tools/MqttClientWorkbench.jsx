@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Radio, Send, Pause, Play, Trash2, Download, Save } from 'lucide-react';
+import { Radio, Send, Pause, Play, Trash2, Download, Save, Eraser, Copy } from 'lucide-react';
 import {
   MqttClient, brokerUrlError, mixedContentWarning, topicFilterError, topicNameError,
   loadProfiles, saveProfiles, prettyJson, hexDump, payloadToText, bytesToBase64, toBytes, parseHex,
+  parseBase64, diffLines, mqttxCommand,
 } from '../../utils/mqttClient.js';
 
 /**
@@ -14,6 +15,7 @@ import {
 const MAX_MESSAGES = 1000;
 const MAX_TOPICS = 5000;
 const MAX_QUEUE = 5000;
+const MAX_PUB_HISTORY = 8;
 const FLUSH_MS = 250;
 const PUBLIC_BROKER_HOSTS = ['broker.hivemq.com', 'test.mosquitto.org'];
 
@@ -45,7 +47,7 @@ const HINTS = [
 
 const inputCls = 'w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-cyan-700';
 const btnCls = 'px-2.5 py-1 rounded text-xs border border-slate-700 bg-slate-800 hover:bg-slate-700 text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1';
-const cardCls = 'bg-slate-950 border border-slate-800 rounded p-3 min-w-0';
+const cardCls = 'bg-slate-950 border border-slate-800 rounded p-2.5 min-w-0';
 const labelCls = 'block text-[10px] uppercase tracking-wide text-slate-500 mb-0.5';
 const STATE_STYLE = {
   connected: 'bg-emerald-900/40 text-emerald-300 border-emerald-800',
@@ -91,6 +93,7 @@ function foldTopics(prev, batch) {
       topic: m.topic,
       count: (cur?.count ?? 0) + 1,
       last: m,
+      prev: cur?.last ?? null,
       firstSeen: cur?.firstSeen ?? m.time,
     });
   }
@@ -136,6 +139,32 @@ function PayloadView({ bytes, mode }) {
     );
   }
   return <pre className="whitespace-pre-wrap break-all max-h-64 overflow-auto text-[11px] font-mono text-gray-200">{looksBinary(bytes) ? `${hexDump(bytes, 256)}` : payloadToText(bytes)}</pre>;
+}
+
+function TopicDiff({ entry }) {
+  if (!entry) return null;
+  const now = payloadToText(entry.last.payload);
+  if (!entry.prev) {
+    return <div className="text-[11px] text-slate-500">Only one message seen on this topic so far, nothing to compare.</div>;
+  }
+  const before = prettyJson(entry.prev.payload) ?? payloadToText(entry.prev.payload);
+  const after = prettyJson(entry.last.payload) ?? now;
+  const lines = diffLines(before, after);
+  const changed = lines.some((l) => l.type !== 'same');
+  return (
+    <div>
+      <div className="text-[10px] text-slate-500 mb-1">
+        Previous ({fmtTime(entry.prev.time)}) vs latest ({fmtTime(entry.last.time)}){changed ? '' : ': identical'}
+      </div>
+      <pre className="whitespace-pre-wrap break-all max-h-48 overflow-auto text-[11px] font-mono">
+        {lines.map((l, i) => (
+          <div key={i} className={l.type === 'add' ? 'bg-emerald-900/30 text-emerald-200' : l.type === 'del' ? 'bg-red-900/30 text-red-300' : 'text-gray-400'}>
+            {l.type === 'add' ? '+ ' : l.type === 'del' ? '- ' : '  '}{l.text}
+          </div>
+        ))}
+      </pre>
+    </div>
+  );
 }
 
 function MessageRow({ m, mode }) {
@@ -206,6 +235,9 @@ export default function MqttClientWorkbench({ onLogMessage } = {}) {
   const [pubRetain, setPubRetain] = useState(false);
   const [pubResult, setPubResult] = useState(null);
   const [saveName, setSaveName] = useState('');
+  const [selTopic, setSelTopic] = useState('');
+  const [pubHistory, setPubHistory] = useState([]);
+  const [cliCopied, setCliCopied] = useState('');
   const [sessionLog, setSessionLog] = useState([]);
   const clientRef = useRef(null);
 
@@ -365,13 +397,18 @@ export default function MqttClientWorkbench({ onLogMessage } = {}) {
     }
     let bytes;
     try {
-      bytes = pubFormat === 'hex' ? parseHex(pubPayload) : toBytes(pubPayload);
+      bytes = pubFormat === 'hex' ? parseHex(pubPayload) : pubFormat === 'base64' ? parseBase64(pubPayload) : toBytes(pubPayload);
     } catch (e) {
       setPubResult({ ok: false, text: e.message });
       return;
     }
     try {
       const r = await client.publish(topic, bytes, { qos: pubQos, retain: pubRetain });
+      setPubHistory((h) => {
+        const item = { topic, payload: pubPayload, format: pubFormat, qos: pubQos, retain: pubRetain };
+        const key = (x) => `${x.topic}|${x.payload}|${x.format}|${x.qos}|${x.retain}`;
+        return [item, ...h.filter((x) => key(x) !== key(item))].slice(0, MAX_PUB_HISTORY);
+      });
       enqueue({ direction: 'out', topic, payload: bytes, qos: pubQos, retain: pubRetain, dup: false, time: Date.now() });
       setPubResult({
         ok: true,
@@ -379,6 +416,50 @@ export default function MqttClientWorkbench({ onLogMessage } = {}) {
       });
     } catch (e) {
       setPubResult({ ok: false, text: e.message });
+    }
+  };
+
+  // Publishing an empty retained message is how MQTT removes a retained message from the broker.
+  const clearRetained = async () => {
+    const client = clientRef.current;
+    setPubResult(null);
+    const topic = pubTopic.trim();
+    const topicErr = topicNameError(topic);
+    if (!client || client.state !== 'connected') return setPubResult({ ok: false, text: 'Not connected' });
+    if (topicErr) return setPubResult({ ok: false, text: topicErr });
+    try {
+      await client.publish(topic, new Uint8Array(0), { qos: 1, retain: true });
+      enqueue({ direction: 'out', topic, payload: new Uint8Array(0), qos: 1, retain: true, dup: false, time: Date.now() });
+      setPubResult({ ok: true, text: `Cleared retained message on ${topic}` });
+    } catch (e) {
+      setPubResult({ ok: false, text: e.message });
+    }
+  };
+
+  const loadHistory = (h) => {
+    setPubTopic(h.topic);
+    setPubPayload(h.payload);
+    setPubFormat(h.format);
+    setPubQos(h.qos);
+    setPubRetain(h.retain);
+  };
+
+  const copyCli = async (kind) => {
+    const text = mqttxCommand(kind, {
+      url: form.url.trim(), clientId: form.clientId.trim(), username: form.username,
+      filters: subs.map((s) => s.filter), qos: subQos,
+      topic: pubTopic.trim(), payload: pubPayload, retain: pubRetain,
+    });
+    if (!text) {
+      setError(kind === 'sub' ? 'Need a ws:// or wss:// broker URL to build the command' : 'Need a ws:// or wss:// URL and a publish topic to build the command');
+      return;
+    }
+    setError('');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCliCopied(kind);
+    } catch {
+      setError(`Clipboard unavailable. Command: ${text}`);
     }
   };
 
@@ -483,11 +564,11 @@ export default function MqttClientWorkbench({ onLogMessage } = {}) {
   const publicBroker = PUBLIC_BROKER_HOSTS.some((h) => form.url.includes(h));
 
   return (
-    <div className="p-3 space-y-3 text-gray-200 text-sm">
-      <div className="flex flex-wrap items-center gap-3">
-        <Radio size={18} className="text-emerald-400" />
-        <div className="font-semibold">MQTT Client</div>
-        <span className={`px-2 py-0.5 rounded text-[11px] border font-mono ${STATE_STYLE[status.state] ?? STATE_STYLE.disconnected}`}>
+    <div className="space-y-2 text-gray-200 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <Radio size={14} className="text-emerald-400" aria-hidden="true" />
+        <h2 className="sr-only">MQTT Client</h2>
+        <span className={`px-1.5 py-0.5 rounded text-[10px] border font-mono ${STATE_STYLE[status.state] ?? STATE_STYLE.disconnected}`}>
           {status.state.toUpperCase()}
         </span>
         <div className="ml-auto flex gap-2">
@@ -511,10 +592,10 @@ export default function MqttClientWorkbench({ onLogMessage } = {}) {
         <div className="text-[11px] text-slate-500 font-mono">Last: {status.detail}</div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] gap-3">
-        <div className="space-y-3 min-w-0">
+      <div className="grid grid-cols-1 @lg:grid-cols-[300px_minmax(0,1fr)] gap-2">
+        <div className="space-y-2 min-w-0">
           <div className={cardCls}>
-            <div className="text-xs font-semibold mb-2">Connection</div>
+            <div className="text-xs font-semibold mb-1.5">Connection</div>
             <div className="flex flex-wrap gap-1 mb-2">
               {PRESETS.map((p) => (
                 <button key={p.url} onClick={() => setForm((f) => ({ ...f, url: p.url }))} className="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-gray-400">
@@ -587,15 +668,15 @@ export default function MqttClientWorkbench({ onLogMessage } = {}) {
             </div>
           </div>
 
-          <div className={cardCls}>
-            <div className="text-xs font-semibold mb-2">Home Assistant, Tasmota, zigbee2mqtt</div>
-            <Hints onPick={(f) => setSubFilter(f)} />
-          </div>
+          <details className={cardCls}>
+            <summary className="cursor-pointer text-xs font-semibold">Home Assistant, Tasmota, zigbee2mqtt</summary>
+            <div className="mt-2"><Hints onPick={(f) => setSubFilter(f)} /></div>
+          </details>
         </div>
 
-        <div className="space-y-3 min-w-0">
+        <div className="space-y-2 min-w-0">
           <div className={cardCls}>
-            <div className="text-xs font-semibold mb-2">Subscriptions</div>
+            <div className="text-xs font-semibold mb-1.5">Subscriptions</div>
             <div className="flex flex-wrap gap-2 items-center">
               <input aria-label="Topic filter" placeholder="topic/filter/#" value={subFilter} onChange={(e) => setSubFilter(e.target.value)} spellCheck={false} className={`${inputCls} flex-1 min-w-[10rem]`} onKeyDown={(e) => e.key === 'Enter' && addSubscription()} />
               <select aria-label="Subscribe QoS" value={subQos} onChange={(e) => setSubQos(Number(e.target.value))} className="bg-slate-900 border border-slate-800 rounded text-xs px-1 py-1">
@@ -623,12 +704,12 @@ export default function MqttClientWorkbench({ onLogMessage } = {}) {
           </div>
 
           <div className={cardCls}>
-            <div className="text-xs font-semibold mb-2">Publish</div>
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+            <div className="text-xs font-semibold mb-1.5">Publish</div>
+            <div className="grid grid-cols-1 @md:grid-cols-[1fr_auto] gap-2">
               <input aria-label="Publish topic" placeholder="topic (no + or #)" value={pubTopic} onChange={(e) => setPubTopic(e.target.value)} spellCheck={false} className={inputCls} />
               <div className="flex gap-2 items-center text-[11px] text-gray-400">
                 <select aria-label="Payload format" value={pubFormat} onChange={(e) => setPubFormat(e.target.value)} className="bg-slate-900 border border-slate-800 rounded text-xs px-1 py-1">
-                  <option value="text">text</option><option value="hex">hex</option>
+                  <option value="text">text</option><option value="hex">hex</option><option value="base64">base64</option>
                 </select>
                 <select aria-label="Publish QoS" value={pubQos} onChange={(e) => setPubQos(Number(e.target.value))} className="bg-slate-900 border border-slate-800 rounded text-xs px-1 py-1">
                   <option value={0}>QoS 0</option><option value={1}>QoS 1</option><option value={2}>QoS 2</option>
@@ -636,12 +717,32 @@ export default function MqttClientWorkbench({ onLogMessage } = {}) {
                 <label className="flex items-center gap-1"><input type="checkbox" checked={pubRetain} onChange={(e) => setPubRetain(e.target.checked)} /> retain</label>
               </div>
             </div>
-            <textarea aria-label="Publish payload" placeholder={pubFormat === 'hex' ? 'de ad be ef' : 'payload'} value={pubPayload} onChange={(e) => setPubPayload(e.target.value)} rows={3} spellCheck={false} className={`${inputCls} mt-2`} />
+            <textarea aria-label="Publish payload" placeholder={pubFormat === 'hex' ? 'de ad be ef' : pubFormat === 'base64' ? '3q2+7w==' : 'payload'} value={pubPayload} onChange={(e) => setPubPayload(e.target.value)} rows={2} spellCheck={false} className={`${inputCls} mt-2`} />
             <div className="flex items-center gap-3 mt-2">
               <button onClick={publish} disabled={!connected} className={btnCls}><Send size={12} /> Publish</button>
+              <button onClick={clearRetained} disabled={!connected} title="Publish an empty retained message to the topic above, which removes the retained message from the broker" className={btnCls}><Eraser size={12} /> Clear retained</button>
               {!connected && <span className="text-[11px] text-slate-500">Connect first.</span>}
               {pubResult && <span className={`text-[11px] font-mono ${pubResult.ok ? 'text-emerald-300' : 'text-red-300'}`}>{pubResult.text}</span>}
             </div>
+            {pubHistory.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1" aria-label="Publish history">
+                <span className="text-[10px] uppercase text-slate-500">Recent</span>
+                {pubHistory.map((h, i) => (
+                  <button key={i} onClick={() => loadHistory(h)} title={`${h.topic}: ${h.payload}`} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-gray-300 max-w-[12rem] truncate">
+                    {h.topic}
+                  </button>
+                ))}
+              </div>
+            )}
+            <details className="mt-2">
+              <summary className="cursor-pointer text-[11px] text-slate-400">Copy as MQTTX CLI command</summary>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                <button onClick={() => copyCli('sub')} className={btnCls}><Copy size={12} /> mqttx sub</button>
+                <button onClick={() => copyCli('pub')} className={btnCls}><Copy size={12} /> mqttx pub</button>
+                {cliCopied && <span className="text-emerald-300">Copied {cliCopied} command</span>}
+                <span>Text for the MQTTX CLI (npm i -g @emqx/mqttx-cli). Not run here; the password is a placeholder.</span>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -673,12 +774,12 @@ export default function MqttClientWorkbench({ onLogMessage } = {}) {
           </div>
         ) : (
           <div className="max-h-96 overflow-auto font-mono">
-            {topicRows.length === 0 && <div className="text-[11px] text-slate-500 py-2">No topics yet. Only incoming messages build the tree. Click a topic name to copy it into the publish form.</div>}
+            {topicRows.length === 0 && <div className="text-[11px] text-slate-500 py-2">No topics yet. Only incoming messages build the tree. Click a topic name to copy it into the publish form and compare its last two payloads.</div>}
             {topicRows.map((r) => (
               <div key={r.full} style={{ paddingLeft: r.depth * 14 }} className="flex items-center gap-2 py-0.5 border-b border-slate-900 text-[11px] min-w-0">
                 {r.entry ? (
                   <>
-                    <button onClick={() => setPubTopic(r.full)} title={r.full} className="text-gray-200 hover:text-cyan-300 shrink-0 max-w-[35%] truncate text-left">{r.name}</button>
+                    <button onClick={() => { setPubTopic(r.full); setSelTopic(r.full); }} title={`${r.full} (click to copy into publish and show changes)`} className="text-gray-200 hover:text-cyan-300 shrink-0 max-w-[35%] truncate text-left">{r.name}</button>
                     <span className="text-slate-500 shrink-0">x{r.entry.count}</span>
                     {r.entry.last.retain && <span className="shrink-0 px-1 rounded text-[9px] bg-purple-900/50 text-purple-300">RET</span>}
                     <span className="text-emerald-300 truncate min-w-0" title={`last ${fmtTime(r.entry.last.time)}`}>{previewText(r.entry.last.payload)}</span>
@@ -688,6 +789,12 @@ export default function MqttClientWorkbench({ onLogMessage } = {}) {
                 )}
               </div>
             ))}
+          </div>
+        )}
+        {view === 'tree' && selTopic && topics.get(selTopic) && (
+          <div className="mt-2 border-t border-slate-800 pt-2">
+            <div className="text-[11px] text-cyan-300 font-mono mb-1 truncate">{selTopic}</div>
+            <TopicDiff entry={topics.get(selTopic)} />
           </div>
         )}
         <div className="text-[10px] text-slate-600 mt-2">
