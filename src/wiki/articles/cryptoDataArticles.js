@@ -47,6 +47,15 @@ Paste a known hash into **Expected digest (verify)**. Case and spaces are ignore
 
 With more than one file, results appear as a table. Choose an algorithm in the selector and press **Copy as SHA256SUMS** (the button name follows the algorithm, for example SHA512SUMS) to copy \`digest  filename\` lines you can save and check with \`sha256sum -c\`.
 
+## Checksum files: export and verify
+
+After you hash one or more files, open **Checksum file: export and verify**.
+
+- **Export:** pick an algorithm and a format, **GNU** (\`digest  filename\`, read by \`sha256sum -c\`) or **BSD** (\`SHA256 (filename) = digest\`, the \`--tag\` style). **Copy** puts it on the clipboard; **Save** downloads it as SHA256SUMS (or the matching name for the algorithm).
+- **Verify:** load or paste a checksum file (GNU, BSD or SFV lines; lines starting with # or ; are ignored). Each listed name is matched to a hashed file by full name, then by base name (ignoring case). The algorithm comes from the BSD tag, SFV (CRC-32) or the digest length. Results show OK, FAILED or "not among the hashed files", with a total, and files you hashed that the list does not mention. Digest lengths that fit no algorithm are reported as unrecognised. Verification is off while HMAC mode is on.
+
+The tool only reads the file you give it; it does not fetch published checksums, so get them over a channel you trust.
+
 ## Which algorithm to trust
 
 - **MD5, MD4, SHA-1** are broken for collision resistance: fine for catching accidental corruption or matching a legacy checksum, not for signatures or security decisions.
@@ -57,6 +66,8 @@ With more than one file, results appear as a table. Choose an algorithm in the s
 ## Limits
 
 - Large files are read fully into memory and may be slow or fail on low-memory devices.
+- Checksum-file verification matches by file name; files in sub-folders match by base name only.
+- Similar tools: 7-Zip CRC SHA, HashMyFiles, sha256sum/cksum.
 - For hash *cracking* use the Hash Cracker; for other encodings and algorithms use CyberChef.
 `,
   },

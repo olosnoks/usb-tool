@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Copy, Check, FileUp } from 'lucide-react';
+import { Copy, Check, FileUp, Download } from 'lucide-react';
 import {
   computeAll, decodeKey, detectAlgorithms, compareDigest, normalizeDigest, formatSums, sumsFileName,
 } from '../../utils/hashSuite.js';
+import { parseChecksumFile, verifyChecksums, formatBsdSums } from '../../utils/checksumFile.js';
 
 /**
  * Hash & HMAC calculator — fully client-side. Digests text or files with MD5,
@@ -63,6 +64,8 @@ export default function HashCalculatorWorkbench({ onLogMessage }) {
   const [keyError, setKeyError] = useState('');
   const [expected, setExpected] = useState('');
   const [sumsAlgo, setSumsAlgo] = useState('SHA-256');
+  const [sumsFormat, setSumsFormat] = useState('gnu');
+  const [sumsText, setSumsText] = useState('');
   const fileInput = useRef(null);
   const logRef = useRef(onLogMessage);
   logRef.current = onLogMessage;
@@ -129,11 +132,27 @@ export default function HashCalculatorWorkbench({ onLogMessage }) {
   const sumsEntries = fileResults
     .map((f) => ({ name: f.name, value: f.rows.find((r) => r.id === sumsAlgo)?.value }))
     .filter((e) => e.value);
+  const sumsOut = () => (sumsFormat === 'bsd' ? formatBsdSums(sumsEntries, sumsAlgo) : formatSums(sumsEntries));
+  const downloadSums = () => {
+    const blob = new Blob([sumsOut()], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = sumsFileName(sumsAlgo); a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const onSumsFile = async (e) => {
+    const f = e.target.files?.[0];
+    try { e.target.value = ''; } catch { /* ignore */ }
+    if (f) setSumsText(await f.text());
+  };
+  const parsedSums = parseChecksumFile(sumsText);
+  const sumsCheck = sumsText.trim() && !useHmac && fileResults.length
+    ? verifyChecksums(parsedSums.entries, fileResults) : null;
   const sumsAlgoOptions = (fileResults[0]?.rows || []).filter((r) => !r.error && r.id !== 'NTLM').map((r) => r.id);
 
   return (
     <div className="w-full min-w-0 max-w-full text-gray-200">
-      <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(18rem,1fr))]">
+      <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(18rem,100%),1fr))]">
         <div>
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] uppercase tracking-wide text-slate-500">Input</span>
@@ -251,6 +270,55 @@ export default function HashCalculatorWorkbench({ onLogMessage }) {
                   : <div className="text-slate-600 text-xs">—</div>;
               })()}
             </div>
+          )}
+          {files.length > 0 && (
+            <details className="mt-2 bg-slate-950 border border-slate-800 rounded p-2 text-[11px]" open={!!sumsText}>
+              <summary className="cursor-pointer text-cyan-300">Checksum file: export and verify</summary>
+              <div className="flex flex-wrap items-center gap-1 mt-2">
+                <select value={sumsAlgo} onChange={(e) => setSumsAlgo(e.target.value)} aria-label="Export algorithm" className="bg-slate-900 border border-slate-800 rounded px-1">
+                  {(sumsAlgoOptions.length ? sumsAlgoOptions : [sumsAlgo]).map((id) => <option key={id} value={id}>{id}</option>)}
+                </select>
+                <select value={sumsFormat} onChange={(e) => setSumsFormat(e.target.value)} aria-label="Checksum file format" className="bg-slate-900 border border-slate-800 rounded px-1">
+                  <option value="gnu">GNU (hash  name)</option>
+                  <option value="bsd">BSD (--tag)</option>
+                </select>
+                <button onClick={() => navigator.clipboard?.writeText(sumsOut())} disabled={!sumsEntries.length} title="Copy checksum list" className="px-2 py-0.5 bg-slate-800 rounded hover:bg-slate-700 text-cyan-300 disabled:opacity-40">Copy</button>
+                <button onClick={downloadSums} disabled={!sumsEntries.length} title={`Download ${sumsFileName(sumsAlgo)}`} className="px-2 py-0.5 bg-slate-800 rounded hover:bg-slate-700 text-cyan-300 disabled:opacity-40 inline-flex items-center gap-1"><Download size={11} /> Save</button>
+              </div>
+              <div className="flex items-center justify-between mt-2 mb-1">
+                <span className="text-[10px] uppercase tracking-wide text-slate-500">Verify against a checksum file</span>
+                <label className="inline-flex items-center gap-1 text-cyan-300 cursor-pointer hover:text-cyan-200">
+                  <FileUp size={11} /> Load
+                  <input type="file" className="hidden" onChange={onSumsFile} data-testid="sums-file-input" />
+                </label>
+              </div>
+              <textarea
+                value={sumsText}
+                onChange={(e) => setSumsText(e.target.value)}
+                rows={3}
+                spellCheck={false}
+                aria-label="Checksum file contents"
+                placeholder="paste SHA256SUMS, BSD (SHA256 (name) = hash) or SFV lines"
+                className="w-full bg-slate-900 border border-slate-800 rounded p-2 font-mono resize-y"
+              />
+              {useHmac && sumsText.trim() && <div className="text-amber-400">Turn HMAC mode off to verify plain checksums.</div>}
+              {parsedSums.bad.length > 0 && <div className="text-amber-400">Ignored unreadable line(s): {parsedSums.bad.join(', ')}</div>}
+              {sumsCheck && (
+                <div data-testid="sums-check">
+                  <div className={sumsCheck.failed || sumsCheck.missing ? 'text-red-400' : 'text-emerald-400'}>
+                    {sumsCheck.ok} OK, {sumsCheck.failed} FAILED, {sumsCheck.missing} missing{sumsCheck.unknown ? `, ${sumsCheck.unknown} unrecognised length` : ''}
+                    {sumsCheck.unlisted.length ? `; not listed: ${sumsCheck.unlisted.join(', ')}` : ''}
+                  </div>
+                  <ul className="font-mono">
+                    {sumsCheck.results.map((r, i) => (
+                      <li key={`${r.name}-${i}`} className={r.status === 'ok' ? 'text-emerald-300' : r.status === 'failed' ? 'text-red-400' : 'text-amber-400'}>
+                        {r.name}: {r.status === 'ok' ? 'OK' : r.status === 'failed' ? 'FAILED' : r.status === 'missing' ? 'not among the hashed files' : 'unrecognised hash length'}{r.algo && r.status !== 'missing' ? ` (${r.algo})` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </details>
           )}
           <p className="text-[10px] text-slate-500 mt-1">MD5, MD4, SHA-1, CRC-32 and Adler-32 are not for security use, only checksums and interop. NTLM is shown for text input only. HMAC is available for the hash families, not for CRC/Adler/MD4. Everything runs locally.</p>
         </div>
