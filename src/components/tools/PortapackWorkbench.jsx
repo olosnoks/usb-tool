@@ -27,17 +27,14 @@ export default function PortapackWorkbench() {
   return (
     <div className="h-full w-full flex flex-col min-h-0 bg-[#0a0d13] text-slate-200 overflow-hidden font-mono select-none">
       {/* Top Cyber Navigation Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-[#0f141f] border-b border-purple-500/30 text-xs shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-2 py-1 bg-[#0f141f] border-b border-purple-500/30 text-xs shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 font-bold text-purple-300">
             <Radio className="w-4 h-4 text-purple-400 animate-pulse" />
-            <span className="tracking-wider">PORTAPACK MAYHEM SDR</span>
+            <span className="tracking-wider hidden @md:inline">PORTAPACK MAYHEM SDR</span>
           </div>
-          <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/40 hidden sm:inline">
+          <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/40 hidden @xl:inline">
             RocketGod Mayhem Mobile Port
-          </span>
-          <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hidden md:inline">
-            WebUSB HackRF & RTL-SDR
           </span>
         </div>
 
@@ -79,7 +76,7 @@ export default function PortapackWorkbench() {
             </button>
           </div>
 
-          <div className="h-4 w-px bg-slate-800 mx-1 hidden sm:block" />
+          <div className="h-4 w-px bg-slate-800 mx-1 hidden @md:block" />
 
           {activeTab === 'app' && (
             <button
@@ -97,7 +94,7 @@ export default function PortapackWorkbench() {
             className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-800 text-xs transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Pop Out</span>
+            <span className="hidden @md:inline">Pop Out</span>
           </button>
         </div>
       </div>
@@ -135,7 +132,7 @@ export default function PortapackWorkbench() {
             <NativeReceiver />
           </div>
         ) : (
-          <div className="flex-1 min-h-0 overflow-auto p-4 bg-slate-950">
+          <div className="flex-1 min-h-0 overflow-auto p-2 bg-slate-950">
             <HackRfFlasherWorkbench embedded />
           </div>
         )}
