@@ -13,7 +13,11 @@ import {
   Rocket,
   Info,
   Loader2,
-  Package
+  Package,
+  Copy,
+  Download,
+  Terminal,
+  Hash
 } from 'lucide-react';
 import {
   FastbootDevice,
@@ -23,7 +27,8 @@ import {
   summarizeVars
 } from '../../utils/fastbootDriver';
 import {
-  isSparse, parseSparse, imageParts, resolvePartition, flashImage, readFactoryZip, flashFactory, checkRequirements
+  isSparse, parseSparse, imageParts, resolvePartition, flashImage, readFactoryZip, flashFactory, checkRequirements,
+  sha256Hex, identifyImage, preflightChecks, prepareConsoleCommand, formatVarsText, cliFlashCommand, buildFlashAllScript
 } from '../../utils/fastbootTools';
 import StatusBadge from '../common/StatusBadge';
 
@@ -55,6 +60,9 @@ export default function FastbootWorkbench() {
   const [skip, setSkip] = useState([]);
   const [wipe, setWipe] = useState(false);
   const [steps, setSteps] = useState([]);
+  const [hash, setHash] = useState('');
+  const [consoleInput, setConsoleInput] = useState('');
+  const [consoleOut, setConsoleOut] = useState([]);
   const zipRef = useRef(null);
   const devRef = useRef(null);
   useEffect(() => { devRef.current = dev; }, [dev]);
@@ -160,6 +168,7 @@ export default function FastbootWorkbench() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       setImage({ name: file.name, data: new Uint8Array(ev.target.result) });
+      setHash('');
       addLog(`Loaded ${file.name} (${ev.target.result.byteLength} bytes).`, 'info');
     };
     reader.readAsArrayBuffer(file);
@@ -236,67 +245,103 @@ export default function FastbootWorkbench() {
 
   const unlocked = summary?.unlocked === 'yes' || vars?.unlocked === 'yes';
 
+  const copyText = async (text, what) => {
+    try { await navigator.clipboard.writeText(text); addLog(`Copied ${what}.`, 'ok'); } catch (e) { addLog(`Copy failed: ${e.message}`, 'err'); }
+  };
+  const downloadText = (text, name) => {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const imageInfo = image && dev ? (() => {
+    const sparse = isSparse(image.data);
+    const raw = sparse ? parseSparse(image.data).rawSize : image.data.length;
+    let parts = 1;
+    try { parts = imageParts(image.data, dev.maxDownloadSize).length; } catch (e) { parts = 0; }
+    return { sparse, raw, parts, kind: identifyImage(image.data), checks: preflightChecks(partition.trim(), image.data, vars || {}) };
+  })() : null;
+
+  const runConsole = () => {
+    let prepared;
+    try { prepared = prepareConsoleCommand(consoleInput); } catch (e) { setConsoleOut((o) => [...o.slice(-99), { cmd: consoleInput, text: e.message, err: true }]); return; }
+    const { cmd, destructive, reason } = prepared;
+    guard('console', async () => {
+      const lines = [];
+      try {
+        const r = await dev.command(cmd, { onInfo: (l) => lines.push(l) });
+        const text = [...lines, r.payload].filter(Boolean).join('\n') || 'OKAY';
+        setConsoleOut((o) => [...o.slice(-99), { cmd, text }]);
+        addLog(`> ${cmd}: ${text.split('\n')[0]}`, 'ok');
+      } catch (err) {
+        setConsoleOut((o) => [...o.slice(-99), { cmd, text: [...lines, err.message].join('\n'), err: true }]);
+        addLog(`> ${cmd}: ${err.message}`, 'err');
+      }
+      if (/^(flashing|oem|set_active)/.test(cmd)) { try { await refreshVars(dev); } catch (e) { /* ignore */ } }
+    }, destructive ? `Send "${cmd}"?\n\nThis ${reason}. Only do this on a device you own.` : undefined);
+  };
+
+  const btn = 'flex items-center gap-1 px-2 py-1 rounded-md font-bold disabled:opacity-40';
+  const card = 'bg-[#030712] border border-cyber-border rounded-lg p-2.5 space-y-2';
+  const head = 'font-bold text-slate-200 flex items-center gap-1.5';
+  const iconBtn = 'p-1 rounded bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-300 disabled:opacity-40';
+
   return (
-    <div className="space-y-4 font-mono text-xs">
+    <div className="space-y-2 font-mono text-xs">
 
-      {/* Header + connect */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <p className="text-[11px] text-slate-400 max-w-3xl">
-              Talk to an Android device in fastboot/bootloader mode over WebUSB: read variables, unlock your own bootloader,
-              flash (sparse images split automatically, either or both A/B slots) or erase partitions, boot an image, flash a whole
-              factory image zip, and reboot. Put the phone in fastboot mode first
-              (power off, then hold Volume-Down + Power, or <code>adb reboot bootloader</code>).
-            </p>
-          </div>
-          <StatusBadge
-            status={status}
-            label={status === 'online' ? 'FASTBOOT' : status === 'warning' ? 'ERR' : 'IDLE'}
-            value={status === 'online' ? 'Connected' : 'Offline'}
-          />
-        </div>
-
-        {!webUsbAvailable && (
-          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200">
-            <ShieldAlert className="w-4 h-4 shrink-0" /> WebUSB needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.
-          </div>
-        )}
-
-        <div className="pt-3 flex flex-wrap items-center gap-2">
+      {/* Connect bar */}
+      <div className={card}>
+        <div className="flex flex-wrap items-center gap-2">
           {!dev ? (
             <button
               onClick={() => connect()}
               disabled={!webUsbAvailable || !!busy}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 text-xs font-bold disabled:opacity-40"
+              className={`${btn} px-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950`}
             >
               {busy === 'connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />}
-              <span>CONNECT FASTBOOT (WEBUSB)</span>
+              <span>CONNECT FASTBOOT</span>
             </button>
           ) : (
             <>
-              <button onClick={disconnect} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
+              <button onClick={disconnect} className={`${btn} bg-rose-500/20 text-rose-300 border border-rose-500/40`}>
                 <Power className="w-3.5 h-3.5" /> DISCONNECT
               </button>
-              <button onClick={() => guard('refresh', () => refreshVars(dev))} disabled={!!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-cyan-300 border border-slate-800 text-xs font-bold disabled:opacity-40">
+              <button onClick={() => guard('refresh', () => refreshVars(dev))} disabled={!!busy} title="Re-read all variables" className={`${btn} bg-slate-900 text-cyan-300 border border-slate-800`}>
                 <RefreshCw className={`w-3.5 h-3.5 ${busy === 'refresh' ? 'animate-spin' : ''}`} /> RE-READ VARS
               </button>
             </>
           )}
+          <span className="ml-auto"><StatusBadge
+            status={status}
+            label={status === 'online' ? 'FASTBOOT' : status === 'warning' ? 'ERR' : 'IDLE'}
+            value={status === 'online' ? 'Connected' : 'Offline'}
+          /></span>
         </div>
-        <p className="mt-2 text-[11px] text-slate-500">{statusMsg}</p>
+        {!webUsbAvailable && (
+          <div className="flex items-start gap-2 p-2 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-200">
+            <ShieldAlert className="w-4 h-4 shrink-0" /> WebUSB needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.
+          </div>
+        )}
+        <p className="text-[11px] text-slate-500">{statusMsg}</p>
+        {!dev && (
+          <details className="text-[11px] text-slate-400">
+            <summary className="cursor-pointer text-slate-300">How to enter fastboot mode</summary>
+            <p className="mt-1">Power the phone off, then hold Volume-Down + Power (keys vary by model), or run <code>adb reboot bootloader</code>. Then connect and pick the device.</p>
+          </details>
+        )}
       </div>
 
       {/* Device summary */}
       {dev && summary && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-            <span className="font-bold text-slate-200">DEVICE</span>
-            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${unlocked ? 'bg-amber-500/15 text-amber-300 border-amber-500/40' : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'}`}>
+        <div className={card}>
+          <div className="flex items-center justify-between gap-2">
+            <span className={head}><Smartphone className="w-3.5 h-3.5 text-cyan-400" /> DEVICE</span>
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${unlocked ? 'bg-amber-500/15 text-amber-300 border-amber-500/40' : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'}`}>
               {unlocked ? 'BOOTLOADER UNLOCKED' : 'BOOTLOADER LOCKED'}
             </span>
           </div>
-          <div className="grid grid-cols-2 @sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 @md:grid-cols-4 gap-1.5">
             <Field label="Product" value={summary.product} />
             <Field label="Bootloader" value={summary.bootloaderVersion} />
             <Field label="Serial" value={summary.serialno} />
@@ -307,7 +352,7 @@ export default function FastbootWorkbench() {
             <Field label="Partitions" value={summary.partitionTypes.length ? `${summary.partitionTypes.length} known` : '—'} />
           </div>
           {summary.currentSlot && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <span className="text-slate-500">Set active slot:</span>
               {['a', 'b'].map((s) => (
                 <button key={s} disabled={!!busy} onClick={() => guard('slot', async () => { await dev.setActiveSlot(s); await refreshVars(dev); addLog(`Active slot set to ${s}.`, 'ok'); })}
@@ -320,42 +365,44 @@ export default function FastbootWorkbench() {
 
       {/* Bootloader lock */}
       {dev && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
-          <span className="font-bold text-slate-200 flex items-center gap-2"><Unlock className="w-4 h-4 text-amber-400" /> BOOTLOADER LOCK</span>
-          <div className="flex items-start gap-2 p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>Unlocking lets you flash custom images, but <b>erases all user data</b> and the phone asks you to confirm on its own screen. Only works on a device you own; it can&apos;t bypass a screen-lock PIN or a Google/Samsung account lock.</span>
+        <div className={card}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={head}><Unlock className="w-3.5 h-3.5 text-amber-400" /> BOOTLOADER LOCK</span>
+            <div className="ml-auto flex gap-1.5">
+              <button onClick={handleUnlock} disabled={!!busy || unlocked} className={`${btn} bg-amber-500/20 text-amber-300 border border-amber-500/40`}>
+                <Unlock className="w-3.5 h-3.5" /> {busy === 'unlock' ? 'REQUESTING...' : 'UNLOCK'}
+              </button>
+              <button onClick={handleLock} disabled={!!busy || !unlocked} className={`${btn} bg-slate-900 text-slate-300 border border-slate-700`}>
+                <Lock className="w-3.5 h-3.5" /> RE-LOCK
+              </button>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={handleUnlock} disabled={!!busy || unlocked} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold disabled:opacity-40">
-              <Unlock className="w-3.5 h-3.5" /> {busy === 'unlock' ? 'REQUESTING...' : 'UNLOCK BOOTLOADER'}
-            </button>
-            <button onClick={handleLock} disabled={!!busy || !unlocked} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-slate-300 border border-slate-700 font-bold disabled:opacity-40">
-              <Lock className="w-3.5 h-3.5" /> RE-LOCK
-            </button>
+          <div className="flex items-start gap-2 p-2 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-200 text-[11px]">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>Unlocking lets you flash custom images, but <b>erases all user data</b> and the phone asks you to confirm on its own screen. Only works on a device you own; it can&apos;t bypass a screen-lock PIN or a Google/Samsung account lock.</span>
           </div>
         </div>
       )}
 
       {/* Flash / erase / boot */}
       {dev && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
-          <span className="font-bold text-slate-200 flex items-center gap-2"><Upload className="w-4 h-4 text-cyan-400" /> FLASH / ERASE / BOOT</span>
+        <div className={card}>
+          <span className={head}><Upload className="w-3.5 h-3.5 text-cyan-400" /> FLASH / ERASE / BOOT</span>
           {!unlocked && <p className="text-[11px] text-amber-300/80">The bootloader is locked, so flashing and erasing will be refused until you unlock.</p>}
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="text-slate-500">Partition</label>
-            <input value={partition} onChange={(e) => setPartition(e.target.value)} list="fb-parts" className="w-32 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <label htmlFor="fb-partition" className="text-slate-500">Partition</label>
+            <input id="fb-partition" value={partition} onChange={(e) => setPartition(e.target.value)} list="fb-parts" className="w-28 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
             <datalist id="fb-parts">
               {(summary?.partitionTypes || ['boot', 'recovery', 'system', 'vbmeta', 'userdata', 'dtbo', 'vendor_boot']).map((p) => <option key={p} value={p} />)}
             </datalist>
-            <input type="file" ref={fileRef} onChange={pickFile} className="hidden" />
-            <button onClick={() => fileRef.current?.click()} disabled={!!busy} className="px-3 py-1 rounded bg-slate-900 text-cyan-300 border border-slate-800 font-bold disabled:opacity-40">
-              {image ? image.name : 'CHOOSE IMAGE...'}
+            <input type="file" ref={fileRef} onChange={pickFile} className="hidden" aria-label="Image file" />
+            <button onClick={() => fileRef.current?.click()} disabled={!!busy} className={`${btn} bg-slate-900 text-cyan-300 border border-slate-800 max-w-[12rem] truncate`}>
+              <span className="truncate">{image ? image.name : 'CHOOSE IMAGE...'}</span>
             </button>
             {summary?.currentSlot && (
               <>
-                <label className="text-slate-500">Slot</label>
-                <select value={slotChoice} onChange={(e) => setSlotChoice(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200">
+                <label htmlFor="fb-slot" className="text-slate-500">Slot</label>
+                <select id="fb-slot" value={slotChoice} onChange={(e) => setSlotChoice(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-slate-200">
                   <option value="current">current ({summary.currentSlot})</option>
                   <option value="a">A</option>
                   <option value="b">B</option>
@@ -364,31 +411,46 @@ export default function FastbootWorkbench() {
               </>
             )}
           </div>
-          {image && (
-            <p className="text-[11px] text-slate-400">
-              {(() => {
-                const sparse = isSparse(image.data);
-                const raw = sparse ? parseSparse(image.data).rawSize : image.data.length;
-                const parts = imageParts(image.data, dev.maxDownloadSize).length;
-                return `${sparse ? 'Android sparse image' : 'Raw image'}, ${(image.data.length / 1048576).toFixed(1)} MB${sparse ? ` (${(raw / 1048576).toFixed(1)} MB written)` : ''}. ${parts > 1 ? `Larger than max-download-size, so it is sent as ${parts} sparse pieces.` : 'Fits in one download.'}`;
-              })()}
-            </p>
+          {imageInfo && (
+            <div className="space-y-1 text-[11px]">
+              <p className="text-slate-400">
+                {imageInfo.sparse ? 'Android sparse image' : imageInfo.kind.label}, {(image.data.length / 1048576).toFixed(1)} MB{imageInfo.sparse ? ` (${(imageInfo.raw / 1048576).toFixed(1)} MB written)` : ''}.{' '}
+                {imageInfo.parts > 1 ? `Larger than max-download-size, so it is sent as ${imageInfo.parts} sparse pieces.` : 'Fits in one download.'}
+              </p>
+              {imageInfo.checks.map((c, i) => (
+                <p key={i} className="text-amber-300 flex items-start gap-1"><AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" /> {c.text}</p>
+              ))}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  onClick={async () => { try { setHash(await sha256Hex(image.data)); } catch (e) { addLog(`SHA-256 failed: ${e.message}`, 'err'); } }}
+                  className={`${btn} bg-slate-900 text-slate-300 border border-slate-800`} title="Compute the SHA-256 of the file to compare with the published checksum">
+                  <Hash className="w-3 h-3" /> SHA-256
+                </button>
+                {hash && <code className="text-slate-300 break-all">{hash}</code>}
+                {hash && <button onClick={() => copyText(hash, 'SHA-256')} title="Copy SHA-256" aria-label="Copy SHA-256" className={iconBtn}><Copy className="w-3 h-3" /></button>}
+              </div>
+            </div>
           )}
           {progress && (
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] text-cyan-400"><span>{progress.phase === 'download' ? 'Uploading to device' : 'Working'}{progress.parts > 1 ? ` (piece ${progress.part} of ${progress.parts})` : ''}</span><span>{progress.percent}%</span></div>
-              <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all" style={{ width: `${progress.percent}%` }} /></div>
+              <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 transition-all" style={{ width: `${progress.percent}%` }} /></div>
             </div>
           )}
-          <div className="flex flex-wrap gap-2">
-            <button onClick={handleFlash} disabled={!!busy || !image} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold disabled:opacity-40">
+          <div className="flex flex-wrap gap-1.5">
+            <button onClick={handleFlash} disabled={!!busy || !image} className={`${btn} bg-cyan-500/20 text-cyan-300 border border-cyan-500/40`}>
               <Upload className="w-3.5 h-3.5" /> {busy === 'flash' ? 'FLASHING...' : 'FLASH IMAGE'}
             </button>
-            <button onClick={handleBoot} disabled={!!busy || !image} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold disabled:opacity-40">
+            <button onClick={handleBoot} disabled={!!busy || !image} className={`${btn} bg-purple-500/20 text-purple-300 border border-purple-500/40`}>
               <Rocket className="w-3.5 h-3.5" /> BOOT ONCE
             </button>
-            <button onClick={handleErase} disabled={!!busy} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold disabled:opacity-40">
-              <Trash2 className="w-3.5 h-3.5" /> ERASE PARTITION
+            <button onClick={handleErase} disabled={!!busy} className={`${btn} bg-rose-500/20 text-rose-300 border border-rose-500/40`}>
+              <Trash2 className="w-3.5 h-3.5" /> ERASE
+            </button>
+            <button
+              onClick={() => copyText(cliFlashCommand(partition.trim() || 'boot', image?.name || 'image.img', { slot: slotChoice === 'both' ? 'all' : slotChoice === 'current' ? null : slotChoice }), 'fastboot command')}
+              className={`${btn} bg-slate-900 text-slate-300 border border-slate-800`} title="Copy the equivalent desktop fastboot command (export only, nothing is run)">
+              <Copy className="w-3.5 h-3.5" /> COPY CLI
             </button>
           </div>
         </div>
@@ -396,19 +458,22 @@ export default function FastbootWorkbench() {
 
       {/* Factory image */}
       {dev && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
-          <span className="font-bold text-slate-200 flex items-center gap-2"><Package className="w-4 h-4 text-amber-400" /> FACTORY IMAGE (FLASH-ALL)</span>
-          <p className="text-[11px] text-slate-400">
-            Open a factory image zip (for example from developers.google.com/android/images) or its inner image-*.zip. The steps follow flash-all.sh and
-            fastboot update: bootloader and radio with a reboot after each, boot/vbmeta-type images in the bootloader, then the dynamic partitions in fastbootd.
-            The whole zip is read into memory, so a very large zip may need its inner image zip instead.
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <input type="file" ref={zipRef} accept=".zip" onChange={onFactoryFile} className="hidden" />
-            <button onClick={() => zipRef.current?.click()} disabled={!!busy} className="px-3 py-1 rounded bg-slate-900 text-amber-300 border border-slate-800 font-bold disabled:opacity-40">
-              {busy === 'zip' ? 'READING...' : factory ? factory.fileName : 'OPEN FACTORY ZIP...'}
+        <div className={card}>
+          <span className={head}><Package className="w-3.5 h-3.5 text-amber-400" /> FACTORY IMAGE (FLASH-ALL)</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <input type="file" ref={zipRef} accept=".zip" onChange={onFactoryFile} className="hidden" aria-label="Factory image zip" />
+            <button onClick={() => zipRef.current?.click()} disabled={!!busy} className={`${btn} bg-slate-900 text-amber-300 border border-slate-800 max-w-[14rem]`}>
+              <span className="truncate">{busy === 'zip' ? 'READING...' : factory ? factory.fileName : 'OPEN FACTORY ZIP...'}</span>
             </button>
           </div>
+          <details className="text-[11px] text-slate-400">
+            <summary className="cursor-pointer text-slate-300">What this does</summary>
+            <p className="mt-1">
+              Open a factory image zip (for example from developers.google.com/android/images) or its inner image-*.zip. The steps follow flash-all.sh and
+              fastboot update: bootloader and radio with a reboot after each, boot/vbmeta-type images in the bootloader, then the dynamic partitions in fastbootd.
+              The whole zip is read into memory, so a very large zip may need its inner image zip instead.
+            </p>
+          </details>
           {factory && (
             <>
               {factory.requirements.length > 0 && vars && (
@@ -420,21 +485,24 @@ export default function FastbootWorkbench() {
                   ))}
                 </div>
               )}
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {[...(factory.bootloader ? ['bootloader'] : []), ...(factory.radio ? ['radio'] : []), ...factory.images.map((i) => i.name)].map((name) => {
                   const img = factory.images.find((i) => i.name === name);
                   return (
-                    <label key={name} className={`flex items-center gap-1 px-2 py-0.5 rounded border ${skip.includes(name) ? 'border-slate-800 text-slate-600 line-through' : 'border-slate-700 text-slate-200'}`}>
+                    <label key={name} className={`flex items-center gap-1 px-1.5 py-0.5 rounded border ${skip.includes(name) ? 'border-slate-800 text-slate-600 line-through' : 'border-slate-700 text-slate-200'}`}>
                       <input type="checkbox" checked={!skip.includes(name)} onChange={(e) => setSkip((prev) => (e.target.checked ? prev.filter((x) => x !== name) : [...prev, name]))} className="accent-amber-500" />
                       {name}{img?.logical ? ' (fastbootd)' : ''}
                     </label>
                   );
                 })}
               </div>
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <label className="flex items-center gap-1 text-rose-300"><input type="checkbox" checked={wipe} onChange={(e) => setWipe(e.target.checked)} className="accent-rose-500" /> wipe user data (like flash-all.sh -w)</label>
-                <button onClick={handleFactoryFlash} disabled={!!busy || !unlocked} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold disabled:opacity-40">
+                <button onClick={handleFactoryFlash} disabled={!!busy || !unlocked} className={`${btn} bg-amber-500/20 text-amber-300 border border-amber-500/40`}>
                   <Upload className="w-3.5 h-3.5" /> {busy === 'factory' ? 'FLASHING...' : 'FLASH FACTORY IMAGE'}
+                </button>
+                <button onClick={() => downloadText(buildFlashAllScript(factory, { wipe, skip }), 'flash-all.sh')} className={`${btn} bg-slate-900 text-slate-300 border border-slate-800`} title="Download a flash-all.sh for the desktop fastboot tool (export only, the files are not included)">
+                  <Download className="w-3.5 h-3.5" /> EXPORT SCRIPT
                 </button>
                 {!unlocked && <span className="text-amber-300/80">Unlock the bootloader first.</span>}
               </div>
@@ -450,11 +518,11 @@ export default function FastbootWorkbench() {
 
       {/* Reboot */}
       {dev && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-2">
-          <span className="font-bold text-slate-200 flex items-center gap-2"><Power className="w-4 h-4 text-emerald-400" /> REBOOT</span>
-          <div className="flex flex-wrap gap-2">
+        <div className={card}>
+          <span className={head}><Power className="w-3.5 h-3.5 text-emerald-400" /> REBOOT</span>
+          <div className="flex flex-wrap gap-1.5">
             {REBOOT_TARGETS.map((t) => (
-              <button key={t.id} onClick={() => handleReboot(t.id)} disabled={!!busy} className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 font-bold disabled:opacity-40">
+              <button key={t.id} onClick={() => handleReboot(t.id)} disabled={!!busy} className={`${btn} bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700`}>
                 {t.label}
               </button>
             ))}
@@ -462,14 +530,43 @@ export default function FastbootWorkbench() {
         </div>
       )}
 
+      {/* Command console */}
+      {dev && (
+        <details className={card}>
+          <summary className={`${head} cursor-pointer`}><Terminal className="w-3.5 h-3.5 text-cyan-400" /> COMMAND CONSOLE</summary>
+          <form className="mt-2 flex gap-1.5" onSubmit={(e) => { e.preventDefault(); runConsole(); }}>
+            <input value={consoleInput} onChange={(e) => setConsoleInput(e.target.value)} aria-label="Fastboot command" placeholder="getvar all, oem device-info, getvar current-slot" spellCheck={false}
+              className="flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200" />
+            <button type="submit" disabled={!!busy || !consoleInput.trim()} className={`${btn} bg-cyan-500/20 text-cyan-300 border border-cyan-500/40`}>SEND</button>
+          </form>
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {['getvar all', 'getvar current-slot', 'getvar is-userspace', 'getvar slot-count', 'getvar version-bootloader', 'oem device-info'].map((c) => (
+              <button key={c} onClick={() => setConsoleInput(c)} className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 text-[10px]">{c}</button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] text-slate-500">Sends one raw command (CLI or wire style, 64 bytes max). Erase, format, lock/unlock and layout commands ask for confirmation. File transfers use the panel above. Vendor <code>oem</code> commands vary by device and some are irreversible.</p>
+          {consoleOut.length > 0 && (
+            <div className="mt-1.5 max-h-40 overflow-y-auto space-y-1 text-[11px]">
+              {consoleOut.map((o, i) => (
+                <div key={i}><span className="text-cyan-400">&gt; {o.cmd}</span><pre className={`whitespace-pre-wrap break-all ${o.err ? 'text-rose-400' : 'text-slate-300'}`}>{o.text}</pre></div>
+              ))}
+            </div>
+          )}
+        </details>
+      )}
+
       {/* All variables */}
       {vars && (
-        <details className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-          <summary className="font-bold text-slate-200 cursor-pointer flex items-center gap-2"><Info className="w-4 h-4 text-slate-400" /> ALL VARIABLES ({Object.keys(vars).length})</summary>
-          <div className="mt-2 grid grid-cols-1 @sm:grid-cols-2 gap-x-6 gap-y-0.5 max-h-72 overflow-y-auto text-[11px]">
+        <details className={card}>
+          <summary className={`${head} cursor-pointer`}><Info className="w-3.5 h-3.5 text-slate-400" /> ALL VARIABLES ({Object.keys(vars).length})</summary>
+          <div className="mt-2 flex gap-1.5">
+            <button onClick={() => copyText(formatVarsText(vars), 'variables')} className={`${btn} bg-slate-900 text-slate-300 border border-slate-800`}><Copy className="w-3 h-3" /> COPY</button>
+            <button onClick={() => downloadText(formatVarsText(vars), `fastboot-vars-${summary?.product || 'device'}.txt`)} className={`${btn} bg-slate-900 text-slate-300 border border-slate-800`}><Download className="w-3 h-3" /> SAVE .TXT</button>
+          </div>
+          <div className="mt-2 grid grid-cols-1 @md:grid-cols-2 gap-x-4 gap-y-0.5 max-h-64 overflow-y-auto text-[11px]">
             {Object.entries(vars).map(([k, v]) => (
               <div key={k} className="flex justify-between gap-2 border-b border-slate-900 py-0.5">
-                <span className="text-slate-500 truncate">{k}</span><span className="text-slate-300 truncate">{v}</span>
+                <span className="text-slate-500 truncate" title={k}>{k}</span><span className="text-slate-300 truncate" title={v}>{v}</span>
               </div>
             ))}
           </div>
@@ -477,14 +574,20 @@ export default function FastbootWorkbench() {
       )}
 
       {/* Log */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 shadow-xl">
-        <span className="text-[11px] font-bold text-slate-400">LOG</span>
-        <div className="mt-1 max-h-48 overflow-y-auto space-y-0.5">
+      <div className={card}>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-bold text-slate-400">LOG</span>
+          <div className="flex gap-1">
+            <button onClick={() => copyText(log.map((e) => `${e.ts} ${e.msg}`).join('\n'), 'log')} disabled={!log.length} title="Copy log" aria-label="Copy log" className={iconBtn}><Copy className="w-3 h-3" /></button>
+            <button onClick={() => setLog([])} disabled={!log.length} title="Clear log" aria-label="Clear log" className={iconBtn}><Trash2 className="w-3 h-3" /></button>
+          </div>
+        </div>
+        <div className="max-h-40 overflow-y-auto space-y-0.5">
           {log.length === 0 && <p className="text-slate-600 text-[11px]">No activity yet.</p>}
           {log.map((e, i) => (
             <div key={i} className="text-[11px] flex gap-2">
-              <span className="text-slate-600">{e.ts}</span>
-              <span className={e.kind === 'err' ? 'text-rose-400' : e.kind === 'ok' ? 'text-emerald-400' : 'text-slate-300'}>{e.msg}</span>
+              <span className="text-slate-600 shrink-0">{e.ts}</span>
+              <span className={`break-all ${e.kind === 'err' ? 'text-rose-400' : e.kind === 'ok' ? 'text-emerald-400' : 'text-slate-300'}`}>{e.msg}</span>
             </div>
           ))}
         </div>
@@ -495,7 +598,7 @@ export default function FastbootWorkbench() {
 
 function Field({ label, value }) {
   return (
-    <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+    <div className="bg-slate-950 p-1.5 rounded-md border border-slate-800 min-w-0">
       <span className="text-[10px] text-slate-500 font-bold uppercase block">{label}</span>
       <span className="text-slate-200 font-semibold break-all">{value ?? '—'}</span>
     </div>
