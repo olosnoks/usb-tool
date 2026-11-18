@@ -574,7 +574,7 @@ Two sliders set the timing: **Reset Hold Duration** (50–500 ms, default 150) a
 - **Pro Tip**: if your board has a large capacitor on the reset line (e.g. 10uF), the default 150 ms may be marginal; raise the reset slider to **250 ms** or more.
 
 #### 2. Reset & Bootloader Profiles
-The **RESET & BOOTLOADER PROFILES** panel runs a ready-made DTR/RTS sequence for a family of boards, using the same two hold sliders as above. Pick one in **PROFILE:**; when the connected adapter's USB vendor/product ID is recognised the panel shows a **Suggested for this USB ID** badge and pre-selects it (only a suggestion, nothing runs by itself):
+The **RESET & BOOTLOADER PROFILES** panel runs a ready-made DTR/RTS sequence for a family of boards, using the same two hold sliders as above. Pick one in **PROFILE:**; when the connected adapter's USB vendor/product ID is recognised the panel shows a **Suggested:** badge and pre-selects it (only a suggestion, nothing runs by itself):
 - **ESP32 / ESP8266 (UART bridge, DTR=IO0 RTS=EN)**: the classic auto-reset wiring.
 - **ESP32-S/C native USB (USB-Serial/JTAG)**: the sequence for chips whose USB port is the built-in USB-Serial/JTAG peripheral.
 - **Arduino (DTR auto-reset, serial bootloader)**: one DTR pulse; bootloader entry and reset are the same pulse because the bootloader runs after any reset.
@@ -585,19 +585,23 @@ The **RESET & BOOTLOADER PROFILES** panel runs a ready-made DTR/RTS sequence for
 
 The **Custom sequence editor** (expand it) lets you build your own: each step sets DTR and RTS to **keep / assert / release** and a **hold** time; use **+ step** and **remove**, then **Run**. **Save** stores it by name in the browser (click a name under **Saved:** to reload it), and **Export JSON** / **Import JSON** exchange sequences as \`{"name":"...","steps":[{"dtr":false,"rts":true,"waitMs":100}]}\`.
 
-#### 3. Manual UART Pin Toggles
+The **ESPTOOL FORMAT** row at the bottom of the editor converts to and from the compact string used by esptool's custom reset sequences, for example \`D0|R1|W0.1|D1|R0|W0.05|D0\`. \`D\` is DTR, \`R\` is RTS (\`1\` = asserted, \`0\` = released) and \`W\` is a wait in seconds (up to 5 s). **Import** loads the string into the step editor; **Export** writes the current steps as a string. D/R values that appear before a wait are applied together as one step, whereas esptool sets them one after another, so a very tight sequence can differ by a few microseconds on a real adapter. Waits are not exact in a browser; the measured holds are printed after each run.
+
+#### 3. Manual UART Outputs
 - **DTR PIN** and **RTS PIN** are toggle buttons. Each shows \`ASSERTED (HIGH)\` or \`IDLE (LOW)\` (see the polarity note above). Use them to hold EN (reset) or IO0 (boot) while you probe voltages with a multimeter, then toggle again to release.
+- **Pulse DTR / Pulse RTS** asserts that line for the **PULSE** length (10-1000 ms slider, default 100), then puts it back to the state it had before. The measured hold time is shown under the buttons. Useful for a single reset tap or for testing a wired-up line.
 - **UART Line Break**: a slider (50–1000 ms, default 250) and an **ASSERT n ms UART BREAK** button that holds TXD low for that long.
 
 #### 4. Live Hardware Input Signals
-**CTS, DSR, DCD and RI** are polled from the adapter every 250 ms (\`port.getSignals()\`) and shown as HIGH/LOW.
+**CTS, DSR, DCD and RI** are polled from the adapter every 250 ms (\`port.getSignals()\`) and shown as HIGH/LOW, each with a count of the edges seen. Below them a **CHANGE LOG** records every change with a clock time (newest first, last 200 kept). Use the copy button to put the log on the clipboard as relative timestamps (\`+1.250s CTS -> HIGH\`) and the bin button to clear the log and counters. Because the signals are polled, a pulse shorter than about 250 ms can be missed; this is a limit of Web Serial, which has no change-notification event for these lines.
 
 #### 5. U-Boot Interrupt Spammer & Bootloader Halter
+Use it, and the root-shell action, only on devices you own or are authorised to test.
 When working with Linux Single Board Computers (Raspberry Pi, Orange Pi, Banana Pi, OpenWrt Wi-Fi routers, IP cameras):
 - The U-Boot bootloader provides a recovery shell to re-flash Linux kernels, dump flash memory, or bypass root passwords.
 - U-Boot only pauses autoboot if it receives a keypress (Space, Enter, or \`Ctrl+C\`) within its autoboot countdown after power-on.
 - **How to Use**: choose an **INTERRUPT KEY** (Spacebar \`0x20\`, Enter \`\\r\\n\`, Ctrl+C \`0x03\`, Escape \`0x1B\` or a custom string), set the **BURST INTERVAL** (10–100 ms, default 25 ms) and click **START SPAMMER**. Power cycle or reset your board. A burst counter runs until the tool sees one of these prompts in the received text (even without a trailing newline) and stops itself: \`=>\`, \`u-boot>\`, \`cfe>\`, \`redboot>\`, \`# \` or \`$ \` (a "Caught" badge shows the match). It never sends after the catch. Click **STOP SPAMMER** to stop manually.
-- **Quick Bootloader Actions** (send commands with an LF ending): **Bypass Root Password (init=/bin/sh)** (asks for confirmation first, because it changes the target's boot behaviour) sends \`setenv bootargs "\${bootargs} init=/bin/sh"\` then \`boot\`; **Dump Environment (printenv)**; **Target Version (version)**; **Memory Hexdump (md.b)** sends \`md.b 0x80000000 0x100\` (adjust the address in the Terminal for your SoC).
+- **Quick Bootloader Actions** (send commands with an LF ending): **Root shell (init=/bin/sh)** (asks for confirmation first, because it changes the target's boot behaviour) sends \`setenv bootargs "\${bootargs} init=/bin/sh"\` then \`boot\`; **printenv**; **version**; **md.b** sends \`md.b 0x80000000 0x100\` (adjust the address in the Terminal for your SoC).
 
 <details>
 <summary>U-Boot Command Prompt Environment Variable Reference & Kernel Boot Commands</summary>
@@ -618,7 +622,13 @@ Once halted at the \`=>\` prompt, engineers use these low-level U-Boot commands 
 
 ---
 
-### 5. Upstream Project & Engineering Attribution
+### 5. Similar Tools
+
+This tool covers the same ground as **esptool** (reset modes and custom reset sequences), **stm32flash** (the \`-i\` GPIO sequence option for DTR/RTS), the **Arduino IDE** (DTR auto-reset and the 1200-baud touch), **RealTerm** (DTR/RTS toggles, break, live modem-line status) and **PuTTY / Tera Term** (send break). Unlike those, it needs no install, but it only drives what Web Serial exposes: DTR, RTS, break and polled CTS/DSR/DCD/RI. It cannot toggle arbitrary GPIOs, change parity or stop bits mid-session, or watch the lines with hardware timing.
+
+---
+
+### 6. Upstream Project & Engineering Attribution
 
 | Project / Hardware Standard | Role & Contribution | Reference & License |
 | :--- | :--- | :--- |
