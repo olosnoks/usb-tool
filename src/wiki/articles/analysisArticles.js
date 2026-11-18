@@ -541,14 +541,18 @@ transmits SLCAN ASCII over that port. All data is live; there is no simulation o
 | :--- | :--- | :--- |
 | **(Top-bar Connect)** | Button | Attaches the SLCAN adapter via the shared Web Serial transport; the deck reads/writes through it. |
 | **CAN Bus Sniffer / OBD-II Scanner & Gauges / UDS Diagnostics / J1939 / Record & Replay** | Mode buttons | Switch between the five views. |
-| **CAN BAUD** | Dropdown | 100 kbps, 125 kbps (low-speed / body), 250 kbps, 500 kbps (standard automotive high-speed, default) or 1000 kbps. |
+| **BAUD** | Dropdown | 100 kbps, 125 kbps (low-speed / body), 250 kbps, 500 kbps (standard automotive high-speed, default) or 1000 kbps. |
 | **AUTO-DETECT** | Button | Tries each bit rate in listen-only mode and keeps the first one that receives valid frames without errors. |
+| **Adapter options** (gear icon) | Toggle | Shows or hides the adapter settings below. They apply when the sniffer is started. |
 | **Adapter** | Dropdown | **SLCAN (Lawicel / CANable 1.x)** or **CANable 2.0 (FD firmware)**. The two firmwares speak different dialects, so the options below change with it. |
 | **listen-only** | Checkbox | The adapter receives but never transmits or ACKs, so it cannot disturb the bus. Lawicel adapters open with \`L\`; CANable 2.0 uses silent mode (\`M1\`, then \`O\`). AUTO-DETECT uses the same silent open. |
 | **FD data rate** | Dropdown | CANable 2.0 only: **Classic CAN**, or a CAN FD data-phase rate. The canable2 firmware accepts only the \`Y2\` (2 Mbps) and \`Y5\` (5 Mbps) presets. |
 | **HW timestamps** | Checkbox | Lawicel adapters only: asks the adapter to append its own receive timestamp to each frame (\`Z1\`); the sniffer shows it in the **HW time** column, unwrapped across the 60 s rollover. CANable 2.0 firmware does not send timestamps, so the option is hidden for it. |
 | **START SNIFFER / PAUSE** | Button | Opens the SLCAN channel (\`C\`, \`S<n>\`, optional \`Y<n>\` / \`Z1\`, then \`O\` or \`L\`) and starts listening; PAUSE sends \`C\` to close it. |
-| **Clear captured packets** | Icon button | Empties the sniffer table. |
+| **Clear captured packets** | Icon button | Empties the sniffer table and the trace. |
+| **fps / load meter** | Readout | Shown while sniffing: frames received per second and an estimated bus load, updated every second. The load uses the nominal frame length (47 bits for an 11-bit ID, 67 for a 29-bit ID, plus 8 per data byte and 3 of intermission) and does not count stuff bits, so the real load is a few percent higher. CAN FD frames are not included in the percentage; when any were seen it shows a trailing **+**. |
+| **By ID / Trace** | Toggle | **By ID** is the one-row-per-ID table. **Trace** lists every frame in arrival order (time since the first frame, RX/TX, ID, length, bytes, FD/RTR flags), keeping the last 500, and honours the ID filter. |
+| **SNAPSHOT** | Button | Saves the current data of every ID. Afterwards, bytes that differ from the snapshot get a cyan outline and IDs the snapshot never saw are tagged **NEW**. Tick **differs from snapshot only** to hide everything unchanged; **×** discards the snapshot. This is the usual way to find which ID reacts to a button press or pedal movement. |
 | **LOAD DBC** | Button | Loads a \`.dbc\` file so known frames show their name and decoded signals (**×** unloads it). |
 | **IDs: 1DC, 200-2FF, !7DF** | Input | Comma-separated IDs or ranges to show; prefix \`!\` to hide. |
 | **changing only** | Checkbox | Hides frames whose data has not changed. |
@@ -561,8 +565,12 @@ transmits SLCAN ASCII over that port. All data is live; there is no simulation o
 | **UDS Diagnostics** | Panel | REQUEST ID / RESPONSE ID, **29-bit IDs**, **TesterPresent keep-alive**, DEFAULT / EXTENDED SESSION, READ IDENTIFICATION, READ DTCs (19 02), CLEAR DTCs (14), ECU RESET (11 01), READ DID and a RAW REQUEST box. Negative responses are shown with their NRC name (e.g. \`0x31 requestOutOfRange\`). |
 | **SERVICES THAT ACT ON THE ECU** | Panel | **ROUTINE (31)** start / stop / results, **WRITE DID (2E)**, **SECURITY ACCESS (27)** with **REQUEST SEED** and **SEND KEY**, **READ MEMORY (23)**, **COMM CONTROL (28)** **ENABLE (00)** / **DISABLE (03)** and **DTC SETTING (85)**. Every service that changes the ECU asks for confirmation first. The key for Security Access is one you supply (from the vehicle documentation); the tool only performs the standard seed/key exchange and never computes or guesses a key. |
 | **J1939** | Tab | Decodes 29-bit J1939 IDs into priority, PGN, source and destination, names ~56 common PGNs and decodes signals for the common ones (engine speed from EEC1, vehicle speed from CCVS, DM1/DM2 diagnostic messages, Address Claimed, VIN). Values the sender marks "not available" or "error" are shown as text, not numbers. **REQUEST PGN** sends a PGN request to a destination address from a chosen source address. Multi-packet transport (BAM / RTS-CTS) is not reassembled. |
-| **START RECORDING / STOP** | Button | Records frames; export as **CANDUMP .LOG** or **CSV**, or open a candump log with **OPEN CANDUMP LOG**. The candump format carries the RTR marker; FD flags are kept in recorded sessions but not in candump files. |
+| **START RECORDING / STOP** | Button | Records frames; export as **CANDUMP .LOG**, **VECTOR .ASC** or **CSV**, or open a candump log with **OPEN CANDUMP LOG**. The candump format carries the RTR marker; FD flags are kept in recorded sessions but not in candump files. The Vector ASC file (readable by CANalyzer, SavvyCAN and BusMaster) holds classic CAN frames with relative timestamps and Rx/Tx direction; CAN FD frames are left out and the tool tells you how many. |
 | **REPLAY ONTO BUS** | Button | Replays recorded frames with original timing (**REPLAY SPEED** 0.25x to 10x, optional **loop**), keeping RTR, FD and BRS flags; **VIEW IN SNIFFER TABLE** shows a loaded log. |
+
+---
+
+**Similar tools:** SavvyCAN (Qt desktop; signal graphing, DBC editing, reverse-engineering helpers), Cangaroo (open-source CAN analyser for candleLight adapters), BusMaster (Windows CAN logger), PCAN-View (PEAK adapters) and can-utils \`candump\`/\`cansniffer\` on Linux. This tool does not plot signals or edit DBC files; it runs in the browser with an SLCAN adapter and needs no install.
 
 ---
 
@@ -572,6 +580,7 @@ transmits SLCAN ASCII over that port. All data is live; there is no simulation o
 - **Framing:** \`buildSlcanFrame\` and \`parseSlcanFrame\` in [\`src/utils/canBusDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/canBusDriver.js) handle the Lawicel ASCII forms: \`t\` / \`T\` (data, 11-/29-bit), \`r\` / \`R\` (remote / RTR), and the CAN FD letters \`d\` / \`D\` (FD) and \`b\` / \`B\` (FD with bit-rate switch), with an optional trailing 4-hex-digit timestamp. The parser validates every character and the DLC and returns nothing for a malformed line. \`buildSlcanOpenSequence\` produces the open sequence (\`C\`, \`S<n>\`, optional \`Y<n>\` and \`Z1\`, then \`O\` or \`L\`).
 - **Diagnostics and tools:** \`src/utils/canTools.js\` provides the DBC parser, ID filter, candump/CSV logging, replay, the ISO-TP channel, the UDS client (including the confirmation-gated services above) and the J1939 decoder (\`decodeJ1939Id\`, \`decodeJ1939Frame\`, the PGN table). All traffic is real: there is no simulation mode, so a connected adapter and bus are required.
 - **Adapter dialects:** checked against the canable2-fw source (\`src/slcan.c\`): CANable 2.0 accepts FD frames (\`d\` / \`D\` / \`b\` / \`B\`), the \`Y2\` / \`Y5\` data-rate presets and \`M1\` silent mode, and rejects \`L\`, \`l\` and \`Z\`. Lawicel-style adapters use \`L\` and \`Z1\` and have no FD. Classic CAN frames work on both.
+- **Analysis helpers:** \`estimateFrameBits\`, \`computeBusLoad\`, \`snapshotBaseline\`, \`diffAgainstBaseline\`, \`formatTraceLine\` and \`toAscLog\` in \`src/utils/canBusDriver.js\` are pure functions covered by \`tests/canSnifferAnalysis.test.js\`.
 - **Transport reuse:** because it shares \`SerialContext\`, the CAN deck inherits the same connection, RX loop, and byte-stats as the Terminal and other serial tools rather than opening its own port.
 
 ---
@@ -585,7 +594,7 @@ transmits SLCAN ASCII over that port. All data is live; there is no simulation o
 4. Keep the vehicle idling and do not touch any controls. Tick **changing only** to hide IDs whose bytes do not change.
 5. Repeatedly press the **Volume Up** button on the steering wheel while watching the screen.
 6. Bytes that just changed are highlighted in amber in the Data Bytes column, showing the exact CAN ID and byte offset carrying the button press.
-7. Record the CAN ID (e.g. \`0x2C4\`) and payload byte pattern. Use the **IDs** filter (e.g. \`2C4\` or \`!7DF\`) to isolate or hide IDs, and optionally **LOAD DBC** to decode known signals.
+7. For a cleaner result, click **SNAPSHOT** before pressing the button, press it, then tick **differs from snapshot only**: only IDs and bytes that moved remain, outlined in cyan. Record the CAN ID (e.g. \`0x2C4\`) and payload byte pattern. Use the **IDs** filter (e.g. \`2C4\` or \`!7DF\`) to isolate or hide IDs, and optionally **LOAD DBC** to decode known signals.
 8. In **Record & Replay**, **START RECORDING** to save a candump log or CSV and later **REPLAY ONTO BUS** (only on buses you own).
 
 ---
