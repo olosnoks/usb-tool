@@ -438,3 +438,85 @@ export class ObdOverSlcan {
     return { confirmed, refused };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Sniffer analysis helpers: bus load, baseline compare, trace lines, ASC export
+// ---------------------------------------------------------------------------
+
+/**
+ * Nominal on-wire length of a classic CAN frame in bits, without stuff bits,
+ * including the 3-bit intermission: 11-bit ID = 47 + 8n + 3, 29-bit ID = 67 + 8n + 3.
+ * Remote frames carry no data. Returns null for CAN FD (two bit rates, so the
+ * figure cannot be derived from the nominal rate alone).
+ */
+export function estimateFrameBits(frame) {
+  if (!frame || frame.fd) return null;
+  const n = frame.rtr ? 0 : Math.min(8, frame.data?.length ?? frame.dlc ?? 0);
+  return (frame.isExtended ? 67 : 47) + 8 * n + 3;
+}
+
+/**
+ * Bus load estimate: bits seen in a window divided by the bits the bus could
+ * carry in it. Stuff bits are not counted, so real load is a few percent higher.
+ */
+export function computeBusLoad(bits, baud, windowMs) {
+  if (!(baud > 0) || !(windowMs > 0)) return 0;
+  return Math.min(100, (bits / (baud * (windowMs / 1000))) * 100);
+}
+
+/** Copy the current table into a baseline: key -> array of data bytes. */
+export function snapshotBaseline(messages) {
+  const out = {};
+  for (const [key, m] of Object.entries(messages || {})) out[key] = Array.from(m.data || []);
+  return out;
+}
+
+/**
+ * Compare one table row to a baseline. Returns null when there is no baseline,
+ * { isNew: true } for an ID the baseline never saw, otherwise the set of byte
+ * indexes whose value differs (a length change counts as different).
+ */
+export function diffAgainstBaseline(baseline, key, data) {
+  if (!baseline) return null;
+  const old = baseline[key];
+  if (!old) return { isNew: true, bytes: new Set() };
+  const bytes = new Set();
+  const len = Math.max(old.length, data.length);
+  for (let i = 0; i < len; i++) if (old[i] !== data[i]) bytes.add(i);
+  return { isNew: false, bytes };
+}
+
+const hex2 = (b) => (b & 0xff).toString(16).toUpperCase().padStart(2, '0');
+
+/** One candump-style trace line: "  12.345678  RX  123  [8]  11 22 ...". */
+export function formatTraceLine(frame, t0 = 0) {
+  const t = ((frame.t ?? 0) - t0) / 1000;
+  const id = (frame.id ?? 0).toString(16).toUpperCase().padStart(frame.isExtended ? 8 : 3, '0');
+  const flags = `${frame.fd ? 'FD' : ''}${frame.brs ? '/BRS' : ''}${frame.rtr ? 'RTR' : ''}`;
+  const body = frame.rtr ? `[${frame.dlc ?? 0}] remote` : `[${frame.data.length}]  ${Array.from(frame.data).map(hex2).join(' ')}`;
+  return `${t.toFixed(3).padStart(10)}  ${frame.tx ? 'TX' : 'RX'}  ${id}  ${body}${flags ? '  ' + flags : ''}`;
+}
+
+/**
+ * Vector ASCII (.asc) trace of classic CAN frames, readable by CANalyzer,
+ * SavvyCAN, BusMaster and python-can. CAN FD frames are skipped (they need the
+ * separate CANFD record type) and counted in `skipped`.
+ */
+export function toAscLog(frames, { date = new Date() } = {}) {
+  const usable = frames.filter((f) => !f.fd);
+  const t0 = usable[0]?.t ?? 0;
+  const lines = [
+    `date ${date.toUTCString()}`,
+    'base hex  timestamps absolute',
+    'no internal events logged',
+    '// version 9.0.0'
+  ];
+  for (const f of usable) {
+    const id = f.id.toString(16).toUpperCase() + (f.isExtended ? 'x' : '');
+    const t = (((f.t ?? 0) - t0) / 1000).toFixed(6).padStart(11);
+    const dir = f.tx ? 'Tx' : 'Rx';
+    if (f.rtr) lines.push(`${t} 1  ${id.padEnd(15)}${dir}   r ${f.dlc ?? 0}`);
+    else lines.push(`${t} 1  ${id.padEnd(15)}${dir}   d ${f.data.length} ${Array.from(f.data).map(hex2).join(' ')}`.trimEnd());
+  }
+  return { text: lines.join('\n') + '\n', skipped: frames.length - usable.length };
+}

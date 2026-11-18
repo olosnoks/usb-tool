@@ -15,7 +15,10 @@ import {
   Circle,
   Repeat,
   Stethoscope,
-  FileText
+  FileText,
+  Camera,
+  ListOrdered,
+  Settings2
 } from 'lucide-react';
 import { useSerial } from '../../context/SerialContext';
 import {
@@ -28,7 +31,13 @@ import {
   createSlcanClock,
   autoDetectBitrate,
   SlcanLineReader,
-  ObdOverSlcan
+  ObdOverSlcan,
+  estimateFrameBits,
+  computeBusLoad,
+  snapshotBaseline,
+  diffAgainstBaseline,
+  formatTraceLine,
+  toAscLog
 } from '../../utils/canBusDriver';
 import {
   parseDbc,
@@ -51,6 +60,7 @@ import {
 import { confirmAction } from '../../utils/sessionLog';
 
 const MAX_LOG = 200000;
+const MAX_TRACE = 500;
 const hexId = (f) => (f.id ?? 0).toString(16).toUpperCase().padStart(f.isExtended ? 8 : 3, '0');
 const hexBytes = (b) => Array.from(b).map((x) => x.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 const parseBytes = (s) => s.split(/[\s,]+/).filter(Boolean).map((h) => parseInt(h.replace(/^0x/i, ''), 16)).filter((n) => !Number.isNaN(n) && n >= 0 && n <= 255);
@@ -86,6 +96,15 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const [dbc, setDbc] = useState(null);
   const [dbcName, setDbcName] = useState('');
   const dbcInput = useRef(null);
+  const [diffOnly, setDiffOnly] = useState(false);
+  const [baseline, setBaseline] = useState(null);          // snapshot for compare: key -> bytes
+  const [view, setView] = useState('grouped');             // 'grouped' per-ID table or chronological 'trace'
+  const [trace, setTrace] = useState([]);
+  const [stats, setStats] = useState({ fps: 0, load: 0, fdSeen: false });
+  const [showOpts, setShowOpts] = useState(false);
+  const traceRef = useRef([]);
+  const statsRef = useRef({ frames: 0, bits: 0, fd: false, since: performance.now() });
+  const traceT0 = useRef(null);
 
   // Transmit
   const [txId, setTxId] = useState('0x123');
@@ -109,6 +128,8 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const [detecting, setDetecting] = useState(false);
   const detectRef = useRef(null);                     // { frames, errors } while auto-detecting
   const clockRef = useRef(createSlcanClock());
+  const canBaudRef = useRef('S6');
+  canBaudRef.current = canBaud;
   const listenOnlyRef = useRef(false);
   listenOnlyRef.current = listenOnly;
 
@@ -179,7 +200,16 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       if (tx) continue;
       obdRef.current.onFrame(f);
       udsRef.current?.tp.onFrame(f);
-      if (sniffingRef.current) pendingFramesRef.current.push({ ...f, seen: now });
+      if (sniffingRef.current) {
+        pendingFramesRef.current.push({ ...f, seen: now });
+        const st = statsRef.current;
+        st.frames++;
+        const bits = estimateFrameBits(f);
+        if (bits === null) st.fd = true; else st.bits += bits;
+        if (traceT0.current === null) traceT0.current = f.t ?? Date.now();
+        traceRef.current.push(formatTraceLine(f, traceT0.current));
+        if (traceRef.current.length > MAX_TRACE) traceRef.current.splice(0, traceRef.current.length - MAX_TRACE);
+      }
     }
   };
 
@@ -220,8 +250,15 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   useEffect(() => {
     const flush = setInterval(() => {
       const batch = pendingFramesRef.current;
-      if (batch.length) { pendingFramesRef.current = []; applyFrames(batch); }
+      if (batch.length) { pendingFramesRef.current = []; applyFrames(batch); setTrace([...traceRef.current]); }
       if (recordingRef.current) setLogCount(logRef.current.length);
+      const st = statsRef.current;
+      const dt = performance.now() - st.since;
+      if (dt >= 1000) {
+        const baud = (CAN_BAUD_RATES.find((r) => r.code === canBaudRef.current) || {}).baud || 0;
+        setStats({ fps: Math.round((st.frames * 1000) / dt), load: computeBusLoad(st.bits, baud, dt), fdSeen: st.fd });
+        statsRef.current = { frames: 0, bits: 0, fd: false, since: performance.now() };
+      }
     }, 100);
     return () => clearInterval(flush);
   }, []);
@@ -352,6 +389,8 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       setDetecting(false);
     }
   };
+
+  const clearCapture = () => { setMessages({}); traceRef.current = []; traceT0.current = null; setTrace([]); };
 
   const stopSniffing = async () => {
     setIsSniffing(false);
@@ -613,7 +652,11 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
     if (!frames.length) { setNotice('Nothing recorded yet.'); return; }
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     if (kind === 'csv') download(toCsv(frames, dbc), `can-${stamp}.csv`, 'text/csv');
-    else download(toCandumpLog(frames.filter((f) => !f.tx)), `can-${stamp}.log`);
+    else if (kind === 'asc') {
+      const { text, skipped } = toAscLog(frames);
+      download(text, `can-${stamp}.asc`);
+      if (skipped) setNotice(`${skipped} CAN FD frame${skipped === 1 ? '' : 's'} left out: the ASC export covers classic CAN only.`);
+    } else download(toCandumpLog(frames.filter((f) => !f.tx)), `can-${stamp}.log`);
   };
 
   const onLogFile = async (e) => {
@@ -676,6 +719,11 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const now = Date.now();
   const filteredMessageList = Object.values(messages)
     .filter((m) => m && filterFn.fn(m.id) && (!changedOnly || now - (m.lastChange || 0) < 2000))
+    .filter((m) => {
+      if (!baseline || !diffOnly) return true;
+      const d = diffAgainstBaseline(baseline, (m.isExtended ? 'x' : '') + m.id, Array.from(m.data || []));
+      return d.isNew || d.bytes.size > 0;
+    })
     .sort((a, b) => a.id - b.id);
 
 
@@ -690,45 +738,86 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
   const inp = 'bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs outline-none';
 
   return (
-    <div className="flex flex-col gap-4 font-mono">
+    <div className="flex flex-col gap-2 font-mono">
       {notice &&<div className="p-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 text-xs flex justify-between gap-2"><span>{notice}</span><button onClick={() => setNotice('')}>×</button></div>}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <p className="text-[11px] text-slate-400">
-              Sniff CAN through an SLCAN adapter (CANable / Candlelight) with byte-change highlighting and DBC signal decoding, transmit and replay frames, read OBD-II data, talk UDS over ISO-TP and decode J1939. Classic CAN, remote frames and CAN FD (where the adapter firmware supports it) are handled.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex flex-wrap items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
-              {MODES.map(([id, label]) => (
-                <button key={id} onClick={() => setMode(id)} className={`px-3 py-1 rounded font-bold transition-all ${mode === id ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-slate-200'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 flex flex-col gap-2">
+        <div className="flex flex-wrap items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[11px] self-start max-w-full">
+          {MODES.map(([id, label]) => (
+            <button key={id} onClick={() => setMode(id)} aria-pressed={mode === id} className={`px-2 py-1 rounded font-bold transition-all ${mode === id ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-slate-200'}`}>
+              {label}
+            </button>
+          ))}
         </div>
 
-        <div className="pt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-500 font-bold text-[11px]">CAN BAUD:</span>
-              <select value={canBaud} onChange={(e) => setCanBaud(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-emerald-400 font-bold outline-none">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5">
+              <span className="text-slate-500 font-bold text-[11px]">BAUD</span>
+              <select aria-label="CAN bit rate" value={canBaud} onChange={(e) => setCanBaud(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-emerald-400 font-bold outline-none max-w-[9rem]">
                 {CAN_BAUD_RATES.map((b) => <option key={b.code} value={b.code}>{b.label}</option>)}
               </select>
-            </div>
+            </label>
             <button onClick={handleAutoDetect} disabled={detecting || !isConnected || isSniffing} className={btn} title="Listen-only sweep over 500/250/1000/125/100 kbps to find the bus bit rate (stop the sniffer first)">
               {detecting ? 'LISTENING...' : 'AUTO-DETECT'}
             </button>
-            <select value={adapter} disabled={isSniffing} onChange={(e) => { setAdapter(e.target.value); if (e.target.value !== 'canable2') setFdRate(''); }} className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-300 outline-none" title="Adapter firmware: the two speak different SLCAN dialects">
+            {!isSniffing ? (
+              <button onClick={startSniffing} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/50 text-xs font-bold transition-all">
+                <Play className="w-3.5 h-3.5 fill-current" /><span>START SNIFFER</span>
+              </button>
+            ) : (
+              <button onClick={stopSniffing} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
+                <Square className="w-3.5 h-3.5 fill-current" /><span>PAUSE</span>
+              </button>
+            )}
+            <button onClick={clearCapture} className="p-1.5 rounded-lg bg-slate-950 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 border border-slate-800" title="Clear captured packets" aria-label="Clear captured packets">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => setShowOpts((v) => !v)} aria-expanded={showOpts} className={`p-1.5 rounded-lg border ${showOpts ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'}`} title="Adapter options: firmware dialect, listen-only, CAN FD, hardware timestamps" aria-label="Adapter options">
+              <Settings2 className="w-3.5 h-3.5" />
+            </button>
+            {recording && <span className="flex items-center gap-1 text-rose-400 font-bold"><Circle className="w-3 h-3 fill-current animate-pulse" /> REC {logCount}</span>}
+            {isSniffing && (
+              <span className="flex items-center gap-2 text-[11px] text-slate-400" title="Frames per second and estimated bus load (nominal frame length without stuff bits; CAN FD frames are not counted in the load)">
+                <span><span className="text-cyan-300 font-bold">{stats.fps}</span> fps</span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block w-14 h-1.5 rounded bg-slate-800 overflow-hidden" role="meter" aria-label="Estimated bus load" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(stats.load)}><span className={`block h-full ${stats.load > 70 ? 'bg-rose-400' : stats.load > 40 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${Math.round(stats.load)}%` }} /></span>
+                  <span className="text-emerald-300 font-bold">{stats.load.toFixed(0)}%{stats.fdSeen ? '+' : ''}</span>
+                </span>
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => dbcInput.current?.click()} className={btn} title="Load a .dbc file to decode signals">
+              <FileText className="w-3.5 h-3.5" /> {dbcName ? `DBC: ${dbcName}` : 'LOAD DBC'}
+            </button>
+            {dbc && <button onClick={() => { setDbc(null); setDbcName(''); }} className="text-slate-500 hover:text-rose-400" title="Unload DBC" aria-label="Unload DBC">×</button>}
+            <input ref={dbcInput} type="file" accept=".dbc" className="hidden" onChange={onDbcFile} />
+            <div className="relative">
+              <input
+                type="text"
+                aria-label="ID filter"
+                placeholder="IDs: 1DC, 200-2FF, !7DF"
+                value={idFilter}
+                onChange={(e) => setIdFilter(e.target.value)}
+                className={`bg-slate-950 border rounded-lg pl-7 pr-2 py-1 text-xs text-slate-200 outline-none w-40 ${filterFn.error ? 'border-rose-500' : 'border-slate-800'}`}
+                title={filterFn.error || 'Comma-separated IDs or ranges; prefix ! to hide'}
+              />
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 top-1.5" />
+            </div>
+            <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} className="accent-amber-500" /> changing only</label>
+          </div>
+        </div>
+
+        {showOpts && (
+          <div className="flex flex-wrap items-center gap-2 text-xs border-t border-slate-800 pt-2">
+            <select aria-label="Adapter firmware" value={adapter} disabled={isSniffing} onChange={(e) => { setAdapter(e.target.value); if (e.target.value !== 'canable2') setFdRate(''); }} className="bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-slate-300 outline-none" title="Adapter firmware: the two speak different SLCAN dialects">
               <option value="lawicel">SLCAN (Lawicel / CANable 1.x)</option>
               <option value="canable2">CANable 2.0 (FD firmware)</option>
             </select>
             <label className="flex items-center gap-1 text-slate-400" title={isCanable2 ? 'Open in silent mode (M1): the adapter never transmits or ACKs' : 'Open with L: the adapter never transmits or ACKs, so it cannot disturb the bus'}><input type="checkbox" checked={listenOnly} disabled={isSniffing} onChange={(e) => setListenOnly(e.target.checked)} className="accent-emerald-500" /> listen-only</label>
             {isCanable2 && (
-              <select value={fdRate} disabled={isSniffing} onChange={(e) => setFdRate(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-300 outline-none" title="CAN FD data-phase rate (Y2 / Y5 in canable2-fw)">
+              <select aria-label="CAN FD data rate" value={fdRate} disabled={isSniffing} onChange={(e) => setFdRate(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-slate-300 outline-none" title="CAN FD data-phase rate (Y2 / Y5 in canable2-fw)">
                 <option value="">Classic CAN</option>
                 {CAN_FD_DATA_RATES.map((r) => <option key={r.code} value={r.code}>FD: {r.label}</option>)}
               </select>
@@ -736,82 +825,78 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
             {!isCanable2 && (
               <label className="flex items-center gap-1 text-slate-400" title="Z1: the adapter appends a millisecond timestamp (16 bit, wraps at 60 s) to each received frame. Not supported by CANable 2.0 firmware."><input type="checkbox" checked={hwTimestamps} disabled={isSniffing} onChange={(e) => setHwTimestamps(e.target.checked)} className="accent-emerald-500" /> HW timestamps</label>
             )}
-            {!isSniffing ? (
-              <button onClick={startSniffing} className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/50 text-xs font-bold transition-all">
-                <Play className="w-3.5 h-3.5 fill-current" /><span>START SNIFFER</span>
-              </button>
-            ) : (
-              <button onClick={stopSniffing} className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold">
-                <Square className="w-3.5 h-3.5 fill-current" /><span>PAUSE</span>
-              </button>
-            )}
-            <button onClick={() => setMessages({})} className="p-1.5 rounded-lg bg-slate-950 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 border border-slate-800" title="Clear captured packets">
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-            {recording && <span className="flex items-center gap-1 text-rose-400 font-bold"><Circle className="w-3 h-3 fill-current animate-pulse" /> REC {logCount}</span>}
+            <span className="text-[11px] text-slate-500">Options apply when the sniffer is started. Works with SLCAN adapters (CANable / Candlelight in SLCAN mode) over Web Serial.</span>
           </div>
-
-          <div className="flex items-center gap-2">
-            <button onClick={() => dbcInput.current?.click()} className={btn} title="Load a .dbc file to decode signals">
-              <FileText className="w-3.5 h-3.5" /> {dbcName ? `DBC: ${dbcName}` : 'LOAD DBC'}
-            </button>
-            {dbc && <button onClick={() => { setDbc(null); setDbcName(''); }} className="text-slate-500 hover:text-rose-400" title="Unload DBC">×</button>}
-            <input ref={dbcInput} type="file" accept=".dbc" className="hidden" onChange={onDbcFile} />
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="IDs: 1DC, 200-2FF, !7DF"
-                value={idFilter}
-                onChange={(e) => setIdFilter(e.target.value)}
-                className={`bg-slate-950 border rounded-lg pl-7 pr-2.5 py-1 text-xs text-slate-200 outline-none w-48 ${filterFn.error ? 'border-rose-500' : 'border-slate-800'}`}
-                title={filterFn.error || 'Comma-separated IDs or ranges; prefix ! to hide'}
-              />
-              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 top-2" />
-            </div>
-            <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} className="accent-amber-500" /> changing only</label>
-          </div>
-        </div>
+        )}
       </div>
 
       {mode === 'sniffer' && (
-        <div className="space-y-3">
-          <div className="bg-[#030712] border border-cyber-border rounded-xl overflow-hidden shadow-xl">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[11px]">
+              {[['grouped', 'By ID'], ['trace', 'Trace']].map(([id, label]) => (
+                <button key={id} onClick={() => setView(id)} aria-pressed={view === id} title={id === 'grouped' ? 'One row per CAN ID with counts and byte-change highlighting' : `Every frame in arrival order (last ${MAX_TRACE})`} className={`px-2 py-0.5 rounded font-bold ${view === id ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-slate-400 hover:text-slate-200'}`}>{id === 'trace' && <ListOrdered className="w-3 h-3 inline mr-1" />}{label}</button>
+              ))}
+            </div>
+            {view === 'grouped' && (
+              <>
+                <button onClick={() => { setBaseline(snapshotBaseline(messages)); setNotice(`Snapshot saved (${Object.keys(messages).length} IDs). Bytes that differ from it are marked in cyan and IDs not in it are tagged NEW.`); }} className={btn} title="Remember the current data of every ID, then do something on the vehicle: bytes that differ from the snapshot are marked">
+                  <Camera className="w-3.5 h-3.5" /> SNAPSHOT
+                </button>
+                {baseline && (
+                  <>
+                    <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={diffOnly} onChange={(e) => setDiffOnly(e.target.checked)} className="accent-cyan-500" /> differs from snapshot only</label>
+                    <button onClick={() => { setBaseline(null); setDiffOnly(false); }} className="text-slate-500 hover:text-rose-400" title="Discard snapshot" aria-label="Discard snapshot">×</button>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+          {view === 'trace' ? (
+            <div className="bg-black border border-cyber-border rounded-lg p-2 h-72 overflow-y-auto overflow-x-auto text-[11px] leading-snug whitespace-pre text-slate-300" aria-label="Frame trace">
+              {trace.length === 0
+                ? <span className="text-slate-600 italic">{isSniffing ? 'Listening on CAN bus... Waiting for frames.' : 'Click "START SNIFFER" to capture packets.'}</span>
+                : trace.filter((l) => { const id = parseInt(l.trim().split(/\s+/)[2], 16); return filterFn.fn(id); }).map((l, i) => <div key={i}>{l}</div>)}
+            </div>
+          ) : (
+          <div className="bg-[#030712] border border-cyber-border rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs font-mono">
                 <thead className="bg-slate-950 text-slate-400 text-[10px] uppercase font-bold border-b border-slate-800">
                   <tr>
-                    <th className="py-2 px-3">CAN ID (Hex)</th>
-                    <th className="py-2 px-3">Type</th>
-                    <th className="py-2 px-3">DLC</th>
-                    <th className="py-2 px-3">Data Bytes (Live Diff Highlight)</th>
-                    <th className="py-2 px-3">Delta</th>
-                    <th className="py-2 px-3">HW time</th>
-                    <th className="py-2 px-3 text-right">Count</th>
+                    <th className="py-1 px-2">CAN ID</th>
+                    <th className="py-1 px-2">Type</th>
+                    <th className="py-1 px-2">DLC</th>
+                    <th className="py-1 px-2">Data (changed bytes lit)</th>
+                    <th className="py-1 px-2">Delta</th>
+                    <th className="py-1 px-2">HW time</th>
+                    <th className="py-1 px-2 text-right">Count</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-850">
                   {filteredMessageList.length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="py-12 text-center text-slate-500 italic">
+                      <td colSpan="7" className="py-8 text-center text-slate-500 italic">
                         {isSniffing ? 'Listening on CAN bus... Waiting for frames.' : 'Click "START SNIFFER" to capture packets.'}
                       </td>
                     </tr>
                   ) : (
                     filteredMessageList.map((m) => {
                       const decoded = dbc ? decodeFrame(dbc, m) : null;
+                      const bd = baseline ? diffAgainstBaseline(baseline, (m.isExtended ? 'x' : '') + m.id, Array.from(m.data || [])) : null;
                       return (
                         <tr key={(m.isExtended ? 'x' : '') + m.id} className="hover:bg-slate-900/40 align-top">
-                          <td className="py-2 px-3 font-bold text-amber-300">
-                            0x{hexId(m)}
+                          <td className="py-1 px-2 font-bold text-amber-300">
+                            0x{hexId(m)}{bd?.isNew && <span className="ml-1 text-[9px] px-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold">NEW</span>}
                             {decoded && <div className="text-[10px] text-emerald-300 font-normal">{decoded.name}</div>}
                           </td>
-                          <td className="py-2 px-3 text-[10px] text-slate-400">{m.isExtended ? 'EXT (29b)' : 'STD (11b)'}{m.fd ? ` FD${m.brs ? '/BRS' : ''}` : ''}{m.rtr ? ' RTR' : ''}</td>
-                          <td className="py-2 px-3 text-slate-300 font-bold">{m.dlc}</td>
-                          <td className="py-2 px-3">
-                            <div className="flex flex-wrap items-center gap-1.5 font-bold">
+                          <td className="py-1 px-2 text-[10px] text-slate-400">{m.isExtended ? 'EXT (29b)' : 'STD (11b)'}{m.fd ? ` FD${m.brs ? '/BRS' : ''}` : ''}{m.rtr ? ' RTR' : ''}</td>
+                          <td className="py-1 px-2 text-slate-300 font-bold">{m.dlc}</td>
+                          <td className="py-1 px-2">
+                            <div className="flex flex-wrap items-center gap-1 font-bold">
                               {m.rtr && <span className="text-slate-500 italic font-normal">remote request for {m.dlc} byte{m.dlc === 1 ? '' : 's'}</span>}
                               {Array.from(m.data || []).map((b, idx) => (
-                                <span key={idx} className={`px-1.5 py-0.5 rounded transition-colors ${m.diffs?.has?.(idx) ? 'bg-amber-400 text-slate-950 font-extrabold shadow-[0_0_8px_rgba(251,191,36,0.6)]' : 'bg-slate-950 text-cyan-300 border border-slate-850'}`}>
+                                <span key={idx} className={`px-1 py-0.5 rounded transition-colors ${m.diffs?.has?.(idx) ? 'bg-amber-400 text-slate-950 font-extrabold shadow-[0_0_8px_rgba(251,191,36,0.6)]' : bd?.bytes?.has(idx) ? 'bg-slate-950 text-cyan-200 border border-cyan-400 ring-1 ring-cyan-400/60' : 'bg-slate-950 text-cyan-300 border border-slate-850'}`}>
                                   {(b ?? 0).toString(16).padStart(2, '0').toUpperCase()}
                                 </span>
                               ))}
@@ -824,9 +909,9 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                               </div>
                             )}
                           </td>
-                          <td className="py-2 px-3 text-slate-400 text-[10px]">{m.deltaMs} ms</td>
-                          <td className="py-2 px-3 text-slate-500 text-[10px]">{m.hwMs != null ? `${(m.hwMs / 1000).toFixed(3)} s` : '-'}</td>
-                          <td className="py-2 px-3 text-right text-emerald-400 font-bold">{m.count}</td>
+                          <td className="py-1 px-2 text-slate-400 text-[10px]">{m.deltaMs} ms</td>
+                          <td className="py-1 px-2 text-slate-500 text-[10px]">{m.hwMs != null ? `${(m.hwMs / 1000).toFixed(3)} s` : '-'}</td>
+                          <td className="py-1 px-2 text-right text-emerald-400 font-bold">{m.count}</td>
                         </tr>
                       );
                     })
@@ -835,19 +920,20 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
               </table>
             </div>
           </div>
+          )}
 
-          <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 shadow-xl text-xs">
+          <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="font-bold text-slate-200 flex items-center gap-1.5">
-              <Send className="w-3.5 h-3.5 text-cyan-400" /><span>TRANSMIT CAN FRAME:</span>
+              <Send className="w-3.5 h-3.5 text-cyan-400" /><span>TRANSMIT:</span>
             </span>
             <div className="flex flex-wrap items-center gap-2 flex-1 justify-end">
-              <input type="text" value={txId} onChange={(e) => setTxId(e.target.value)} placeholder="0x123" className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-amber-300 font-bold outline-none w-24 uppercase" />
+              <input type="text" aria-label="CAN ID (hex)" value={txId} onChange={(e) => setTxId(e.target.value)} placeholder="0x123" className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-amber-300 font-bold outline-none w-24 uppercase" />
               <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={txExtended} onChange={(e) => setTxExtended(e.target.checked)} className="accent-cyan-500" /> 29-bit</label>
               <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={txRtr} onChange={(e) => setTxRtr(e.target.checked)} className="accent-cyan-500" /> RTR</label>
               {txRtr && <input type="number" min="0" max="8" value={txRtrDlc} onChange={(e) => setTxRtrDlc(e.target.value)} title="Bytes requested" className={`${inp} w-14 text-slate-200`} />}
               <label className="flex items-center gap-1 text-slate-400" title="Needs an FD data rate selected in the toolbar"><input type="checkbox" checked={txFd} disabled={txRtr} onChange={(e) => setTxFd(e.target.checked)} className="accent-cyan-500" /> FD</label>
               {txFd && !txRtr && <label className="flex items-center gap-1 text-slate-400"><input type="checkbox" checked={txBrs} onChange={(e) => setTxBrs(e.target.checked)} className="accent-cyan-500" /> BRS</label>}
-              <input type="text" value={txData} disabled={txRtr} onChange={(e) => setTxData(e.target.value)} placeholder="11 22 33 44 55 66 77 88" className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-cyan-300 font-bold outline-none w-64 uppercase disabled:opacity-40" />
+              <input type="text" aria-label="Data bytes (hex)" value={txData} disabled={txRtr} onChange={(e) => setTxData(e.target.value)} placeholder="11 22 33 44 55 66 77 88" className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-cyan-300 font-bold outline-none w-full @md:w-64 uppercase disabled:opacity-40" />
               <button onClick={handleTransmitFrame} className="px-3 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/50 font-bold text-xs">SEND FRAME</button>
               <span className="text-slate-500">every</span>
               <input type="number" min="5" value={txIntervalMs} onChange={(e) => setTxIntervalMs(e.target.value)} className={`${inp} w-16 text-slate-200`} />
@@ -867,7 +953,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       )}
 
       {mode === 'obd2' && (
-        <div className="space-y-4">
+        <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {(
               <button
@@ -881,7 +967,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
             <button onClick={handleScanPids} disabled={!!obdBusy} className={btn}>{obdBusy === 'pids' ? 'SCANNING...' : 'SCAN SUPPORTED PIDS'}</button>
             {vin && <span className="text-slate-300">VIN: <span className="text-amber-300 font-bold">{vin}</span></span>}
           </div>
-          <div className="grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-6 gap-2">
             {(() => {
               const fmt = (v, suffix = '') => (v === null || v === undefined ? '--' : v === 'n/a' ? 'n/a' : `${typeof v === 'number' && suffix === '' && v > 100 ? Math.round(v) : v}${suffix}`);
               return [
@@ -893,7 +979,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                 { name: 'VOLTAGE', val: fmt(obdValues.voltage, 'V'), unit: 'Module', color: 'text-cyan-400' }
               ];
             })().map((gauge) => (
-              <div key={gauge.name} className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-center flex flex-col justify-between">
+              <div key={gauge.name} className="bg-slate-950 p-2 rounded-lg border border-slate-800 text-center flex flex-col justify-between">
                 <span className="text-[10px] text-slate-500 font-bold">{gauge.name}</span>
                 <div className={`text-xl font-extrabold my-1 ${gauge.color}`}>{gauge.val}</div>
                 <span className="text-[10px] text-slate-500">{gauge.unit}</span>
@@ -902,7 +988,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
           </div>
 
           {pidTable && (
-            <div className="bg-[#030712] border border-cyber-border rounded-xl p-3 text-xs">
+            <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 text-xs">
               <div className="font-bold text-slate-200 mb-2">SUPPORTED MODE 01 PIDS ({pidTable.length})</div>
               <div className="grid grid-cols-1 @md:grid-cols-2 gap-x-6">
                 {pidTable.map((r) => (
@@ -915,8 +1001,8 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
             </div>
           )}
 
-          <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl flex flex-col gap-3">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+          <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 flex flex-col gap-2">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 gap-2 flex-wrap">
               <span className="font-bold text-xs text-slate-200 flex items-center gap-1.5">
                 <ShieldAlert className="w-4 h-4 text-rose-500" /><span>DIAGNOSTIC TROUBLE CODES (DTCs / CHECK ENGINE LIGHT)</span>
               </span>
@@ -934,12 +1020,12 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
             <div className="space-y-2">
               {dtcStatus && <div className="text-[11px] text-slate-400">{dtcStatus}</div>}
               {activeDtcs.length === 0 ? (
-                <div className="py-6 text-center text-slate-500 flex flex-col items-center gap-1.5">
+                <div className="py-3 text-center text-slate-500 flex flex-col items-center gap-1.5">
                   {dtcStatus === null ? <span>Not scanned yet. Press READ CODES to query the vehicle.</span> : (<><CheckCircle2 className="w-6 h-6 text-emerald-400" /><span>No stored trouble codes reported.</span></>)}
                 </div>
               ) : (
                 activeDtcs.map((code) => (
-                  <div key={code} className="bg-rose-950/30 border border-rose-500/40 rounded-lg p-3 flex items-center justify-between">
+                  <div key={code} className="bg-rose-950/30 border border-rose-500/40 rounded-lg p-2 flex items-center justify-between">
                     <div>
                       <div className="text-sm font-bold text-rose-300">{code}</div>
                       <div className="text-xs text-slate-300">{COMMON_DTCS[code] || 'Vehicle Manufacturer Specific Code'}</div>
@@ -954,9 +1040,9 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       )}
 
       {mode === 'uds' && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl flex flex-col gap-3 text-xs">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 flex flex-col gap-2 text-xs">
           <div className="font-bold text-slate-200 flex items-center gap-1.5"><Stethoscope className="w-4 h-4 text-cyan-400" /> UDS (ISO 14229) OVER ISO-TP</div>
-          <p className="text-slate-400">Talk to one ECU by its physical request/response IDs (engine ECU is usually 7E0 / 7E8). Reading is harmless; clear, reset and non-default sessions change the ECU's state.</p>
+          <details className="text-slate-400"><summary className="cursor-pointer text-slate-500">About UDS</summary><p className="mt-1">Talk to one ECU by its physical request/response IDs (engine ECU is usually 7E0 / 7E8). Reading is harmless; clear, reset and non-default sessions change the ECU's state.</p></details>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-slate-500 font-bold">REQUEST ID</span>
             <input value={udsTx} onChange={(e) => setUdsTx(e.target.value)} className={`${inp} w-24 text-amber-300`} />
@@ -981,7 +1067,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
             </datalist>
             <button onClick={udsReadDid} disabled={!!udsBusy} className={btn}>READ</button>
             <span className="text-slate-500 font-bold ml-3">RAW REQUEST</span>
-            <input value={udsRaw} onChange={(e) => setUdsRaw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && udsSendRaw()} className={`${inp} w-48 text-cyan-300`} />
+            <input value={udsRaw} onChange={(e) => setUdsRaw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && udsSendRaw()} className={`${inp} w-48 text-cyan-300 max-w-full`} />
             <button onClick={udsSendRaw} disabled={!!udsBusy} className={btn}><Send className="w-3.5 h-3.5" /> SEND</button>
             {udsBusy && <span className="text-slate-500">waiting for the ECU...</span>}
           </div>
@@ -993,13 +1079,13 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                 <option value={1}>start</option><option value={2}>stop</option><option value={3}>request results</option>
               </select>
               <input value={udsRoutineId} onChange={(e) => setUdsRoutineId(e.target.value)} title="Routine ID (hex)" className={`${inp} w-20 text-cyan-300`} />
-              <input value={udsRoutineOpt} onChange={(e) => setUdsRoutineOpt(e.target.value)} placeholder="option bytes (hex)" className={`${inp} w-40 text-cyan-300`} />
+              <input value={udsRoutineOpt} onChange={(e) => setUdsRoutineOpt(e.target.value)} placeholder="option bytes (hex)" className={`${inp} w-40 text-cyan-300 max-w-full`} />
               <button onClick={udsRoutine} disabled={!!udsBusy} className={`${btn} text-amber-300`}>SEND</button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-slate-500 font-bold">WRITE DID (2E)</span>
               <input value={udsWriteDid} onChange={(e) => setUdsWriteDid(e.target.value)} className={`${inp} w-20 text-cyan-300`} />
-              <input value={udsWriteData} onChange={(e) => setUdsWriteData(e.target.value)} placeholder="data bytes (hex)" className={`${inp} w-64 text-cyan-300`} />
+              <input value={udsWriteData} onChange={(e) => setUdsWriteData(e.target.value)} placeholder="data bytes (hex)" className={`${inp} w-64 text-cyan-300 max-w-full`} />
               <button onClick={udsWrite} disabled={!!udsBusy} className={`${btn} text-rose-300`}>WRITE</button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1008,13 +1094,13 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
               <input value={udsSecLevel} onChange={(e) => setUdsSecLevel(e.target.value)} title="Odd request-seed level: 01, 03, ..." className={`${inp} w-14 text-cyan-300`} />
               <button onClick={udsSeedRequest} disabled={!!udsBusy} className={btn}>REQUEST SEED</button>
               <span className="text-slate-300">{udsSeed ? <>seed <span className="text-amber-300 font-bold">{udsSeed}</span></> : ''}</span>
-              <input value={udsKey} onChange={(e) => setUdsKey(e.target.value)} placeholder="key (hex) you computed" className={`${inp} w-48 text-cyan-300`} />
+              <input value={udsKey} onChange={(e) => setUdsKey(e.target.value)} placeholder="key (hex) you computed" className={`${inp} w-48 text-cyan-300 max-w-full`} />
               <button onClick={udsSendKey} disabled={!!udsBusy} className={`${btn} text-amber-300`}>SEND KEY</button>
             </div>
             <p className="text-slate-500">The seed and key exchange is the standard UDS one. This tool never computes, guesses or brute-forces keys; enter the key your own algorithm or the vendor's documentation gives. Wrong keys count against the ECU's attempt limit.</p>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-slate-500 font-bold">READ MEMORY (23)</span>
-              <input value={udsMemAddr} onChange={(e) => setUdsMemAddr(e.target.value)} placeholder="address (hex)" className={`${inp} w-32 text-cyan-300`} />
+              <input value={udsMemAddr} onChange={(e) => setUdsMemAddr(e.target.value)} placeholder="address (hex)" className={`${inp} w-32 text-cyan-300 max-w-full`} />
               <input value={udsMemSize} onChange={(e) => setUdsMemSize(e.target.value)} title="Bytes (decimal)" className={`${inp} w-16 text-cyan-300`} />
               <button onClick={udsMemRead} disabled={!!udsBusy} className={btn}>READ</button>
               <span className="text-slate-500 font-bold ml-3">COMM CONTROL (28)</span>
@@ -1028,7 +1114,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
               <button onClick={udsDtcControl} disabled={!!udsBusy} className={`${btn} text-amber-300`}>SEND</button>
             </div>
           </div>
-          <div className="bg-black border border-slate-800 rounded p-2 h-64 overflow-y-auto">
+          <div className="bg-black border border-slate-800 rounded p-2 h-48 @lg:h-64 overflow-y-auto">
             {udsLog.length === 0 && <div className="text-slate-600">Responses appear here.</div>}
             {udsLog.map((l, i) => (
               <div key={i} className={l.kind === 'error' ? 'text-rose-300' : l.kind === 'ok' ? 'text-emerald-300' : 'text-slate-300'}>
@@ -1040,9 +1126,9 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       )}
 
       {mode === 'j1939' && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl flex flex-col gap-3 text-xs">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 flex flex-col gap-2 text-xs">
           <div className="font-bold text-slate-200">J1939 (29-bit IDs: priority, PGN, source address)</div>
-          <p className="text-slate-400">Start the sniffer at the network's bit rate (250 kbps on most trucks, tractors and NMEA 2000 boats; 500 kbps on newer ones). Decoded signals come from a built-in table of common PGNs; values the sender marks not available are shown as such. Multi-packet messages (BAM / RTS-CTS) are not reassembled.</p>
+          <details className="text-slate-400"><summary className="cursor-pointer text-slate-500">About J1939</summary><p className="mt-1">Start the sniffer at the network's bit rate (250 kbps on most trucks, tractors and NMEA 2000 boats; 500 kbps on newer ones). Decoded signals come from a built-in table of common PGNs; values the sender marks not available are shown as such. Multi-packet messages (BAM / RTS-CTS) are not reassembled.</p></details>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-slate-500 font-bold">REQUEST PGN</span>
             <input value={j1939Pgn} onChange={(e) => setJ1939Pgn(e.target.value)} title="Decimal (65262) or hex (0xFEEE)" className={`${inp} w-24 text-cyan-300`} />
@@ -1055,7 +1141,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
           <div className="overflow-x-auto border border-slate-800 rounded">
             <table className="w-full text-left">
               <thead className="bg-slate-950 text-slate-400 text-[10px] uppercase font-bold border-b border-slate-800">
-                <tr><th className="py-1.5 px-3">PGN</th><th className="py-1.5 px-3">Name</th><th className="py-1.5 px-3">SA</th><th className="py-1.5 px-3">DA</th><th className="py-1.5 px-3">Pri</th><th className="py-1.5 px-3">Data / signals</th><th className="py-1.5 px-3 text-right">Count</th></tr>
+                <tr><th className="py-1 px-2">PGN</th><th className="py-1 px-2">Name</th><th className="py-1 px-2">SA</th><th className="py-1 px-2">DA</th><th className="py-1 px-2">Pri</th><th className="py-1 px-2">Data / signals</th><th className="py-1 px-2 text-right">Count</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-900">
                 {j1939Rows.length === 0 && (
@@ -1063,12 +1149,12 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                 )}
                 {j1939Rows.map(({ m, d }) => (
                   <tr key={m.id} className="align-top hover:bg-slate-900/40">
-                    <td className="py-1.5 px-3 text-amber-300 font-bold">{d.pgn}<span className="text-slate-500 font-normal"> 0x{d.pgn.toString(16).toUpperCase()}</span></td>
-                    <td className="py-1.5 px-3 text-emerald-300">{d.acronym ? `${d.acronym} ` : ''}<span className="text-slate-400">{d.name || 'unknown PGN'}</span></td>
-                    <td className="py-1.5 px-3 text-slate-300">{d.sa.toString(16).toUpperCase().padStart(2, '0')}</td>
-                    <td className="py-1.5 px-3 text-slate-300">{d.pdu1 ? d.da.toString(16).toUpperCase().padStart(2, '0') : 'all'}</td>
-                    <td className="py-1.5 px-3 text-slate-300">{d.priority}</td>
-                    <td className="py-1.5 px-3">
+                    <td className="py-1 px-2 text-amber-300 font-bold">{d.pgn}<span className="text-slate-500 font-normal"> 0x{d.pgn.toString(16).toUpperCase()}</span></td>
+                    <td className="py-1 px-2 text-emerald-300">{d.acronym ? `${d.acronym} ` : ''}<span className="text-slate-400">{d.name || 'unknown PGN'}</span></td>
+                    <td className="py-1 px-2 text-slate-300">{d.sa.toString(16).toUpperCase().padStart(2, '0')}</td>
+                    <td className="py-1 px-2 text-slate-300">{d.pdu1 ? d.da.toString(16).toUpperCase().padStart(2, '0') : 'all'}</td>
+                    <td className="py-1 px-2 text-slate-300">{d.priority}</td>
+                    <td className="py-1 px-2">
                       <div className="text-cyan-300 font-bold">{hexBytes(m.data)}</div>
                       {d.signals.length > 0 && (
                         <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[10px]">
@@ -1078,7 +1164,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
                         </div>
                       )}
                     </td>
-                    <td className="py-1.5 px-3 text-right text-emerald-400 font-bold">{m.count}</td>
+                    <td className="py-1 px-2 text-right text-emerald-400 font-bold">{m.count}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1088,7 +1174,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
       )}
 
       {mode === 'log' && (
-        <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl flex flex-col gap-3 text-xs">
+        <div className="bg-[#030712] border border-cyber-border rounded-lg p-2.5 flex flex-col gap-2 text-xs">
           <div className="font-bold text-slate-200">RECORD, EXPORT AND REPLAY</div>
           <div className="flex flex-wrap items-center gap-2">
             {!recording ? (
@@ -1097,6 +1183,7 @@ export default function CanBusWorkbench({ initialMode = 'sniffer' }) {
               <button onClick={() => { setRecording(false); setLogCount(logRef.current.length); }} className={btn}><Square className="w-3.5 h-3.5" /> STOP ({logCount} frames)</button>
             )}
             <button onClick={() => exportLog('candump')} className={btn}><Download className="w-3.5 h-3.5" /> CANDUMP .LOG</button>
+            <button onClick={() => exportLog('asc')} className={btn} title="Vector ASCII trace (classic CAN frames); opens in CANalyzer, SavvyCAN, BusMaster"><Download className="w-3.5 h-3.5" /> VECTOR .ASC</button>
             <button onClick={() => exportLog('csv')} className={btn}><Download className="w-3.5 h-3.5" /> CSV{dbc ? ' + SIGNALS' : ''}</button>
             <button onClick={() => logInput.current?.click()} className={btn}><Upload className="w-3.5 h-3.5" /> OPEN CANDUMP LOG</button>
             <input ref={logInput} type="file" accept=".log,.txt" className="hidden" onChange={onLogFile} />
