@@ -150,7 +150,7 @@ The mode selector offers **Matches**, **matchAll (all)** and **Split**.
 - **Highlighted** shows matches in the test string with a count; an empty match is drawn as a thin marker.
 - **Match details** lists each match's position and text, numbered groups (\`—\` if a group did not participate), named groups, and group indices when \`d\` is on. Split mode lists the parts.
 - **Replace** takes \`$1\`, \`$<name>\` and the other JavaScript replacement tokens and shows the result.
-- The line above the match details shows how many matches are unique, the share of the text they cover, and how long the last run took in milliseconds.
+- The **Highlighted** heading also shows how many matches are unique, the share of the text they cover, and how long the last run took in milliseconds.
 - **Export** (shown when there are matches) copies or downloads the match list as **JSON** (index, text, groups, named groups), **CSV** (one column per group, quoted where needed), **one match per line**, or **unique matches**. It is built in the browser; nothing is uploaded.
 
 ## Backtracking warning
