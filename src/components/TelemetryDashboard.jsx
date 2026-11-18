@@ -4,7 +4,10 @@ import {
   Activity, 
   Compass, 
   RotateCcw, 
-  Download
+  Download,
+  Pause,
+  Play,
+  Trash2
 } from 'lucide-react';
 import { useSerial } from '../context/SerialContext';
 import { createLineAssembler, parseTelemetryLine } from '../utils/rxLines';
@@ -14,10 +17,25 @@ import {
   applySamples,
   trimHistory,
   resetChannelStats,
-  buildTelemetryCsv
+  buildTelemetryCsv,
+  thresholdState,
+  channelRates,
+  countAlerts
 } from '../utils/telemetryModel';
 
 const SAMPLE_LOG_LIMIT = 5000;
+const STATE_CLASS = {
+  ok: 'bg-slate-950 border-slate-800 hover:border-slate-700',
+  warn: 'bg-amber-950/40 border-amber-500/60',
+  alarm: 'bg-red-950/50 border-red-500/70'
+};
+const LIMIT_FIELDS = [
+  ['warnLow', 'warn low'],
+  ['warnHigh', 'warn high'],
+  ['alarmLow', 'alarm low'],
+  ['alarmHigh', 'alarm high']
+];
+const FIELD_CLS = 'bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 min-w-0';
 
 function Sparkline({ history }) {
   if (!history || history.length < 2) return null;
@@ -41,6 +59,8 @@ export default function TelemetryDashboard() {
   const [channelConfig, setChannelConfig] = useState({});
   const [historyLen, setHistoryLen] = useState(20);
   const [activeGaugeChannel, setActiveGaugeChannel] = useState('');
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
   const historyLenRef = useRef(20);
   const samplesRef = useRef([]); // [{ t, pairs }] for CSV export
 
@@ -56,6 +76,7 @@ export default function TelemetryDashboard() {
       }
       if (!batch.length) return;
       samplesRef.current = [...samplesRef.current, ...batch].slice(-SAMPLE_LOG_LIMIT);
+      if (pausedRef.current) return; // display frozen; samples are still logged for CSV
       setTelemetryData((prev) => applySamples(prev, batch.map((b) => b.pairs), historyLenRef.current));
     });
   }, [subscribeRx]);
@@ -70,6 +91,17 @@ export default function TelemetryDashboard() {
     historyLenRef.current = n;
     setHistoryLen(n);
     setTelemetryData((prev) => trimHistory(prev, n));
+  };
+
+  const togglePause = () => {
+    pausedRef.current = !pausedRef.current;
+    setPaused(pausedRef.current);
+  };
+
+  const handleClear = () => {
+    samplesRef.current = [];
+    setTelemetryData({});
+    setActiveGaugeChannel('');
   };
 
   const handleResetStats = () => setTelemetryData((prev) => resetChannelStats(prev));
@@ -117,63 +149,68 @@ export default function TelemetryDashboard() {
   const hasRoll = telemetryData.roll !== undefined;
   const currentPitch = telemetryData.pitch?.value ?? 0;
   const currentRoll = telemetryData.roll?.value ?? 0;
+  const activeState = hasData ? thresholdState(activeChannelData.value, activeCfg) : 'ok';
+  const alerts = countAlerts(telemetryData, channelConfig);
+  const rates = channelRates(samplesRef.current, Date.now());
   const fmt = (v, has) => (has ? `${v.toFixed(1)}°` : '--');
 
   return (
-    <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 text-slate-200 text-xs font-mono space-y-4">
-      {/* Header & Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-        <div className="flex items-center gap-2">
-          <Gauge className="w-5 h-5 text-cyan-400" />
-          <div>
-            <h2 className="font-bold text-sm text-slate-100 uppercase tracking-wider flex items-center gap-2">
-              TELEMETRY & ATTITUDE DASHBOARD
-              <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-bold">
-                SERIAL STUDIO ENGINE
-              </span>
-            </h2>
-            <p className="text-[11px] text-slate-400">
-              Gauges, pitch/roll horizon and min/max cards for any JSON, key=value or CSV line the device prints.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <select
-            value={historyLen}
-            onChange={(e) => handleHistoryLen(Number(e.target.value))}
-            aria-label="History length"
-            className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-300"
-          >
-            {HISTORY_OPTIONS.map((n) => <option key={n} value={n}>{n} samples</option>)}
-          </select>
-          <button
-            onClick={handleExportCsv}
-            disabled={!hasData}
-            title="Export every sample received as CSV"
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs disabled:opacity-40"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>CSV</span>
-          </button>
-          <button
-            onClick={handleResetStats}
-            title="Reset min/max peak statistics"
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>RESET STATS</span>
-          </button>
-        </div>
+    <div className="text-slate-200 text-xs font-mono space-y-2">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <select
+          value={historyLen}
+          onChange={(e) => handleHistoryLen(Number(e.target.value))}
+          aria-label="History length"
+          className="bg-slate-900 border border-slate-800 rounded px-1.5 py-1 text-[11px] text-slate-300"
+        >
+          {HISTORY_OPTIONS.map((n) => <option key={n} value={n}>{n} samples</option>)}
+        </select>
+        <button
+          onClick={togglePause}
+          aria-pressed={paused}
+          title={paused ? 'Resume updating the display' : 'Freeze the display (samples are still logged for CSV)'}
+          className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] ${paused ? 'bg-amber-950 border-amber-600 text-amber-300' : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'}`}
+        >
+          {paused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+          <span>{paused ? 'Resume' : 'Pause'}</span>
+        </button>
+        <button
+          onClick={handleExportCsv}
+          disabled={!hasData}
+          title="Export every sample received as CSV"
+          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-[11px] disabled:opacity-40"
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span>CSV</span>
+        </button>
+        <button onClick={handleResetStats} title="Reset min/max peak statistics" className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-[11px]">
+          <RotateCcw className="w-3.5 h-3.5" />
+          <span>Reset stats</span>
+        </button>
+        <button
+          onClick={handleClear}
+          disabled={!hasData}
+          title="Forget all channels and the CSV sample log"
+          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-[11px] disabled:opacity-40"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          <span>Clear</span>
+        </button>
+        {(alerts.alarm > 0 || alerts.warn > 0) && (
+          <span role="status" className={`ml-auto text-[11px] font-bold ${alerts.alarm ? 'text-red-400' : 'text-amber-400'}`}>
+            {alerts.alarm ? `${alerts.alarm} alarm` : ''}{alerts.alarm && alerts.warn ? ' / ' : ''}{alerts.warn ? `${alerts.warn} warning` : ''}
+          </span>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 @md:grid-cols-2 @xl:grid-cols-3 gap-2">
         {/* Visual 1: Artificial Horizon / Attitude Gyro */}
-        <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 flex flex-col items-center justify-between">
-          <div className="w-full flex items-center justify-between border-b border-slate-800/80 pb-2 mb-3">
+        <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col items-center justify-between">
+          <div className="w-full flex items-center justify-between border-b border-slate-800/80 pb-1.5 mb-2">
             <span className="font-bold text-slate-200 flex items-center gap-1.5">
               <Compass className="w-4 h-4 text-cyan-400" />
-              ATTITUDE HORIZON // 3D GYRO
+              ATTITUDE HORIZON
             </span>
             <div className="flex items-center gap-2 text-[10px]">
               <span className="text-cyan-400">PITCH: <strong>{fmt(currentPitch, hasPitch)}</strong></span>
@@ -182,7 +219,7 @@ export default function TelemetryDashboard() {
           </div>
 
           {/* SVG Artificial Horizon Display */}
-          <div className="relative w-48 h-48 rounded-full border-4 border-slate-800 overflow-hidden bg-slate-950 shadow-inner">
+          <div className="relative w-40 h-40 rounded-full border-4 border-slate-800 overflow-hidden bg-slate-950 shadow-inner">
             {/* Horizon Disc (Rotates with Roll, Translates with Pitch) */}
             <svg 
               className="absolute inset-0 w-full h-full"
@@ -259,15 +296,16 @@ export default function TelemetryDashboard() {
         </div>
 
         {/* Visual 2: Circular Speedometer / Dial Gauge */}
-        <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 flex flex-col items-center justify-between">
-          <div className="w-full flex items-center justify-between border-b border-slate-800/80 pb-2 mb-2">
+        <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 flex flex-col items-center justify-between">
+          <div className="w-full flex items-center justify-between border-b border-slate-800/80 pb-1.5 mb-1.5">
             <span className="font-bold text-slate-200 flex items-center gap-1.5">
               <Gauge className="w-4 h-4 text-cyan-400" />
-              CIRCULAR SPEEDOMETER
+              GAUGE
             </span>
             <select
               value={activeGaugeChannel}
               onChange={e => setActiveGaugeChannel(e.target.value)}
+              aria-label="Gauge channel"
               className="bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-cyber-cyan font-bold text-[11px]"
             >
               {!hasData && <option value="">NO DATA</option>}
@@ -298,7 +336,7 @@ export default function TelemetryDashboard() {
                 cy="80"
                 r="60"
                 fill="none"
-                stroke="url(#gaugeGradient)"
+                stroke={activeState === 'ok' ? 'url(#gaugeGradient)' : activeState === 'warn' ? '#f59e0b' : '#ef4444'}
                 strokeWidth="12"
                 strokeDasharray="282.7"
                 strokeDashoffset={282.7 - (normalized * 212.1)}
@@ -344,8 +382,8 @@ export default function TelemetryDashboard() {
         </div>
 
         {/* Visual 3: Live Metric Cards Grid */}
-        <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+        <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 space-y-2">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
             <span className="font-bold text-slate-200 flex items-center gap-1.5">
               <Activity className="w-4 h-4 text-emerald-400" />
               LIVE TELEMETRY FEEDS ({channelKeys.length})
@@ -362,60 +400,51 @@ export default function TelemetryDashboard() {
               {channelKeys.map((name) => {
                 const data = telemetryData[name];
                 const cfg = channelConfig[name] || {};
+                const state = thresholdState(data.value, cfg);
+                const hz = rates[name];
                 return (
                   <div
                     key={name}
                     onClick={() => setActiveGaugeChannel(name)}
                     className={`p-2 rounded-lg border cursor-pointer transition-all ${
-                      activeGaugeChannel === name
-                        ? 'bg-slate-800 border-cyan-500/60 shadow-cyan-glow/20'
-                        : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                      state !== 'ok'
+                        ? STATE_CLASS[state]
+                        : activeGaugeChannel === name
+                          ? 'bg-slate-800 border-cyan-500/60 shadow-cyan-glow/20'
+                          : STATE_CLASS.ok
                     }`}
                   >
-                    <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase font-bold">
-                      <span>{labelOf(name)}</span>
-                      <span className="text-slate-500">{cfg.unit || ''}</span>
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase font-bold gap-1">
+                      <span className="truncate">{labelOf(name)}</span>
+                      <span className="text-slate-500 shrink-0">{cfg.unit || ''}</span>
                     </div>
-                    <div className="text-base font-extrabold text-slate-100 font-mono mt-0.5">
+                    <div className={`text-base font-extrabold font-mono mt-0.5 ${state === 'alarm' ? 'text-red-300' : state === 'warn' ? 'text-amber-300' : 'text-slate-100'}`}>
                       {data.value}
                     </div>
                     <Sparkline history={data.history} />
                     <div className="flex items-center justify-between text-[9px] text-slate-500 mt-1">
                       <span>↓ {data.min}</span>
+                      <span>{hz ? `${hz.toFixed(hz < 10 ? 1 : 0)} Hz` : ''}</span>
                       <span>↑ {data.max}</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-1 mt-1.5" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        value={cfg.label || ''}
-                        onChange={(e) => updateConfig(name, { label: e.target.value })}
-                        placeholder="name"
-                        aria-label={`Name for ${name}`}
-                        className="bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 min-w-0"
-                      />
-                      <input
-                        value={cfg.unit || ''}
-                        onChange={(e) => updateConfig(name, { unit: e.target.value })}
-                        placeholder="unit"
-                        aria-label={`Unit for ${name}`}
-                        className="bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 min-w-0"
-                      />
-                      <input
-                        type="number"
-                        value={Number.isFinite(cfg.min) ? cfg.min : ''}
-                        onChange={(e) => updateConfig(name, { min: e.target.value === '' ? undefined : Number(e.target.value) })}
-                        placeholder="gauge min"
-                        aria-label={`Gauge minimum for ${name}`}
-                        className="bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 min-w-0"
-                      />
-                      <input
-                        type="number"
-                        value={Number.isFinite(cfg.max) ? cfg.max : ''}
-                        onChange={(e) => updateConfig(name, { max: e.target.value === '' ? undefined : Number(e.target.value) })}
-                        placeholder="gauge max"
-                        aria-label={`Gauge maximum for ${name}`}
-                        className="bg-slate-900 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 min-w-0"
-                      />
-                    </div>
+                    <details className="mt-1" onClick={(e) => e.stopPropagation()}>
+                      <summary className="text-[10px] text-slate-500 cursor-pointer select-none">setup / limits</summary>
+                      <div className="grid grid-cols-2 gap-1 mt-1">
+                        <input value={cfg.label || ''} onChange={(e) => updateConfig(name, { label: e.target.value })} placeholder="name" aria-label={`Name for ${name}`} className={FIELD_CLS} />
+                        <input value={cfg.unit || ''} onChange={(e) => updateConfig(name, { unit: e.target.value })} placeholder="unit" aria-label={`Unit for ${name}`} className={FIELD_CLS} />
+                        {[['min', 'gauge min', 'Gauge minimum'], ['max', 'gauge max', 'Gauge maximum'], ...LIMIT_FIELDS.map(([f, ph]) => [f, ph, `${ph.startsWith('warn') ? 'Warning' : 'Alarm'} ${f.endsWith('Low') ? 'low' : 'high'} limit`])].map(([f, ph, lbl]) => (
+                          <input
+                            key={f}
+                            type="number"
+                            value={Number.isFinite(cfg[f]) ? cfg[f] : ''}
+                            onChange={(e) => updateConfig(name, { [f]: e.target.value === '' ? undefined : Number(e.target.value) })}
+                            placeholder={ph}
+                            aria-label={`${lbl} for ${name}`}
+                            className={FIELD_CLS}
+                          />
+                        ))}
+                      </div>
+                    </details>
                   </div>
                 );
               })}
