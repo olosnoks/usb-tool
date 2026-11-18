@@ -1,8 +1,9 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { Usb, Power, PowerOff, Download, Upload, Cpu, HardDrive, ShieldAlert, Loader2, RotateCcw, CheckCircle2, AlertTriangle, Eraser, Search } from 'lucide-react';
+import { Usb, Power, PowerOff, Download, Upload, Cpu, HardDrive, ShieldAlert, Loader2, RotateCcw, CheckCircle2, AlertTriangle, Eraser, Search, ShieldCheck } from 'lucide-react';
 import {
   PICOBOOT_USB_FILTERS, PicobootConnection, PicobootError, XIP_BASE, FLASH_SECTOR_SIZE, WRITE_CHUNK_SIZE, READ_CHUNK_SIZE,
   chipFromPid, findPicobootInterface, planFlashWrite, uf2ToFlashImage, formatRange, parseBinaryInfo, PICOBOOT_EXCLUSIVE,
+  parseSize, usedLength, binToUf2, compareImages, digestHex, crc32Hex, picotoolCommands, UF2_FAMILY,
 } from '../../utils/picoboot';
 
 const SCAN_BYTES = 64 * 1024; // how much flash the connect step reads for vectors and binary_info
@@ -58,6 +59,9 @@ export default function PicobootWorkbench({ onLogMessage }) {
   const [writeFile, setWriteFile] = useState(null); // { name, bytes, kind }
   const [writeConfirmed, setWriteConfirmed] = useState(false);
   const [verifyResult, setVerifyResult] = useState(null);
+  const [saveFormat, setSaveFormat] = useState('bin');
+  const [trimFF, setTrimFF] = useState(false);
+  const [readSummary, setReadSummary] = useState(null);
   const [log, setLog] = useState([]);
   const [error, setError] = useState('');
   const busyRef = useRef(false);
@@ -127,7 +131,7 @@ export default function PicobootWorkbench({ onLogMessage }) {
   const disconnect = async () => {
     const c = connRef.current;
     connRef.current = null;
-    setConn(null); setDevice(null); setChip(null); setIface(null); setVectors(null); setDump(''); setBinInfo(null); setVerifyResult(null);
+    setConn(null); setDevice(null); setChip(null); setIface(null); setVectors(null); setDump(''); setBinInfo(null); setVerifyResult(null); setReadSummary(null);
     if (c) await c.close();
     addLog('Disconnected and released the PICOBOOT interface.');
   };
@@ -147,13 +151,39 @@ export default function PicobootWorkbench({ onLogMessage }) {
     const c = connRef.current;
     if (!c) return;
     const off = parseNum(readOffset);
-    const len = parseNum(readLength);
-    if (off === null || len === null || len <= 0) throw new PicobootError('Enter a valid offset and a length greater than zero (hex or decimal).');
+    const len = parseSize(readLength);
+    if (off === null || len === null || len <= 0) throw new PicobootError('Enter a valid offset and a length greater than zero (hex, decimal, or like 2M / 256K).');
     if (off + len > 16 * 1024 * 1024) throw new PicobootError('Range runs past 16 MB.');
     addLog(`Reading ${fmtBytes(len)} from offset ${hex(off)}.`);
-    const bytes = await readFlash(c, XIP_BASE + off, len, reportProgress);
-    download(bytes, `flash_${hex(off, 6)}_${len}.bin`);
-    addLog(`Read ${fmtBytes(len)} OK and saved as .bin.`);
+    let bytes = await readFlash(c, XIP_BASE + off, len, reportProgress);
+    if (trimFF) {
+      const used = usedLength(bytes);
+      if (used === 0) throw new PicobootError('The range is all 0xFF (erased); nothing to save.');
+      bytes = bytes.subarray(0, used);
+    }
+    const sha = await digestHex(bytes);
+    setReadSummary({ size: bytes.length, crc: crc32Hex(bytes), sha });
+    if (saveFormat === 'uf2') {
+      const fam = chip === 'RP2350' ? UF2_FAMILY.RP2350_ARM_S : UF2_FAMILY.RP2040;
+      download(binToUf2(bytes, XIP_BASE + off, fam), `flash_${hex(off, 6)}_${bytes.length}.uf2`);
+    } else {
+      download(bytes, `flash_${hex(off, 6)}_${bytes.length}.bin`);
+    }
+    addLog(`Read ${fmtBytes(bytes.length)} OK, saved as .${saveFormat}. CRC-32 ${crc32Hex(bytes)}, SHA-256 ${sha.slice(0, 16)}...`);
+  });
+
+  const doVerifyOnly = () => run('Verify', async () => {
+    const c = connRef.current;
+    if (!c) return;
+    const img = resolveImage();
+    const p = planFlashWrite(img.data, img.offset);
+    const back = await readFlash(c, XIP_BASE + p.writeStart, p.dataLength + p.imageOffset, reportProgress);
+    const cmp = compareImages(p.image.subarray(p.imageOffset, p.imageOffset + p.dataLength), back.subarray(p.imageOffset));
+    const result = cmp.equal
+      ? { ok: true, text: `Verify OK: ${fmtBytes(p.dataLength)} at ${hex(img.offset)} match the file (no write done).` }
+      : { ok: false, text: `Verify FAILED: ${cmp.mismatches} byte(s) differ, first at ${hex(img.offset + cmp.firstIndex)}.` };
+    setVerifyResult(result);
+    addLog(result.text, result.ok ? 'info' : 'error');
   });
 
   const onPickFile = async (e) => {
@@ -222,14 +252,10 @@ export default function PicobootWorkbench({ onLogMessage }) {
     }
     addLog('Program complete. Verifying by reading back...');
     const back = await readFlash(c, XIP_BASE + p.writeStart, p.image.length, reportProgress);
-    let mismatches = 0;
-    let first = -1;
-    for (let i = 0; i < p.image.length; i++) {
-      if (back[i] !== p.image[i]) { mismatches++; if (first < 0) first = i; }
-    }
-    const result = mismatches === 0
+    const cmp = compareImages(p.image, back);
+    const result = cmp.equal
       ? { ok: true, text: `Verify OK: ${fmtBytes(p.image.length)} match.` }
-      : { ok: false, text: `Verify FAILED: ${mismatches} byte(s) differ, first at ${hex(p.writeStart + first)}.` };
+      : { ok: false, text: `Verify FAILED: ${cmp.mismatches} byte(s) differ, first at ${hex(p.writeStart + cmp.firstIndex)}.` };
     setVerifyResult(result);
     addLog(result.text, result.ok ? 'info' : 'error');
   });
@@ -253,52 +279,64 @@ export default function PicobootWorkbench({ onLogMessage }) {
   const spLooksRam = sp !== null && sp >= 0x20000000 && sp < 0x20100000;
   const resetLooksFlash = vectors && (vectors.reset >>> 24) === 0x10;
 
+  const btn = 'px-2 py-1 rounded border border-slate-700 hover:bg-slate-800 disabled:opacity-40 text-[11px] font-mono flex items-center gap-1';
+  const input = 'flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs font-mono';
+  const card = 'rounded border border-slate-800 bg-slate-900/60 p-2.5 space-y-2';
+  const cliCommands = picotoolCommands({
+    readOffset: parseNum(readOffset) ?? 0,
+    readLength: parseSize(readLength) ?? 0,
+    writeFile: writeFile?.name ?? null,
+    writeOffset: parseNum(writeOffset) ?? 0,
+    kind: saveFormat,
+  });
+
   return (
-    <div className="h-full overflow-auto bg-slate-950 text-slate-200 p-4 font-sans text-sm">
-      <div className="max-w-5xl mx-auto space-y-4">
-        <header className="flex flex-wrap items-center gap-3">
-          <Cpu className="w-5 h-5 text-cyan-400" />
-          <h2 className="text-base font-semibold">Raspberry Pi PICOBOOT (RP2040 / RP2350)</h2>
-          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${connected ? 'border-emerald-700 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>
+    <div className="h-full overflow-auto bg-slate-950 text-slate-200 font-sans text-xs">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Cpu className="w-4 h-4 text-cyan-400" />
+          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${connected ? 'border-emerald-700 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>
             {connected ? `CONNECTED · ${chip ?? 'unknown'}` : 'NOT CONNECTED'}
           </span>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-amber-700 text-amber-300">UNTESTED ON HARDWARE</span>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-amber-700 text-amber-300">UNTESTED ON HARDWARE</span>
           <div className="ml-auto flex gap-2">
             {!connected ? (
               <button onClick={connect} disabled={busyNow || !webUsbAvailable}
-                className="flex items-center gap-2 px-3 py-1.5 rounded bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 text-white text-xs font-mono">
-                {busy === 'Connect' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Usb className="w-4 h-4" />} CONNECT PICOBOOT (WEBUSB)
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 text-white text-[11px] font-mono">
+                {busy === 'Connect' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Usb className="w-3.5 h-3.5" />} CONNECT (WEBUSB)
               </button>
             ) : (
-              <button onClick={disconnect} disabled={busyNow}
-                className="flex items-center gap-2 px-3 py-1.5 rounded border border-slate-700 hover:bg-slate-800 text-xs font-mono">
-                <PowerOff className="w-4 h-4" /> DISCONNECT
+              <button onClick={disconnect} disabled={busyNow} className={btn}>
+                <PowerOff className="w-3.5 h-3.5" /> DISCONNECT
               </button>
             )}
           </div>
-        </header>
+        </div>
 
         {!webUsbAvailable && (
-          <div className="flex gap-2 items-start p-3 rounded border border-amber-800 bg-amber-950/40 text-amber-200 text-xs">
+          <div className="flex gap-2 items-start p-2 rounded border border-amber-800 bg-amber-950/40 text-amber-200">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             WebUSB is not available here. Use Chrome, Edge or Opera on a desktop{!isSecureContext ? ' over HTTPS (this page is not a secure context)' : ''}.
           </div>
         )}
 
-        <p className="text-xs text-slate-400">
-          Connects to the PICOBOOT vendor interface of a board in BOOTSEL mode (USB IDs 2e8a:0003 RP2040, 2e8a:000f RP2350).
-          The mass-storage (UF2 drive) interface is not claimed. Nothing is written until you press Write.
-        </p>
+        <details className="text-slate-400">
+          <summary className="cursor-pointer text-[11px]">About this tool</summary>
+          <p className="pt-1">
+            Talks to the PICOBOOT vendor interface of a board in BOOTSEL mode (USB IDs 2e8a:0003 RP2040, 2e8a:000f RP2350).
+            The mass-storage (UF2 drive) interface is not claimed. Nothing is written until you press Write.
+          </p>
+        </details>
 
         {error && (
-          <div className="flex gap-2 items-start p-3 rounded border border-rose-800 bg-rose-950/40 text-rose-200 text-xs font-mono">
+          <div className="flex gap-2 items-start p-2 rounded border border-rose-800 bg-rose-950/40 text-rose-200 font-mono">
             <AlertTriangle className="w-4 h-4 shrink-0" /> {error}
           </div>
         )}
 
         {busy && (
-          <div className="flex items-center gap-3 text-xs font-mono text-cyan-300">
-            <Loader2 className="w-4 h-4 animate-spin" /> {busy}…
+          <div className="flex items-center gap-2 font-mono text-cyan-300">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" /> {busy}…
             {progress && progress.total > 0 && (
               <span className="text-slate-400">{Math.round((progress.done / progress.total) * 100)}% ({fmtBytes(progress.done)} / {fmtBytes(progress.total)})</span>
             )}
@@ -306,28 +344,28 @@ export default function PicobootWorkbench({ onLogMessage }) {
         )}
 
         {connected && (
-          <div className="grid md:grid-cols-2 gap-4">
-            <section className="rounded border border-slate-800 bg-slate-900/60 p-3 space-y-2">
-              <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2"><HardDrive className="w-4 h-4" /> Device</h3>
-              <dl className="text-xs font-mono grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                <dt className="text-slate-500">chip</dt><dd>{chip ?? 'unknown'} (from PID {hex(device?.productId ?? 0, 4)})</dd>
-                <dt className="text-slate-500">interface</dt><dd>{iface?.interfaceNumber} (vendor, bulk OUT {iface?.outEndpoint} / IN {iface?.inEndpoint})</dd>
+          <div className="grid @xl:grid-cols-2 gap-2">
+            <section className={card}>
+              <h3 className="font-semibold text-slate-300 flex items-center gap-1.5"><HardDrive className="w-3.5 h-3.5" /> Device</h3>
+              <dl className="font-mono grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 break-words">
+                <dt className="text-slate-500">chip</dt><dd>{chip ?? 'unknown'} (PID {hex(device?.productId ?? 0, 4)})</dd>
+                <dt className="text-slate-500">interface</dt><dd>{iface?.interfaceNumber} (OUT {iface?.outEndpoint} / IN {iface?.inEndpoint})</dd>
                 <dt className="text-slate-500">vector SP</dt><dd>{sp !== null ? hex(sp, 8) : '—'} {spLooksRam ? <span className="text-emerald-400">RAM stack pointer</span> : sp !== null ? <span className="text-amber-400">not a RAM address</span> : ''}</dd>
                 <dt className="text-slate-500">reset vector</dt><dd>{vectors ? hex(vectors.reset, 8) : '—'} {resetLooksFlash ? <span className="text-emerald-400">in flash</span> : vectors ? <span className="text-amber-400">not in flash (blank or RAM image?)</span> : ''}</dd>
               </dl>
-              <div className="flex flex-wrap gap-2 pt-1">
-                <button onClick={rescan} disabled={busyNow} className="px-2 py-1 rounded border border-slate-700 hover:bg-slate-800 text-xs font-mono flex items-center gap-1"><RotateCcw className="w-3 h-3" /> rescan flash</button>
-                <button onClick={() => doReboot('app')} disabled={busyNow} className="px-2 py-1 rounded border border-slate-700 hover:bg-slate-800 text-xs font-mono flex items-center gap-1"><Power className="w-3 h-3" /> reboot to app</button>
-                <button onClick={() => doReboot('bootsel')} disabled={busyNow || chip !== 'RP2350'} title="RP2350 only" className="px-2 py-1 rounded border border-slate-700 hover:bg-slate-800 disabled:opacity-40 text-xs font-mono flex items-center gap-1"><Usb className="w-3 h-3" /> reboot to BOOTSEL (RP2350)</button>
+              <div className="flex flex-wrap gap-1.5">
+                <button onClick={rescan} disabled={busyNow} title="Re-read the first 64 KB of flash" className={btn}><RotateCcw className="w-3 h-3" /> rescan</button>
+                <button onClick={() => doReboot('app')} disabled={busyNow} className={btn}><Power className="w-3 h-3" /> reboot to app</button>
+                <button onClick={() => doReboot('bootsel')} disabled={busyNow || chip !== 'RP2350'} title="RP2350 only" className={btn}><Usb className="w-3 h-3" /> to BOOTSEL (RP2350)</button>
               </div>
             </section>
 
-            <section className="rounded border border-slate-800 bg-slate-900/60 p-3 space-y-2">
-              <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2"><Search className="w-4 h-4" /> binary_info (picotool info)</h3>
-              {!binInfo && <p className="text-xs text-slate-500">Scanning...</p>}
-              {binInfo && !binInfo.found && <p className="text-xs text-slate-500">No binary_info header in the first {fmtBytes(SCAN_BYTES)} of flash. The image may be blank or not built with the pico-sdk.</p>}
+            <section className={card}>
+              <h3 className="font-semibold text-slate-300 flex items-center gap-1.5"><Search className="w-3.5 h-3.5" /> binary_info (picotool info)</h3>
+              {!binInfo && <p className="text-slate-500">Scanning...</p>}
+              {binInfo && !binInfo.found && <p className="text-slate-500">No binary_info header in the first {fmtBytes(SCAN_BYTES)} of flash. The image may be blank or not built with the pico-sdk.</p>}
               {binInfo?.found && (
-                <div className="text-xs font-mono space-y-1">
+                <div className="font-mono space-y-1">
                   <div className="text-slate-500">header at flash offset {hex(binInfo.headerOffset)}; {binInfo.entries.length} entries</div>
                   {binInfo.program.strings?.length > 0 && (
                     <ul className="list-disc pl-4 text-slate-200">{binInfo.program.strings.map((s, i) => <li key={i}>{s}</li>)}</ul>
@@ -338,32 +376,55 @@ export default function PicobootWorkbench({ onLogMessage }) {
               )}
             </section>
 
-            <section className="md:col-span-2 rounded border border-slate-800 bg-slate-900/60 p-3">
-              <h3 className="text-xs font-semibold text-slate-300 mb-2">First 256 bytes of flash (0x10000000)</h3>
-              <pre className="text-[11px] leading-4 text-emerald-300 overflow-x-auto whitespace-pre">{dump || '—'}</pre>
+            <details className="@xl:col-span-2 rounded border border-slate-800 bg-slate-900/60 p-2.5">
+              <summary className="cursor-pointer font-semibold text-slate-300">First 256 bytes of flash (0x10000000)</summary>
+              <pre className="mt-2 text-[11px] leading-4 text-emerald-300 overflow-x-auto whitespace-pre">{dump || '—'}</pre>
+            </details>
+
+            <section className={card}>
+              <h3 className="font-semibold text-slate-300 flex items-center gap-1.5"><Download className="w-3.5 h-3.5" /> Save flash (picotool save)</h3>
+              <div className="flex gap-2 items-center font-mono">
+                <label htmlFor="pb-read-off" className="text-slate-500 w-12">offset</label>
+                <input id="pb-read-off" value={readOffset} onChange={(e) => setReadOffset(e.target.value)} className={input} />
+              </div>
+              <div className="flex gap-2 items-center font-mono">
+                <label htmlFor="pb-read-len" className="text-slate-500 w-12">length</label>
+                <input id="pb-read-len" value={readLength} onChange={(e) => setReadLength(e.target.value)} className={input} />
+              </div>
+              <div className="flex flex-wrap gap-1 items-center">
+                <span className="text-slate-500 text-[11px]">size:</span>
+                {['256K', '1M', '2M', '4M', '16M'].map((sz) => (
+                  <button key={sz} type="button" onClick={() => setReadLength(sz)} className="px-1.5 py-0.5 rounded border border-slate-700 hover:bg-slate-800 text-[11px] font-mono">{sz}</button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-3 items-center">
+                <label className="flex items-center gap-1.5 text-[11px]">format
+                  <select value={saveFormat} onChange={(e) => setSaveFormat(e.target.value)} className="bg-slate-950 border border-slate-700 rounded px-1 py-0.5 font-mono">
+                    <option value="bin">.bin</option>
+                    <option value="uf2">.uf2</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5 text-[11px]" title="Drop trailing 0xFF (erased) bytes, keeping 256-byte pages">
+                  <input type="checkbox" checked={trimFF} onChange={(e) => setTrimFF(e.target.checked)} /> trim trailing 0xFF
+                </label>
+              </div>
+              <button onClick={doRead} disabled={busyNow} className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-[11px] font-mono flex items-center gap-1.5"><Download className="w-3.5 h-3.5" /> READ AND DOWNLOAD</button>
+              {readSummary && (
+                <div className="text-[11px] font-mono text-slate-400 break-all space-y-0.5">
+                  <div>{fmtBytes(readSummary.size)} saved · CRC-32 {readSummary.crc}</div>
+                  <div>SHA-256 {readSummary.sha}</div>
+                </div>
+              )}
             </section>
 
-            <section className="rounded border border-slate-800 bg-slate-900/60 p-3 space-y-2">
-              <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2"><Download className="w-4 h-4" /> Read flash to .bin</h3>
-              <div className="flex gap-2 items-center text-xs font-mono">
-                <label className="text-slate-500 w-14">offset</label>
-                <input value={readOffset} onChange={(e) => setReadOffset(e.target.value)} className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1" />
-              </div>
-              <div className="flex gap-2 items-center text-xs font-mono">
-                <label className="text-slate-500 w-14">length</label>
-                <input value={readLength} onChange={(e) => setReadLength(e.target.value)} className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1" />
-              </div>
-              <button onClick={doRead} disabled={busyNow} className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs font-mono flex items-center gap-2"><Download className="w-4 h-4" /> READ AND DOWNLOAD</button>
-            </section>
-
-            <section className="rounded border border-slate-800 bg-slate-900/60 p-3 space-y-2">
-              <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2"><Upload className="w-4 h-4" /> Write .bin or .uf2</h3>
-              <input type="file" accept=".bin,.uf2" onChange={onPickFile} disabled={busyNow} className="text-xs" />
-              {writeFile && <div className="text-xs font-mono text-slate-400">{writeFile.name} · {fmtBytes(writeFile.size)} · {writeFile.kind === 'uf2' ? 'UF2 (addresses from file)' : 'raw .bin'}</div>}
+            <section className={card}>
+              <h3 className="font-semibold text-slate-300 flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" /> Write / verify .bin or .uf2</h3>
+              <input type="file" aria-label="Firmware file" accept=".bin,.uf2" onChange={onPickFile} disabled={busyNow} className="text-xs max-w-full" />
+              {writeFile && <div className="font-mono text-slate-400 break-all">{writeFile.name} · {fmtBytes(writeFile.size)} · {writeFile.kind === 'uf2' ? 'UF2 (addresses from file)' : 'raw .bin'}</div>}
               {writeFile?.kind === 'bin' && (
-                <div className="flex gap-2 items-center text-xs font-mono">
-                  <label className="text-slate-500 w-14">offset</label>
-                  <input value={writeOffset} onChange={(e) => { setWriteOffset(e.target.value); setWriteConfirmed(false); }} className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1" />
+                <div className="flex gap-2 items-center font-mono">
+                  <label htmlFor="pb-write-off" className="text-slate-500 w-12">offset</label>
+                  <input id="pb-write-off" value={writeOffset} onChange={(e) => { setWriteOffset(e.target.value); setWriteConfirmed(false); }} className={input} />
                 </div>
               )}
               {plan && !plan.error && (
@@ -373,27 +434,37 @@ export default function PicobootWorkbench({ onLogMessage }) {
                   <div className="text-amber-400">Bytes in the erased sectors outside the image are lost.</div>
                 </div>
               )}
-              {plan?.error && <div className="text-xs text-rose-300 font-mono">{plan.error}</div>}
-              <label className="flex items-center gap-2 text-xs text-amber-300">
+              {plan?.error && <div className="text-rose-300 font-mono">{plan.error}</div>}
+              <button onClick={doVerifyOnly} disabled={busyNow || !plan || !!plan?.error} title="Compare flash with the file; nothing is written" className={btn}>
+                <ShieldCheck className="w-3.5 h-3.5" /> VERIFY ONLY (picotool verify)
+              </button>
+              <label className="flex items-center gap-2 text-amber-300">
                 <input type="checkbox" checked={writeConfirmed} onChange={(e) => setWriteConfirmed(e.target.checked)} disabled={!plan || !!plan.error} />
                 I understand this erases and overwrites the flash range above.
               </label>
               <button onClick={doWrite} disabled={busyNow || !writeConfirmed || !plan || !!plan?.error}
-                className="px-3 py-1.5 rounded bg-rose-800 hover:bg-rose-700 disabled:opacity-40 text-white text-xs font-mono flex items-center gap-2">
-                <Eraser className="w-4 h-4" /> ERASE, WRITE AND VERIFY
+                className="px-2.5 py-1 rounded bg-rose-800 hover:bg-rose-700 disabled:opacity-40 text-white text-[11px] font-mono flex items-center gap-1.5">
+                <Eraser className="w-3.5 h-3.5" /> ERASE, WRITE AND VERIFY
               </button>
               {verifyResult && (
-                <div className={`text-xs flex items-center gap-2 ${verifyResult.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
-                  {verifyResult.ok ? <CheckCircle2 className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />} {verifyResult.text}
+                <div className={`flex items-center gap-2 ${verifyResult.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {verifyResult.ok ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <ShieldAlert className="w-4 h-4 shrink-0" />} {verifyResult.text}
                 </div>
               )}
             </section>
+
+            <details className="@xl:col-span-2 rounded border border-slate-800 bg-slate-900/60 p-2.5">
+              <summary className="cursor-pointer font-semibold text-slate-300">Equivalent picotool commands</summary>
+              <p className="text-slate-500 text-[11px] pt-1">Export for the desktop CLI, built from your current settings. This page does not run picotool.</p>
+              <pre className="mt-1 text-[11px] text-cyan-300 overflow-x-auto whitespace-pre">{cliCommands.join('\n')}</pre>
+              <button onClick={() => navigator.clipboard?.writeText(cliCommands.join('\n'))} className={`${btn} mt-1`}>copy</button>
+            </details>
           </div>
         )}
 
-        <section className="rounded border border-slate-800 bg-slate-950 p-3">
-          <h3 className="text-xs font-semibold text-slate-400 mb-2">Log</h3>
-          <div className="font-mono text-[11px] space-y-0.5 max-h-48 overflow-auto">
+        <section className="rounded border border-slate-800 bg-slate-950 p-2">
+          <h3 className="font-semibold text-slate-400 mb-1">Log</h3>
+          <div className="font-mono text-[11px] space-y-0.5 max-h-40 overflow-auto">
             {log.length === 0 && <div className="text-slate-600">No activity yet.</div>}
             {log.map((l, i) => (
               <div key={i} className={l.level === 'error' ? 'text-rose-300' : l.level === 'warn' ? 'text-amber-300' : 'text-slate-400'}>

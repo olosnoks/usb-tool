@@ -423,3 +423,99 @@ export class PicobootConnection {
     return { disconnectedAfterCommand: false };
   }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Helpers for save / verify / export (pure functions)
+// ---------------------------------------------------------------------------------------------
+
+export const UF2_FAMILY = Object.freeze({ RP2040: 0xe48bff56, RP2350_ARM_S: 0xe48bff59 });
+
+/** Parse "0x1000", "4096", or sizes like "2M" / "256K". Returns null when invalid. */
+export function parseSize(s) {
+  const t = String(s ?? '').trim();
+  if (!t) return null;
+  const m = /^(0x[0-9a-f]+|\d+)\s*([kKmM]?)$/i.exec(t);
+  if (!m) return null;
+  const base = /^0x/i.test(m[1]) ? parseInt(m[1], 16) : parseInt(m[1], 10);
+  const mul = m[2] ? (m[2].toLowerCase() === 'k' ? 1024 : 1024 * 1024) : 1;
+  const n = base * mul;
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** Length of `data` without trailing 0xFF (erased flash) bytes, rounded up to `align`. */
+export function usedLength(data, align = FLASH_PAGE_SIZE) {
+  let end = data.length;
+  while (end > 0 && data[end - 1] === 0xff) end--;
+  if (end === 0) return 0;
+  return Math.min(data.length, Math.ceil(end / align) * align);
+}
+
+/** Encode a flash image as UF2 (256-byte payload blocks, familyID present). `address` is the bus address. */
+export function binToUf2(data, address = XIP_BASE, family = UF2_FAMILY.RP2040) {
+  const PAYLOAD = 256;
+  const blocks = Math.ceil(data.length / PAYLOAD);
+  const out = new Uint8Array(blocks * 512);
+  const dv = new DataView(out.buffer);
+  for (let i = 0; i < blocks; i++) {
+    const o = i * 512;
+    const part = data.subarray(i * PAYLOAD, (i + 1) * PAYLOAD);
+    dv.setUint32(o, 0x0a324655, true);
+    dv.setUint32(o + 4, 0x9e5d5157, true);
+    dv.setUint32(o + 8, 0x2000, true);
+    dv.setUint32(o + 12, (address + i * PAYLOAD) >>> 0, true);
+    dv.setUint32(o + 16, PAYLOAD, true);
+    dv.setUint32(o + 20, i, true);
+    dv.setUint32(o + 24, blocks, true);
+    dv.setUint32(o + 28, family >>> 0, true);
+    out.set(part, o + 32);
+    dv.setUint32(o + 508, 0x0ab16f30, true);
+  }
+  return out;
+}
+
+/** Compare two byte arrays. Returns { equal, mismatches, firstIndex, lengthA, lengthB }. */
+export function compareImages(expected, actual) {
+  const n = Math.min(expected.length, actual.length);
+  let mismatches = Math.abs(expected.length - actual.length);
+  let first = expected.length === actual.length ? -1 : n;
+  for (let i = 0; i < n; i++) {
+    if (expected[i] !== actual[i]) { mismatches++; if (first < 0 || i < first) first = i; }
+  }
+  return { equal: mismatches === 0, mismatches, firstIndex: first, lengthA: expected.length, lengthB: actual.length };
+}
+
+/** Hex digest using Web Crypto (SHA-256 by default). */
+export async function digestHex(bytes, algo = 'SHA-256') {
+  const d = await crypto.subtle.digest(algo, bytes);
+  return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** CRC-32 (IEEE) as 8 hex digits. */
+export function crc32Hex(bytes) {
+  let c = ~0;
+  for (let i = 0; i < bytes.length; i++) {
+    c ^= bytes[i];
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ((~c) >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Equivalent picotool command lines for the current settings. These are an export for the
+ * desktop CLI; the browser does not run picotool.
+ */
+export function picotoolCommands({ readOffset = 0, readLength = 0, writeFile = null, writeOffset = 0, kind = 'bin' } = {}) {
+  const h = (n) => `0x${(n >>> 0).toString(16)}`;
+  const cmds = ['picotool info -a'];
+  if (readLength > 0) cmds.push(`picotool save -r ${h(XIP_BASE + readOffset)} ${h(XIP_BASE + readOffset + readLength)} flash.${kind === 'uf2' ? 'uf2' : 'bin'}`);
+  if (writeFile) {
+    const f = /\s/.test(writeFile) ? `"${writeFile}"` : writeFile;
+    if (/\.uf2$/i.test(writeFile)) {
+      cmds.push(`picotool load ${f} -v`, `picotool verify ${f}`);
+    } else {
+      cmds.push(`picotool load ${f} -o ${h(XIP_BASE + writeOffset)} -v`, `picotool verify ${f} -o ${h(XIP_BASE + writeOffset)}`);
+    }
+  }
+  cmds.push('picotool reboot');
+  return cmds;
+}
