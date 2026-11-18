@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { checkCapabilities, registerCredential, authenticateCredential, currentRpId } from '../../../utils/webauthnLab';
+import { checkCapabilities, registerCredential, authenticateCredential, currentRpId, verifyAssertion } from '../../../utils/webauthnLab';
 import { loadAaguidNames } from '../../../utils/fido2Driver';
 
-const btn = 'px-3 py-1.5 rounded-lg border text-xs font-bold disabled:opacity-40';
+const btn = 'px-2.5 py-1 rounded-lg border text-xs font-bold disabled:opacity-40';
 
 function Json({ value }) {
-  return <pre className="mt-2 p-2 bg-slate-950 border border-slate-800 rounded text-[11px] text-slate-300 overflow-auto max-h-96 whitespace-pre-wrap break-all">{JSON.stringify(value, null, 2)}</pre>;
+  return <pre className="mt-2 p-2 bg-slate-950 border border-slate-800 rounded text-[11px] text-slate-300 overflow-auto max-h-60 whitespace-pre-wrap break-all">{JSON.stringify(value, null, 2)}</pre>;
 }
 
 export default function WebAuthnLab() {
@@ -18,6 +18,9 @@ export default function WebAuthnLab() {
   const [reg, setReg] = useState(null);
   const [credId, setCredId] = useState(null); // Uint8Array of the lab's own credential
   const [assertion, setAssertion] = useState(null);
+  const [regKey, setRegKey] = useState(null); // {spki, alg} from the lab's own registration
+  const [verdict, setVerdict] = useState(null);
+  const [lastCount, setLastCount] = useState(null);
   let rpId = '';
   try { rpId = currentRpId(); } catch (e) { rpId = ''; }
 
@@ -32,7 +35,9 @@ export default function WebAuthnLab() {
       const r = await registerCredential({ discoverable, confirmed: discoverable, userVerification: uv, attestation });
       setCredId(r.rawId);
       setReg(r.description);
-      setAssertion(null);
+      setAssertion(null); setVerdict(null);
+      setRegKey(r.publicKeySpki ? { spki: r.publicKeySpki, alg: r.publicKeyAlg } : null);
+      setLastCount(r.description.attestation?.authData?.signCount ?? null);
     } catch (err) { setError(`${err.name || 'Error'}: ${err.message}`); }
     finally { setBusy(''); }
   };
@@ -43,6 +48,16 @@ export default function WebAuthnLab() {
     try {
       const r = await authenticateCredential({ credentialId: credId || undefined, userVerification: uv });
       setAssertion(r.description);
+      // Verify only when this assertion is for the credential the lab registered (its public key is known).
+      if (regKey && credId && r.credential.id === reg?.id) {
+        const res = r.credential.response;
+        const v = await verifyAssertion(
+          { publicKeySpki: regKey.spki, alg: regKey.alg, authenticatorData: res.authenticatorData, clientDataJSON: res.clientDataJSON, signature: res.signature },
+          { challenge: r.challenge, rpId, origin: location.origin, lastSignCount: lastCount }
+        );
+        setVerdict(v);
+        setLastCount(r.description.authData?.signCount ?? lastCount);
+      } else setVerdict(null);
     } catch (err) { setError(`${err.name || 'Error'}: ${err.message}`); }
     finally { setBusy(''); }
   };
@@ -50,14 +65,17 @@ export default function WebAuthnLab() {
   const webauthn = caps ? caps.webauthn : typeof window !== 'undefined' && !!window.PublicKeyCredential;
 
   return (
-    <div id="webauthn-lab" className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+    <div id="webauthn-lab" className="bg-[#030712] border border-cyber-border rounded-xl p-2.5 shadow-xl space-y-2">
       <div>
         <span className="text-[10px] text-slate-500 font-bold uppercase block">WebAuthn lab (no flag needed)</span>
-        <p className="text-[11px] text-slate-400 max-w-3xl mt-1">
-          Creates and uses a test credential through the browser&apos;s own WebAuthn API, so it works with the normal HID blocklist in place.
-          The relying party ID is always this page&apos;s hostname{rpId ? <> (<code className="text-amber-200">{rpId}</code>)</> : ''}; the credential only works here.
-          Registration decodes the attestation (format, certificate chain, flags, sign count, public key) from the response.
-        </p>
+        <details className="mt-1">
+          <summary className="cursor-pointer text-[11px] text-slate-400">What this does</summary>
+          <p className="text-[11px] text-slate-400 max-w-3xl mt-1">
+            Creates and uses a test credential through the browser&apos;s own WebAuthn API, so it works with the normal HID blocklist in place.
+            The relying party ID is always this page&apos;s hostname{rpId ? <> (<code className="text-amber-200">{rpId}</code>)</> : ''}; the credential only works here.
+            Registration decodes the attestation (format, certificate chain, flags, sign count, public key). Authenticating with the credential made here also verifies the signature in your browser.
+          </p>
+        </details>
       </div>
 
       {caps && (
@@ -72,7 +90,7 @@ export default function WebAuthnLab() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-3 text-slate-300">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-300">
         <label className="flex items-center gap-1.5">
           <input type="checkbox" checked={discoverable} onChange={(e) => setDiscoverable(e.target.checked)} />
           Discoverable (resident) credential <span className="text-amber-300">(uses a key slot)</span>
@@ -101,6 +119,14 @@ export default function WebAuthnLab() {
 
       {error && <div className="p-2.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 font-bold break-words">{error}</div>}
       {reg && <div><span className="text-[10px] text-slate-500 font-bold uppercase">Registration</span><Json value={reg} /></div>}
+      {verdict && (
+        <div className={`p-2 rounded-lg border ${verdict.ok ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-rose-500/40 bg-rose-500/10'}`}>
+          <span className={`font-bold ${verdict.ok ? 'text-emerald-300' : 'text-rose-300'}`}>{verdict.ok ? 'Assertion verified' : 'Assertion FAILED verification'}</span>
+          <ul className="mt-1 space-y-0.5 text-[11px]">
+            {verdict.checks.map((c) => <li key={c.name} className={c.ok ? 'text-emerald-300' : 'text-rose-300'}>{c.ok ? '✓' : '✗'} {c.name}{c.detail ? <span className="text-slate-500"> ({c.detail})</span> : null}</li>)}
+          </ul>
+        </div>
+      )}
       {assertion && <div><span className="text-[10px] text-slate-500 font-bold uppercase">Assertion</span><Json value={assertion} /></div>}
     </div>
   );

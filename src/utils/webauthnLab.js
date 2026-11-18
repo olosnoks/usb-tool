@@ -270,12 +270,100 @@ export async function registerCredential(opts, creds = globalThis.navigator?.cre
   if (!creds) throw new Error('navigator.credentials is not available here (needs a secure context).');
   const cred = await creds.create(buildCreateOptions(opts));
   if (!cred) throw new Error('No credential was created.');
-  return { credential: cred, rawId: new Uint8Array(cred.rawId), description: describeRegistration(cred) };
+  const r = cred.response;
+  const publicKeySpki = typeof r.getPublicKey === 'function' ? r.getPublicKey() : null;
+  const publicKeyAlg = typeof r.getPublicKeyAlgorithm === 'function' ? r.getPublicKeyAlgorithm() : null;
+  return { credential: cred, rawId: new Uint8Array(cred.rawId), publicKeySpki, publicKeyAlg, description: describeRegistration(cred) };
 }
 
 export async function authenticateCredential(opts, creds = globalThis.navigator?.credentials) {
   if (!creds) throw new Error('navigator.credentials is not available here (needs a secure context).');
-  const cred = await creds.get(buildGetOptions(opts));
+  const challenge = opts?.challenge || randomBytes(32);
+  const cred = await creds.get(buildGetOptions({ ...opts, challenge }));
   if (!cred) throw new Error('No assertion was returned.');
-  return { credential: cred, description: describeAssertion(cred) };
+  return { credential: cred, challenge, description: describeAssertion(cred) };
+}
+
+// --- assertion verification (WebCrypto, client side) -------------------------
+
+const b64uEncode = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+/** ASN.1 DER ECDSA signature -> fixed-width r||s as WebCrypto expects. Throws on malformed input. */
+export function derEcdsaToRaw(der, size = 32) {
+  const b = der instanceof Uint8Array ? der : new Uint8Array(der);
+  let o = 0;
+  if (b[o++] !== 0x30) throw new Error('Signature is not a DER sequence.');
+  const first = b[o++];
+  if (first & 0x80) o += first & 0x7f;
+  const readInt = () => {
+    if (b[o++] !== 0x02) throw new Error('Signature integer expected.');
+    const l = b[o++];
+    let v = b.subarray(o, o + l);
+    o += l;
+    while (v.length > 0 && v[0] === 0) v = v.subarray(1);
+    if (v.length > size) throw new Error('Signature integer too large.');
+    const out = new Uint8Array(size);
+    out.set(v, size - v.length);
+    return out;
+  };
+  const r = readInt();
+  const s = readInt();
+  const raw = new Uint8Array(size * 2);
+  raw.set(r, 0);
+  raw.set(s, size);
+  return raw;
+}
+
+const importParams = (alg) => {
+  switch (alg) {
+    case -7: return { import: { name: 'ECDSA', namedCurve: 'P-256' }, verify: { name: 'ECDSA', hash: 'SHA-256' }, ec: 32, label: 'ES256' };
+    case -35: return { import: { name: 'ECDSA', namedCurve: 'P-384' }, verify: { name: 'ECDSA', hash: 'SHA-384' }, ec: 48, label: 'ES384' };
+    case -257: return { import: { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, verify: { name: 'RSASSA-PKCS1-v1_5' }, ec: 0, label: 'RS256' };
+    case -8: return { import: { name: 'Ed25519' }, verify: { name: 'Ed25519' }, ec: 0, label: 'EdDSA' };
+    default: return null;
+  }
+};
+
+/**
+ * Verify a WebAuthn assertion against the credential's public key (SPKI bytes from getPublicKey()).
+ * Returns {ok, checks:[{name, ok, detail}]}; bad data produces failed checks rather than exceptions.
+ * `expected` = {challenge:Uint8Array, rpId, origin, lastSignCount?}. `subtle` is injectable for tests.
+ */
+export async function verifyAssertion({ publicKeySpki, alg, authenticatorData, clientDataJSON, signature }, expected, subtle = globalThis.crypto?.subtle) {
+  const checks = [];
+  const add = (name, ok, detail = '') => checks.push({ name, ok: !!ok, detail });
+  const ad = new Uint8Array(authenticatorData);
+  const cdj = new Uint8Array(clientDataJSON);
+  let cd = null;
+  try { cd = JSON.parse(new TextDecoder().decode(cdj)); } catch (e) { add('clientDataJSON parses', false, e.message); }
+  if (cd) {
+    add('type is webauthn.get', cd.type === 'webauthn.get', String(cd.type));
+    add('challenge matches', cd.challenge === b64uEncode(expected.challenge), 'the challenge this page sent');
+    add('origin matches', cd.origin === expected.origin, String(cd.origin));
+  }
+  let parsed = null;
+  try { parsed = decodeAuthenticatorData(ad); } catch (e) { add('authenticatorData parses', false, e.message); }
+  if (parsed && subtle) {
+    const h = new Uint8Array(await subtle.digest('SHA-256', new TextEncoder().encode(expected.rpId)));
+    add('rpIdHash matches', hex(h) === parsed.rpIdHash, expected.rpId);
+    add('user present flag set', parsed.flags.UP);
+    if (expected.lastSignCount != null && (parsed.signCount !== 0 || expected.lastSignCount !== 0)) {
+      add('sign count increased', parsed.signCount > expected.lastSignCount, `${expected.lastSignCount} -> ${parsed.signCount}`);
+    }
+  }
+  const p = importParams(alg);
+  if (!p) add('signature valid', false, `algorithm ${alg} is not verified by this tool`);
+  else if (!subtle || !publicKeySpki) add('signature valid', false, 'no public key or WebCrypto available');
+  else {
+    try {
+      const key = await subtle.importKey('spki', publicKeySpki, p.import, false, ['verify']);
+      const cdHash = new Uint8Array(await subtle.digest('SHA-256', cdj));
+      const signed = new Uint8Array(ad.length + 32);
+      signed.set(ad, 0);
+      signed.set(cdHash, ad.length);
+      const sig = p.ec ? derEcdsaToRaw(signature, p.ec) : new Uint8Array(signature);
+      add('signature valid', await subtle.verify(p.verify, key, sig, signed), p.label);
+    } catch (e) { add('signature valid', false, e.message); }
+  }
+  return { ok: checks.length > 0 && checks.every((c) => c.ok), checks };
 }
