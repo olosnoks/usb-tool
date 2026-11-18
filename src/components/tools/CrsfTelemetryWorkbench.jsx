@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Radio, Activity, Battery, Compass, Satellite, Search, Download, Trash2, Usb, Terminal, Play, Square, Pencil, ListTree, Plane, Signal, ShieldAlert } from 'lucide-react';
+import { Radio, Activity, Battery, Compass, Satellite, Search, Download, Trash2, Usb, Terminal, Play, Square, Pencil, ListTree, Plane, Signal, ShieldAlert, Circle } from 'lucide-react';
 import { useOptionalSerial } from '../../context/SerialContext';
 import {
   CRSF_BAUD_RATES, CRSF_DEFAULT_BAUD, CRSF_SYNC, FRAME_TYPE, FRAME_TYPE_NAMES, ADDRESS_NAMES, PARAM_TYPE, PARAM_TYPE_NAMES,
   createCrsfParser, createParamClient, buildDevicePing, decodeTelemetry, encodeParamValue, toHex,
+  assessLink, summarizeLinkSamples, linkSamplesToCsv, createRateTracker,
 } from '../../utils/crsfProtocol';
 
 const SYNC_OPTIONS = [
@@ -15,6 +16,13 @@ const TABS = [['live', 'LIVE TELEMETRY', Activity], ['params', 'DEVICE PARAMETER
 const LOG_LIMIT = 300;
 const HIST_LIMIT = 120;
 const FLUSH_MS = 150;
+const REC_LIMIT = 20000;
+const HEALTH_STYLE = {
+  good: 'border-emerald-700 text-emerald-300',
+  warn: 'border-amber-700 text-amber-300',
+  bad: 'border-rose-700 text-rose-300',
+  none: 'border-slate-700 text-slate-500',
+};
 
 const hex2 = (n) => `0x${n.toString(16).padStart(2, '0').toUpperCase()}`;
 const fmt = (v, digits = 1, unit = '') => (typeof v === 'number' && Number.isFinite(v) ? `${v.toFixed(digits)}${unit}` : '—');
@@ -24,11 +32,15 @@ function emptyStore() {
   return {
     link: null, linkHist: [], rc: null, battery: null, gps: null, attitude: null, flightMode: null,
     devices: new Map(), counts: {}, log: [], dirty: false,
+    rec: [], recording: false, rates: createRateTracker(),
   };
 }
 
 function snapshotOf(store, parser) {
   return {
+    recording: store.recording,
+    recCount: store.rec.length,
+    rates: store.rates.rates(Date.now()),
     link: store.link,
     linkHist: store.linkHist.slice(),
     rc: store.rc,
@@ -49,7 +61,7 @@ const EMPTY_SNAP = snapshotOf(emptyStore(), null);
 function LinkTrend({ hist }) {
   if (hist.length < 2) {
     return (
-      <div className="h-28 flex items-center justify-center text-[11px] text-slate-600 border border-slate-800 rounded bg-black">
+      <div className="h-24 flex items-center justify-center text-[11px] text-slate-600 border border-slate-800 rounded bg-black">
         The LQ / RSSI chart fills in as link statistics frames arrive.
       </div>
     );
@@ -60,18 +72,20 @@ function LinkTrend({ hist }) {
     const v = Math.max(0, Math.min(1, pick(h)));
     return `${((i / (hist.length - 1)) * W).toFixed(1)},${(H - v * H).toFixed(1)}`;
   }).join(' ');
-  const lq = pts((h) => (h.lq ?? 0) / 100);
-  const rssi = pts((h) => ((h.rssi ?? -120) + 120) / 120);
+  const lq = pts((h) => (h.upLq ?? 0) / 100);
+  const rssi = pts((h) => ((h.upRssi1 ?? -120) + 120) / 120);
+  const rssi2 = pts((h) => ((h.upRssi2 ?? -120) + 120) / 120);
   return (
     <div className="relative">
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full bg-black border border-slate-800 rounded" style={{ height: H }}>
         {[0.25, 0.5, 0.75].map((f) => <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} stroke="#1e293b" />)}
+        <polyline points={rssi2} fill="none" stroke="#a78bfa" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         <polyline points={rssi} fill="none" stroke="#22d3ee" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         <polyline points={lq} fill="none" stroke="#34d399" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
       </svg>
       <div className="absolute top-1 left-2 text-[10px] text-slate-500">100% LQ / 0 dBm</div>
       <div className="absolute bottom-1 left-2 text-[10px] text-slate-500">0% LQ / -120 dBm</div>
-      <div className="absolute top-1 right-2 text-[10px]"><span className="text-emerald-400">LQ</span> <span className="text-cyan-400">uplink RSSI ant.1</span></div>
+      <div className="absolute top-1 right-2 text-[10px]"><span className="text-emerald-400">LQ</span> <span className="text-cyan-400">RSSI ant.1</span> <span className="text-violet-400">ant.2</span></div>
     </div>
   );
 }
@@ -81,7 +95,7 @@ function ChannelBars({ us }) {
     return <div className="text-[11px] text-slate-600">No RC channel frames yet.</div>;
   }
   return (
-    <div className="flex items-end gap-1 h-32">
+    <div className="flex items-end gap-1 h-24">
       {us.map((v, i) => {
         const pct = Math.max(0, Math.min(100, ((v - 988) / (2012 - 988)) * 100));
         return (
@@ -157,6 +171,7 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
   const handleFrame = (frame) => {
     const s = storeRef.current;
     s.counts[frame.type] = (s.counts[frame.type] || 0) + 1;
+    s.rates.mark(frame.type, Date.now());
     logFrame('rx', frame.raw, frame.type);
     const t = decodeTelemetry(frame);
     if (t && t.data) {
@@ -164,7 +179,7 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
         case 'rc': s.rc = t.data; break;
         case 'link':
           s.link = t.data;
-          s.linkHist.push({ lq: t.data.upLq, rssi: t.data.upRssi1 });
+          { const sample = { t: Date.now(), ...t.data }; s.linkHist.push(sample); if (s.recording && s.rec.length < REC_LIMIT) s.rec.push(sample); }
           if (s.linkHist.length > HIST_LIMIT) s.linkHist.splice(0, s.linkHist.length - HIST_LIMIT);
           break;
         case 'battery': s.battery = t.data; break;
@@ -183,7 +198,7 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
   useEffect(() => {
     const id = setInterval(() => {
       const s = storeRef.current;
-      if (!s.dirty) return;
+      if (!s.dirty && !(parserRef.current && Object.keys(s.counts).length)) return;
       s.dirty = false;
       setSnap(snapshotOf(s, parserRef.current));
     }, FLUSH_MS);
@@ -331,6 +346,24 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  const toggleRecord = () => {
+    const s = storeRef.current;
+    if (!s.recording) s.rec = [];
+    s.recording = !s.recording;
+    s.dirty = true;
+  };
+
+  const downloadCsv = () => {
+    const s = storeRef.current;
+    const samples = s.rec.length ? s.rec : s.linkHist;
+    const url = URL.createObjectURL(new Blob([linkSamplesToCsv(samples)], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `crsf-link-${Date.now()}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   const apiMissing = typeof navigator !== 'undefined' && !('serial' in navigator);
   const link = snap.link;
   const rc = snap.rc;
@@ -342,13 +375,14 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
     .filter((p) => showHidden || !p.hidden)
     .sort((a, b) => a.paramNum - b.paramNum);
   const folderNames = new Map(Array.from(params.values()).filter((p) => p.type === PARAM_TYPE.FOLDER).map((p) => [p.paramNum, p.name]));
+  const health = assessLink(snap.link);
+  const summary = summarizeLinkSamples(snap.linkHist);
   const selectedBaud = isConnected ? serial.baudRate : baudPref;
 
   return (
-    <div className="flex flex-col gap-3 p-3 text-slate-200 bg-slate-950 min-h-full font-sans">
-      <div className="flex flex-wrap items-center gap-2 bg-slate-900/70 border border-slate-800 rounded p-2">
-        <Radio className="w-4 h-4 text-cyan-400" />
-        <span className="text-sm font-semibold tracking-wide">ELRS / CRSF</span>
+    <div className="flex flex-col gap-2 text-slate-200 bg-slate-950 min-h-full font-sans">
+      <div className="flex flex-wrap items-center gap-2 bg-slate-900/70 border border-slate-800 rounded p-1.5">
+        <Radio className="w-4 h-4 text-cyan-400" aria-label="ELRS / CRSF" />
         <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${isConnected ? 'border-emerald-700 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>
           {isConnected ? `CONNECTED @ ${selectedBaud} bps` : 'NOT CONNECTED'}
         </span>
@@ -366,7 +400,7 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
             </select>
           </label>
           {!isConnected ? (
-            <button type="button" onClick={connect} disabled={!serial} className="flex items-center gap-1 px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-xs font-semibold">
+            <button type="button" onClick={connect} disabled={!serial} className="flex items-center gap-1 px-2 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-xs font-semibold">
               <Usb className="w-3.5 h-3.5" /> CONNECT PORT
             </button>
           ) : (
@@ -393,51 +427,83 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
       <div className="flex gap-1 border-b border-slate-800">
         {TABS.map(([id, label, Icon]) => (
           <button key={id} type="button" onClick={() => setTab(id)}
-            className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold border-b-2 -mb-px ${tab === id ? 'border-cyan-400 text-cyan-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+            className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold border-b-2 -mb-px ${tab === id ? 'border-cyan-400 text-cyan-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
             <Icon className="w-3.5 h-3.5" /> {label}
           </button>
         ))}
       </div>
 
       {tab === 'live' && (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
           {!isConnected && (
-            <div className="text-xs text-slate-500 border border-dashed border-slate-800 rounded p-4 text-center">
+            <div className="text-xs text-slate-500 border border-dashed border-slate-800 rounded p-2 text-center">
               Connect a port carrying CRSF (an ELRS TX module, a receiver or a flight controller on the CRSF line) to see live data.
               Values appear only when frames arrive; nothing here is simulated.
             </div>
           )}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 @lg:grid-cols-4 gap-2">
             <Stat label="Uplink LQ" value={fmt(link?.upLq, 0, '%')} sub={`SNR ${fmt(link?.upSnr, 0, ' dB')}`} />
             <Stat label="Uplink RSSI" value={link ? `${link.upRssi1} / ${link.upRssi2} dBm` : '—'} sub={`ant ${link?.antenna ?? '—'}`} />
             <Stat label="Downlink LQ" value={fmt(link?.downLq, 0, '%')} sub={`RSSI ${link ? `${link.downRssi} dBm` : '—'}`} />
             <Stat label="TX power" value={link?.upPowerMw != null ? `${link.upPowerMw} mW` : '—'} sub={link ? `RF mode index ${link.rfMode}` : ''} />
           </div>
-          <div className="bg-slate-900/50 border border-slate-800 rounded p-3">
-            <div className="flex items-center gap-2 text-[11px] text-slate-400 mb-2"><Signal className="w-3.5 h-3.5" /> LINK TREND</div>
+          <div className="bg-slate-900/50 border border-slate-800 rounded p-2">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 mb-1.5">
+              <Signal className="w-3.5 h-3.5" /> LINK TREND
+              <span title={health.reasons.join('; ') || 'Rule-of-thumb check of the latest link frame'}
+                className={`font-mono text-[10px] px-1.5 py-0.5 rounded border ${HEALTH_STYLE[health.level]}`}>
+                {health.level === 'none' ? 'NO LINK DATA' : `LINK ${health.level === 'good' ? 'OK' : health.level.toUpperCase()}`}
+              </span>
+              {health.reasons.length > 0 && <span className="text-[10px] text-slate-500 truncate">{health.reasons[0]}</span>}
+              <span className="ml-auto flex items-center gap-1">
+                <button type="button" onClick={toggleRecord} disabled={!isConnected}
+                  title="Record every link statistics frame (up to 20000) for CSV export"
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] disabled:opacity-40 ${snap.recording ? 'bg-rose-800 hover:bg-rose-700' : 'bg-slate-800 hover:bg-slate-700'}`}>
+                  <Circle className={`w-2.5 h-2.5 ${snap.recording ? 'fill-rose-300 text-rose-300' : ''}`} /> {snap.recording ? `REC ${snap.recCount}` : 'REC'}
+                </button>
+                <button type="button" onClick={downloadCsv} disabled={snap.linkHist.length === 0}
+                  title="Download the recording (or the last 120 frames if nothing was recorded) as CSV"
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-[11px]">
+                  <Download className="w-3 h-3" /> CSV
+                </button>
+              </span>
+            </div>
             <LinkTrend hist={snap.linkHist} />
+            {summary.count > 0 && (
+              <div className="mt-1.5 overflow-auto">
+                <table className="w-full text-[10px] font-mono text-slate-400">
+                  <caption className="text-left text-slate-600">Last {summary.count} link frames ({(summary.durationMs / 1000).toFixed(1)} s) · dropouts (LQ under 50%): {summary.dropouts}</caption>
+                  <thead className="text-slate-500 text-left"><tr><th>metric</th><th>min</th><th>avg</th><th>max</th></tr></thead>
+                  <tbody>
+                    {[['Uplink LQ %', summary.upLq, 0], ['Uplink RSSI 1 dBm', summary.upRssi1, 0], ['Uplink RSSI 2 dBm', summary.upRssi2, 0], ['Uplink SNR dB', summary.upSnr, 1], ['Downlink LQ %', summary.downLq, 0]].map(([n, st, d]) => (
+                      <tr key={n}><td>{n}</td><td>{fmt(st?.min, d)}</td><td>{fmt(st?.avg, d)}</td><td>{fmt(st?.max, d)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-          <div className="grid md:grid-cols-2 gap-3">
-            <div className="bg-slate-900/50 border border-slate-800 rounded p-3">
+          <div className="grid @xl:grid-cols-2 gap-2">
+            <div className="bg-slate-900/50 border border-slate-800 rounded p-2">
               <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
                 <span className="flex items-center gap-2"><Activity className="w-3.5 h-3.5" /> RC CHANNELS (µs)</span>
                 <span className="font-mono text-slate-500">{rc ? 'frames received' : ''}</span>
               </div>
               <ChannelBars us={rc?.us} />
             </div>
-            <div className="flex flex-col gap-3">
-              <div className="bg-slate-900/50 border border-slate-800 rounded p-3 grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-2">
+              <div className="bg-slate-900/50 border border-slate-800 rounded p-2 grid grid-cols-2 gap-2">
                 <Stat label="Battery" value={bat ? fmt(bat.voltageV, 1, ' V') : '—'} sub={bat ? `${fmt(bat.currentA, 1, ' A')} · ${bat.capacityMah} mAh used · ${bat.remainingPct}%` : ''} />
                 <Stat label="Flight mode" value={snap.flightMode ?? '—'} />
                 <Stat label="Attitude (deg)" value={att ? `P ${att.pitchDeg.toFixed(1)} R ${att.rollDeg.toFixed(1)}` : '—'} sub={att ? `Y ${att.yawDeg.toFixed(1)}` : ''} />
                 <Stat label="GPS" value={gps ? `${gps.lat.toFixed(5)}, ${gps.lon.toFixed(5)}` : '—'} sub={gps ? `${gps.satellites} sats · ${gps.altitudeM} m · ${gps.groundspeedKmh.toFixed(1)} km/h` : ''} />
               </div>
-              <div className="bg-slate-900/50 border border-slate-800 rounded p-3">
-                <div className="flex items-center gap-2 text-[11px] text-slate-400 mb-2"><Compass className="w-3.5 h-3.5" /> FRAMES SEEN</div>
+              <div className="bg-slate-900/50 border border-slate-800 rounded p-2">
+                <div className="flex items-center gap-2 text-[11px] text-slate-400 mb-1.5"><Compass className="w-3.5 h-3.5" /> FRAMES SEEN (count · Hz)</div>
                 <div className="text-[11px] font-mono text-slate-400 grid grid-cols-2 gap-x-3 gap-y-0.5 max-h-28 overflow-auto">
                   {Object.keys(counts).length === 0 && <span className="text-slate-600 col-span-2">None yet.</span>}
                   {Object.entries(counts).map(([t, n]) => (
-                    <span key={t} className="flex justify-between gap-2"><span>{FRAME_TYPE_NAMES[t] || hex2(Number(t))}</span><span>{n}</span></span>
+                    <span key={t} className="flex justify-between gap-2"><span>{FRAME_TYPE_NAMES[t] || hex2(Number(t))}</span><span>{n} · {fmt(snap.rates[t], 0)} Hz</span></span>
                   ))}
                 </div>
                 <div className="text-[10px] font-mono text-slate-600 mt-2">
@@ -450,8 +516,8 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'params' && (
-        <div className="flex flex-col gap-3">
-          <div className="bg-slate-900/50 border border-slate-800 rounded p-3 flex flex-col gap-2">
+        <div className="flex flex-col gap-2">
+          <div className="bg-slate-900/50 border border-slate-800 rounded p-2 flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" onClick={ping} disabled={!isConnected || reading} className="flex items-center gap-1 px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-xs font-semibold">
                 <Search className="w-3.5 h-3.5" /> PING DEVICES
@@ -461,7 +527,7 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
             {devices.length === 0 ? (
               <div className="text-[11px] text-slate-600">No device info received yet. Devices answer a ping with a device info frame (0x29).</div>
             ) : (
-              <div className="grid md:grid-cols-2 gap-2">
+              <div className="grid @lg:grid-cols-2 gap-2">
                 {devices.map((d) => {
                   const active = d.address === selectedAddr;
                   return (
@@ -506,7 +572,7 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
           {writeMsg && <div className="text-xs font-mono text-slate-300 bg-slate-900 border border-slate-800 rounded p-2">{writeMsg}</div>}
 
           {paramList.length === 0 ? (
-            <div className="text-xs text-slate-600 border border-dashed border-slate-800 rounded p-4 text-center">
+            <div className="text-xs text-slate-600 border border-dashed border-slate-800 rounded p-2 text-center">
               {selected ? 'Read the parameters to list them here.' : 'Ping devices and select one to browse its parameters.'}
             </div>
           ) : (
@@ -599,7 +665,7 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
               <Download className="w-3 h-3" /> DOWNLOAD .TXT
             </button>
           </div>
-          <div className="font-mono text-[11px] bg-black border border-slate-800 rounded h-96 overflow-auto p-2">
+          <div className="font-mono text-[11px] bg-black border border-slate-800 rounded h-72 @lg:h-96 overflow-auto p-2">
             {snap.log.length === 0 && <div className="text-slate-600">No frames yet.</div>}
             {snap.log.filter((e) => !(hideRc && e.type === FRAME_TYPE.RC_CHANNELS_PACKED)).slice().reverse().map((e) => (
               <div key={e.id} className="whitespace-nowrap">
@@ -617,11 +683,15 @@ export default function CrsfTelemetryWorkbench({ onLogMessage }) {
         </div>
       )}
 
-      <div className="text-[10px] text-slate-600 flex items-center gap-1">
-        <Plane className="w-3 h-3" /> Decoded: RC channels, link statistics, battery, GPS, attitude, flight mode, device info.
-        <Battery className="w-3 h-3 ml-2" /> Parameter write support: integer, float, text select and command.
-        <Satellite className="w-3 h-3 ml-2" /> Frames are not sent unless you press a button.
-      </div>
+      <details className="text-[10px] text-slate-600">
+        <summary className="cursor-pointer select-none">About this view</summary>
+        <div className="flex flex-wrap items-center gap-1 mt-1">
+          <Plane className="w-3 h-3" /> Decoded: RC channels, link statistics, battery, GPS, attitude, flight mode, device info.
+          <Battery className="w-3 h-3 ml-2" /> Parameter write support: integer, float, text select and command.
+          <Satellite className="w-3 h-3 ml-2" /> Frames are not sent unless you press a button.
+          Link health is a rule of thumb (LQ, best-antenna RSSI, SNR), not part of the CRSF spec.
+        </div>
+      </details>
     </div>
   );
 }
