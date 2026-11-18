@@ -8,11 +8,11 @@ import BitConverterWorkbench from '../src/components/tools/BitConverterWorkbench
 describe('BitConverterWorkbench', () => {
   it('renders the idle Number tab without a browser', () => {
     const html = renderToString(<BitConverterWorkbench />);
-    expect(html).toContain('Bits &amp; Numbers Converter');
-    expect(html).toContain('Offline.');
+    expect(html).toContain('Calc');
+    expect(html).toContain('Expression');
     expect(html).toContain('Number');
     expect(html).toContain('Bits &amp; fields');
     expect(html).toContain('Fixed-point');
-    expect(html).toContain('0xDEADBEEF');
+    expect(html).toContain('0xF0 | 0x0F');
   });
 });

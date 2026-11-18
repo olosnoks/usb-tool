@@ -522,3 +522,46 @@ describe('byte input and data inspector', () => {
     expect(row(empty, 'uint8').note).toContain('0 left');
   });
 });
+
+import { reverseBits, toggleFloatBit, floatNeighbors, evalExpression } from '../src/utils/bitConverter.js';
+
+describe('polish additions', () => {
+  it('reverseBits', () => {
+    expect(reverseBits(0x01n, 8)).toBe(0x80n);
+    expect(reverseBits(0x0Fn, 8)).toBe(0xF0n);
+    expect(reverseBits(0x1n, 32)).toBe(0x80000000n);
+  });
+  it('toggleFloatBit flips sign and checks range', () => {
+    expect(toggleFloatBit('single', 0x3F800000n, 31)).toBe(0xBF800000n);
+    expect(() => toggleFloatBit('half', 0n, 16)).toThrow();
+  });
+  it('floatNeighbors', () => {
+    expect(floatNeighbors('single', 0x3F800000n)).toEqual({ up: 0x3F800001n, down: 0x3F7FFFFFn });
+    expect(floatNeighbors('single', 0xBF800000n)).toEqual({ up: 0xBF7FFFFFn, down: 0xBF800001n });
+    expect(floatNeighbors('half', 0n)).toEqual({ up: 1n, down: 0x8001n });
+    expect(floatNeighbors('half', 0x7C00n).up).toBe(null);
+    expect(floatNeighbors('half', 0xFC00n).down).toBe(null);
+    expect(floatNeighbors('half', 0x7E00n)).toEqual({ up: null, down: null });
+  });
+  it('evalExpression precedence and radix', () => {
+    expect(evalExpression('1 + 2 * 3').value).toBe(7n);
+    expect(evalExpression('(1 + 2) * 3').value).toBe(9n);
+    expect(evalExpression('0xFF & ~0x0F').value).toBe(0xF0n);
+    expect(evalExpression('1 << 4 | 0b11').value).toBe(19n);
+    expect(evalExpression('-1', 8).value).toBe(255n);
+    expect(evalExpression('-1', 8).signed).toBe(-1n);
+    expect(evalExpression('0xFFFFFFFF + 1', 32).value).toBe(0n);
+    expect(evalExpression('0xFFFFFFFF + 1', 32).wrapped).toBe(true);
+    expect(evalExpression('-7 / 2').signed).toBe(-3n);
+    expect(evalExpression('2 ^ 3 & 1').value).toBe(3n);
+  });
+  it('evalExpression errors', () => {
+    expect(evalExpression('1 / 0').ok).toBe(false);
+    expect(evalExpression('(1 + 2').ok).toBe(false);
+    expect(evalExpression('1 +').ok).toBe(false);
+    expect(evalExpression('1 2').ok).toBe(false);
+    expect(evalExpression('1 $ 2').ok).toBe(false);
+    expect(evalExpression('1 << 999').ok).toBe(false);
+    expect(evalExpression('').ok).toBe(false);
+  });
+});

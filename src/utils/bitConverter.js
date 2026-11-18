@@ -634,3 +634,123 @@ export function inspectBytes(bytes, offset = 0) {
   row('unix ms u64 BE', 8, () => big(false, true));
   return rows;
 }
+
+/* ---------------------------------------------------------------- additions */
+
+/** Reverse the order of the low `width` bits (bit 0 becomes bit width-1). */
+export function reverseBits(value, width) {
+  const u = toUnsigned(value, width);
+  let out = 0n;
+  for (let i = 0; i < width; i++) if ((u >> BigInt(i)) & 1n) out |= 1n << BigInt(width - 1 - i);
+  return out;
+}
+
+/** Flip one bit of a float bit pattern (index 0 = LSB). Returns the new unsigned pattern. */
+export function toggleFloatBit(key, bitsIn, index) {
+  const f = floatFormat(key);
+  if (!Number.isInteger(index) || index < 0 || index >= f.bits) throw new RangeError('Bit index out of range');
+  return BigInt.asUintN(f.bits, BigInt(bitsIn)) ^ (1n << BigInt(index));
+}
+
+/**
+ * Neighbouring float patterns: the next value up and down in magnitude-ordered numeric order.
+ * Returns { up, down } as bit patterns, or null for a direction with no finite/infinite neighbour
+ * (NaN input gives { up: null, down: null }).
+ */
+export function floatNeighbors(key, bitsIn) {
+  const f = floatFormat(key);
+  const u = BigInt.asUintN(f.bits, BigInt(bitsIn));
+  const signBit = 1n << BigInt(f.bits - 1);
+  const mag = u & (signBit - 1n);
+  const infMag = BigInt(f.maxExp) << BigInt(f.mbits);
+  if (mag > infMag) return { up: null, down: null };
+  const neg = (u & signBit) !== 0n;
+  const step = (m, delta) => m + delta;
+  // Move toward +inf (dir +1) or -inf (dir -1) in value order.
+  const move = (dir) => {
+    if (mag === 0n) {
+      // +0 and -0 both step to the smallest subnormals.
+      return dir > 0 ? 1n : signBit | 1n;
+    }
+    const grow = (dir > 0) !== neg; // magnitude grows when moving away from zero
+    if (grow) return mag === infMag ? null : (neg ? signBit : 0n) | step(mag, 1n);
+    return (neg ? signBit : 0n) | step(mag, -1n);
+  };
+  return { up: move(1), down: move(-1) };
+}
+
+/**
+ * Evaluate a C-style integer expression at a width. Operators by precedence: unary - + ~,
+ * * / %, + -, << >>, &, ^, |. Literals as in parseNumber. Math is exact (BigInt) and the
+ * result is wrapped to the width, so the same text gives the same bits as C unsigned math.
+ * Division truncates toward zero.
+ */
+export function evalExpression(text, width = 32) {
+  if (typeof text !== 'string' || !text.trim()) return { ok: false, error: 'Empty expression' };
+  const tokens = [];
+  const re = /\s*(?:(0[xXbBoO][0-9a-fA-F_]+|[0-9][0-9_]*)|(<<|>>|[-+*/%&|^~()]))/y;
+  let pos = 0;
+  while (pos < text.length) {
+    if (/^\s*$/.test(text.slice(pos))) break;
+    re.lastIndex = pos;
+    const m = re.exec(text);
+    if (!m) return { ok: false, error: `Unexpected character at position ${pos + 1}: "${text.slice(pos).trim()[0]}"` };
+    if (m[1] !== undefined) {
+      const p = parseNumber(m[1]);
+      if (!p.ok) return { ok: false, error: p.error };
+      tokens.push({ n: p.value });
+    } else tokens.push({ op: m[2] });
+    pos = re.lastIndex;
+  }
+  let i = 0;
+  const fail = (error) => { throw new Error(error); };
+  const peek = () => tokens[i]?.op;
+  const binary = (next, ops, apply) => () => {
+    let l = next();
+    while (ops.includes(peek())) {
+      const op = tokens[i++].op;
+      l = apply(op, l, next());
+    }
+    return l;
+  };
+  const unary = () => {
+    const op = peek();
+    if (op === '-' || op === '+' || op === '~') {
+      i++;
+      const v = unary();
+      return op === '-' ? -v : op === '~' ? ~v : v;
+    }
+    if (op === '(') {
+      i++;
+      const v = orExpr();
+      if (peek() !== ')') fail('Missing closing parenthesis');
+      i++;
+      return v;
+    }
+    const t = tokens[i];
+    if (!t || t.op) fail(t ? `Unexpected "${t.op}"` : 'Expression ends early');
+    i++;
+    return t.n;
+  };
+  const mul = binary(unary, ['*', '/', '%'], (op, a, b) => {
+    if (op === '*') return a * b;
+    if (b === 0n) fail('Division by zero');
+    return op === '/' ? a / b : a % b;
+  });
+  const add = binary(mul, ['+', '-'], (op, a, b) => (op === '+' ? a + b : a - b));
+  const shift = binary(add, ['<<', '>>'], (op, a, b) => {
+    if (b < 0n || b > 256n) fail('Shift count must be 0 to 256');
+    return op === '<<' ? a << b : a >> b;
+  });
+  const andE = binary(shift, ['&'], (_o, a, b) => a & b);
+  const xorE = binary(andE, ['^'], (_o, a, b) => a ^ b);
+  const orExpr = binary(xorE, ['|'], (_o, a, b) => a | b);
+  try {
+    const raw = orExpr();
+    if (i < tokens.length) fail(`Unexpected "${tokens[i].op ?? tokens[i].n}"`);
+    const u = toUnsigned(raw, width);
+    return { ok: true, raw, value: u, signed: toSigned(u, width), wrapped: raw !== u && raw !== toSigned(u, width) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
