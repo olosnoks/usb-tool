@@ -739,6 +739,7 @@ If the device is unplugged, the page keeps showing what was read before it disco
 ### 4. Implementation & Architecture
 
 - **Driver:** [\`src/utils/usbDescriptors.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/usbDescriptors.js) — all pure functions. \`describeDevice\` walks the USBDevice tree into a named structure, \`classDetail\` decodes class/subclass/protocol, \`describeEndpoint\` rebuilds the address byte and names the transfer type, and \`toTextReport\` renders the summary dump. The raw-descriptor side (\`fetchRawDescriptors\`, \`parseConfigDescriptor\`, \`parseBos\`, \`toLsusbText\`) fetches and decodes the descriptors, and \`src/utils/usbIds.js\` supplies usb.ids names.
+- **File list helpers:** [\`src/utils/ptpFileTools.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/ptpFileTools.js) — filter, sort, summary, CSV export and download-name templates, tested in [\`tests/ptpFileTools.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/ptpFileTools.test.js).
 - **Workbench:** [\`src/components/tools/UsbDescriptorExplorer.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/UsbDescriptorExplorer.jsx) renders the summary, the nested configuration/interface/endpoint view, and the granted-device list (\`navigator.usb.getDevices()\`).
 - **Tests:** [\`tests/usbDescriptors.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/usbDescriptors.test.js) checks class decoding, BCD/ID formatting, endpoint address assembly and the full tree against hand-built device objects.
 
@@ -930,17 +931,22 @@ Key operations: \`OpenSession\`, \`GetDeviceInfo\`, \`GetStorageIDs\`, \`GetStor
 | :--- | :--- |
 | **CONNECT CAMERA (WEBUSB)** | Opens the device, opens a session, reads device info, storage and battery, and lists files. **DISCONNECT** closes the session. |
 | **Device panel** | Manufacturer, Model, Firmware, Serial, Battery (if reported), and one field per storage with free / total space. |
-| **FILES table** | Checkbox, thumbnail, Filename, Format, Size, Dimensions, Date, and a per-row download button. The header shows the object count and how many are selected. At most the first 2,000 objects are listed, and folders are hidden. |
-| **CAMERA SETTINGS** | Shown when the camera reports properties. Lists the common ones it supports (battery, exposure index, exposure time, f-number, exposure program, exposure bias, white balance, focus mode, focal length, flash mode, metering mode, image size, compression, date/time), formatted with units and names. Only settings this camera reports are shown; a writable one that offers a list of allowed values gets a dropdown, and **changes apply to the camera right away**; anything else is shown as text, marked \`(read-only)\` when the camera says so. A refresh button re-reads them. |
-| **CAMERA EVENTS** | Appears when the device has an event endpoint. Tick **listen** to log events as they happen (for example ObjectAdded, DevicePropChanged, CaptureComplete) with timestamps and parameters; try pressing the shutter or changing a setting. |
-| **THUMBNAILS** | Fetches embedded thumbnails for the listed files. |
-| **DOWNLOAD SELECTED / DOWNLOAD ALL** | Saves several files into a folder you pick (Chrome/Edge), or as a single zip if the browser cannot pick a folder. |
+| **FILES table** | Checkbox, thumbnail, Filename, Format, Size, Dimensions, Date (the last two are hidden in a narrow window), and a per-row download button. The header shows the object count, total size and how many are selected. At most the first 2,000 objects are listed, and folders are hidden. |
+| **Filter / type / sort bar** | Filter by file name, by type (Images, RAW, Video, Other, guessed from the PTP format code and the file extension) and sort by camera order, name, date taken or size, ascending or descending. This only changes what is shown; the header then reads "N of M". The select-all checkbox and the download buttons work on the files shown. |
+| **CAMERA SETTINGS** | A collapsed section (click to open), shown when the camera reports properties. Lists the common ones it supports (battery, exposure index, exposure time, f-number, exposure program, exposure bias, white balance, focus mode, focal length, flash mode, metering mode, image size, compression, date/time), formatted with units and names. Only settings this camera reports are shown; a writable one that offers a list of allowed values gets a dropdown, and **changes apply to the camera right away**; anything else is shown as text, marked \`(read-only)\` when the camera says so. A refresh button re-reads them. |
+| **CAMERA EVENTS** | A collapsed section that appears when the device has an event endpoint. Tick **listen** to log events as they happen (for example ObjectAdded, DevicePropChanged, CaptureComplete) with timestamps and parameters; try pressing the shutter or changing a setting. |
+| **THUMBS** | Fetches embedded thumbnails for the listed files. |
+| **SELECTED / ALL** | Saves several files into a folder you pick (Chrome/Edge), or as a single zip if the browser cannot pick a folder. ALL means every file currently shown, so it respects the filter. |
+| **Download file names** | Optional name template with tokens \`{name}\` (no extension), \`{ext}\`, \`{date}\` (YYYYMMDD from the capture date), \`{time}\` (HHMMSS), \`{n}\` (position in the download, 4 digits) and \`{handle}\`. The original extension is added if the template omits it. Empty keeps the camera's names. Characters that are illegal in file names become \`_\`, and duplicate names get " (2)", " (3)" so nothing is overwritten (cameras that reuse a name in different folders used to clash). Applies to bulk downloads only. |
+| **CSV** | Saves the files shown (handle, filename, format, size in bytes, width, height, captured, modified, protected) as a CSV file. |
 | **DELETE** | Appears only if the device supports \`DeleteObject\`; deletes the selected files after a confirmation. This cannot be undone. |
-| **UPLOAD FILE** | Appears only if the device supports \`SendObjectInfo\` and \`SendObject\`; copies a file from your computer to the camera's first storage after a confirmation, guessing the object format from the file extension, then re-lists files. Nothing is retried: a full or read-only card is reported with the camera's own response name. |
+| **UPLOAD** | Appears only if the device supports \`SendObjectInfo\` and \`SendObject\`; copies a file from your computer to the camera's first storage after a confirmation, guessing the object format from the file extension, then re-lists files. Nothing is retried: a full or read-only card is reported with the camera's own response name. |
 | **CAPTURE** | Appears only if the device supports \`InitiateCapture\`; fires the shutter, then re-lists files and selects the new ones. |
 | **REFRESH** | Re-list the files (after taking a new photo, say). |
 
-There is no simulated demo camera.
+There is no simulated demo camera. Live view and tethered capture-and-download are not offered.
+
+Similar tools: gphoto2 and Entangle (Linux), digiCamControl (Windows) and the vendor apps. They add live view and vendor-specific control, which this tool does not; this one needs no install.
 
 ---
 
