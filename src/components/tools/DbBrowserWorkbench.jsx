@@ -194,10 +194,10 @@ export default function DbBrowserWorkbench({ onLogMessage }) {
   const log = (m) => onLogMessage?.(m);
   return (
     <div className="w-full min-w-0 max-w-full text-gray-200">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-2">
         <div className="flex rounded overflow-hidden border border-slate-800 text-xs">
-          <button onClick={() => setTab('sqlite')} className={`px-3 py-1.5 inline-flex items-center gap-1.5 ${tab === 'sqlite' ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}><Database size={13} /> SQLite</button>
-          <button onClick={() => setTab('endpoint')} className={`px-3 py-1.5 inline-flex items-center gap-1.5 ${tab === 'endpoint' ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}><Globe size={13} /> Endpoint</button>
+          <button onClick={() => setTab('sqlite')} className={`px-2.5 py-1 inline-flex items-center gap-1.5 ${tab === 'sqlite' ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}><Database size={13} /> SQLite</button>
+          <button onClick={() => setTab('endpoint')} className={`px-2.5 py-1 inline-flex items-center gap-1.5 ${tab === 'endpoint' ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}><Globe size={13} /> Endpoint</button>
         </div>
       </div>
       <div className={tab === 'sqlite' ? '' : 'hidden'}><SqliteStudio log={log} /></div>

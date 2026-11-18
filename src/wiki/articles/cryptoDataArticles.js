@@ -205,6 +205,13 @@ The SQLite engine is **sql.js** (SQLite compiled to WebAssembly). The database l
 | **Edit Pragmas** | Read and set SQLite PRAGMAs (for example \`foreign_keys\`, \`user_version\`, \`page_size\`) |
 | **Execute SQL** | Multi-tab SQL editor with results grid. Saved tabs are remembered in your browser |
 
+### Execute SQL: history, query plan and copy
+
+- **Execute all** (Ctrl+Enter or F5) runs the whole tab, or only the selection if there is one. **Execute current** (Shift+F5 or Ctrl+Shift+Enter) runs the statement under the cursor.
+- **Explain** runs \`EXPLAIN QUERY PLAN\` on the statement under the cursor (or the selection) and shows SQLite's plan as an indented tree. Lines starting with a full table scan are amber; lines that use an index or primary key are green. The statement itself is not executed. It works for SELECT, WITH, INSERT, UPDATE, DELETE, REPLACE and VALUES.
+- **History** opens a list of statements you have executed. Identical statements (ignoring whitespace) are merged and show a run count and the last run time. Click one to replace the editor text, double-click to open it in a new tab. The pin icon keeps a statement at the top and exempts it from **Clear**. Use the search box to filter. History holds up to 200 entries and is stored in this browser's local storage only; it is not part of a project file.
+- Above a result grid, **TSV** copies the result as tab-separated text (pastes into spreadsheets) and **MD** copies it as a Markdown table. BLOB values are copied as \`<blob NB>\` in these two formats. **CSV** and **JSON** still download files.
+
 ### Write Changes, Revert and undo
 
 Edits are applied to the in-memory copy. Nothing reaches your file until you click **Write Changes**. The toolbar highlights the button when there are unwritten changes, and the page warns before you leave with unwritten changes. Revert discards them. Changes to an *attached* database are not part of Write Changes / Revert; use the "save copy" action next to it.
@@ -238,6 +245,10 @@ Always work on a copy of evidence, never the original. Opening a WAL-mode databa
 The whole file is read into browser memory, so very large databases (hundreds of MB or more) can exhaust the tab's memory. If a large file fails to open, use the command-line client, or export just the tables you need. The *journal_mode* pragma here only affects the in-memory copy.
 
 Encrypted databases (SQLCipher) cannot be opened: they are not readable by stock SQLite.
+
+## Similar tools
+
+DB Browser for SQLite (desktop, the model for this tool's layout and .sqbpro projects), SQLite Viewer web apps (browser-only viewers), and Beekeeper Studio (desktop, query history and saved queries). This tool has no SQLCipher support, no WAL replay, and no visual query builder.
 
 ## Endpoint tab
 
