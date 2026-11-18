@@ -27,6 +27,16 @@ The **ESP32 Partition Table & NVS Editor** works offline on files you already ha
 3. Edit each row: name, type (app or data), subtype, offset, size, and the **encrypted** and **readonly** flags. A blank offset is **auto**. It is placed after the previous partition and aligned to 64 KiB for app partitions and 4 KiB for data partitions, as \`gen_esp32part.py\` does. Sizes accept \`K\` and \`M\` suffixes, for example \`64K\` or \`1M\`.
 4. Errors are shown per row and block the binary and dump outputs. The checks are: alignment (app 0x10000, data 0x1000); app size a multiple of 0x1000; nothing below 0x9000; no overlaps; unique names of at most 16 characters; the flash size (when a dump is loaded); an \`nvs\` partition smaller than 0x3000 must be readonly; ota and coredump data cannot be readonly; at most one otadata; and at most 95 entries.
 
+Layout helpers:
+- **Preset** replaces the table with one of four layouts: single app (the ESP-IDF default), two OTA slots, two OTA slots plus a SPIFFS partition that takes the rest of the flash, or factory plus two OTA slots. Slot sizes are computed for the selected flash size (up to 3 MiB each, 64 KiB aligned). If no flash size is chosen, 4 MiB is used. Offsets stay on auto.
+- **Flash** selects the flash size (1 to 64 MiB) when no dump is loaded, so size checks and the map work on a CSV alone. With a dump loaded, the dump size is used and the selector is locked.
+- **Fill to end** resizes the last partition (by offset) so it ends at the end of flash, rounded down to 4 KiB.
+- **Move up / down** (arrows in each row) reorders rows. This changes auto-placed offsets, because they follow list order.
+- **Copy CSV** copies the CSV text to the clipboard.
+- A **summary line** shows app, data and reserved bytes, and free space and any unallocated tail when the flash size is known.
+- **Layout advice** (amber, only shown when there are no errors) warns about things gen_esp32part accepts but that usually cause trouble: OTA slots without otadata, otadata not 0x2000 bytes, a single OTA slot, OTA slots of different sizes, no factory app or ota_0, no app, no nvs, no phy_init, and several filesystem partitions.
+- **Build-system snippets** (collapsed) give text for \`platformio.ini\` (\`board_build.partitions\`), ESP-IDF \`sdkconfig.defaults\` and the \`gen_esp32part.py --verify\` command. They are text to copy; the tool cannot apply them to a project.
+
 Outputs:
 - **Export CSV** writes the table in gen_esp32part syntax with resolved offsets.
 - **partitions.bin (0xC00)** writes the binary table with its MD5 entry, at the 0xC00 size ESP-IDF uses.
@@ -68,6 +78,10 @@ After each edit the image is parsed again. Save the result with **NVS partition 
 - *"Every page is erased"*: the NVS partition has never been written, or the wrong partition was opened.
 - *"Most entries fail their CRC"*: the partition is probably encrypted, or the offset is wrong.
 - An edit reports "must stay exactly N bytes": a string edit must keep the same length. Change other lengths in your firmware instead.
+
+## Similar tools
+
+Compared against: ESP-IDF \`gen_esp32part.py\` and its \`--verify\` option, ESP-IDF menuconfig partition table settings, PlatformIO custom \`partitions.csv\` support, and browser partition generators. Unlike gen_esp32part, this editor works on binary dumps in both directions and also edits NVS. It does not run menuconfig, and it does not check a table against the firmware you build.
 
 ## Related tools
 

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Layers, Database, Plus, Trash2, Download, Upload, FileText, AlertTriangle, CheckCircle2, Save, Pencil, Search, ShieldAlert, Eye, EyeOff } from 'lucide-react';
+import { Layers, Database, Plus, Trash2, Download, Upload, FileText, AlertTriangle, CheckCircle2, Save, Pencil, Search, ShieldAlert, Eye, EyeOff, ArrowUp, ArrowDown, Copy, Maximize2 } from 'lucide-react';
 import {
   parseNvsPartition, editNvsValue, valueToJson, csvCell, printableText, NVS_PAGE_SIZE
 } from '../../utils/espNvs.js';
@@ -9,6 +9,7 @@ import {
   subtypeName, TYPE_APP, TYPE_DATA, MAX_ENTRIES
 } from '../../utils/espNvs/partitionTable.js';
 import { parsePartitionTable } from '../../utils/espPartitions.js';
+import { FLASH_SIZES, PRESETS, buildPreset, fillToEnd, layoutStats, lintLayout, buildSnippets } from '../../utils/espPartitionTools.js';
 
 /**
  * ESP32 partition table and NVS editor. Fully offline: it works on a flash dump (read_flash /
@@ -93,7 +94,8 @@ export default function EspPartitionEditorWorkbench({ onLogMessage }) {
   const [pasteText, setPasteText] = useState(DEFAULT_CSV);
   const [dumpTable, setDumpTable] = useState(null); // partitions as stored in the loaded dump (for NVS lookup)
 
-  const flashSize = file && file.kind === 'dump' ? file.size : undefined;
+  const [flashChoice, setFlashChoice] = useState(0); // flash size selector, used when no dump is loaded (0 = unknown)
+  const flashSize = file && file.kind === 'dump' ? file.size : (flashChoice || undefined);
 
   const { rows: numeric, errs: rowErrs } = useMemo(() => numericRows(rows), [rows]);
   // Every row stays in place so issue indexes match table rows; unparsable fields come through as null.
@@ -105,6 +107,10 @@ export default function EspPartitionEditorWorkbench({ onLogMessage }) {
   }, [rowErrs, rows, resolved, flashSize]);
   const errorCount = issues.filter((i) => i.severity === 'error').length;
   const map = useMemo(() => flashMap(resolved, flashSize), [resolved, flashSize]);
+  const stats = useMemo(() => layoutStats(resolved, flashSize), [resolved, flashSize]);
+  const advice = useMemo(() => (errorCount === 0 ? lintLayout(resolved) : []), [errorCount, resolved]);
+  const snippets = useMemo(() => buildSnippets('partitions.csv', flashSize), [flashSize]);
+  const [snippetsOpen, setSnippetsOpen] = useState(false);
 
   const loadImage = async (f) => {
     try {
@@ -154,6 +160,34 @@ export default function EspPartitionEditorWorkbench({ onLogMessage }) {
   const updateRow = (id, patch) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const removeRow = (id) => setRows((rs) => rs.filter((r) => r.id !== id));
   const addRow = () => setRows((rs) => [...rs, toEditRow({ name: `part${rs.length + 1}`, type: TYPE_DATA, subtype: 0x06, offset: null, size: 0x1000 })]);
+  const moveRow = (id, dir) => setRows((rs) => {
+    const i = rs.findIndex((r) => r.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= rs.length) return rs;
+    const next = rs.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
+  const applyPreset = (id) => {
+    if (!id) return;
+    const size = flashSize || 0x400000;
+    try {
+      setRows(buildPreset(id, size).map(toEditRow));
+      if (!flashSize) setFlashChoice(size);
+      setNotice({ level: 'ok', text: `Preset applied for ${fmtBytes(size)} flash. Offsets are left on auto; review and edit.` });
+    } catch (e) { setNotice({ level: 'error', text: e.message }); }
+  };
+  const fillLast = () => {
+    if (!flashSize) return;
+    try {
+      const r = fillToEnd(resolved, flashSize);
+      setRows(rows.map((row, i) => (r.rows[i].size !== resolved[i].size ? { ...row, sizeText: formatSize(r.rows[i].size) } : row)));
+      setNotice({ level: 'ok', text: `"${r.name}" resized from ${fmtBytes(r.oldSize)} to ${fmtBytes(r.newSize)} to reach the end of flash.` });
+    } catch (e) { setNotice({ level: 'error', text: e.message }); }
+  };
+  const copyText = async (text, what) => {
+    try { await navigator.clipboard.writeText(text); setNotice({ level: 'ok', text: `${what} copied.` }); } catch { setNotice({ level: 'error', text: 'Clipboard is not available in this browser context.' }); }
+  };
   const setType = (id, type) => setRows((rs) => rs.map((r) => {
     if (r.id !== id) return r;
     const table = subtypesFor(type);
@@ -268,43 +302,52 @@ export default function EspPartitionEditorWorkbench({ onLogMessage }) {
 
   return (
     <div className="flex flex-col h-full w-full text-gray-200 bg-slate-950 font-sans overflow-hidden">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-900/60">
-        <Layers size={16} className="text-cyan-400" />
-        <div className="text-sm font-semibold tracking-wide">ESP32 PARTITION TABLE &amp; NVS EDITOR</div>
-        <div className="flex-1" />
-        <label className={`${btn} cursor-pointer`}>
-          <Upload size={12} /> Open .bin
-          <input type="file" accept=".bin,.img,application/octet-stream" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) loadImage(f); }} />
-        </label>
-        {file && <span className="text-[11px] font-mono text-slate-400">{file.name} · {fmtBytes(file.size)} · {file.kind}{file.modified ? ' · modified' : ''}</span>}
-      </div>
-
-      <div className="flex gap-1 px-3 pt-2 border-b border-slate-800">
+      <div className="flex flex-wrap items-center gap-1.5 px-2 pt-1.5 border-b border-slate-800">
         {TABS.map(([id, label, Icon]) => (
-          <button key={id} onClick={() => setTab(id)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono rounded-t border-b-2 ${tab === id ? 'border-cyan-400 text-cyan-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          <button key={id} onClick={() => setTab(id)} className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-mono rounded-t border-b-2 ${tab === id ? 'border-cyan-400 text-cyan-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
             <Icon size={12} /> {label}
           </button>
         ))}
+        <div className="flex-1" />
+        {file && <span className="text-[10px] font-mono text-slate-400 truncate max-w-[50%]" title={file.name}>{file.name} · {fmtBytes(file.size)} · {file.kind}{file.modified ? ' · modified' : ''}</span>}
+        <label className={`${btn} cursor-pointer mb-1`} title="Open a flash dump, partitions.bin or nvs.bin">
+          <Upload size={12} /> Open .bin
+          <input type="file" accept=".bin,.img,application/octet-stream" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) loadImage(f); }} />
+        </label>
       </div>
 
       {notice && (
-        <div className={`mx-3 mt-2 px-2.5 py-1.5 rounded border text-[11px] flex items-start gap-2 ${notice.level === 'error' ? 'border-red-900 bg-red-950/30 text-red-300' : notice.level === 'warn' ? 'border-amber-900 bg-amber-950/30 text-amber-200' : 'border-emerald-900 bg-emerald-950/20 text-emerald-300'}`}>
+        <div className={`mx-2 mt-2 px-2 py-1 rounded border text-[11px] flex items-start gap-2 ${notice.level === 'error' ? 'border-red-900 bg-red-950/30 text-red-300' : notice.level === 'warn' ? 'border-amber-900 bg-amber-950/30 text-amber-200' : 'border-emerald-900 bg-emerald-950/20 text-emerald-300'}`}>
           {notice.level === 'ok' ? <CheckCircle2 size={13} className="mt-0.5 shrink-0" /> : <AlertTriangle size={13} className="mt-0.5 shrink-0" />}
           <span className="flex-1">{notice.text}</span>
           <button onClick={() => setNotice(null)} className="text-slate-500 hover:text-slate-300">dismiss</button>
         </div>
       )}
 
-      <div className="flex-1 min-h-0 overflow-auto p-3 space-y-3">
+      <div className="flex-1 min-h-0 overflow-auto p-2 space-y-2">
         {tab === 'partitions' && (
           <>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <label className={`${btn} cursor-pointer`}>
                 <FileText size={12} /> Import CSV
                 <input type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={onCsvFile} />
               </label>
               <button className={btn} onClick={() => setPasteOpen((o) => !o)}><Pencil size={12} /> {pasteOpen ? 'Hide CSV text' : 'Paste / edit CSV text'}</button>
+              <select aria-label="Layout preset" title="Replace the table with a preset layout" className={inputCls} value="" onChange={(e) => { applyPreset(e.target.value); }}>
+                <option value="">Preset...</option>
+                {PRESETS.map((p) => <option key={p.id} value={p.id} title={p.desc}>{p.label}</option>)}
+              </select>
+              <label className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                Flash
+                <select aria-label="Flash size" className={inputCls} value={file?.kind === 'dump' ? file.size : flashChoice} disabled={file?.kind === 'dump'} onChange={(e) => setFlashChoice(Number(e.target.value))}>
+                  <option value={0}>unknown</option>
+                  {file?.kind === 'dump' && !FLASH_SIZES.includes(file.size) && <option value={file.size}>{fmtBytes(file.size)} (dump)</option>}
+                  {FLASH_SIZES.map((n) => <option key={n} value={n}>{fmtBytes(n)}</option>)}
+                </select>
+              </label>
               <button className={btn} onClick={addRow} disabled={rows.length >= MAX_ENTRIES}><Plus size={12} /> Add partition</button>
+              <button className={btn} onClick={fillLast} disabled={!flashSize || resolved.length === 0} title="Resize the last partition to end at the end of flash"><Maximize2 size={12} /> Fill to end</button>
+              <button className={btn} onClick={() => copyText(toCsv(resolved), 'CSV')} disabled={resolved.length === 0} title="Copy the CSV to the clipboard"><Copy size={12} /> Copy CSV</button>
               <button className={btn} onClick={exportCsv} disabled={resolved.length === 0}><Download size={12} /> Export CSV</button>
               <button className={btn} onClick={exportBin} disabled={!binary}><Download size={12} /> partitions.bin (0xC00)</button>
               {file?.kind === 'dump' && <button className={btn} onClick={patchFullDump} disabled={!binary}><Save size={12} /> Patch table into dump</button>}
@@ -391,8 +434,10 @@ export default function EspPartitionEditorWorkbench({ onLogMessage }) {
                           <td className="px-1 py-1 text-slate-500">{end !== null ? fmtHex(end) : '—'}</td>
                           <td className="px-1 py-1"><input aria-label="Encrypted" type="checkbox" checked={r.encrypted} onChange={(e) => updateRow(r.id, { encrypted: e.target.checked })} /></td>
                           <td className="px-1 py-1"><input aria-label="Read-only" type="checkbox" checked={r.readonly} onChange={(e) => updateRow(r.id, { readonly: e.target.checked })} /></td>
-                          <td className="px-1 py-1">
-                            <button aria-label="Remove partition" className="text-slate-600 hover:text-red-400" onClick={() => removeRow(r.id)}><Trash2 size={12} /></button>
+                          <td className="px-1 py-1 whitespace-nowrap">
+                            <button aria-label="Move up" title="Move up (changes auto offsets)" className="text-slate-600 hover:text-cyan-300 disabled:opacity-30" disabled={i === 0} onClick={() => moveRow(r.id, -1)}><ArrowUp size={12} /></button>
+                            <button aria-label="Move down" title="Move down (changes auto offsets)" className="text-slate-600 hover:text-cyan-300 disabled:opacity-30" disabled={i === rows.length - 1} onClick={() => moveRow(r.id, 1)}><ArrowDown size={12} /></button>
+                            <button aria-label="Remove partition" title="Remove partition" className="text-slate-600 hover:text-red-400" onClick={() => removeRow(r.id)}><Trash2 size={12} /></button>
                           </td>
                           {rowIssues.length > 0 && (
                             <td colSpan={9} className="px-2 pb-1 text-[10px]">
@@ -417,10 +462,45 @@ export default function EspPartitionEditorWorkbench({ onLogMessage }) {
               </div>
             )}
 
+            {rows.length > 0 && (
+              <div className="text-[10px] font-mono text-slate-500 flex flex-wrap gap-x-3" data-testid="layout-stats">
+                <span>app {fmtBytes(stats.app)}</span>
+                <span>data {fmtBytes(stats.data)}</span>
+                <span>reserved {fmtBytes(stats.reserved)}</span>
+                <span>{flashSize ? `free ${fmtBytes(stats.free)} of ${fmtBytes(stats.span)}` : `span ${fmtBytes(stats.span)}`}</span>
+                {flashSize && stats.tail > 0 && <span>unallocated tail {fmtBytes(stats.tail)}</span>}
+              </div>
+            )}
+
+            {advice.length > 0 && (
+              <ul className="text-[11px] text-amber-300 space-y-0.5" aria-label="Layout advice">
+                {advice.map((m, k) => <li key={k}>advice: {m}</li>)}
+              </ul>
+            )}
+
+            {rows.length > 0 && (
+              <div>
+                <button className="text-[11px] text-slate-500 hover:text-cyan-300" onClick={() => setSnippetsOpen((o) => !o)} aria-expanded={snippetsOpen}>
+                  {snippetsOpen ? 'Hide' : 'Show'} build-system snippets (PlatformIO, ESP-IDF, gen_esp32part)
+                </button>
+                {snippetsOpen && (
+                  <div className="mt-1 space-y-1">
+                    <p className="text-[10px] text-slate-500">Text to copy into your project. This tool cannot apply it for you.</p>
+                    {Object.entries(snippets).map(([k, v]) => (
+                      <div key={k} className="relative">
+                        <pre className="bg-slate-900 border border-slate-800 rounded p-1.5 text-[10px] font-mono text-gray-300 overflow-x-auto">{v}</pre>
+                        <button className="absolute top-1 right-1 text-slate-500 hover:text-cyan-300" title={`Copy ${k} snippet`} aria-label={`Copy ${k} snippet`} onClick={() => copyText(v, 'Snippet')}><Copy size={11} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {rows.length === 0 && (
-              <div className="border border-dashed border-slate-800 rounded p-4 text-[11px] text-slate-500 leading-relaxed">
-                No table loaded. Open a full flash dump (the table is read from 0x8000), a partitions.bin, or import a
-                gen_esp32part.py CSV. Nothing is shown until a file or CSV is provided.
+              <div className="border border-dashed border-slate-800 rounded p-3 text-[11px] text-slate-500 leading-relaxed">
+                No table loaded. Open a full flash dump (the table is read from 0x8000), a partitions.bin, import a
+                gen_esp32part.py CSV, or pick a preset.
               </div>
             )}
           </>
