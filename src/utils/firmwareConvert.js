@@ -923,3 +923,130 @@ export function mergeImages(images) {
     warnings: [...new Set(warnings)],
   });
 }
+
+// ---------------------------------------------------------------------------
+// Crop / exclude, pad to alignment, insert checksum, srec_cat command export
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse address ranges: "0x1000-0x1FFF" (both ends included) or "0x1000+0x100" (start + length),
+ * separated by commas, semicolons or new lines. Returns half-open ranges {start, end}.
+ */
+export function parseRanges(text) {
+  const parts = String(text ?? '').split(/[,;\n]+/).map((p) => p.trim()).filter(Boolean);
+  if (!parts.length) throw new FirmwareError('Enter at least one range, for example 0x1000-0x1FFF');
+  return parts.map((p) => {
+    const m = /^(\S+?)\s*([+-])\s*(\S+)$/.exec(p);
+    if (!m) throw new FirmwareError(`Bad range "${p}" (use start-end or start+length)`);
+    const a = parseNumber(m[1]);
+    const b = parseNumber(m[3]);
+    if (a < 0 || b < 0) throw new FirmwareError(`Range "${p}" must not be negative`);
+    const end = m[2] === '+' ? a + b : b + 1;
+    if (end <= a) throw new FirmwareError(`Range "${p}" is empty or reversed`);
+    return { start: a, end };
+  });
+}
+
+function withSegments(image, segments) {
+  const holds = (a) => segments.some((s) => a >= s.address && a < s.address + s.data.length);
+  const keepStart = image.startAddress !== null && holds(image.startAddress);
+  return {
+    ...image,
+    segments,
+    startAddress: keepStart ? image.startAddress : null,
+    startKind: keepStart ? image.startKind : null,
+    warnings: [],
+    overlapBytes: 0,
+  };
+}
+
+/** Keep only the bytes inside the ranges (like srec_cat -crop). */
+export function cropImage(image, ranges) {
+  const chunks = [];
+  for (const r of ranges) for (const s of clipSegments(image.segments, r.start, r.end)) chunks.push(s);
+  return withSegments(image, buildSegments(chunks).segments);
+}
+
+/** Remove the bytes inside the ranges (like srec_cat -exclude). */
+export function excludeImage(image, ranges) {
+  let segs = image.segments;
+  for (const r of ranges) {
+    segs = [...clipSegments(segs, -Infinity, r.start), ...clipSegments(segs, r.end, Infinity)];
+  }
+  return withSegments(image, buildSegments(segs).segments);
+}
+
+/** Extend the end of the last segment with `fill` so the image length is a multiple of `align`. */
+export function padImageToAlign(image, align, fill = 0xff) {
+  if (!Number.isInteger(align) || align < 1) throw new FirmwareError('Alignment must be a whole number of 1 or more');
+  if (!image.segments.length || align === 1) return image;
+  const segs = image.segments.slice();
+  const last = segs[segs.length - 1];
+  const end = last.address + last.data.length;
+  const pad = (align - (end % align)) % align;
+  if (!pad) return image;
+  const data = new Uint8Array(last.data.length + pad);
+  data.set(last.data);
+  data.fill(fill & 0xff, last.data.length);
+  segs[segs.length - 1] = { address: last.address, data };
+  return { ...image, segments: segs };
+}
+
+/**
+ * Write a checksum word into the image. It covers every byte from the lowest address up to
+ * (not including) the slot, with gaps counted as `fill`. The slot defaults to the end of the image.
+ * algo: 'crc32' (same CRC-32 as the inspector) or 'sum32' (two's complement of the 32-bit byte sum).
+ * @returns {{image: object, address: number, value: number, covered: number}}
+ */
+export function insertChecksum(image, { algo = 'crc32', address = null, endian = 'little', fill = 0xff } = {}) {
+  if (!image.segments.length) throw new FirmwareError('The image is empty');
+  if (algo !== 'crc32' && algo !== 'sum32') throw new FirmwareError(`Unknown checksum: ${algo}`);
+  const { start, end } = imageSpan(image);
+  const at = address === null ? end : address;
+  if (!Number.isSafeInteger(at) || at < start) throw new FirmwareError('Checksum address must be at or above the first image address');
+  if (at - start > MAX_SPAN) throw new FirmwareError('Range too large to checksum');
+  const buf = new Uint8Array(at - start).fill(fill & 0xff);
+  for (const s of clipSegments(image.segments, start, at)) buf.set(s.data, s.address - start);
+  let value;
+  if (algo === 'crc32') value = crc32(buf);
+  else {
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum = (sum + buf[i]) >>> 0;
+    value = (0x100000000 - sum) >>> 0;
+  }
+  const slot = new Uint8Array(4);
+  for (let i = 0; i < 4; i++) slot[endian === 'big' ? 3 - i : i] = (value >>> (8 * i)) & 0xff;
+  const rest = [...clipSegments(image.segments, -Infinity, at), ...clipSegments(image.segments, at + 4, Infinity)];
+  const merged = buildSegments([...rest, { address: at, data: slot }]).segments;
+  return { image: { ...image, segments: merged }, address: at, value, covered: buf.length };
+}
+
+/**
+ * Build an srec_cat command line that approximates the current settings. This is text for you
+ * to copy into a shell with SRecord installed; the tool does not run it.
+ */
+export function srecCatCommand({ inputs = [], offset = 0, crop = [], exclude = [], format = 'hex', fillGaps = false, fill = 0xff, recordSize = 16, outName = 'out', span = null } = {}) {
+  const inFlag = { bin: '-binary', hex: '-intel', srec: '', uf2: null, elf: null };
+  const unsupported = inputs.find((i) => inFlag[i.format] === null);
+  const args = ['srec_cat'];
+  for (const i of inputs) {
+    if (i.format === 'bin') args.push(shq(i.name), '-binary', '-offset', hexAddr(i.base ?? 0));
+    else args.push(shq(i.name), ...(inFlag[i.format] ? [inFlag[i.format]] : []));
+  }
+  for (const r of crop) args.push('-crop', hexAddr(r.start), hexAddr(r.end));
+  for (const r of exclude) args.push('-exclude', hexAddr(r.start), hexAddr(r.end));
+  if (offset) args.push('-offset', String(offset));
+  if ((fillGaps || format === 'bin') && span && span.end > span.start) args.push('-fill', `0x${hexN(fill & 0xff, 2)}`, hexAddr(span.start), hexAddr(span.end));
+  if (format === 'hex' || format === 'srec') args.push('-output-block-size=' + recordSize);
+  const outFlag = { bin: '-binary', hex: '-intel', srec: '', uf2: null }[format];
+  args.push('-o', shq(`${outName}.${format === 'srec' ? 'srec' : format}`));
+  if (outFlag) args.push(outFlag);
+  const notes = [];
+  if (unsupported) notes.push('srec_cat cannot read UF2 or ELF; convert those inputs with uf2conv.py or objcopy first.');
+  if (format === 'uf2') notes.push('srec_cat cannot write UF2; use uf2conv.py on the .hex or .bin.');
+  return { command: args.join(' '), notes, ok: notes.length === 0 };
+}
+
+function shq(s) {
+  return /^[\w./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\''`)}'`;
+}

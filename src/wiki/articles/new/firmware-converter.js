@@ -3,7 +3,7 @@ export default {
   toolId: 'firmware-converter',
   category: 'core',
   title: 'Firmware File Converter & Inspector — BIN, HEX, S-record, UF2 and ELF',
-  summary: 'Open a firmware file, see its segment map, gaps, CRC-32, SHA-256 and start address, then convert it between raw binary, Intel HEX, Motorola S-record and UF2, relocate, split or merge it. Fully offline; nothing is uploaded.',
+  summary: 'Open a firmware file, see its segment map, gaps, CRC-32, SHA-256 and start address, then convert it between raw binary, Intel HEX, Motorola S-record and UF2, relocate, crop, pad, checksum, split or merge it. Fully offline; nothing is uploaded.',
   tags: ['firmware', 'converter', 'UF2', 'Intel HEX', 'S-record', 'SREC', 'srec', 'S19', 'ELF', 'bin', 'hex', 'CRC32', 'SHA256', 'family ID', 'RP2040', 'segment map', 'offline'],
   readTime: '8 min read',
   content: `
@@ -53,6 +53,21 @@ Checksum errors, malformed lines, bad magic numbers and truncated ELF headers ar
   - A list of common families (RP2040, the three RP2350 variants, nRF52840, SAMD21, SAMD51, ESP32-S2, ESP32-S3, STM32F4) is provided, and *Custom hex* accepts any 32-bit value. The list was hand-entered; check it against the upstream UF2 family table before relying on it for a flash.
 - **Start address.** Intel HEX writes it as a type 05 record. S-record writes it as the entry record. Raw .bin and UF2 have no start address field, so it is not written.
 
+## Edit before converting
+
+Open the **Edit** section under the offset box. Edits run in this order on the image shown (after relocation) and feed the inspector, the outputs, split and verification:
+
+1. **Crop (keep only ranges).** Ranges are written \`start-end\` (end included) or \`start+length\`, separated by commas, for example \`0x08000000-0x0800FFFF, 0x08010000+0x100\`. Everything outside is dropped. A start address outside the kept data is dropped too.
+2. **Exclude (remove ranges).** Same syntax, applied after crop.
+3. **Pad end to a multiple of N bytes.** Extends the last segment with the fill byte.
+4. **Insert a 32-bit checksum word.** Choose CRC-32 (IEEE, same as the inspector) or the negated byte sum, little- or big-endian, and an address (empty means the end of the image). The checksum covers every byte from the lowest address up to the slot, with gaps counted as the fill byte. Data after the slot is not covered, and any data in the four slot bytes is replaced. The computed value and range are shown.
+
+The **Fill byte** box in this section is the same setting as the one in the output options.
+
+## srec_cat command
+
+Under the output options, **Equivalent srec_cat command** shows a command line for SRecord that approximates the current input, crop, exclude, offset, fill and record-size settings. It is only text to copy; nothing is run. Pad, checksum and split are not included. srec_cat cannot read UF2 or ELF or write UF2, and the panel says so when that applies. Check the command against the SRecord manual before relying on it.
+
 ## Split and merge
 
 - **Merge.** Load several files and choose **Merge all**. Files are combined in load order, and a later file wins on overlap. The first start address found is kept. A warning is shown if the merged files carry different UF2 family IDs; in that case no family is written unless you choose one.
@@ -79,6 +94,7 @@ Any modern browser: Chrome, Edge, Firefox or Safari. No USB, serial or Bluetooth
 - It does not flash, erase or write to any device.
 - It does not check a UF2 MD5 extension or decode UF2 extension tags. Their presence is reported as a warning.
 - It does not unpack UF2 file containers.
+- It does not run srec_cat, objcopy or uf2conv.py; the command shown is text only.
 - It does not write ELF, Intel HEX type 03 start records, or S5 and S6 count records.
 - It does not sign, encrypt, decrypt or compress images, and it does not know bootloader or partition layouts (ESP32 partition tables are handled by the ESP partition tools).
 - It does not preserve the raw .bin base address; a .bin file has nowhere to store one. Note the base shown in the inspector.
@@ -91,6 +107,10 @@ Any modern browser: Chrome, Edge, Firefox or Safari. No USB, serial or Bluetooth
 - **"bad magic numbers" on UF2.** The file is not UF2 or is truncated. Its length must be a multiple of 512.
 - **"Mixed families" warning.** The file contains blocks for more than one chip. Pick a family in the output options if you need one, or split the file by segment and convert each part.
 - **Verification failed.** Report it with the file; a failed round trip means a bug in the converter or an input it does not handle.
+
+## Similar tools
+
+SRecord (srec_cat) offers crop, exclude, offset, fill and checksum filters on the command line; uf2conv.py and picotool convert BIN and HEX to UF2 with a family ID; the IntelHex Python library merges files and pads with a chosen byte. This tool covers the same everyday conversions in the browser, with a segment map and a re-read check on each output. It has no scripting, no random fill and no CRC variants beyond the two above.
 
 ## Related tools
 
