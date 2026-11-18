@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Keyboard, Sparkles, Layers, ShieldCheck } from 'lucide-react';
+import { Keyboard, Sparkles } from 'lucide-react';
 import DuckyScriptStudio from './DuckyScriptStudio';
 import CyberChefWorkbench from './CyberChefWorkbench';
 
@@ -12,55 +12,34 @@ export default function BadUsbPayloadSuite({ initialTab = 'ducky' }) {
     }
   }, [initialTab]);
 
-  return (
-    <div className="w-full space-y-4">
-      {/* Suite Header & Sub-Navigation */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-400">
-            <Keyboard className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-400">
-              Interactive DuckyScript keystroke compiler, live simulator & CyberChef recipe encoder
-            </p>
-          </div>
-        </div>
+  const base = 'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition focus:outline-none focus:ring-1';
+  const idle = 'text-slate-400 hover:text-slate-200 focus:ring-slate-500';
 
-        {/* Tab Switcher */}
-        <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
-          <button
-            onClick={() => setActiveSubTab('ducky')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'ducky'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Keyboard className="w-3.5 h-3.5" />
-            <span>DuckyScript Studio</span>
-          </button>
-          <button
-            onClick={() => setActiveSubTab('cyberchef')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'cyberchef'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>CyberChef Obfuscator</span>
-          </button>
-        </div>
+  return (
+    <div className="w-full space-y-2">
+      <div role="tablist" aria-label="Payload tools" className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 w-fit max-w-full">
+        <button
+          role="tab"
+          aria-selected={activeSubTab === 'ducky'}
+          onClick={() => setActiveSubTab('ducky')}
+          className={`${base} ${activeSubTab === 'ducky' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 focus:ring-amber-400' : idle}`}
+        >
+          <Keyboard className="w-3 h-3" />
+          <span>DuckyScript Studio</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeSubTab === 'cyberchef'}
+          onClick={() => setActiveSubTab('cyberchef')}
+          className={`${base} ${activeSubTab === 'cyberchef' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 focus:ring-cyan-400' : idle}`}
+        >
+          <Sparkles className="w-3 h-3" />
+          <span>CyberChef Obfuscator</span>
+        </button>
       </div>
 
-      {/* Active Tab View */}
       <div className="w-full">
-        {activeSubTab === 'ducky' ? (
-          <DuckyScriptStudio />
-        ) : (
-          <CyberChefWorkbench />
-        )}
+        {activeSubTab === 'ducky' ? <DuckyScriptStudio /> : <CyberChefWorkbench />}
       </div>
     </div>
   );
