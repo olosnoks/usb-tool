@@ -7,7 +7,8 @@ import {
   ViaClient, VIA_CMD, VIA_REPORT_LENGTH
 } from '../src/utils/keyboardVia';
 import {
-  buildKeyboardLayout, layoutKeyCodes, applyKeyEvent, createTesterState, rolloverVerdict, MAX_LOG
+  buildKeyboardLayout, layoutKeyCodes, applyKeyEvent, createTesterState, rolloverVerdict, MAX_LOG,
+  dwellSummary, untestedKeys, testCoverage, comboStatus, buildReport, modifierLabel, COMBO_PRESETS
 } from '../src/utils/keyboardVia/keyTester';
 
 describe('VIA packet building', () => {
@@ -375,5 +376,40 @@ describe('key tester events', () => {
   it('uses the logical key when the browser gives no physical code', () => {
     const s = applyKeyEvent(createTesterState(), { type: 'down', code: '', key: 'Dead', timeStamp: 5 });
     expect(s.counts['Key:Dead']).toBe(1);
+  });
+});
+
+describe('key tester extras', () => {
+  const press = (s, code, down, up) => applyKeyEvent(applyKeyEvent(s, { type: 'down', code, key: 'a', timeStamp: down }), { type: 'up', code, key: 'a', timeStamp: up });
+
+  it('tracks hold time per key', () => {
+    let s = press(createTesterState(), 'KeyA', 100, 160);
+    s = press(s, 'KeyA', 300, 320);
+    expect(dwellSummary(s, 'KeyA')).toEqual({ n: 2, avg: 40, min: 20, max: 60 });
+    expect(dwellSummary(s, 'KeyB')).toBeNull();
+  });
+
+  it('computes coverage and untested keys', () => {
+    const layout = buildKeyboardLayout({ tkl: true });
+    const s = press(createTesterState(), 'KeyA', 1, 2);
+    const cov = testCoverage(s, layout);
+    expect(cov.tested).toBe(1);
+    expect(cov.total).toBe(layoutKeyCodes(layout).length);
+    expect(untestedKeys(s, layout).some((k) => k.c === 'KeyA')).toBe(false);
+    expect(buildReport(s, layout)).toContain(`1/${cov.total}`);
+  });
+
+  it('compares held keys with a combo', () => {
+    const r = comboStatus(['KeyW', 'KeyA', 'KeyZ'], COMBO_PRESETS[0].codes);
+    expect(r.ok).toBe(false);
+    expect(r.held).toBe(2);
+    expect(r.missing).toContain('Space');
+    expect(r.extra).toEqual(['KeyZ']);
+    expect(comboStatus(['KeyA', 'KeyB'], ['KeyA', 'KeyB']).ok).toBe(true);
+  });
+
+  it('formats modifiers', () => {
+    expect(modifierLabel({ ctrlKey: true, shiftKey: true })).toBe('Ctrl+Shift');
+    expect(modifierLabel({})).toBe('none');
   });
 });

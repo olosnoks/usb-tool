@@ -93,6 +93,7 @@ export function createTesterState(chatterMs = DEFAULT_CHATTER_MS) {
     counts: {},      // code -> number of real (non-repeat) presses
     lastUp: {},      // code -> timeStamp of the last release
     chatter: {},     // code -> chatter events flagged
+    dwell: {},       // code -> { n, sum, min, max } hold time in ms (down to up)
     maxSimultaneous: 0,
     events: 0,
     log: []          // newest last, capped at MAX_LOG
@@ -138,6 +139,17 @@ export function applyKeyEvent(state, evt) {
     next.maxSimultaneous = Math.max(state.maxSimultaneous, Object.keys(next.down).length);
   } else if (evt.type === 'up') {
     const rest = { ...state.down };
+    const downAt = state.down[code];
+    if (downAt !== undefined && t >= downAt) {
+      const held = t - downAt;
+      const d = (state.dwell || {})[code];
+      next.dwell = {
+        ...(state.dwell || {}),
+        [code]: d
+          ? { n: d.n + 1, sum: d.sum + held, min: Math.min(d.min, held), max: Math.max(d.max, held) }
+          : { n: 1, sum: held, min: held, max: held }
+      };
+    }
     delete rest[code];
     next.down = rest;
     next.lastUp = { ...state.lastUp, [code]: t };
@@ -163,4 +175,62 @@ export function rolloverVerdict(max) {
     level: 'nkro',
     text: `${max} keys registered together: more than 6KRO, consistent with NKRO.`
   };
+}
+
+/** Hold-time summary for one key: { n, avg, min, max } in ms, or null when never released. */
+export function dwellSummary(state, code) {
+  const d = state.dwell && state.dwell[code];
+  if (!d || !d.n) return null;
+  return { n: d.n, avg: d.sum / d.n, min: d.min, max: d.max };
+}
+
+/** Keys on the board that have not been pressed yet, in layout order: [{ c, l }]. */
+export function untestedKeys(state, layout) {
+  return layoutKeyCodes(layout).filter((it) => !state.ever[it.c]);
+}
+
+/** { tested, total, percent } over the keys drawn on the board. */
+export function testCoverage(state, layout) {
+  const all = layoutKeyCodes(layout);
+  const tested = all.filter((it) => state.ever[it.c]).length;
+  return { tested, total: all.length, percent: all.length ? Math.round((tested / all.length) * 100) : 0 };
+}
+
+/** Combo presets for the simultaneous-keys (ghosting) check. */
+export const COMBO_PRESETS = [
+  { id: 'wasd', name: 'WASD + Space + Shift', codes: ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft'] },
+  { id: 'arrows', name: 'Arrows + Space', codes: ['ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space'] },
+  { id: 'qwe', name: 'Q W E A S D (matrix block)', codes: ['KeyQ', 'KeyW', 'KeyE', 'KeyA', 'KeyS', 'KeyD'] },
+  { id: 'ghost', name: 'Classic ghost trio: Q A Z + W', codes: ['KeyQ', 'KeyA', 'KeyZ', 'KeyW'] }
+];
+
+/**
+ * Compare the keys currently held with a target combo. Browser-side only: a missing
+ * key means "the browser did not report it", which is ghosting or blocking by the keyboard
+ * (or the OS), not proof of which.
+ */
+export function comboStatus(downCodes, targetCodes) {
+  const held = new Set(downCodes);
+  const missing = targetCodes.filter((c) => !held.has(c));
+  const extra = downCodes.filter((c) => !targetCodes.includes(c));
+  return { held: targetCodes.length - missing.length, total: targetCodes.length, missing, extra, ok: missing.length === 0 };
+}
+
+/** Plain-text summary of the session: counts and problems only, no key sequence or timing log. */
+export function buildReport(state, layout) {
+  const cov = testCoverage(state, layout);
+  const missing = untestedKeys(state, layout).map((it) => it.l);
+  const chat = Object.entries(state.chatter).filter(([, n]) => n > 0).map(([c, n]) => `${c} x${n}`);
+  return [
+    'Keyboard test summary (browser key events)',
+    `Keys tested: ${cov.tested}/${cov.total} (${cov.percent}%)`,
+    `Most keys held at once: ${state.maxSimultaneous}`,
+    `Chatter window: ${state.chatterMs} ms; flagged: ${chat.length ? chat.join(', ') : 'none'}`,
+    `Not pressed yet: ${missing.length ? missing.join(' ') : 'none'}`
+  ].join('\n');
+}
+
+/** Modifier state label from a KeyboardEvent-like object, e.g. "Ctrl+Shift". */
+export function modifierLabel(e) {
+  return [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta'].filter(Boolean).join('+') || 'none';
 }
