@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Plane, Cpu, Activity, Gauge, Battery, Terminal, Download, Send, AlertTriangle, Usb } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Plane, Cpu, Activity, Gauge, Battery, Terminal, Download, Send, AlertTriangle, Usb, Copy, Circle, Square, FileUp } from 'lucide-react';
 import { useOptionalSerial } from '../../context/SerialContext';
 import { useSessionError } from '../../utils/sessionLog';
 import {
@@ -23,6 +23,13 @@ import {
   endsWithCliPrompt,
   isRebootingCommand,
 } from '../../utils/mspProtocol';
+import {
+  parseCliSettings,
+  diffCliSettings,
+  summarizeCliSettings,
+  telemetryRow,
+  telemetryToCsv,
+} from '../../utils/fcCliTools';
 
 const TABS = [
   { id: 'identify', label: 'Identify' },
@@ -65,6 +72,11 @@ const CLI_MAX_CHARS = 400000;
 const IMU_HISTORY = 240;
 const CAPTURE_TIMEOUT_MS = 90000;
 const CAPTURE_IDLE_MS = 500;
+const REC_MAX_ROWS = 20000;
+const CLI_HISTORY_MAX = 50;
+const DIFF_LIST_MAX = 200;
+// Read-only CLI commands offered as one-click buttons. They only print information.
+const QUICK_CLI = ['version', 'status', 'tasks', 'diff', 'get name'];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -92,8 +104,8 @@ function fmt(n, digits = 1) {
 
 function Card({ title, icon: Icon, children, className = '' }) {
   return (
-    <section className={`bg-slate-950 border border-slate-800 rounded-lg p-3 min-w-0 ${className}`}>
-      <header className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-slate-400 mb-2">
+    <section className={`bg-slate-950 border border-slate-800 rounded-lg p-2 min-w-0 ${className}`}>
+      <header className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-slate-400 mb-1.5">
         {Icon && <Icon size={13} className="text-cyan-400" />}
         <span>{title}</span>
       </header>
@@ -202,6 +214,16 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
   const [cliInput, setCliInput] = useState('');
   const [confirmExit, setConfirmExit] = useState(false);
   const [capture, setCapture] = useState(null); // { label, text, running, incomplete, chars }
+
+  const [cmdHistory, setCmdHistory] = useState([]);
+  const histIdxRef = useRef(-1);
+  const [baseline, setBaseline] = useState(null); // { name, text }
+  const [recording, setRecording] = useState(false);
+  const [recCount, setRecCount] = useState(0);
+  const recRef = useRef(false);
+  const recRowsRef = useRef([]);
+  const recStartRef = useRef(0);
+  const snapRef = useRef({});
 
   const clientRef = useRef(null);
   const cliDecoderRef = useRef(null);
@@ -319,6 +341,43 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
     }
   };
 
+  // ---- Telemetry recording (sample-and-hold rows, exported as CSV) -----------
+  const recordFrame = (cmd, payload) => {
+    if (!recRef.current) return;
+    const snap = snapRef.current;
+    if (cmd === MSP.ATTITUDE) snap.attitude = decodeAttitude(payload);
+    else if (cmd === MSP.RAW_IMU) snap.imu = decodeRawImu(payload);
+    else if (cmd === MSP.RC) snap.rc = decodeChannels(payload);
+    else if (cmd === MSP.ANALOG) snap.analog = decodeAnalog(payload);
+    else if (cmd === MSP.MOTOR) snap.motors = decodeChannels(payload);
+    else return;
+    // One row per completed read cycle (when the last polled command arrives), so rows are not duplicated.
+    if (cmd !== MSP.MOTOR) return;
+    const rows = recRowsRef.current;
+    rows.push(telemetryRow(Date.now() - recStartRef.current, snap));
+    if (rows.length >= REC_MAX_ROWS) stopRecording();
+    else setRecCount(rows.length);
+  };
+
+  const startRecording = () => {
+    recRowsRef.current = [];
+    snapRef.current = {};
+    recStartRef.current = Date.now();
+    recRef.current = true;
+    setRecCount(0);
+    setRecording(true);
+    setPolling(true);
+  };
+
+  const stopRecording = () => {
+    recRef.current = false;
+    setRecording(false);
+  };
+
+  const saveRecording = () => {
+    downloadTextFile(`${variantName.replace(/\s+/g, '-').toLowerCase()}-telemetry-${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.csv`, telemetryToCsv(recRowsRef.current));
+  };
+
   // ---- Poll loop: one read at a time, only for the visible tab --------------
   useEffect(() => {
     if (!connected || !polling) return undefined;
@@ -336,6 +395,7 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
           try {
             const frame = await client.request(cmd);
             handleFrame(cmd, frame.payload);
+            recordFrame(cmd, frame.payload);
           } catch (err) {
             if (cancelled) break;
             const msg = describeMspError(err);
@@ -354,6 +414,8 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
   // Drop MSP state when the port goes away.
   useEffect(() => {
     if (connected) return;
+    recRef.current = false;
+    setRecording(false);
     if (clientRef.current) clientRef.current.close();
     clientRef.current = null;
     cliDecoderRef.current = null;
@@ -436,6 +498,50 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
     }
   };
 
+  const pushHistory = (line) => {
+    histIdxRef.current = -1;
+    setCmdHistory((h) => [line, ...h.filter((x) => x !== line)].slice(0, CLI_HISTORY_MAX));
+  };
+
+  const onCliKeyDown = (e) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    if (cmdHistory.length === 0) return;
+    e.preventDefault();
+    const next = e.key === 'ArrowUp'
+      ? Math.min(cmdHistory.length - 1, histIdxRef.current + 1)
+      : histIdxRef.current - 1;
+    histIdxRef.current = next;
+    setCliInput(next < 0 ? '' : cmdHistory[next]);
+  };
+
+  const runQuick = (cmd) => {
+    if (mode !== 'cli') return;
+    if (cmd === 'diff') { startCapture('diff', 'diff'); return; }
+    pushHistory(cmd);
+    sendCliLine(cmd);
+  };
+
+  const copyCapture = async () => {
+    if (!capture || !capture.text) return;
+    try {
+      await navigator.clipboard.writeText(capture.text);
+      if (onLogMessage) onLogMessage(`${capture.label} copied to the clipboard.`, 'info');
+    } catch (err) {
+      setError(`Copy failed: ${err && err.message ? err.message : err}`);
+    }
+  };
+
+  const loadBaseline = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      setBaseline({ name: file.name, text: await file.text() });
+    } catch (err) {
+      setError(`Could not read ${file.name}: ${err && err.message ? err.message : err}`);
+    }
+  };
+
   const submitCliInput = () => {
     const line = cliInput.trim();
     if (!line) return;
@@ -443,6 +549,7 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
       setConfirmExit(true);
       return;
     }
+    pushHistory(line);
     sendCliLine(line);
     setCliInput('');
   };
@@ -464,6 +571,13 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
     await sendCliLine(command);
   };
 
+  const comparison = useMemo(() => {
+    if (!baseline || !capture || capture.running || !capture.text) return null;
+    const a = parseCliSettings(baseline.text);
+    const b = parseCliSettings(capture.text);
+    return { a, b, diff: diffCliSettings(a, b), summary: summarizeCliSettings(b) };
+  }, [baseline, capture]);
+
   const variantName = data.identify.variant ? data.identify.variant.name : 'flight-controller';
   const hasNoReplies = connected && mode === 'msp' && stats.requests >= 3 && stats.responses === 0;
 
@@ -480,10 +594,10 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
   const baudMismatch = Number(serial.baudRate) !== MSP_BAUD_RATE;
 
   return (
-    <div className="p-3 space-y-3 text-slate-200 bg-slate-900 min-h-full">
+    <div className="space-y-2 text-slate-200 bg-slate-900 min-h-full">
       <div className="flex flex-wrap items-center gap-2">
-        <Plane size={16} className="text-cyan-400" />
-        <h2 className="text-sm font-semibold">Flight Controller Configurator</h2>
+        <Plane size={14} className="text-cyan-400" aria-hidden="true" />
+        <h2 className="sr-only">Flight Controller Configurator</h2>
         <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${connected ? 'border-emerald-700 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>
           {connected ? `CONNECTED ${serial.baudRate} bps` : 'DISCONNECTED'}
         </span>
@@ -492,11 +606,11 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
         </span>
         <div className="flex-1" />
         {connected ? (
-          <button type="button" onClick={() => serial.disconnect()} className="text-xs px-2 py-1 rounded border border-slate-700 hover:border-rose-700 text-slate-300">
+          <button type="button" onClick={() => serial.disconnect()} className="text-[11px] px-2 py-0.5 rounded border border-slate-700 hover:border-rose-700 text-slate-300">
             Disconnect
           </button>
         ) : (
-          <button type="button" onClick={onConnect} disabled={webSerialMissing} className="text-xs px-2 py-1 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-950 disabled:opacity-40">
+          <button type="button" onClick={onConnect} disabled={webSerialMissing} className="text-[11px] px-2 py-0.5 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-950 disabled:opacity-40">
             <Usb size={12} className="inline mr-1" />Connect serial port
           </button>
         )}
@@ -526,7 +640,7 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
             role="tab"
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
-            className={`px-3 py-1.5 text-xs font-mono border-b-2 -mb-px whitespace-nowrap ${tab === t.id ? 'border-cyan-400 text-cyan-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+            className={`px-2.5 py-1 text-xs font-mono border-b-2 -mb-px whitespace-nowrap ${tab === t.id ? 'border-cyan-400 text-cyan-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
           >
             {t.label}
           </button>
@@ -540,26 +654,26 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
       </nav>
 
       {!connected && tab !== 'cli' && (
-        <div className="text-xs text-slate-400 p-3 border border-dashed border-slate-800 rounded">
+        <div className="text-xs text-slate-400 p-2 border border-dashed border-slate-800 rounded">
           Connect the flight controller's USB serial port (Betaflight or INAV). The tool reads it at {MSP_BAUD_RATE} bps.
           Nothing is shown until the flight controller answers.
         </div>
       )}
 
       {tab === 'identify' && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={runIdentify}
               disabled={!connected || mode !== 'msp' || identifying}
-              className="text-xs px-3 py-1.5 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-950 disabled:opacity-40"
+              className="text-[11px] px-2 py-1 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-950 disabled:opacity-40"
             >
               {identifying ? 'Reading...' : 'Read identity'}
             </button>
             <span className="text-[11px] text-slate-500 font-mono">Read-only requests; nothing is written to the flight controller.</span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 @md:grid-cols-2 gap-2">
             {IDENTIFY_STEPS.map((step) => {
               const v = data.identify[step.key];
               const e = data.identifyErr[step.key];
@@ -590,15 +704,18 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
               );
             })}
           </div>
-          <p className="text-[11px] text-slate-500">
-            Decoders are checked against known byte vectors in the test suite. Field meanings after the first few bytes of BOARD_INFO
-            depend on firmware version, so unknown trailing fields are not shown.
-          </p>
+          <details className="text-[11px] text-slate-500">
+            <summary className="cursor-pointer">About these fields</summary>
+            <p className="mt-1">
+              Decoders are checked against known byte vectors in the test suite. Field meanings after the first few bytes of BOARD_INFO
+              depend on firmware version, so unknown trailing fields are not shown.
+            </p>
+          </details>
         </div>
       )}
 
       {tab === 'status' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 @md:grid-cols-2 gap-2">
           <Card title="MSP_STATUS_EX (150)" icon={Gauge}>
             {data.status ? (
               <>
@@ -625,7 +742,7 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
               <div className="text-xs font-mono text-slate-500">No sensor data yet.</div>
             )}
           </Card>
-          <p className="md:col-span-2 text-[11px] text-slate-500">
+          <p className="@md:col-span-2 text-[11px] text-slate-500">
             Arming-disabled reasons are not decoded in this version. The raw mode-flag word is shown above instead, because its bit layout
             differs between Betaflight and INAV and is not decoded here.
           </p>
@@ -633,9 +750,26 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'live' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 @md:grid-cols-2 gap-2">
+          <div className="@md:col-span-2 flex flex-wrap items-center gap-2 text-[11px] font-mono">
+            {recording ? (
+              <button type="button" onClick={stopRecording} title="Stop recording" className="px-2 py-0.5 rounded border border-rose-700 text-rose-300 hover:bg-rose-950">
+                <Square size={11} className="inline mr-1" />Stop recording
+              </button>
+            ) : (
+              <button type="button" onClick={startRecording} disabled={!connected || mode !== 'msp'} title="Record each full read cycle (attitude, IMU, RC, battery, motors) to a CSV" className="px-2 py-0.5 rounded border border-slate-700 text-slate-300 hover:border-rose-700 disabled:opacity-40">
+                <Circle size={11} className="inline mr-1 text-rose-400" />Record
+              </button>
+            )}
+            {recCount > 0 && (
+              <button type="button" onClick={saveRecording} disabled={recording} title="Download the recording as CSV" className="px-2 py-0.5 rounded border border-emerald-700 text-emerald-300 hover:bg-emerald-950 disabled:opacity-40">
+                <Download size={11} className="inline mr-1" />CSV ({recCount} rows)
+              </button>
+            )}
+            <span className="text-slate-500">{recording ? `Recording ${recCount} rows (max ${REC_MAX_ROWS}). Stay on this tab.` : 'Recording is kept in memory only; nothing is uploaded.'}</span>
+          </div>
           <Card title="Attitude (MSP_ATTITUDE 108)" icon={Plane}>
-            <div className="flex flex-col sm:flex-row gap-3 items-center">
+            <div className="flex flex-col @sm:flex-row gap-2 items-center">
               <Horizon rollDeg={data.attitude?.rollDeg} pitchDeg={data.attitude?.pitchDeg} />
               <div className="flex-1 w-full">
                 <Field label="Roll" value={data.attitude ? `${fmt(data.attitude.rollDeg)} deg` : '--'} />
@@ -671,18 +805,18 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
               <div className="border border-slate-800 rounded p-2"><div className="text-[10px] text-slate-500 font-mono">RSSI (RAW)</div><div className="text-lg font-mono">{data.analog ? data.analog.rssiRaw : '--'}</div></div>
             </div>
           </Card>
-          <Card title="Motors (MSP_MOTOR 104), readout only" icon={Gauge} className="md:col-span-2">
+          <Card title="Motors (MSP_MOTOR 104), readout only" icon={Gauge} className="@md:col-span-2">
             {data.motors && data.motors.length ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-1">
+              <div className="grid grid-cols-1 @md:grid-cols-2 gap-1">
                 {data.motors.map((v, i) => <Bar key={i} label={`M${i + 1}`} value={v} min={1000} max={2000} />)}
               </div>
             ) : (
               <div className="text-xs font-mono text-slate-500">No motor readout yet.</div>
             )}
-            <p className="text-[11px] text-slate-500 mt-2">This tool only reads motor values. It never spins or tests motors.</p>
+            <p className="text-[11px] text-slate-500 mt-1.5">Props-off safety: this tool only reads motor values. It never spins or tests motors.</p>
           </Card>
           {hasNoReplies && (
-            <div className="md:col-span-2 text-xs text-amber-300 border border-amber-800 rounded p-2">
+            <div className="@md:col-span-2 text-xs text-amber-300 border border-amber-800 rounded p-2">
               No MSP replies after {stats.requests} requests. Check that the flight controller is powered, this is its USB serial port,
               the port is at {MSP_BAUD_RATE} bps, and the board is not sitting in the CLI (use Disconnect, reconnect, and try again).
             </div>
@@ -692,31 +826,44 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
 
       {tab === 'cli' && (
         <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             {mode === 'msp' ? (
-              <button type="button" onClick={enterCli} disabled={!connected} className="text-xs px-3 py-1.5 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-950 disabled:opacity-40">
+              <button type="button" onClick={enterCli} disabled={!connected} className="text-[11px] px-2 py-1 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-950 disabled:opacity-40">
                 <Terminal size={12} className="inline mr-1" />Enter CLI (#)
               </button>
             ) : (
-              <button type="button" onClick={() => setConfirmExit(true)} disabled={mode !== 'cli'} className="text-xs px-3 py-1.5 rounded border border-amber-700 text-amber-300 hover:bg-amber-950 disabled:opacity-40">
+              <button type="button" onClick={() => setConfirmExit(true)} disabled={mode !== 'cli'} className="text-[11px] px-2 py-1 rounded border border-amber-700 text-amber-300 hover:bg-amber-950 disabled:opacity-40">
                 Exit CLI
               </button>
             )}
-            <button type="button" onClick={() => startCapture('diff all', 'diff all')} disabled={mode !== 'cli' || Boolean(capture && capture.running)} className="text-xs px-3 py-1.5 rounded border border-slate-700 text-slate-300 hover:border-cyan-700 disabled:opacity-40">
+            <button type="button" onClick={() => startCapture('diff all', 'diff all')} disabled={mode !== 'cli' || Boolean(capture && capture.running)} className="text-[11px] px-2 py-1 rounded border border-slate-700 text-slate-300 hover:border-cyan-700 disabled:opacity-40">
               Capture diff all
             </button>
-            <button type="button" onClick={() => startCapture('dump', 'dump')} disabled={mode !== 'cli' || Boolean(capture && capture.running)} className="text-xs px-3 py-1.5 rounded border border-slate-700 text-slate-300 hover:border-cyan-700 disabled:opacity-40">
+            <button type="button" onClick={() => startCapture('dump', 'dump')} disabled={mode !== 'cli' || Boolean(capture && capture.running)} className="text-[11px] px-2 py-1 rounded border border-slate-700 text-slate-300 hover:border-cyan-700 disabled:opacity-40">
               Capture dump
             </button>
             {capture && !capture.running && capture.text && (
               <button
                 type="button"
                 onClick={() => downloadTextFile(`${variantName.replace(/\s+/g, '-').toLowerCase()}-${capture.label.replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 19).replace(/:/g, '')}.txt`, capture.text)}
-                className="text-xs px-3 py-1.5 rounded border border-emerald-700 text-emerald-300 hover:bg-emerald-950"
+                className="text-[11px] px-2 py-1 rounded border border-emerald-700 text-emerald-300 hover:bg-emerald-950"
               >
                 <Download size={12} className="inline mr-1" />Download {capture.label} ({capture.chars} chars)
               </button>
             )}
+            {capture && !capture.running && capture.text && (
+              <button type="button" onClick={copyCapture} title="Copy the capture to the clipboard" className="text-[11px] px-2 py-1 rounded border border-slate-700 text-slate-300 hover:border-cyan-700">
+                <Copy size={12} className="inline mr-1" />Copy
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-1 text-[11px] font-mono">
+            <span className="text-slate-500">Quick (read-only):</span>
+            {QUICK_CLI.map((c) => (
+              <button key={c} type="button" onClick={() => runQuick(c)} disabled={mode !== 'cli' || Boolean(capture && capture.running)} className="px-1.5 py-0.5 rounded border border-slate-800 text-slate-300 hover:border-cyan-700 disabled:opacity-40">
+                {c}
+              </button>
+            ))}
           </div>
 
           {capture && capture.running && (
@@ -737,18 +884,19 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
             </div>
           )}
 
-          <pre className="bg-slate-950 border border-slate-800 rounded p-2 h-72 overflow-auto text-[11px] font-mono text-slate-300 whitespace-pre-wrap break-all" aria-label="CLI output">
+          <pre className="bg-slate-950 border border-slate-800 rounded p-2 h-56 @md:h-72 overflow-auto text-[11px] font-mono text-slate-300 whitespace-pre-wrap break-all" aria-label="CLI output">
             {cliText || (mode === 'cli' ? '' : 'CLI output appears here after you enter the CLI.')}
           </pre>
           <form
-            className="flex gap-2"
+            className="flex gap-1.5"
             onSubmit={(e) => { e.preventDefault(); submitCliInput(); }}
           >
             <input
               value={cliInput}
               onChange={(e) => setCliInput(e.target.value)}
+              onKeyDown={onCliKeyDown}
               disabled={mode !== 'cli'}
-              placeholder={mode === 'cli' ? 'Type a CLI command (set, diff, status, save ...)' : 'Enter the CLI first'}
+              placeholder={mode === 'cli' ? 'CLI command (Up/Down = history)' : 'Enter the CLI first'}
               className="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-slate-200 disabled:opacity-40"
               aria-label="CLI command"
             />
@@ -756,8 +904,49 @@ export default function FlightControllerWorkbench({ onLogMessage }) {
               <Send size={12} className="inline mr-1" />Send
             </button>
           </form>
+          <details className="border border-slate-800 rounded p-2 text-[11px]">
+            <summary className="cursor-pointer text-slate-300 font-mono">Compare a saved diff with the latest capture</summary>
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="px-2 py-1 rounded border border-slate-700 text-slate-300 hover:border-cyan-700 cursor-pointer">
+                  <FileUp size={12} className="inline mr-1" />Load baseline file
+                  <input type="file" accept=".txt,.cfg,.diff,text/plain" onChange={loadBaseline} className="sr-only" aria-label="Load baseline diff file" />
+                </label>
+                {baseline && <span className="font-mono text-slate-400 break-all">{baseline.name}</span>}
+                {baseline && <button type="button" onClick={() => setBaseline(null)} className="px-2 py-1 rounded border border-slate-800 text-slate-400">Clear</button>}
+              </div>
+              {!comparison && <div className="text-slate-500">Load a baseline file and finish a capture (diff all, dump or diff). Both are only read in your browser; nothing is sent to the board.</div>}
+              {comparison && (
+                <div className="space-y-1.5 font-mono">
+                  <div className="text-slate-400">
+                    Baseline {comparison.a.count} settings{comparison.a.header ? ` (${comparison.a.header})` : ''}; capture {comparison.b.count} settings{comparison.b.header ? ` (${comparison.b.header})` : ''}.
+                  </div>
+                  <div className="text-slate-400">
+                    Capture by command: {Object.entries(comparison.summary).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}.
+                  </div>
+                  <div>
+                    <span className="text-amber-300">{comparison.diff.changed.length} changed</span>,{' '}
+                    <span className="text-emerald-300">{comparison.diff.added.length} only in capture</span>,{' '}
+                    <span className="text-rose-300">{comparison.diff.removed.length} only in baseline</span>,{' '}
+                    <span className="text-slate-400">{comparison.diff.same} same</span>.
+                  </div>
+                  <pre className="bg-slate-950 border border-slate-800 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap break-all" aria-label="Settings comparison">
+                    {[
+                      ...comparison.diff.changed.map((c) => `~ ${c.key}: ${c.from} -> ${c.to}`),
+                      ...comparison.diff.added.map((c) => `+ ${c.key}: ${c.value}`),
+                      ...comparison.diff.removed.map((c) => `- ${c.key}: ${c.value}`),
+                    ].slice(0, DIFF_LIST_MAX).join('\n') || 'No differences.'}
+                  </pre>
+                  {comparison.diff.changed.length + comparison.diff.added.length + comparison.diff.removed.length > DIFF_LIST_MAX && (
+                    <div className="text-slate-500">Showing the first {DIFF_LIST_MAX} differences.</div>
+                  )}
+                  <div className="text-slate-500">Comparing across firmware versions can show renamed settings as removed plus added.</div>
+                </div>
+              )}
+            </div>
+          </details>
           <p className="text-[11px] text-slate-500">
-            Commands are sent only when you type them. Typing <code className="font-mono">exit</code> asks for confirmation first, because it reboots the board.
+            Commands are sent only when you type them or press a read-only quick button. <code className="font-mono">exit</code> asks for confirmation first, because it reboots the board.
             Settings change only through commands you type (for example <code className="font-mono">set</code> and <code className="font-mono">save</code>).
           </p>
         </div>
