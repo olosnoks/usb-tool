@@ -132,3 +132,38 @@ describe('IpCalculatorWorkbench tabs', () => {
     expect(html('contains')).toContain('A contains B');
   });
 });
+
+import { addressForms, excludeCidr, prefixTable, aclEntry } from '../src/utils/ipcalcExtra.js';
+
+describe('ipcalcExtra', () => {
+  it('addressForms v4 and v6', () => {
+    const f4 = Object.fromEntries(addressForms('192.168.1.10/24'));
+    expect(f4['Decimal integer']).toBe('3232235786');
+    expect(f4.Hexadecimal).toBe('0xc0a8010a');
+    expect(f4['IPv4-mapped IPv6']).toBe('::ffff:192.168.1.10');
+    const f6 = Object.fromEntries(addressForms('2001:db8::1'));
+    expect(f6.Expanded).toBe('2001:0db8:0000:0000:0000:0000:0000:0001');
+    expect(f6.Compressed).toBe('2001:db8::1');
+    expect(Object.fromEntries(addressForms('::ffff:1.2.3.4'))['Embedded IPv4']).toBe('1.2.3.4');
+  });
+  it('excludeCidr', () => {
+    expect(excludeCidr('10.0.0.0/24', '10.0.0.64/26')).toEqual(['10.0.0.0/26', '10.0.0.128/25']);
+    expect(excludeCidr('10.0.0.0/24', '192.168.0.0/16')).toEqual(['10.0.0.0/24']);
+    expect(excludeCidr('10.0.0.0/24', '10.0.0.0/16')).toEqual([]);
+    expect(excludeCidr('2001:db8::/32', '2001:db8::/33')).toEqual(['2001:db8:8000::/33']);
+    expect(() => excludeCidr('10.0.0.0/8', '::/8')).toThrow();
+  });
+  it('prefixTable and aclEntry', () => {
+    const t = prefixTable(4);
+    expect(t).toHaveLength(33);
+    expect(t[24]).toMatchObject({ netmask: '255.255.255.0', wildcard: '0.0.0.255', usable: 254n });
+    expect(prefixTable(6).at(-1).addresses).toBe(1n);
+    expect(aclEntry('10.1.2.3/24')).toBe('10.1.2.0 0.0.0.255');
+    expect(() => aclEntry('::1/64')).toThrow();
+  });
+  it('workbench renders new tabs', () => {
+    const html = renderToString(<IpCalculatorWorkbench />);
+    expect(html).toContain('Exclude');
+    expect(html).toContain('Prefix table');
+  });
+});

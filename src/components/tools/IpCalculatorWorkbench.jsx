@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Calculator, Copy, Check, FileDown } from 'lucide-react';
+import { Copy, Check, FileDown } from 'lucide-react';
 import { computeCidr, splitCidr, vlsm, aggregate, rangeToCidrs, cidrRelation, reverseName, binaryView } from '../../utils/ipcalc.js';
+import { addressForms, excludeCidr, prefixTable, aclEntry } from '../../utils/ipcalcExtra.js';
 
 /**
  * IPv4 / IPv6 subnet (CIDR) calculator — fully client-side, no network.
@@ -10,10 +11,10 @@ import { computeCidr, splitCidr, vlsm, aggregate, rangeToCidrs, cidrRelation, re
  */
 
 const EXAMPLES = ['192.168.1.10/24', '10.0.0.0/8', '172.16.5.4/20', '100.64.1.1/10', '2001:db8:abcd:12::1/64', '::1/128'];
-const TABS = [['calc', 'Calculate'], ['split', 'Split'], ['vlsm', 'VLSM'], ['aggregate', 'Aggregate'], ['contains', 'Contains / overlap']];
+const TABS = [['calc', 'Calculate'], ['split', 'Split'], ['vlsm', 'VLSM'], ['aggregate', 'Aggregate'], ['contains', 'Contains / overlap'], ['exclude', 'Exclude'], ['table', 'Prefix table']];
 
 const copyText = (t) => navigator.clipboard?.writeText(String(t));
-const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono';
+const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono';
 
 function Row({ k, v }) {
   const [copied, setCopied] = useState(false);
@@ -62,6 +63,17 @@ function BinaryView({ report }) {
   );
 }
 
+function AddressForms({ address }) {
+  const forms = useMemo(() => { try { return addressForms(address); } catch { return []; } }, [address]);
+  if (!forms.length) return null;
+  return (
+    <details className="mt-2">
+      <summary className="text-[11px] text-slate-500 cursor-pointer">Other forms of {address}</summary>
+      <div className="mt-1">{forms.map(([k, v]) => <Row key={k} k={k} v={v} />)}</div>
+    </details>
+  );
+}
+
 function reportToMarkdown(r) {
   const rows = [['Address', r.address], ['Network', r.network], r.broadcast && ['Broadcast', r.broadcast], r.netmask && ['Netmask', r.netmask], r.wildcard && ['Wildcard', r.wildcard],
     ['First host', r.firstHost], ['Last host', r.lastHost], ['Prefix', `/${r.prefix}`], ['Total addresses', r.totalAddresses.toLocaleString()],
@@ -88,15 +100,15 @@ function CalcTab() {
         placeholder="e.g. 192.168.1.10/24, 10.0.0.1/255.255.255.0 or 2001:db8::/48"
         className={`w-full ${inputCls} ${error ? 'border-red-800' : ''}`}
       />
-      <div className="flex flex-wrap gap-1 my-2">
+      <div className="flex flex-wrap gap-1 my-1.5">
         {EXAMPLES.map((e) => (
           <button key={e} onClick={() => setInput(e)} className="px-2 py-0.5 text-[10px] bg-slate-800 text-gray-400 rounded hover:bg-slate-700 hover:text-gray-200 font-mono">{e}</button>
         ))}
       </div>
       {error && <Err>{error}</Err>}
       {report && (
-        <div className="bg-slate-950 border border-slate-800 rounded p-3">
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <div className="bg-slate-950 border border-slate-800 rounded p-2">
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
             <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-900/50 text-cyan-200 border border-cyan-800">IPv{report.version}</span>
             <span className="font-mono text-sm text-cyan-300">{report.cidr}</span>
             {report.classification && (
@@ -120,7 +132,9 @@ function CalcTab() {
           <Row k="Total addresses" v={report.totalAddresses.toLocaleString()} />
           {report.usableHosts !== undefined && <Row k="Usable hosts" v={report.usableHosts.toLocaleString()} />}
           <Row k="Reverse name" v={safeReverse(report.address)} />
+          {report.wildcard && <Row k="ACL (net wildcard)" v={aclEntry(report.cidr)} />}
           <BinaryView report={report} />
+          <AddressForms address={report.address} />
         </div>
       )}
     </>
@@ -175,7 +189,7 @@ function AggregateTab() {
     <>
       <textarea aria-label="CIDRs to aggregate" value={text} onChange={(e) => setText(e.target.value)} rows={4} className={`w-full ${inputCls}`} spellCheck={false} placeholder="One CIDR per line" />
       {res.error ? <Err>{res.error}</Err> : <ResultList items={res.value} />}
-      <div className="mt-4 text-xs text-slate-500">Range to CIDRs</div>
+      <div className="mt-3 text-xs text-slate-500">Range to CIDRs</div>
       <div className="flex flex-wrap gap-2 items-center mt-1">
         <input aria-label="Range start" value={a} onChange={(e) => setA(e.target.value)} className={`flex-1 min-w-[8rem] ${inputCls}`} spellCheck={false} />
         <span className="text-slate-600">to</span>
@@ -210,16 +224,58 @@ function ContainsTab() {
   );
 }
 
+function ExcludeTab() {
+  const [parent, setParent] = useState('10.0.0.0/24');
+  const [ex, setEx] = useState('10.0.0.64/26');
+  const res = useMemo(() => attempt(() => excludeCidr(parent, ex)), [parent, ex]);
+  return (
+    <>
+      <div className="flex flex-wrap gap-2 items-center">
+        <input aria-label="Parent network" value={parent} onChange={(e) => setParent(e.target.value)} className={`flex-1 min-w-[10rem] ${inputCls}`} spellCheck={false} />
+        <span className="text-slate-600 text-xs">minus</span>
+        <input aria-label="Network to exclude" value={ex} onChange={(e) => setEx(e.target.value)} className={`flex-1 min-w-[10rem] ${inputCls}`} spellCheck={false} />
+      </div>
+      {res.error ? <Err>{res.error}</Err> : <ResultList items={res.value} />}
+    </>
+  );
+}
+
+function PrefixTableTab() {
+  const [v, setV] = useState(4);
+  const rows = useMemo(() => prefixTable(v), [v]);
+  return (
+    <>
+      <div className="flex gap-1 mb-1.5">
+        {[4, 6].map((x) => <button key={x} onClick={() => setV(x)} aria-pressed={v === x} className={`px-2 py-0.5 text-[11px] rounded border ${v === x ? 'bg-cyan-900/50 border-cyan-800 text-cyan-200' : 'bg-slate-900 border-slate-800 text-gray-400'}`}>IPv{x}</button>)}
+      </div>
+      <div className="max-h-80 overflow-auto bg-slate-950 border border-slate-800 rounded">
+        <table className="w-full text-[11px] font-mono text-gray-200">
+          <thead className="text-slate-500 text-left"><tr><th className="px-2 py-1">Prefix</th>{v === 4 && <><th>Netmask</th><th>Wildcard</th></>}<th>Addresses</th>{v === 4 && <th>Usable</th>}</tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.prefix} className="border-t border-slate-900">
+                <td className="px-2 py-0.5">/{r.prefix}</td>
+                {v === 4 && <><td>{r.netmask}</td><td>{r.wildcard}</td></>}
+                <td className="break-all">{r.addresses.toLocaleString('en-US')}</td>
+                {v === 4 && <td>{r.usable.toLocaleString('en-US')}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 export default function IpCalculatorWorkbench({ initialTab = 'calc' }) {
   const [tab, setTab] = useState(TABS.some(([id]) => id === initialTab) ? initialTab : 'calc');
   return (
     <div className="w-full min-w-0 max-w-full text-gray-200">
-      <div className="flex items-center gap-2 mb-2">
-        <Calculator size={16} className="text-cyan-400 shrink-0" />
+      <div className="mb-2">
         <div role="tablist" className="flex flex-wrap gap-1">
           {TABS.map(([id, label]) => (
             <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
-              className={`px-2.5 py-1 text-xs rounded border ${tab === id ? 'bg-cyan-900/50 border-cyan-800 text-cyan-200' : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-gray-200'}`}>{label}</button>
+              className={`px-2 py-0.5 text-[11px] rounded border ${tab === id ? 'bg-cyan-900/50 border-cyan-800 text-cyan-200' : 'bg-slate-900 border-slate-800 text-gray-400 hover:text-gray-200'}`}>{label}</button>
           ))}
         </div>
       </div>
@@ -228,6 +284,8 @@ export default function IpCalculatorWorkbench({ initialTab = 'calc' }) {
       {tab === 'vlsm' && <VlsmTab />}
       {tab === 'aggregate' && <AggregateTab />}
       {tab === 'contains' && <ContainsTab />}
+      {tab === 'exclude' && <ExcludeTab />}
+      {tab === 'table' && <PrefixTableTab />}
     </div>
   );
 }
