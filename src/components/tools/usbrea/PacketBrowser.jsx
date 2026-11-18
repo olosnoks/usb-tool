@@ -4,11 +4,12 @@ import React, { useMemo, useState } from 'react';
 import { XFER_NAMES } from '../../../utils/usbrea/model';
 import { hex } from '../../../utils/usbrea/bytes';
 import { ascii, decode_setup, find_descriptors } from '../../../utils/usbrea/setupDecode';
+import { endpoint_stats, wireshark_filter, transfers_to_csv, diff_bytes, render_diff } from '../../../utils/usbrea/packetTools';
 
 const ROW_H = 20;
 const VIEW_H = 340;
 const COLS = 'grid-cols-[60px_80px_40px_40px_50px_44px_60px_1fr]';
-const field = 'bg-slate-950 border border-slate-800 rounded p-1.5 text-xs text-gray-200 font-mono';
+const field = 'bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-xs text-gray-200 font-mono';
 
 export function hexdump(data) {
   const lines = [];
@@ -38,6 +39,7 @@ export default function PacketBrowser({ transfers, ids }) {
   const [flt, setFlt] = useState({ device: '', endpoint: '', direction: '', type: '', hex: '' });
   const [scroll, setScroll] = useState(0);
   const [sel, setSel] = useState(null);
+  const [cmp, setCmp] = useState(null);
   const t0 = useMemo(() => {
     let m = Infinity;
     for (const t of transfers) if (t.ts < m) m = t.ts;
@@ -45,6 +47,8 @@ export default function PacketBrowser({ transfers, ids }) {
   }, [transfers]);
   const devices = useMemo(() => [...new Set(transfers.map((t) => t.device))].sort((a, b) => a - b), [transfers]);
   const rows = useMemo(() => filter_transfers(transfers, flt), [transfers, flt]);
+  const stats = useMemo(() => endpoint_stats(transfers), [transfers]);
+  const wsFilter = useMemo(() => wireshark_filter(flt), [flt]);
   const descriptors = useMemo(() => find_descriptors(transfers), [transfers]);
   const idOf = (d) => {
     const i = ids instanceof Map ? ids.get(d) : ids?.[d];
@@ -54,10 +58,19 @@ export default function PacketBrowser({ transfers, ids }) {
   const last = Math.min(rows.length, first + Math.ceil(VIEW_H / ROW_H) + 10);
   const set = (k) => (e) => { setFlt((p) => ({ ...p, [k]: e.target.value })); setScroll(0); };
   const selected = sel != null ? transfers.find((t) => t.frame === sel) : null;
+  const other = cmp != null ? transfers.find((t) => t.frame === cmp) : null;
+  const diff = selected && other ? render_diff(diff_bytes(other.data, selected.data)) : null;
+  const dl = (name, text, type) => {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const btn = 'px-2 py-1 rounded text-[11px] border bg-slate-800/60 border-slate-700 text-gray-300 hover:bg-slate-700/60 disabled:opacity-40';
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-2 items-center text-xs text-gray-300">
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5 items-center text-xs text-gray-300">
         <select value={flt.device} onChange={set('device')} className={field} aria-label="Device filter">
           <option value="">All devices</option>
           {devices.map((d) => <option key={d} value={d}>#{d}{idOf(d) ? ` ${idOf(d)}` : ''}</option>)}
@@ -72,8 +85,12 @@ export default function PacketBrowser({ transfers, ids }) {
         </select>
         <input value={flt.hex} onChange={set('hex')} className={`${field} w-48`} placeholder="hex substring (aa 01)" />
         <span className="text-gray-500">{rows.length.toLocaleString()} of {transfers.length.toLocaleString()} transfers</span>
+        <button type="button" className={btn} disabled={!rows.length} title="Download the filtered transfers as CSV" onClick={() => dl('transfers.csv', transfers_to_csv(rows, t0), 'text/csv')}>CSV</button>
+        <button type="button" className={btn} disabled={!wsFilter} title="Copy a Wireshark display filter equivalent to these filters" onClick={() => navigator.clipboard?.writeText(wsFilter)}>Copy Wireshark filter</button>
       </div>
-      <div className="border border-slate-800 rounded overflow-hidden">
+      {wsFilter && <div className="text-[11px] font-mono text-gray-500 break-all" data-testid="ws-filter">{wsFilter}</div>}
+      <div className="border border-slate-800 rounded overflow-x-auto">
+       <div className="min-w-[520px]">
         <div className={`grid ${COLS} gap-2 px-2 py-1 bg-slate-900/60 text-[10px] uppercase text-gray-500 font-mono`}>
           <span>Frame</span><span>Time (s)</span><span>Bus</span><span>Dev</span><span>EP</span><span>Dir</span><span>Type</span><span>Len / setup / ASCII</span>
         </div>
@@ -82,7 +99,7 @@ export default function PacketBrowser({ transfers, ids }) {
             {rows.slice(first, last).map((t, i) => (
               <div
                 key={t.frame}
-                onClick={() => setSel(t.frame)}
+                onClick={(e) => { if (e.shiftKey && sel != null && sel !== t.frame) setCmp(sel); setSel(t.frame); }}
                 role="row"
                 style={{ position: 'absolute', top: (first + i) * ROW_H, height: ROW_H, left: 0, right: 0 }}
                 className={`grid ${COLS} gap-2 px-2 items-center text-[11px] font-mono cursor-pointer whitespace-nowrap ${sel === t.frame ? 'bg-amber-500/20 text-amber-100' : 'text-gray-300 hover:bg-slate-800/60'}`}
@@ -99,6 +116,7 @@ export default function PacketBrowser({ transfers, ids }) {
             ))}
           </div>
         </div>
+       </div>
       </div>
       {selected && (
         <div className="border border-slate-800 rounded p-2">
@@ -107,8 +125,30 @@ export default function PacketBrowser({ transfers, ids }) {
           </div>
           {selected.setup && <div className="text-xs text-amber-300 font-mono mb-1">{decode_setup(selected.setup, selected.data)}</div>}
           <pre className="text-[11px] text-gray-200 overflow-auto max-h-48 whitespace-pre">{hexdump(selected.data)}</pre>
+          <div className="text-[10px] text-gray-500 mt-1">Shift-click another row to diff it against the previously selected one.</div>
+          {diff && (
+            <div className="mt-1">
+              <div className="text-xs text-gray-400">Diff: A = frame {other.frame}, B = frame {selected.frame} <button type="button" className={btn} onClick={() => setCmp(null)}>Clear diff</button></div>
+              <pre className="text-[11px] text-amber-200 overflow-auto max-h-48 whitespace-pre" data-testid="packet-diff">{diff}</pre>
+            </div>
+          )}
         </div>
       )}
+      <details className="border border-slate-800 rounded p-2">
+        <summary className="text-xs font-bold text-gray-300 uppercase tracking-wider cursor-pointer">Endpoint statistics ({stats.length})</summary>
+        <div className="overflow-x-auto mt-1">
+          <table className="w-full text-[11px] text-gray-300 font-mono">
+            <thead><tr className="text-left text-gray-500"><th>Dev</th><th>EP</th><th>Dir</th><th>Type</th><th>Pkts</th><th>Bytes</th><th>Min/Max</th><th>Span (s)</th></tr></thead>
+            <tbody>
+              {stats.map((s) => (
+                <tr key={`${s.device}-${s.endpoint}-${s.dir}-${s.kind}`} className="border-t border-slate-800">
+                  <td>{s.device}</td><td>{s.endpoint}</td><td>{s.dir}</td><td>{s.kind}</td><td>{s.packets}</td><td>{s.bytes}</td><td>{s.min}/{s.max}</td><td>{(s.last - s.first).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
       <div className="border border-slate-800 rounded p-2">
         <div className="text-xs font-bold text-gray-300 uppercase tracking-wider mb-1">Descriptors found in capture</div>
         {descriptors.length === 0 ? (

@@ -16,10 +16,10 @@ const TABS = [
   ['guide', 'How to capture'],
 ];
 
-const btn = 'px-3 py-1.5 rounded text-xs font-semibold border transition-colors';
+const btn = 'px-2 py-1 rounded text-xs font-semibold border transition-colors';
 const btnPrimary = `${btn} bg-amber-500/20 border-amber-500/50 text-amber-200 hover:bg-amber-500/30`;
 const btnGhost = `${btn} bg-slate-800/60 border-slate-700 text-gray-300 hover:bg-slate-700/60`;
-const field = 'w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-gray-200 font-mono';
+const field = 'w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-xs text-gray-200 font-mono';
 
 function download(name, text, type = 'text/plain') {
   const blob = new Blob([text], { type });
@@ -75,7 +75,7 @@ function OutputPane({ outputs, baseName }) {
   };
   const [name, text] = files[view];
   return (
-    <div className="mt-4 border border-slate-800 rounded">
+    <div className="mt-2 border border-slate-800 rounded">
       <div className="flex flex-wrap items-center gap-2 p-2 border-b border-slate-800 bg-slate-900/60">
         {[['report', 'Report (.md)'], ['scaffold', 'Python driver'], ['dissector', 'Wireshark dissector'], ['json', 'Protocol JSON']].map(([k, l]) => (
           <button key={k} type="button" onClick={() => setView(k)} className={view === k ? btnPrimary : btnGhost}>{l}</button>
@@ -84,7 +84,7 @@ function OutputPane({ outputs, baseName }) {
         <button type="button" className={btnGhost} onClick={() => navigator.clipboard?.writeText(text)}>Copy</button>
         <button type="button" className={btnGhost} onClick={() => download(name, text)}>Download {name}</button>
       </div>
-      <pre className="p-3 text-[11px] leading-relaxed text-gray-200 overflow-auto max-h-[60vh] whitespace-pre">{text}</pre>
+      <pre className="p-2 text-[11px] leading-relaxed text-gray-200 overflow-auto max-h-[50vh] whitespace-pre">{text}</pre>
     </div>
   );
 }
@@ -227,8 +227,8 @@ function AnalyzeTab({ log, pendingMarkers, onPackets }) {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="grid md:grid-cols-2 gap-4">
+    <div className="space-y-2">
+      <div className="grid @md:grid-cols-2 gap-2">
         <div className="space-y-2">
           <div className="text-xs font-bold text-gray-300 uppercase tracking-wider">1. Capture</div>
           <input type="file" accept=".pcap,.pcapng,.gz,.cap" onChange={onCapture} className="text-xs text-gray-300" />
@@ -267,7 +267,7 @@ function AnalyzeTab({ log, pendingMarkers, onPackets }) {
           )}
         </div>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={btnPrimary} disabled={!capture || busy} onClick={onAnalyze}>{busy ? 'Analyzing…' : '3. Infer protocol'}</button>
         {busy && <button type="button" className={btnGhost} onClick={cancel}>Cancel</button>}
         {busy && progress && (
@@ -300,7 +300,7 @@ function MarkerTab({ onUse }) {
   };
   const json = JSON.stringify(marks, null, 1);
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <p className="text-xs text-gray-400">
         Replaces <code className="text-amber-300">usb-rea mark</code>. Start your capture (Wireshark + USBPcap or usbmon) on <b>this same computer</b>,
         then type a label and press Enter <i>right before</i> you click that action in the vendor app. Timestamps use this PC&apos;s clock,
@@ -311,7 +311,7 @@ function MarkerTab({ onUse }) {
         <input value={label} onChange={(e) => setLabel(e.target.value)} className={field} placeholder="brightness 50%" autoFocus />
         <button type="submit" className={btnPrimary}>Mark</button>
       </form>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-1">
         <button type="button" className={btnGhost} disabled={!marks.length} onClick={() => setMarks((p) => p.map((m) => (m.end === null ? { ...m, end: now() } : m)))}>End current action</button>
         <button type="button" className={btnGhost} disabled={!marks.length} onClick={() => setMarks((p) => p.slice(0, -1))}>Undo last</button>
         <button type="button" className={btnGhost} disabled={!marks.length} onClick={() => download('capture.pcapng.actions.json', json, 'application/json')}>Download .actions.json</button>
@@ -368,7 +368,7 @@ function LookupTab() {
         Also ask OpenDeviceDB online (sends only the VID:PID)
       </label>
       {error && <div className="text-xs text-red-400">{error}</div>}
-      {result && <pre className="p-3 text-[11px] text-gray-200 bg-slate-950 border border-slate-800 rounded whitespace-pre-wrap">{result}</pre>}
+      {result && <pre className="p-2 text-[11px] text-gray-200 bg-slate-950 border border-slate-800 rounded whitespace-pre-wrap">{result}</pre>}
     </div>
   );
 }
@@ -408,8 +408,8 @@ export default function UsbReaWorkbench({ onLogMessage }) {
   const [packets, setPackets] = useState(null);
   const log = useMemo(() => (m) => onLogMessage?.(m), [onLogMessage]);
   return (
-    <div className="p-4 space-y-4">
-      <div className="flex flex-wrap gap-2">
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1">
         {TABS.map(([id, name]) => (
           <button key={id} type="button" onClick={() => setTab(id)} className={tab === id ? btnPrimary : btnGhost}>{name}</button>
         ))}
