@@ -190,14 +190,23 @@ A browser cannot open raw TCP sockets, so this uses a **connect-timing heuristic
 
 ---
 
-### Usage
-Enter a host and a port list or ranges (e.g. \`80,443,8000-8100\`). Scanning runs with bounded concurrency, a progress counter and a stop button. Open and browser-blocked ports are listed with timing.
+### Tabs
+The tool has three tabs. Scan only hosts and networks you own or are authorised to test.
+
+**Scan.** Enter a host, pick port profiles (they combine) or type ports and ranges (e.g. \`80,443,8000-8100\`). Choose a timing template, concurrency and URL scheme. Scanning shows a progress counter and a stop button. Results can be filtered to open ports and exported as .txt or .md.
+
+**Command builder.** Build an \`nmap\` command line from options: target, scan type (-sT, -sS, -sU, -sn), timing T0-T5, ports or --top-ports, -sV, -sC, -O, -Pn, -n, --open, --reason and an -oX file. Copy it and run it yourself in a terminal; the browser cannot run nmap and nothing is executed here. A second box explains each flag of any pasted command (it knows common flags and says so when it does not) and warns when a target is missing or root privileges are needed.
+
+**Import results.** Open one or more files you produced with \`nmap -oX\` or \`-oG\`. They are parsed in the browser and not uploaded. You get host and port counts, a table with an open-only filter, and CSV export. Loading a second file shows what changed between the two scans: ports newly open, no longer open, and changed service or version.
 
 ### Honest limitations
 - **Browser-restricted ports:** Chrome refuses \`fetch\` to many classic service ports (21, 22, 23, 25, 110, 143, 993, 995, …). These are reported as **blocked**, not scanned.
 - **Mixed content:** from an HTTPS page only HTTPS targets and \`localhost\` can be probed.
 - **Private Network Access:** Chrome blocks pages from probing \`localhost\` / private IPs, so local scans may all look closed.
 - **No service/version detection** without a native engine.
+- The importer reads the common fields of nmap XML and grepable output (hosts, addresses, ports, states, services, first OS match); NSE script output is ignored.
+
+Similar tools: Zenmap (command builder, saved scans, compare) and web-based nmap XML viewers.
 
 For real scanning past these limits, build \`public/wasm/portscanner.wasm\` (the engine carries its own transport; see the WASM Engines doc) or route through a local proxy.
 `,
