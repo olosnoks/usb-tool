@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Compass, Navigation, Radio, MapPin, Sparkles } from 'lucide-react';
+import { Compass, Navigation, MapPin, Wrench } from 'lucide-react';
 import GpsWardriverDeck from '../GpsWardriverDeck';
 import UbxConfigDeck from '../UbxConfigDeck';
 import WardriveGeneratorWorkbench from './WardriveGeneratorWorkbench';
+import GpsToolkitPanel from './GpsToolkitPanel';
+
+const TAB_IDS = ['wardrive', 'ubx', 'toolkit', 'generator'];
 
 export default function GpsNavigationSuite({
   initialTab = 'wardrive',
@@ -12,66 +15,45 @@ export default function GpsNavigationSuite({
   onSendRawBytes = () => {}
 }) {
   const [activeSubTab, setActiveSubTab] = useState(
-    initialTab === 'ubx' ? 'ubx' : initialTab === 'generator' ? 'generator' : 'wardrive'
+    TAB_IDS.includes(initialTab) ? initialTab : 'wardrive'
   );
 
   useEffect(() => {
-    if (initialTab === 'ubx' || initialTab === 'wardrive' || initialTab === 'generator') {
+    if (TAB_IDS.includes(initialTab)) {
       setActiveSubTab(initialTab);
     }
   }, [initialTab]);
 
-  return (
-    <div className="w-full space-y-4">
-      {/* Suite Header & Sub-Navigation */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400">
-            <Compass className="w-5 h-5" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-400">
-              Live NMEA sentence parser, tactical wardriving map & u-blox UBX binary protocol configurator
-            </p>
-          </div>
-        </div>
+  const tabs = [
+    ['wardrive', Compass, 'GPS Wardriver & NMEA', 'emerald'],
+    ['ubx', Navigation, 'u-blox UBX Config', 'cyan'],
+    ['toolkit', Wrench, 'NMEA/UBX Toolkit', 'amber'],
+    ['generator', MapPin, 'Demo Vector Generator', 'purple']
+  ];
+  const active = {
+    emerald: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
+    cyan: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40',
+    amber: 'bg-amber-500/20 text-amber-300 border border-amber-500/40',
+    purple: 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+  };
 
-        {/* Tab Switcher */}
-        <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
+  return (
+    <div className="w-full space-y-2">
+      <div role="tablist" aria-label="GPS tools" className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+        {tabs.map(([id, Icon, text, color]) => (
           <button
-            onClick={() => setActiveSubTab('wardrive')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'wardrive'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+            key={id}
+            role="tab"
+            aria-selected={activeSubTab === id}
+            onClick={() => setActiveSubTab(id)}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold transition focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
+              activeSubTab === id ? active[color] : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Compass className="w-3.5 h-3.5" />
-            <span>GPS Wardriver & NMEA</span>
+            <Icon className="w-3.5 h-3.5" />
+            <span>{text}</span>
           </button>
-          <button
-            onClick={() => setActiveSubTab('ubx')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'ubx'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Navigation className="w-3.5 h-3.5" />
-            <span>u-blox UBX Config</span>
-          </button>
-          <button
-            onClick={() => setActiveSubTab('generator')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
-              activeSubTab === 'generator'
-                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <MapPin className="w-3.5 h-3.5" />
-            <span>Demo Vector Generator</span>
-          </button>
-        </div>
+        ))}
       </div>
 
       {/* Active Tab View */}
@@ -84,6 +66,12 @@ export default function GpsNavigationSuite({
           />
         ) : activeSubTab === 'ubx' ? (
           <UbxConfigDeck
+            isConnected={isConnected}
+            onSendRawBytes={onSendRawBytes}
+            onLogMessage={onLogMessage}
+          />
+        ) : activeSubTab === 'toolkit' ? (
+          <GpsToolkitPanel
             isConnected={isConnected}
             onSendRawBytes={onSendRawBytes}
             onLogMessage={onLogMessage}
