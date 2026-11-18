@@ -9,7 +9,7 @@ export default {
   content: `
 # Smart Card Toolkit
 
-The **Smart Card Toolkit** is an offline analyser for smart card data. Paste hex or a trace captured somewhere else and the tool explains it: what the card said in its ATR, what each command asked for, what each status word means, and what a TLV record contains. It has five tabs: **ATR**, **APDU**, **Trace**, **TLV** and **Build**.
+The **Smart Card Toolkit** is an offline analyser for smart card data. Paste hex or a trace captured somewhere else and the tool explains it: what the card said in its ATR, what each command asked for, what each status word means, and what a TLV record contains. It has six tabs: **ATR**, **APDU**, **Trace**, **TLV**, **Build** and **Script**.
 
 ## What this tool cannot do
 
@@ -37,6 +37,10 @@ The parser follows ISO/IEC 7816-3 and shows:
 - **Historical bytes:** the hex, an ASCII preview, the category byte (0x00 status, 0x10 DIR reference, 0x80 compact-TLV) and, for category 0x80, the compact-TLV objects.
 - **Length:** the expected length from the interface bytes, K and TCK, with errors for truncation and warnings for extra bytes.
 
+The interface-byte table explains each byte by the protocol that governs its group (the low nibble of the previous TD): TA2 (specific mode, negotiable or not, implicit parameters), TC2 (work waiting time WI), and for T=1 groups TA3 (IFSC), TB3 (BWI and CWI) and TC3 (LRC or CRC). For T=15 groups TA shows clock-stop support and the supported voltage classes (A, B, C). Bytes outside these cases are shown as raw hex.
+
+**Copy report** copies a plain-text summary of the parsed ATR (convention, T0, interface notes, protocols, historical bytes, TCK, errors) in a pcsc_scan-like layout, for notes or bug reports.
+
 There is a small table of **known patterns**. These are hints, not identifications: the PC/SC pseudo-ATR that a reader synthesises for a contactless ISO 14443 tag, a historical-bytes text match for "YubiKey", and a text match for "Java". A text match does not prove the card model, so check the application list before relying on it.
 
 ## APDU tab
@@ -61,6 +65,8 @@ Paste a **response APDU** (optional) and the tool shows the status word and its 
 Paste a trace log. Reader-to-card lines start with \`>>\` (or \`>\`, \`->\` or \`TX\`) and card-to-reader lines start with \`<<\` (or \`<\`, \`<-\` or \`RX\`). Timestamps before the marker and comments after the hex are ignored.
 
 The tool shows the conversation step by step: an ATR if the first response starts with \`3B\` or \`3F\`, then each command with its decoded fields and each response with its status word. A command with no response line is flagged. Responses without a command are flagged as orphans. Each line has a copy button for its hex.
+
+**Convert gp -d / scriptor output** rewrites the text in the box into \`>>\` and \`<<\` lines. It understands GlobalPlatformPro debug output (\`A>>\` and \`A<<\` lines), scriptor output (\`Sending:\` and \`Response: data : SW\` lines) and lines that already have a marker. Other lines are dropped and the count is shown. The conversion is a text match on those formats, so check the result against your tool version.
 
 The example trace in the tool is illustrative, not a capture from a real card.
 
@@ -90,13 +96,25 @@ Build an APDU and copy the hex:
 
 Short encoding is used unless the data or Le needs extended length. Paste the hex into the raw APDU field of your reader tool, or the hex payload of \`hf 14a apdu\` on a Proxmark3 (check \`hf 14a apdu -h\` for your client version).
 
+## Script tab
+
+Write or paste a scriptor-style script: one command APDU per line in hex, \`#\`, \`;\` or \`//\` comments, and lines starting with \`/\` (for example \`/reset\`) kept as directives. Each line is checked as an APDU and listed with its INS name; lines that are not valid APDUs are reported with their line number.
+
+Commands that change card state or use secrets get a warning: VERIFY, CHANGE and RESET RETRY COUNTER, EXTERNAL AUTHENTICATE, INITIALIZE UPDATE, DELETE, INSTALL, PUT KEY, PUT DATA, UPDATE BINARY and RECORD, APPEND RECORD, CREATE and DELETE FILE, and SET STATUS. A wrong PIN or key can lower a retry counter or lock the card, so only run such a script on your own card.
+
+The export box turns the script into text for another tool: a **scriptor file** (with a leading \`/reset\`), one \`opensc-tool -s\` command per APDU, a single \`gp -a\` command line, or a **pyscard** snippet. These are strings to copy. The page never runs them and never contacts a reader.
+
+## Similar tools
+
+The toolkit was compared with pcsc-tools (pcsc_scan, scriptor and the ATR_analysis parser with its smartcard_list.txt database), online ATR parsers, pyscard and GlobalPlatformPro. Unlike those, it does not talk to a reader and does not include an ATR-to-card-model database, so an ATR is parsed but not identified.
+
 ## Browser requirements
 
 Nothing special. The tool runs in any modern browser, including Firefox and Safari, because it uses no hardware API. Copy buttons use the clipboard API, which needs a secure context (https or localhost).
 
 ## Limits
 
-- It does not read or write any card or reader, and it has no simulation mode. Everything shown comes from the text you pasted.
+- It does not read or write any card or reader, and it has no simulation mode. Scripts are checked and exported, never executed. Everything shown comes from the text you pasted.
 - The FI table covers the common values only; others are reported as not tabulated.
 - The historical-byte category interpretation follows ISO 7816-4 at a basic level. Vendor structures inside the historical bytes are shown raw.
 - The EMV and PIV dictionaries are incomplete by design. Unknown tags are shown without a name.

@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { CreditCard, Copy, Check, Info, ListTree, Terminal, Hammer, Binary } from 'lucide-react';
+import { CreditCard, Copy, Check, Info, ListTree, Terminal, Hammer, Binary, FileCode } from 'lucide-react';
 import {
   parseHex, toHex, parseAtr, decodeCommandApdu, decodeResponseApdu, parseTrace, parseTlv,
   KNOWN_AIDS, buildApdu, buildSelectByAid, buildGetResponse, buildReadRecord, buildGetData, VERIFY_NOTE, EXAMPLES,
 } from '../../utils/smartcardTools.js';
+import { explainAtrInterface, formatAtrReport, parseScript, exportScript, convertToolOutputToTrace } from '../../utils/smartcardScript.js';
 
 /**
  * Smart Card toolkit. Offline analysis only: ATR, APDU, trace logs, TLV and an
@@ -16,11 +17,12 @@ const TABS = [
   ['trace', 'Trace', ListTree],
   ['tlv', 'TLV', Binary],
   ['build', 'Build', Hammer],
+  ['script', 'Script', FileCode],
 ];
 
 const inputCls = 'w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs font-mono text-gray-200 focus:outline-none focus:border-cyan-700';
 const btnCls = 'px-2 py-1 rounded border border-slate-700 text-[11px] text-slate-300 hover:border-cyan-700 hover:text-cyan-300';
-const panelCls = 'bg-slate-900/60 border border-slate-800 rounded p-3';
+const panelCls = 'bg-slate-900/60 border border-slate-800 rounded p-2';
 const labelCls = 'text-[10px] uppercase tracking-wider text-slate-500 mb-1';
 
 const copyText = (t) => { try { navigator.clipboard?.writeText(String(t)); } catch { /* clipboard unavailable */ } };
@@ -50,7 +52,7 @@ function Notice({ children, tone = 'amber' }) {
 
 function KV({ k, v, mono = true }) {
   return (
-    <div className="flex items-start justify-between gap-3 py-0.5 border-b border-slate-900 last:border-0">
+    <div className="flex items-start justify-between gap-2 py-0.5 border-b border-slate-900 last:border-0">
       <span className="text-slate-500 text-xs shrink-0">{k}</span>
       <span className={`text-xs text-gray-200 text-right break-all ${mono ? 'font-mono' : ''}`}>{v === null || v === undefined || v === '' ? '-' : String(v)}</span>
     </div>
@@ -67,7 +69,7 @@ function AtrTab() {
   }, [text]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div>
         <div className={labelCls}>ATR (hex, from pcsc-tools, a reader log, or a card dump)</div>
         <textarea className={inputCls} rows={3} spellCheck={false} aria-label="ATR hex" value={text} onChange={(e) => setText(e.target.value)} />
@@ -75,12 +77,13 @@ function AtrTab() {
           <button type="button" className={btnCls} onClick={() => setText(EXAMPLES.atr)}>Load example (T=0)</button>
           <button type="button" className={btnCls} onClick={() => setText(EXAMPLES.atrT1)}>Load example (T=1, TA1)</button>
           <button type="button" className={btnCls} onClick={() => setText('')}>Clear</button>
+          {atr && <CopyBtn text={formatAtrReport(atr, atr.rawHex)} label="Copy report" />}
         </div>
         <div className="text-[10px] text-slate-500 mt-1">The example ATRs are illustrative inputs for the parser, not readings from a card.</div>
       </div>
       {error && <ErrorLine>{error}</ErrorLine>}
       {atr && (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-2 @md:grid-cols-2">
           <div className={panelCls}>
             <div className={labelCls}>Header</div>
             <KV k="Convention (TS)" v={atr.TS === null ? '-' : `${atr.TS.toString(16).toUpperCase().padStart(2, '0')} (${atr.convention})`} />
@@ -102,7 +105,7 @@ function AtrTab() {
               </>
             ) : <div className="text-xs text-slate-500">No FI/DI data.</div>}
           </div>
-          <div className={`${panelCls} md:col-span-2`}>
+          <div className={`${panelCls} @md:col-span-2`}>
             <div className={labelCls}>Interface bytes</div>
             {atr.interface.length === 0 ? <div className="text-xs text-slate-500">No interface bytes after T0.</div> : (
               <table className="w-full text-xs font-mono">
@@ -110,19 +113,14 @@ function AtrTab() {
                   <tr><th className="py-1 pr-2">Group</th><th className="pr-2">TA</th><th className="pr-2">TB</th><th className="pr-2">TC</th><th className="pr-2">TD</th><th>Meaning</th></tr>
                 </thead>
                 <tbody>
-                  {atr.interface.map((g) => {
+                  {atr.interface.map((g, gi) => {
                     const hx = (v) => (v === null ? '-' : v.toString(16).toUpperCase().padStart(2, '0'));
-                    const notes = [];
-                    if (g.TA !== null && g.index === 1) notes.push('TA1: FI/DI');
-                    if (g.TA !== null && g.index === 2) notes.push('TA2: specific mode (PPS not negotiable)');
-                    if (g.TB !== null && g.index === 1) notes.push('TB1: deprecated (VPP)');
-                    if (g.TC !== null && g.index === 1) notes.push(`TC1: extra guard time N=${g.TC}`);
-                    if (g.TD !== null) notes.push(`TD${g.index}: ${(g.TD & 0x0f) === 0 ? 'T=0' : (g.TD & 0x0f) === 1 ? 'T=1' : `T=${g.TD & 0x0f} (RFU or proprietary)`}`);
+                    const notes = explainAtrInterface(atr)[gi]?.notes ?? [];
                     return (
-                      <tr key={g.index} className="border-t border-slate-900">
+                      <tr key={g.index} className="border-t border-slate-900 align-top">
                         <td className="py-1 pr-2 text-slate-400">{g.index}</td>
                         <td className="pr-2">{hx(g.TA)}</td><td className="pr-2">{hx(g.TB)}</td><td className="pr-2">{hx(g.TC)}</td><td className="pr-2">{hx(g.TD)}</td>
-                        <td className="font-sans text-slate-300">{notes.join('; ')}</td>
+                        <td className="font-sans text-slate-300">{notes.map((n, ni) => <div key={ni}>{n}</div>)}</td>
                       </tr>
                     );
                   })}
@@ -130,7 +128,7 @@ function AtrTab() {
               </table>
             )}
           </div>
-          <div className={`${panelCls} md:col-span-2`}>
+          <div className={`${panelCls} @md:col-span-2`}>
             <div className={labelCls}>Historical bytes</div>
             <KV k="Hex" v={atr.historical.hex || '(none)'} />
             <KV k="ASCII" v={atr.historical.ascii || '-'} />
@@ -145,7 +143,7 @@ function AtrTab() {
             )}
           </div>
           {(atr.patterns.length > 0 || atr.errors.length > 0 || atr.warnings.length > 0) && (
-            <div className={`${panelCls} md:col-span-2 space-y-2`}>
+            <div className={`${panelCls} @md:col-span-2 space-y-2`}>
               {atr.patterns.map((p) => (
                 <Notice key={p.id} tone="slate"><span className="font-semibold text-cyan-300">Hint: {p.label}.</span> {p.note}</Notice>
               ))}
@@ -176,8 +174,8 @@ function ApduTab() {
   }, [rsp]);
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 md:grid-cols-2">
+    <div className="space-y-2">
+      <div className="grid gap-2 @md:grid-cols-2">
         <div>
           <div className={labelCls}>Command APDU (hex)</div>
           <textarea className={inputCls} rows={3} spellCheck={false} aria-label="Command APDU hex" value={cmd} onChange={(e) => setCmd(e.target.value)} />
@@ -191,7 +189,7 @@ function ApduTab() {
         <button type="button" className={btnCls} onClick={() => { setCmd(EXAMPLES.apdu); setRsp('6F 02 90 00'); }}>Load example</button>
         <button type="button" className={btnCls} onClick={() => { setCmd(''); setRsp(''); }}>Clear</button>
       </div>
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-2 @md:grid-cols-2">
         <div className={panelCls}>
           <div className={labelCls}>Command</div>
           {!cmdRes && <div className="text-xs text-slate-500">Paste a command APDU.</div>}
@@ -235,17 +233,25 @@ function ApduTab() {
 
 function TraceTab() {
   const [text, setText] = useState(EXAMPLES.trace);
+  const [convNote, setConvNote] = useState('');
   const trace = useMemo(() => parseTrace(text), [text]);
   const lines = trace.steps.length;
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div>
         <div className={labelCls}>Trace log. Lines start with &gt;&gt; (command) or &lt;&lt; (response). ATR lines start with &lt;&lt; and 3B or 3F.</div>
         <textarea className={inputCls} rows={7} spellCheck={false} aria-label="Trace log" value={text} onChange={(e) => setText(e.target.value)} />
         <div className="flex gap-2 mt-1">
           <button type="button" className={btnCls} onClick={() => setText(EXAMPLES.trace)}>Load example</button>
           <button type="button" className={btnCls} onClick={() => setText('')}>Clear</button>
+          <button
+            type="button"
+            className={btnCls}
+            title="Rewrite gp -d (A>> / A<<) or scriptor (Sending: / Response:) output into >> / << lines"
+            onClick={() => { const r = convertToolOutputToTrace(text); if (r.trace) { setText(r.trace); setConvNote(r.skipped ? `${r.skipped} unrecognised line(s) dropped.` : 'Converted.'); } else setConvNote('Nothing recognised (expects gp -d or scriptor output).'); }}
+          >Convert gp -d / scriptor output</button>
         </div>
+        {convNote && <div className="text-[10px] text-slate-400 mt-1">{convNote}</div>}
         <div className="text-[10px] text-slate-500 mt-1">The example trace is illustrative (a PIV-style select and read), not a capture from a card.</div>
       </div>
       {!text.trim() ? <div className="text-xs text-slate-500">Paste a trace to see the conversation.</div> : (
@@ -322,7 +328,7 @@ function TlvTab() {
     try { return { result: parseTlv(parseHex(text)), error: '' }; } catch (e) { return { result: null, error: e.message }; }
   }, [text]);
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div>
         <div className={labelCls}>BER-TLV data (hex). Use the response data from a READ RECORD, GET DATA or SELECT FCI.</div>
         <textarea className={inputCls} rows={4} spellCheck={false} aria-label="TLV hex" value={text} onChange={(e) => setText(e.target.value)} />
@@ -415,15 +421,15 @@ function BuildTab() {
   const modes = [['select', 'SELECT by AID'], ['getresponse', 'GET RESPONSE'], ['readrecord', 'READ RECORD'], ['getdata', 'GET DATA'], ['verify', 'VERIFY note'], ['custom', 'Custom APDU']];
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5">
         {modes.map(([id, label]) => (
           <button key={id} type="button" onClick={() => setMode(id)} className={`${btnCls} ${mode === id ? 'border-cyan-600 text-cyan-300' : ''}`}>{label}</button>
         ))}
       </div>
-      <div className={`${panelCls} space-y-3`}>
+      <div className={`${panelCls} space-y-2`}>
         {mode === 'select' && (
-          <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-slate-500">Known AID</span>
               <select className={`${inputCls} w-80`} value={aidId} onChange={(e) => setAidId(e.target.value)}>
@@ -437,20 +443,20 @@ function BuildTab() {
         )}
         {mode === 'getresponse' && <Field label="Le (bytes to fetch, from 61 xx)" value={leResp} onChange={setLeResp} />}
         {mode === 'readrecord' && (
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-2">
             <Field label="Record number" value={record} onChange={setRecord} />
             <Field label="SFI (0 = current file)" value={sfi} onChange={setSfi} />
             <Field label="Le" value={leRec} onChange={setLeRec} />
           </div>
         )}
         {mode === 'getdata' && (
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-2">
             <Field label="Tag (1 or 2 bytes hex)" value={tag} onChange={setTag} width="w-40" />
             <Field label="Le" value={leData} onChange={setLeData} />
           </div>
         )}
         {mode === 'custom' && (
-          <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-end gap-2">
             <Field label="CLA" value={cla} onChange={setCla} />
             <Field label="INS" value={ins} onChange={setIns} />
             <Field label="P1" value={p1} onChange={setP1} />
@@ -485,6 +491,55 @@ function parseIntField(s, min, max) {
   return n;
 }
 
+// ---------------------------------------------------------------- Script tab
+
+const SCRIPT_EXAMPLE = '# select the PIV application, then read the CHUID\n/reset\n00 A4 04 00 09 A0 00 00 03 08 00 00 10 00\n00 CB 3F FF 05 5C 03 5F C1 02 00\n';
+const EXPORTS = [['scriptor', 'scriptor file'], ['opensc', 'opensc-tool -s'], ['gp', 'gp -a'], ['pyscard', 'pyscard']];
+
+function ScriptTab() {
+  const [text, setText] = useState(SCRIPT_EXAMPLE);
+  const [fmt, setFmt] = useState('scriptor');
+  const parsed = useMemo(() => parseScript(text), [text]);
+  const exported = useMemo(() => { try { return exportScript(parsed, fmt); } catch { return ''; } }, [parsed, fmt]);
+  return (
+    <div className="space-y-2">
+      <div>
+        <div className={labelCls}>Script: one APDU per line (hex), # comments, /reset lines kept</div>
+        <textarea className={inputCls} rows={5} spellCheck={false} aria-label="APDU script" value={text} onChange={(e) => setText(e.target.value)} />
+        <div className="flex gap-2 mt-1">
+          <button type="button" className={btnCls} onClick={() => setText(SCRIPT_EXAMPLE)}>Load example</button>
+          <button type="button" className={btnCls} onClick={() => setText('')}>Clear</button>
+        </div>
+        <div className="text-[10px] text-slate-500 mt-1">This page only checks and converts the script. It sends nothing; run the exported text with your own tool on your own card.</div>
+      </div>
+      {parsed.errors.map((e, i) => <ErrorLine key={`e${i}`}>Line {e.line}: {e.message}</ErrorLine>)}
+      {parsed.warnings.map((w, i) => <Notice key={`w${i}`}>{w.message}</Notice>)}
+      {parsed.commands.length > 0 && (
+        <div className={panelCls}>
+          <div className={labelCls}>{parsed.commands.length} command(s)</div>
+          {parsed.commands.map((c) => (
+            <div key={c.line} className="flex items-start gap-2 text-xs border-b border-slate-900 last:border-0 py-0.5">
+              <span className="text-slate-600 w-8 shrink-0">L{c.line}</span>
+              <span className="font-mono text-cyan-200 break-all flex-1">{c.hex}</span>
+              <span className="text-slate-400 shrink-0">{c.ins} {c.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className={panelCls}>
+        <div className="flex flex-wrap items-center gap-1.5 mb-1">
+          <span className={labelCls + ' mb-0'}>Export for</span>
+          {EXPORTS.map(([id, label]) => (
+            <button key={id} type="button" onClick={() => setFmt(id)} className={`${btnCls} ${fmt === id ? 'border-cyan-600 text-cyan-300' : ''}`}>{label}</button>
+          ))}
+          <CopyBtn text={exported} label="Copy" />
+        </div>
+        <pre className="text-[11px] font-mono text-gray-300 whitespace-pre-wrap break-all max-h-40 overflow-auto">{exported || 'Nothing to export.'}</pre>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- shell
 
 export default function SmartCardWorkbench({ onLogMessage } = {}) {
@@ -493,26 +548,19 @@ export default function SmartCardWorkbench({ onLogMessage } = {}) {
   const switchTab = (id) => { setTab(id); log(`Smart Card: ${id.toUpperCase()} tab`); };
 
   return (
-    <div className="p-4 space-y-4 text-gray-200 text-sm">
-      <div className="flex items-start gap-3">
-        <CreditCard className="text-cyan-400 shrink-0 mt-0.5" size={20} />
-        <div>
-          <div className="font-semibold text-base">Smart Card toolkit</div>
-          <div className="text-xs text-slate-400">ATR, APDU, trace logs, TLV and an APDU builder. Offline: no reader is contacted.</div>
+    <div className="space-y-2 text-gray-200 text-sm">
+      <details className="text-xs border rounded text-amber-200 bg-amber-950/30 border-amber-900">
+        <summary className="cursor-pointer px-2 py-1.5 flex items-center gap-1.5">
+          <Info size={13} className="shrink-0" />
+          <span><span className="font-semibold">Smart Card toolkit.</span> Offline: nothing is read from hardware. (details)</span>
+        </summary>
+        <div className="px-2 pb-2 space-y-1">
+          <div><span className="font-semibold">This page cannot drive a smart-card reader.</span> Chrome's WebUSB blocks the smart-card interface class (0x0B), so a CCID reader (contact or contactless) cannot be opened from a normal web page. The Web Smart Card API exists only for Isolated Web Apps.</div>
+          <div>Paste data captured elsewhere: pcsc-tools output, a Proxmark3 <span className="font-mono">hf 14a apdu</span> session, a Flipper NFC dump, or a log. Nothing here is read from hardware.</div>
         </div>
-      </div>
+      </details>
 
-      <Notice>
-        <div className="flex gap-2">
-          <Info size={14} className="shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <div><span className="font-semibold">This page cannot drive a smart-card reader.</span> Chrome's WebUSB blocks the smart-card interface class (0x0B), so a CCID reader (contact or contactless) cannot be opened from a normal web page. The Web Smart Card API exists only for Isolated Web Apps.</div>
-            <div>Paste data captured elsewhere: pcsc-tools output, a Proxmark3 <span className="font-mono">hf 14a apdu</span> session, a Flipper NFC dump, or a log. Nothing here is read from hardware.</div>
-          </div>
-        </div>
-      </Notice>
-
-      <div className="flex flex-wrap gap-1.5 border-b border-slate-800 pb-2" role="tablist">
+      <div className="flex flex-wrap gap-1.5 border-b border-slate-800 pb-1.5" role="tablist">
         {TABS.map(([id, label, Icon]) => (
           <button
             key={id}
@@ -532,6 +580,7 @@ export default function SmartCardWorkbench({ onLogMessage } = {}) {
       {tab === 'trace' && <TraceTab />}
       {tab === 'tlv' && <TlvTab />}
       {tab === 'build' && <BuildTab />}
+      {tab === 'script' && <ScriptTab />}
     </div>
   );
 }
