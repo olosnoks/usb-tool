@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Search, RefreshCw, FileDown, ShieldCheck, ShieldAlert, Link2, FileCode, Image, Code2, Fingerprint, Cookie, Globe } from 'lucide-react';
+import { Search, RefreshCw, FileDown, ShieldCheck, ShieldAlert, Link2, FileCode, Image, Code2, Fingerprint, Cookie, Globe, Copy, Accessibility } from 'lucide-react';
 import { proxiedFetch, describeNetworkError, isProxyEnabled, getSetCookie, getRedirectChain } from '../../utils/netClient';
 import ProxyConfig from './common/ProxyConfig';
 import { extractTitle, assessSecurityHeaders, extractLinks, extractResources, extractMeta, extractForms, gradeSecurityHeaders } from '../../utils/urlinspect.js';
@@ -8,6 +8,8 @@ import { analyzeSetCookies, cookieNames } from '../../utils/cookies.js';
 import { scanHeaders } from '../../utils/webScan.js';
 import NiktoScannerWorkbench from './NiktoScannerWorkbench';
 import CrawlerTab from './webanalyzer/CrawlerTab';
+import LinkCheckerPanel from './webanalyzer/LinkCheckerPanel';
+import { auditSeoA11y, remediationItems, remediationSnippet } from '../../utils/siteAudit.js';
 
 /**
  * Web Analyzer — one Analyze does a single fetch and shows everything about the
@@ -22,8 +24,8 @@ import CrawlerTab from './webanalyzer/CrawlerTab';
 
 function Section({ icon: Icon, title, count, accent = 'text-cyan-400', id, children }) {
   return (
-    <section id={id} className="mb-3">
-      <h3 className={`text-xs font-semibold uppercase tracking-wide mb-1 flex items-center gap-1.5 ${accent}`}>
+    <section id={id} className="mb-2">
+      <h3 className={`text-xs font-semibold uppercase tracking-wide mb-0.5 flex items-center gap-1.5 ${accent}`}>
         <Icon size={13} /> {title}{count !== undefined && <span className="text-slate-500">({count})</span>}
       </h3>
       <div className="bg-slate-950 border border-slate-800 rounded p-2 text-xs">{children}</div>
@@ -66,6 +68,7 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null); // { page, tech, cookies, cookieNote, passive }
+  const [fmt, setFmt] = useState('nginx');
   const extraRef = useRef({}); // onReport output from Path Prober / Crawler
 
   const log = (m) => onLogMessage?.(m);
@@ -96,6 +99,7 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
         security: assessSecurityHeaders(headersLower),
         grade, redirects,
         title: extractTitle(html), meta: extractMeta(html),
+        seo: auditSeoA11y(html, resp.url || target),
         links: extractLinks(html, target), resources, forms: extractForms(html, target),
       };
       const tech = detectTech({ headers: headersLower, html, cookieNames: names, scripts: resources.scripts });
@@ -131,6 +135,11 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
       L.push('', `### Security headers — grade ${page.grade.grade} (${page.grade.score}/100)`, '');
       page.grade.headers.forEach((h) => L.push(`- ${ICON[h.status]} **${h.header}** (${h.status})${h.value ? `: \`${h.value}\`` : ''} — ${h.reason}`));
       L.push('');
+      const fixes = remediationItems(page.grade.headers);
+      if (fixes.length) L.push('### Suggested header fixes (nginx)', '', '```', remediationSnippet(fixes, 'nginx'), '```', '');
+      L.push('## SEO and accessibility hints', '');
+      if (page.seo.issues.length) page.seo.issues.forEach((i) => L.push(`- [${i.area}/${i.severity}] ${i.message}`)); else L.push('_No hints._');
+      L.push('');
       L.push('## Technology', '');
       if (tech.length) tech.forEach((t) => L.push(`- **${t.name}** (${t.category}) — \`${t.evidence}\``)); else L.push('_No technologies matched._');
       L.push('');
@@ -144,6 +153,7 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
       L.push('## Resources', '', `- Links: ${page.links.length}`, `- Scripts: ${page.resources.scripts.length}`, `- Stylesheets: ${page.resources.styles.length}`, `- Images: ${page.resources.images.length}`, '');
       if (page.forms.length) { L.push('### Forms'); page.forms.forEach((f) => L.push(`- ${f.method} ${f.action} — ${f.inputs.map((i) => `${i.name || '—'}:${i.type}`).join(', ') || 'no inputs'}`)); L.push(''); }
     } else { L.push('_No analysis has been run._', ''); }
+    if (extraRef.current.links) { L.push('## Link check', '', extraRef.current.links.markdown, ''); }
     if (extraRef.current.paths) { L.push('## Path Prober', '', extraRef.current.paths.markdown || '_No findings._', ''); }
     if (extraRef.current.crawler) { L.push('## Crawler', '', extraRef.current.crawler.markdown || '_No pages._', ''); }
     return L.join('\n');
@@ -160,7 +170,7 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
   const exportJson = () => {
     const host = (() => { try { return new URL(data?.target || normalized()).hostname; } catch { return 'report'; } })();
     const { page, tech, cookies, cookieNote, passive, target } = data;
-    const out = { target, generatedAt: new Date().toISOString(), status: page.status, finalUrl: page.finalUrl, sizeBytes: page.size, redirects: page.redirects, grade: page.grade, tech, cookies, cookieNote, passive, forms: page.forms, resources: page.resources };
+    const out = { target, generatedAt: new Date().toISOString(), status: page.status, finalUrl: page.finalUrl, sizeBytes: page.size, redirects: page.redirects, grade: page.grade, tech, cookies, cookieNote, passive, forms: page.forms, resources: page.resources, seo: page.seo, headerFixes: remediationItems(page.grade.headers) };
     const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = `web-analysis-${host}-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(a.href);
@@ -170,31 +180,31 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
   const d = data;
 
   return (
-    <div className="w-full min-w-0 max-w-full text-gray-200 px-4 pt-3 pb-4">
+    <div className="w-full min-w-0 max-w-full text-gray-200">
       <ProxyConfig onLogMessage={log} />
-      <div className="flex flex-wrap gap-2 mb-3">
-        <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && analyze()} placeholder="https://example.com" className="flex-1 min-w-[14rem] bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono" />
-        <button onClick={analyze} disabled={busy} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && analyze()} placeholder="https://example.com" className="flex-1 min-w-[11rem] bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono" />
+        <button onClick={analyze} disabled={busy} className="px-2.5 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
           {busy ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />} {busy ? 'Analyzing…' : 'Analyze'}
         </button>
-        <button onClick={exportMd} disabled={!d} title={d ? 'Export everything to Markdown' : 'Analyze first'} className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-gray-200 rounded text-sm hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
-          <FileDown size={14} /> Export (.md)
+        <button onClick={exportMd} disabled={!d} title={d ? 'Export everything to Markdown' : 'Analyze first'} className="px-2 py-1 bg-slate-800 border border-slate-700 text-gray-200 rounded text-xs hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
+          <FileDown size={13} /> Export (.md)
         </button>
-        <button onClick={exportJson} disabled={!d} title={d ? 'Export to JSON' : 'Analyze first'} className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-gray-200 rounded text-sm hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
-          <FileDown size={14} /> Export (.json)
+        <button onClick={exportJson} disabled={!d} title={d ? 'Export to JSON' : 'Analyze first'} className="px-2 py-1 bg-slate-800 border border-slate-700 text-gray-200 rounded text-xs hover:bg-slate-700 disabled:opacity-40 inline-flex items-center gap-1">
+          <FileDown size={13} /> Export (.json)
         </button>
       </div>
 
-      {error && <div className="mb-3 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{error}</div>}
+      {error && <div className="mb-2 p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{error}</div>}
 
       {d && (
         <>
-          <div className="mb-3 flex items-center gap-3 flex-wrap text-xs">
+          <div className="mb-1.5 flex items-center gap-2 flex-wrap text-xs">
             <span className={d.page.status >= 400 ? 'text-red-400' : d.page.status >= 300 ? 'text-amber-400' : 'text-green-400'}>{d.page.status} {d.page.statusText}</span>
             <span className="text-gray-500">{(d.page.size / 1024).toFixed(1)} KB · {d.page.timeMs} ms</span>
             <span className="text-slate-400 font-mono break-all">{d.page.finalUrl}</span>
           </div>
-          {d.page.title && <div className="text-sm text-gray-200 mb-2">{d.page.title}</div>}
+          {d.page.title && <div className="text-xs text-gray-200 mb-1.5">{d.page.title}</div>}
 
           {d.page.redirects?.length > 0 && (
             <Section icon={Link2} title="Redirect chain" count={d.page.redirects.length} accent="text-sky-400">
@@ -217,6 +227,41 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
                 </div>
               ))}
             </div>
+            {(() => {
+              const fixes = remediationItems(d.page.grade.headers);
+              if (!fixes.length) return null;
+              const text = remediationSnippet(fixes, fmt);
+              return (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-[11px] text-cyan-300 hover:text-cyan-200">Suggested fixes for {fixes.length} header(s)</summary>
+                  <div className="mt-1 space-y-1">
+                    <div className="flex items-center gap-1.5 text-[11px]">
+                      <select aria-label="Server format" value={fmt} onChange={(e) => setFmt(e.target.value)} className="bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5">
+                        <option value="nginx">nginx</option><option value="apache">Apache</option><option value="headers">_headers (Cloudflare Pages / Netlify)</option>
+                      </select>
+                      <button onClick={() => navigator.clipboard?.writeText(text)} title="Copy snippet" className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded inline-flex items-center gap-1"><Copy size={11} /> Copy</button>
+                    </div>
+                    <pre className="bg-slate-900 border border-slate-800 rounded p-1.5 text-[11px] font-mono overflow-auto whitespace-pre-wrap break-all">{text}</pre>
+                    <ul className="text-[10px] text-slate-500 list-disc pl-4">{fixes.filter((f) => f.note).map((f) => <li key={f.header}><span className="text-slate-400">{f.name}:</span> {f.note}</li>)}</ul>
+                    <div className="text-[10px] text-slate-600">Baseline values, not a tailored policy. Test on staging before deploying.</div>
+                  </div>
+                </details>
+              );
+            })()}
+          </Section>
+
+          <Section icon={Accessibility} title="SEO and accessibility hints" count={d.page.seo.issues.length} accent="text-teal-400">
+            {d.page.seo.issues.length === 0 ? <div className="text-emerald-400">No hints from these checks.</div> : (
+              <div className="space-y-0.5">
+                {d.page.seo.issues.map((i) => (
+                  <div key={i.id} className="flex items-start gap-1.5">
+                    <span className={`shrink-0 px-1.5 rounded text-[10px] border ${i.severity === 'warn' ? 'border-amber-800 text-amber-300' : 'border-slate-700 text-slate-400'}`}>{i.area === 'seo' ? 'SEO' : 'a11y'}</span>
+                    <span className="text-[11px] text-gray-300 min-w-0 break-words">{i.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="text-[10px] text-slate-600 mt-1">Quick regex checks (lang, title, description, viewport, h1, alt text, link names, form labels). Not a full Lighthouse audit.</div>
           </Section>
 
           <Section icon={Fingerprint} title="Technology" count={d.tech.length} accent="text-purple-400">
@@ -248,7 +293,11 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
             ))}
           </Section>
 
-          <div id="wa-links" className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]">
+          <Section icon={Link2} title="Link checker" accent="text-sky-400">
+            <LinkCheckerPanel links={d.page.links} baseUrl={d.page.finalUrl} onLogMessage={log} onReport={(p) => onExtraReport('links', p)} />
+          </Section>
+
+          <div id="wa-links" className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(14rem,1fr))]">
             <Section icon={Link2} title="Links" count={d.page.links.length}><List items={d.page.links} /></Section>
             <Section icon={FileCode} title="Scripts" count={d.page.resources.scripts.length}><List items={d.page.resources.scripts} /></Section>
             <Section icon={Code2} title="Stylesheets" count={d.page.resources.styles.length}><List items={d.page.resources.styles} /></Section>
@@ -264,9 +313,9 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
             ))}
           </Section>
 
-          <details className="mb-3">
+          <details className="mb-2">
             <summary className="cursor-pointer text-[11px] text-slate-400 hover:text-gray-200">Response headers & meta ({Object.keys(d.page.headers).length} + {Object.keys(d.page.meta).length})</summary>
-            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(16rem,1fr))] mt-2">
+            <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(16rem,1fr))] mt-2">
               <Section icon={Globe} title="Response headers"><List items={Object.entries(d.page.headers).map(([k, v]) => `${k}: ${v}`)} linkify={false} /></Section>
               <Section icon={FileCode} title="Meta tags"><List items={Object.entries(d.page.meta).map(([k, v]) => `${k}: ${v}`)} linkify={false} /></Section>
             </div>
@@ -275,16 +324,16 @@ export default function WebAnalyzerWorkbench({ onLogMessage, initialTab }) {
       )}
 
       {/* On-demand, long-running sections */}
-      <details id="wa-paths" className="mt-2 border-t border-slate-800 pt-3" open={pathsOpen} onToggle={(e) => setPathsOpen(e.currentTarget.open)}>
+      <details id="wa-paths" className="mt-2 border-t border-slate-800 pt-2" open={pathsOpen} onToggle={(e) => setPathsOpen(e.currentTarget.open)}>
         <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-rose-300">Path Prober (on-demand)</summary>
         <div className="mt-1"><NiktoScannerWorkbench onLogMessage={onLogMessage} hideProxyConfig fixedTarget={normalized()} onReport={(p) => onExtraReport('paths', p)} /></div>
       </details>
-      <details id="wa-crawler" className="mt-2 border-t border-slate-800 pt-3" open={crawlerOpen} onToggle={(e) => setCrawlerOpen(e.currentTarget.open)}>
+      <details id="wa-crawler" className="mt-2 border-t border-slate-800 pt-2" open={crawlerOpen} onToggle={(e) => setCrawlerOpen(e.currentTarget.open)}>
         <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-emerald-300">Crawler (on-demand)</summary>
         <div className="mt-1"><CrawlerTab onLogMessage={onLogMessage} fixedTarget={normalized()} onReport={(p) => onExtraReport('crawler', p)} /></div>
       </details>
 
-      {!d && !error && <p className="text-[10px] text-slate-500 mt-3">One Analyze fetches the page once and shows its security headers, technology stack, cookie flags, passive-scan findings, links/resources and forms together. Path Prober and Crawler run on demand below. Export compiles everything to one Markdown file.</p>}
+      {!d && !error && <p className="text-[10px] text-slate-500 mt-2">One Analyze fetches the page once and shows its security headers, technology stack, cookie flags, passive-scan findings, links/resources and forms together. Path Prober and Crawler run on demand below. Export compiles everything to one Markdown file.</p>}
     </div>
   );
 }
