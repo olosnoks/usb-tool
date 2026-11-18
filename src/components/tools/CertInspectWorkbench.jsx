@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Globe, FileUp, ClipboardPaste, Search, RefreshCw, ShieldCheck, ShieldAlert, Download } from 'lucide-react';
+import { Globe, FileUp, ClipboardPaste, Search, RefreshCw, ShieldCheck, ShieldAlert, Download, Copy } from 'lucide-react';
 import { parseCertificate, toDER, loadCertificateBundle, buildChain, matchHostname, spkiPin, fingerprintHex, pemFromDer, weaknessHints } from '../../utils/x509';
 import { proxiedFetch, describeNetworkError, isProxyEnabled } from '../../utils/netClient';
 import { isBackendConfigured, tlsCert } from '../../utils/backendClient';
+import { matchFingerprint, validityTimeline, certToText, certToJson, opensslCommands } from '../../utils/certReport';
 import ProxyConfig from './common/ProxyConfig';
 
 /**
@@ -34,6 +35,42 @@ function Row({ label, value, cls = '' }) {
   return <tr><td className="p-1 border border-slate-700 bg-slate-800 text-slate-200 align-top whitespace-nowrap">{label}</td><td className={`p-1 border border-slate-700 break-all ${cls}`}>{Array.isArray(value) ? value.join(', ') : value}</td></tr>;
 }
 
+const copyText = (t) => navigator.clipboard?.writeText(t).catch(() => {});
+
+function Timeline({ parsed }) {
+  const t = validityTimeline(parsed);
+  const color = t.state === 'valid' ? 'bg-green-500' : t.state === 'expiring' ? 'bg-amber-500' : 'bg-red-500';
+  return (
+    <div className="font-sans" title={`${t.totalDays}-day validity, ${t.pct}% elapsed`}>
+      <div className="h-1.5 rounded bg-slate-800 overflow-hidden" role="progressbar" aria-label="Validity elapsed" aria-valuemin={0} aria-valuemax={100} aria-valuenow={t.pct}><div className={`h-full ${color}`} style={{ width: `${t.pct}%` }} /></div>
+      <div className="flex justify-between text-[10px] text-slate-500 mt-0.5"><span>{parsed.notBefore.toISOString().slice(0, 10)}</span><span>{t.pct}% of {t.totalDays} d elapsed</span><span>{parsed.notAfter.toISOString().slice(0, 10)}</span></div>
+    </div>
+  );
+}
+
+function Tools({ parsed, fps, expectHost }) {
+  const [fpIn, setFpIn] = useState('');
+  const fpRes = matchFingerprint(fpIn, fps);
+  const download = (name, text, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); URL.revokeObjectURL(a.href); };
+  const cmds = opensslCommands({ host: expectHost });
+  return (
+    <div className="space-y-1.5 font-sans">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button onClick={() => copyText(certToText(parsed, fps))} title="Copy a plain-text summary" className="px-2 py-0.5 text-[11px] bg-slate-800 border border-slate-700 rounded hover:bg-slate-700 inline-flex items-center gap-1"><Copy size={11} /> Copy text</button>
+        <button onClick={() => download('certificate.json', JSON.stringify(certToJson(parsed, fps), null, 2), 'application/json')} title="Download a JSON summary" className="px-2 py-0.5 text-[11px] bg-slate-800 border border-slate-700 rounded hover:bg-slate-700 inline-flex items-center gap-1"><Download size={11} /> JSON</button>
+        <input value={fpIn} onChange={(e) => setFpIn(e.target.value)} aria-label="Compare a fingerprint or pin" placeholder="compare fingerprint / pin-sha256 …" className="flex-1 min-w-[10rem] bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-[11px] font-mono" />
+        {fpRes && <span className={`text-[11px] ${fpRes.match ? 'text-green-400' : 'text-red-400'}`}>{fpRes.match ? `Match (${fpRes.algorithm})` : `No match: ${fpRes.reason}`}</span>}
+      </div>
+      <details className="text-[11px]">
+        <summary className="cursor-pointer text-slate-400">openssl equivalents (run these yourself on the saved PEM)</summary>
+        <ul className="mt-1 space-y-0.5 font-mono">
+          {cmds.map((c) => <li key={c.label}><span className="text-slate-500 font-sans">{c.label}: </span><code className="text-cyan-300 break-all">{c.cmd}</code> <button onClick={() => copyText(c.cmd)} title="Copy command" aria-label={`Copy command: ${c.label}`} className="text-slate-400 hover:text-slate-200 align-middle"><Copy size={10} /></button></li>)}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
 function CertDetails({ parsed: i, fps, der }) {
   const statusCls = i.expired || i.notYetValid ? 'text-red-400' : 'text-green-400';
   const expCls = i.expired ? 'text-red-400' : i.daysUntilExpiry <= 30 ? 'text-amber-400' : 'text-green-400';
@@ -46,7 +83,7 @@ function CertDetails({ parsed: i, fps, der }) {
   const policies = (i.certificatePolicies || []).map((p) => `${p.name ? `${p.name} ` : ''}(${p.oid})${p.cps.length ? ` CPS: ${p.cps.join(', ')}` : ''}${p.notices.length ? ` notice: ${p.notices.join(' ')}` : ''}`);
   const nc = i.nameConstraints;
   return (
-    <table className="w-full border-collapse text-sm">
+    <table className="w-full border-collapse text-[11px]">
       <tbody>
         <Row label="Subject" value={i.subject} />
         <Row label="Issuer" value={i.issuer} />
@@ -75,10 +112,7 @@ function CertDetails({ parsed: i, fps, der }) {
         {i.scts && <Row label="Embedded SCTs" value={i.scts.length ? i.scts.map((t) => `log ${t.logId.slice(0, 16)}… @ ${t.timestamp}`) : '(none decoded)'} />}
         {(i.unknownExtensions || []).map((u) => <Row key={u.oid} label={`Ext ${u.name || u.oid}`} value={`${u.name ? `${u.oid} · ` : ''}${u.critical ? 'critical · ' : ''}${clip(u.hex)}`} />)}
         {hints.length > 0 && <Row label="Weakness hints" value={<ul className="list-disc ml-4 font-sans">{hints.map((h) => <li key={h.text} className={h.level === 'bad' ? 'text-red-400' : 'text-amber-400'}>{h.text}</li>)}</ul>} />}
-        <Row label="SHA-256" value={fps.sha256} />
-        <Row label="SHA-1" value={fps.sha1} />
-        <Row label="SHA-512" value={fps.sha512} />
-        <Row label="SPKI pin (SHA-256, base64)" value={fps.pin} />
+        {[['SHA-256', fps.sha256], ['SHA-1', fps.sha1], ['SHA-512', fps.sha512], ['SPKI pin (SHA-256, base64)', fps.pin]].map(([l, v]) => <Row key={l} label={l} value={<span>{v} <button onClick={() => copyText(v)} title={`Copy ${l}`} aria-label={`Copy ${l}`} className="ml-1 text-slate-400 hover:text-slate-200 align-middle"><Copy size={10} /></button></span>} />)}
         <Row label="DER size" value={<span>{fps.size} bytes <button onClick={downloadPem} className="ml-2 inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300 font-sans"><Download size={11} /> PEM</button></span>} />
       </tbody>
     </table>
@@ -90,7 +124,7 @@ function ChainPanel({ bundle, selected, onSelect }) {
   const { chain, unused, problems, valid } = chainInfo;
   const sigBadge = (e) => (e.sig == null ? '' : e.sig.ok === true ? 'signature OK' : e.sig.ok === false ? 'signature FAILED' : 'signature unchecked');
   return (
-    <div className="mb-3 border border-slate-800 rounded bg-slate-950 p-2 text-xs">
+    <div className="mb-2 border border-slate-800 rounded bg-slate-950 p-2 text-xs">
       <div className="mb-1 flex items-center gap-2 font-sans">
         {valid
           ? <span className="inline-flex items-center gap-1 text-green-400"><ShieldCheck size={14} /> Chain complete and every signature verifies ({chain.length} cert{chain.length === 1 ? '' : 's'}, leaf to root)</span>
@@ -239,30 +273,30 @@ export default function CertInspectWorkbench({ onLogMessage }) {
   const TABS = [{ id: 'url', label: 'From URL', icon: Globe }, { id: 'file', label: 'From file', icon: FileUp }, { id: 'paste', label: 'Paste PEM', icon: ClipboardPaste }];
 
   return (
-    <div className="p-4 text-gray-200">
-      <div className="flex rounded overflow-hidden border border-slate-800 text-xs w-fit mb-3">
+    <div className="text-gray-200 text-xs">
+      <div className="flex rounded overflow-hidden border border-slate-800 text-xs w-fit mb-2">
         {TABS.map((t) => { const Icon = t.icon; return (
-          <button key={t.id} onClick={() => { setMode(t.id); setError(''); }} className={`px-3 py-1.5 inline-flex items-center gap-1.5 ${mode === t.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>
+          <button key={t.id} onClick={() => { setMode(t.id); setError(''); }} className={`px-2.5 py-1 inline-flex items-center gap-1.5 ${mode === t.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>
             <Icon size={13} /> {t.label}
           </button>
         ); })}
       </div>
 
       {mode === 'url' && (
-        <div className="mb-3">
+        <div className="mb-2">
           <ProxyConfig onLogMessage={log} backend="tls-inspector" />
           <div className="flex flex-wrap gap-2">
-            <input value={host} onChange={(e) => setHost(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && lookup()} placeholder="example.com" className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono" />
-            <button onClick={lookup} disabled={busy} className="px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
+            <input value={host} onChange={(e) => setHost(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && lookup()} placeholder="example.com" className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono" />
+            <button onClick={lookup} disabled={busy} className="px-2.5 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 disabled:opacity-50 inline-flex items-center gap-1">
               {busy ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />} Fetch certs
             </button>
             {isBackendConfigured('tls-inspector') && (
-              <button onClick={liveLookup} disabled={busy} title="Fetch the certificate the server serves right now, via the TLS backend" className="px-3 py-1.5 bg-emerald-900/40 border border-emerald-800 text-emerald-200 rounded text-sm hover:bg-emerald-900/60 disabled:opacity-50 inline-flex items-center gap-1">
+              <button onClick={liveLookup} disabled={busy} title="Fetch the certificate the server serves right now, via the TLS backend" className="px-2.5 py-1 bg-emerald-900/40 border border-emerald-800 text-emerald-200 rounded text-xs hover:bg-emerald-900/60 disabled:opacity-50 inline-flex items-center gap-1">
                 <ShieldCheck size={14} /> Live cert
               </button>
             )}
           </div>
-          <p className="text-[10px] text-slate-500 mt-1">Certificates come from Certificate Transparency logs (crt.sh) and are the most recent <em>issued</em> for the host — this may differ from what the server serves right now. Requires the proxy (crt.sh sends no CORS headers).</p>
+          <details className="mt-1 text-[10px] text-slate-500"><summary className="cursor-pointer">About these results</summary><p className="mt-0.5">Certificates come from Certificate Transparency logs (crt.sh) and are the most recent <em>issued</em> for the host — this may differ from what the server serves right now. Requires the proxy (crt.sh sends no CORS headers).</p></details>
           {certList && certList.length > 0 && (
             <div className="mt-2 border border-slate-800 rounded bg-slate-950 max-h-40 overflow-auto text-[11px] font-mono">
               {certList.map((c) => (
@@ -277,16 +311,16 @@ export default function CertInspectWorkbench({ onLogMessage }) {
       )}
 
       {mode === 'file' && (
-        <div className="mb-3">
+        <div className="mb-2">
           <p className="text-[10px] text-slate-500 mb-1">Every certificate in a PEM bundle or PKCS#7 (.p7b) file is loaded and the chain is verified.</p>
           <input type="file" accept=".pem,.crt,.cer,.der,.p7b,.p7c,.pb7" onChange={handleFile} className="bg-slate-900 border border-slate-800 rounded p-1 text-gray-200 text-xs" />
         </div>
       )}
 
       {mode === 'paste' && (
-        <div className="mb-3">
+        <div className="mb-2">
           <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={6} spellCheck={false} placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----" className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-[11px] font-mono resize-y" />
-          <button onClick={parsePaste} className="mt-1 px-3 py-1.5 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-sm hover:bg-cyan-900/70 inline-flex items-center gap-1"><ClipboardPaste size={14} /> Parse</button>
+          <button onClick={parsePaste} className="mt-1 px-2.5 py-1 bg-cyan-900/50 border border-cyan-800 text-cyan-200 rounded text-xs hover:bg-cyan-900/70 inline-flex items-center gap-1"><ClipboardPaste size={14} /> Parse</button>
         </div>
       )}
 
@@ -309,6 +343,7 @@ export default function CertInspectWorkbench({ onLogMessage }) {
               </span>
             )}
           </div>
+          <div className="mb-2 space-y-2"><Timeline parsed={result.parsed} /><Tools parsed={result.parsed} fps={result.fps} expectHost={expectHost} /></div>
           <CertDetails {...result} />
         </div>
       )}

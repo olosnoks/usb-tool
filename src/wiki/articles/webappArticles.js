@@ -396,6 +396,16 @@ The box "check hostname or IP against this certificate" matches the name against
 ### Details shown
 Subject and issuer, self-signed flag, validity dates with an expired / not-yet-valid / days-left status, validity period, version, serial, signature algorithm, public key (type, size or curve), SAN, key usage, extended key usage, basic constraints, key identifiers, CRL / OCSP / CA Issuers URLs, critical extensions, policies, name constraints, TLS feature (must-staple), embedded SCTs, unknown extensions, **weakness hints** (for example short keys or weak signature algorithms), SHA-256 / SHA-1 / SHA-512 fingerprints, the **SPKI pin** (SHA-256, base64) and the DER size. A **PEM** link downloads the selected certificate.
 
+### Timeline, copy and compare
+- A **validity bar** above the table shows how much of the certificate's lifetime has elapsed (green, amber within 30 days of expiry, red when expired).
+- **Copy text** copies a plain summary (similar in spirit to \`openssl x509 -text\`, not identical). **JSON** downloads the same fields as a JSON file.
+- Each fingerprint and the SPKI pin has a small copy button.
+- **compare fingerprint / pin-sha256** accepts a SHA-1, SHA-256 or SHA-512 fingerprint (with or without colons, spaces or a \`sha256:\` prefix) or a base64 SPKI pin (also \`pin-sha256="..."\`) and reports which one it matches, or why it does not.
+- **openssl equivalents** (collapsed) lists commands you can run yourself on a saved PEM: text dump, fingerprint, dates, \`-checkend\`, SPKI pin, and \`-checkhost\` when a hostname is entered. The tool only shows the text of these commands and never runs anything.
+
+### Similar tools
+\`openssl x509\` and \`openssl verify\` (command line), KeyStore Explorer (desktop, shows extensions including SCTs) and SSL Labs (checks what a live server serves, including chain issues). This tool is client-side only and does not consult a trust store or query OCSP/CRL.
+
 The parser is a dependency-free DER/ASN.1 reader. It does not check revocation (OCSP/CRL URLs are shown, not queried).
 `,
   },
