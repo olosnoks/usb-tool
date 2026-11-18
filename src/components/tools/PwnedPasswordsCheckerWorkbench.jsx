@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { proxiedFetch, describeNetworkError } from '../../utils/netClient';
 import { EmailTab, CatalogTab, BREACH_NOTE } from './BreachTabs';
 import {
   maskPassword, makeRangeFetcher, checkEntries, parsePasswordCsv, parseHashList, resultsToCsv, MAX_PASSWORD_ENTRIES,
 } from '../../utils/breachCheck';
+import { sha1Upper, ntlmUpper } from '../../utils/breachCheck';
+import { analyzePassword, summarizeStrength, requestPreview } from '../../utils/passwordStrength';
 
 /**
  * Pwned Passwords checker (HaveIBeenPwned range API, k-anonymity model).
@@ -14,6 +16,45 @@ import {
  * whether the prefix had many or few matches. Plaintext is never logged.
  */
 export { maskPassword };
+
+const METER_COLORS = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-lime-500', 'bg-green-500'];
+const METER_TEXT = ['text-red-400', 'text-orange-400', 'text-yellow-300', 'text-lime-400', 'text-green-400'];
+
+/** Live, local-only strength readout for a single typed password. */
+function StrengthPanel({ password, mode }) {
+  const a = useMemo(() => analyzePassword(password), [password]);
+  const [preview, setPreview] = useState(null);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const h = mode === 'ntlm' ? ntlmUpper(password) : await sha1Upper(password);
+      if (live) setPreview(requestPreview(h, mode));
+    })();
+    return () => { live = false; };
+  }, [password, mode]);
+  return (
+    <div className="rounded border border-slate-800 bg-slate-900/60 p-2 space-y-1.5 text-[11px]" data-testid="pw-strength">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-1.5 rounded bg-slate-800 overflow-hidden" role="meter" aria-label="Password strength" aria-valuemin={0} aria-valuemax={4} aria-valuenow={a.score}>
+          <div className={`h-full ${METER_COLORS[a.score]}`} style={{ width: `${(a.score + 1) * 20}%` }} />
+        </div>
+        <span className={`font-semibold ${METER_TEXT[a.score]}`}>{a.label}</span>
+        <span className="text-slate-500">{a.length} chars, ~{a.bits} bits</span>
+      </div>
+      <div className="grid grid-cols-1 @md:grid-cols-2 gap-x-3 text-slate-400">
+        {a.crackTimes.map((c) => <div key={c.name}>{c.name}: <span className="text-gray-200">{c.text}</span></div>)}
+      </div>
+      {a.warnings.map((w) => <div key={w} className="text-amber-300">{w}</div>)}
+      {a.suggestions.length > 0 && <ul className="list-disc pl-4 text-slate-400">{a.suggestions.map((t) => <li key={t}>{t}</li>)}</ul>}
+      {preview && (
+        <div className="text-slate-500 font-mono break-all">
+          Would send: <span className="text-cyan-300">{preview.url}</span> (the other {preview.keptLocal} hash characters stay in this tab)
+        </div>
+      )}
+      <div className="text-slate-600">Estimates are rough heuristics, not guarantees. Computed locally.</div>
+    </div>
+  );
+}
 
 const SOURCES = [['list', 'Type or paste'], ['csv', 'Password manager CSV'], ['hash', 'Hashes']];
 
@@ -45,6 +86,8 @@ function PasswordsTab({ onLogMessage }) {
   const [stats, setStats] = useState(null);
   const [msg, setMsg] = useState('');
   const [shown, setShown] = useState({});
+  const [strength, setStrength] = useState([]); // by entry index; analysis only, never the password
+  const [onlyProblems, setOnlyProblems] = useState(false);
   const csvEntries = useRef(null);
   const controller = useRef(null);
 
@@ -52,7 +95,7 @@ function PasswordsTab({ onLogMessage }) {
   useEffect(() => () => { controller.current?.abort(); csvEntries.current = null; }, []);
 
   const reset = () => {
-    setResults([]); setPlain([]); setShown({}); setStats(null); setProgress(null); setMsg('');
+    setResults([]); setPlain([]); setShown({}); setStrength([]); setStats(null); setProgress(null); setMsg('');
   };
 
   const changeSource = (s) => { if (checking) return; setSource(s); reset(); };
@@ -85,6 +128,7 @@ function PasswordsTab({ onLogMessage }) {
     }
     if (entries.length === 0) { setMsg((m) => m || (source === 'csv' ? 'Import a CSV file first.' : 'Nothing to check.')); return; }
 
+    setStrength(entries.map((e) => (e.password ? analyzePassword(e.password) : null)));
     const ac = new AbortController();
     controller.current = ac;
     setChecking(true);
@@ -106,6 +150,7 @@ function PasswordsTab({ onLogMessage }) {
       const bad = out.filter((r) => r.count > 0).length;
       const reused = out.filter((r) => r.reuse > 1).length;
       setStats({ checked: out.length, total: entries.length, compromised: bad, reused, requests, cancelled });
+      setOnlyProblems(false);
       log(`Pwned Passwords (${mode.toUpperCase()}): ${out.length}/${entries.length} checked, ${bad} compromised, ${requests} range request${requests === 1 ? '' : 's'}${cancelled ? ', cancelled' : ''}`);
     } catch (e) {
       setMsg(describeNetworkError(e));
@@ -118,15 +163,26 @@ function PasswordsTab({ onLogMessage }) {
 
   const cancel = () => controller.current?.abort();
   const showSite = source === 'csv';
+  const nonEmpty = source === 'list' ? input.split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.length > 0) : [];
+  const singleLine = nonEmpty.length === 1 ? (trim ? nonEmpty[0].trim() : nonEmpty[0]) : '';
+  const strengthStats = summarizeStrength(strength);
+  const isProblem = (r) => r.count > 0 || r.reuse > 1 || (strength[r.index] && strength[r.index].score < 2);
+  const visible = onlyProblems ? results.filter(isProblem) : results;
 
   return (
-    <div className="p-4 space-y-4">
-      <p className="text-sm text-gray-400">
-        Checks passwords against HaveIBeenPwned using k-anonymity. Only the first 5 characters of each
-        hash are sent; the password never leaves your browser and is never logged.
-      </p>
+    <div className="p-2 space-y-2 text-xs">
+      <details className="rounded border border-slate-800 bg-slate-900/40 px-2 py-1 text-[11px] text-slate-400">
+        <summary className="cursor-pointer text-gray-300">Privacy: what is sent and what is not</summary>
+        <ul className="list-disc pl-4 mt-1 space-y-0.5">
+          <li>Each password is hashed in this tab (SHA-1, or NTLM). Only the first 5 hex characters of the hash go to the HaveIBeenPwned range API.</li>
+          <li>The API returns every hash suffix with that prefix and the match is made locally. The password and full hash never leave the browser.</li>
+          <li>The Add-Padding header hides how many matches a prefix had. HIBP can still see your IP address and request timing.</li>
+          <li>Passwords are never logged (logs show a masked form) and nothing is saved: lists, CSV contents and strength results are dropped when you clear or leave.</li>
+          <li>Strength estimates are computed locally and are rough heuristics.</li>
+        </ul>
+      </details>
 
-      <div className="flex flex-wrap items-center gap-3 text-xs">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
         <div className="flex gap-1">
           {SOURCES.map(([id, label]) => (
             <button key={id} onClick={() => changeSource(id)} disabled={checking}
@@ -160,19 +216,23 @@ function PasswordsTab({ onLogMessage }) {
         </div>
       ) : (
         <textarea
-          rows={6}
+          rows={5}
+          aria-label={source === 'hash' ? 'Hashes to check' : 'Passwords to check'}
+          autoComplete="off" spellCheck={false}
           placeholder={source === 'hash' ? `One ${mode === 'ntlm' ? 'NTLM (32 hex)' : 'SHA-1 (40 hex)'} hash per line` : 'Enter one password per line'}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-sm text-gray-200 font-mono"
+          className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-xs text-gray-200 font-mono"
         />
       )}
 
+      {source === 'list' && singleLine && <StrengthPanel password={singleLine} mode={mode} />}
+
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={run} disabled={checking} className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-500 disabled:opacity-40">
+        <button onClick={run} disabled={checking} className="px-2.5 py-1 bg-red-600 text-white rounded hover:bg-red-500 disabled:opacity-40">
           {checking ? 'Checking…' : source === 'hash' ? 'Check Hashes' : 'Check Passwords'}
         </button>
-        {checking && <button onClick={cancel} className="px-3 py-1 bg-slate-700 text-white rounded hover:bg-slate-600">Cancel</button>}
+        {checking && <button onClick={cancel} className="px-2.5 py-1 bg-slate-700 text-white rounded hover:bg-slate-600">Cancel</button>}
         {!checking && (input || results.length > 0) && (
           <button onClick={() => { setInput(''); reset(); }} className="px-3 py-1 text-xs text-gray-400 hover:text-gray-200">Clear</button>
         )}
@@ -184,13 +244,18 @@ function PasswordsTab({ onLogMessage }) {
         <div className="text-xs text-gray-300" data-testid="pw-summary">
           {stats.cancelled ? `Cancelled after ${stats.checked} of ${stats.total}. ` : ''}
           {stats.checked} checked, <span className={stats.compromised ? 'text-red-400' : 'text-green-400'}>{stats.compromised} compromised</span>
-          {stats.reused ? `, ${stats.reused} in reused groups` : ''} · {stats.requests} range request{stats.requests === 1 ? '' : 's'}.
+          {stats.reused ? `, ${stats.reused} in reused groups` : ''}
+          {strengthStats.total > 0 && <>, <span className={strengthStats.weak ? 'text-orange-400' : 'text-green-400'}>{strengthStats.weak} weak</span></>} · {stats.requests} range request{stats.requests === 1 ? '' : 's'}.
         </div>
       )}
 
       {results.length > 0 && (
         <>
-          <table className="w-full table-auto border-collapse border border-slate-600 text-sm">
+          <label className="flex items-center gap-1 text-[11px] text-gray-300">
+            <input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} /> Show problems only (breached, reused or weak): {results.filter(isProblem).length}
+          </label>
+          <div className="overflow-x-auto">
+          <table className="w-full table-auto border-collapse border border-slate-600 text-xs">
             <thead className="bg-slate-800 text-slate-100">
               <tr>
                 {showSite && <th className="p-1 border border-slate-600 text-left">Site</th>}
@@ -198,10 +263,11 @@ function PasswordsTab({ onLogMessage }) {
                 {!showSite && <th className="p-1 border border-slate-600 text-left">{source === 'hash' ? 'Hash prefix' : 'Password'}</th>}
                 <th className="p-1 border border-slate-600 text-left">Breach count</th>
                 <th className="p-1 border border-slate-600 text-left">Reuse</th>
+                {strengthStats.total > 0 && <th className="p-1 border border-slate-600 text-left">Strength</th>}
               </tr>
             </thead>
             <tbody>
-              {results.map((r, i) => (
+              {visible.map((r) => { const i = r.index; return (
                 <tr key={i} className={i % 2 ? 'bg-slate-900' : ''}>
                   {showSite && <td className="p-1 border border-slate-700 break-all">{r.site || '—'}</td>}
                   {showSite && <td className="p-1 border border-slate-700 break-all">{r.username || '—'}</td>}
@@ -217,10 +283,16 @@ function PasswordsTab({ onLogMessage }) {
                     {r.count < 0 ? `Error: ${r.error}` : r.count > 0 ? `${r.count.toLocaleString()} — compromised` : 'Not found'}
                   </td>
                   <td className="p-1 border border-slate-700 text-xs text-gray-400">{r.reuse > 1 ? `reused ×${r.reuse}` : ''}</td>
+                  {strengthStats.total > 0 && (
+                    <td className={`p-1 border border-slate-700 ${strength[i] ? METER_TEXT[strength[i].score] : 'text-slate-500'}`} title={strength[i]?.warnings.join(' ') || undefined}>
+                      {strength[i] ? `${strength[i].label} (~${strength[i].bits} bits)` : '—'}
+                    </td>
+                  )}
                 </tr>
-              ))}
+              ); })}
             </tbody>
           </table>
+          </div>
           <button onClick={() => downloadText('pwned-passwords-report.csv', resultsToCsv(results))} className="px-3 py-1 text-xs bg-slate-800 rounded hover:bg-slate-700 text-cyan-300">
             Export masked report (CSV)
           </button>
@@ -236,13 +308,13 @@ export default function PwnedPasswordsCheckerWorkbench({ onLogMessage }) {
   const [tab, setTab] = useState('passwords');
   return (
     <div>
-      <div className="px-4 pt-3 flex gap-1 border-b border-slate-800">
+      <div className="px-2 pt-1 flex gap-1 border-b border-slate-800">
         {TABS.map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)} className={`px-3 py-1 text-sm rounded-t ${tab === id ? 'bg-slate-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}>{label}</button>
+          <button key={id} onClick={() => setTab(id)} className={`px-2.5 py-0.5 text-xs rounded-t ${tab === id ? 'bg-slate-800 text-white' : 'text-gray-400 hover:text-gray-200'}`}>{label}</button>
         ))}
       </div>
       {tab === 'passwords' ? <PasswordsTab onLogMessage={onLogMessage} /> : (
-        <div className="p-4 space-y-3">
+        <div className="p-2 space-y-2">
           <p className="text-xs text-slate-400">{BREACH_NOTE}</p>
           {tab === 'email' ? <EmailTab onLogMessage={onLogMessage} /> : <CatalogTab onLogMessage={onLogMessage} />}
         </div>
