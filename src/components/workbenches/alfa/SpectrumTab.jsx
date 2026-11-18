@@ -13,7 +13,7 @@ export default function SpectrumTab({
   spectrumStats
 }) {
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-2 space-y-2">
       {/* Top Controls & KPI Cards */}
       <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
         {/* Band Selector */}

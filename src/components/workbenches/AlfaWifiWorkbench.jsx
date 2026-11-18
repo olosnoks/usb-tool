@@ -92,6 +92,7 @@ import {
 import { readPcapFile, PcapReplayer } from '../../utils/pcapReader';
 import { HandshakeTracker, playHandshakeChime } from '../../utils/handshakeDetector';
 import { detectRogueAps } from '../../utils/widsRogueAp';
+import { apsToCsv, clientsToCsv, summarizeAps } from '../../utils/alfaTableExport';
 import { downloadWigleCsv, calculateHaversineDistance } from '../../utils/wardrivingExporter';
 import TopologyView from './TopologyView';
 
@@ -2018,7 +2019,30 @@ export default function AlfaWifiWorkbench() {
       setStatusMessage(`Survey import failed, nothing changed: ${err?.message || err}`);
     }
   };
+  const apsSummary = useMemo(() => summarizeAps(devices), [devices]);
   const apsWithoutFix = useMemo(() => countWithoutFix(devices), [devices]);
+
+  // 14c. Export AP / client tables as CSV (spreadsheet)
+  const handleExportApCsv = () => {
+    if (Object.keys(devices).length === 0) {
+      setStatusLevel('error');
+      setStatusMessage('No access points captured yet to export as CSV.');
+      return;
+    }
+    downloadFile(apsToCsv(devices), `alfa_wifi_aps_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`, 'text/csv;charset=utf-8;');
+    setStatusLevel('success');
+    setStatusMessage(`Exported ${Object.keys(devices).length} access points to CSV.`);
+  };
+  const handleExportClientCsv = () => {
+    if (Object.keys(clients).length === 0) {
+      setStatusLevel('error');
+      setStatusMessage('No client stations captured yet to export as CSV.');
+      return;
+    }
+    downloadFile(clientsToCsv(clients), `alfa_wifi_clients_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`, 'text/csv;charset=utf-8;');
+    setStatusLevel('success');
+    setStatusMessage(`Exported ${Object.keys(clients).length} client stations to CSV.`);
+  };
 
   // 15. Export PCAP (Wireshark)
   const handleExportPcap = () => {
@@ -2610,7 +2634,7 @@ export default function AlfaWifiWorkbench() {
   }, [channelStats, spectrumChannels, spectrumBand]);
 
   return (
-    <div className="w-full space-y-4 font-mono text-slate-200">
+    <div className="w-full space-y-2 font-mono text-slate-200">
       {/* Hardware Disconnect Notice Banner */}
       {adapterDisconnectedAlert && (
         <div className="p-4 rounded-xl bg-rose-950/90 border-2 border-rose-500 text-rose-200 flex items-center justify-between shadow-rose-glow animate-pulse">
@@ -2869,33 +2893,21 @@ export default function AlfaWifiWorkbench() {
 
 
       {/* Header Card */}
-      <div className="bg-[#171920] border border-slate-800/80 rounded-xl p-4 @sm:p-5 shadow-lg flex flex-col @md:flex-row @md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-              <Wifi className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold text-slate-100 tracking-wide">
-                  {adapterPreset === 'pau09' ? 'Panda Wireless PAU09 (RT5572)' : 'Alfa Wi-Fi Adapter (RTL8812AU)'}
-                </h1>
-                <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                  RF / Hardware
-                </span>
-                <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
-                  WebUSB + WASM
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                802.11 monitor mode reconnaissance, STA tracking, WIDS intrusion alert & Wireshark PCAP export
-              </p>
-            </div>
+      <div className="bg-[#171920] border border-slate-800/80 rounded-lg p-2 shadow-lg flex flex-col @md:flex-row @md:items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0" title="802.11 monitor mode reconnaissance, STA tracking, WIDS intrusion alert and Wireshark PCAP export (WebUSB + WASM)">
+          <div className="p-1.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shrink-0">
+            <Wifi className="w-4 h-4" />
           </div>
+          <h1 className="text-xs font-bold text-slate-100 tracking-wide truncate">
+            {adapterPreset === 'pau09' ? 'Panda PAU09 (RT5572)' : 'Alfa RTL8812AU'}
+          </h1>
+          <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shrink-0">
+            WebUSB
+          </span>
         </div>
 
         {/* Action Controls */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Environment Posture Score Gauge */}
           <div 
             className="flex items-center gap-2.5 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800 shadow-md cursor-help"
@@ -3709,7 +3721,7 @@ export default function AlfaWifiWorkbench() {
               onClick={() => setIsExportDropdownOpen(prev => !prev)}
               disabled={Object.keys(devices).length === 0 && Object.keys(clients).length === 0}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs transition font-bold disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Export captured APs and clients (JSON, Wigle CSV, HTML report, GeoJSON, KML)"
+              title="Export captured APs and clients (JSON, AP/client CSV, Wigle CSV, HTML report, GeoJSON, KML)"
               aria-haspopup="menu"
               aria-expanded={isExportDropdownOpen}
             >
@@ -3726,6 +3738,8 @@ export default function AlfaWifiWorkbench() {
               >
                 {[
                   ['Export JSON', handleExportJson],
+                  ['Export APs CSV', handleExportApCsv],
+                  ['Export Clients CSV', handleExportClientCsv],
                   ['Export Wigle CSV', handleExportWigle],
                   ['Export Executive Report', handleExportExecutiveReport],
                   ['Export GeoJSON', handleExportGeoJson],
@@ -3951,6 +3965,19 @@ export default function AlfaWifiWorkbench() {
           </button>
         </div>
       </div>
+
+      {/* Survey summary strip */}
+      {apsSummary.total > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1 rounded-md bg-slate-900/60 border border-slate-800 text-[11px] text-slate-400" aria-label="Survey summary">
+          <span><span className="text-cyan-300 font-bold">{apsSummary.total}</span> APs</span>
+          <span>2.4 GHz <span className="text-slate-200 font-bold">{apsSummary.bands['2.4 GHz']}</span></span>
+          <span>5 GHz <span className="text-slate-200 font-bold">{apsSummary.bands['5 GHz']}</span></span>
+          <span>WPA3 <span className="text-purple-300 font-bold">{apsSummary.wpa3}</span></span>
+          <span className={apsSummary.open ? 'text-amber-300' : ''}>Open <span className="font-bold">{apsSummary.open}</span></span>
+          <span className={apsSummary.wep ? 'text-rose-300' : ''}>WEP <span className="font-bold">{apsSummary.wep}</span></span>
+          <span>Hidden <span className="text-slate-200 font-bold">{apsSummary.hidden}</span></span>
+        </div>
+      )}
 
       {/* View Mode Navigation Bar (Dedicated horizontal scrollable tab strip) */}
       <div className="bg-[#171920] border border-slate-800/80 rounded-xl p-1.5 min-w-0 shadow-md">

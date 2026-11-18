@@ -9,7 +9,7 @@ export default function AnomaliesTab({
   setSelectedItem
 }) {
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-2 space-y-2">
       {/* Header Guidance Banner */}
       <div className="p-3.5 bg-rose-950/20 border border-rose-800/40 rounded-xl flex items-start gap-3 text-xs">
         <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
