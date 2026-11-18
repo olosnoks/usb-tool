@@ -185,9 +185,9 @@ export default function SqliteStudio({ log }) {
 
       {db ? (
         <>
-          <div className="flex rounded overflow-hidden border border-slate-800 text-xs w-fit mb-2">
+          <div className="flex rounded overflow-x-auto border border-slate-800 text-xs max-w-full w-fit mb-2">
             {TABS.map((t) => (
-              <button key={t.id} onClick={() => setTab(t.id)} className={`px-3 py-1.5 inline-flex items-center gap-1.5 ${tab === t.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>
+              <button key={t.id} onClick={() => setTab(t.id)} className={`px-2 py-1 inline-flex items-center gap-1 whitespace-nowrap ${tab === t.id ? 'bg-cyan-900/50 text-cyan-200' : 'bg-slate-900 text-gray-400 hover:text-gray-200'}`}>
                 <t.icon size={12} /> {t.label}
               </button>
             ))}
@@ -209,11 +209,10 @@ export default function SqliteStudio({ log }) {
           </div>
         </>
       ) : !combining && (
-        <div className="border border-dashed border-slate-700 rounded p-6 text-center">
-          <Database size={28} className="mx-auto text-cyan-500/70 mb-2" />
-          <div className="text-sm text-gray-200 mb-1">DB Browser for SQLite — in your browser</div>
-          <p className="text-xs text-slate-500 max-w-xl mx-auto mb-3">
-            Create, design, browse and edit SQLite database files. Everything runs locally (sql.js / WASM) — files never leave the machine.
+        <div className="border border-dashed border-slate-700 rounded p-3 text-center">
+          <Database size={20} className="mx-auto text-cyan-500/70 mb-1" />
+          <p className="text-[11px] text-slate-500 max-w-xl mx-auto mb-2">
+            Everything runs locally (sql.js / WASM); files never leave the machine.
             Changes stay in memory until you Write Changes{hasFsAccess() ? ', which saves straight back to the file you opened' : ''}.
           </p>
           <div className="flex justify-center gap-2 flex-wrap">
@@ -222,7 +221,7 @@ export default function SqliteStudio({ log }) {
             <button className={btn} onClick={importSql}><FileCode size={13} /> Import SQL file</button>
             <button className={btn} onClick={() => setCombining(true)}><Combine size={13} /> Combine databases</button>
           </div>
-          <div className="text-[10px] text-slate-600 mt-3">…or drop a .sqlite / .db file here.</div>
+          <div className="text-[10px] text-slate-600 mt-2">…or drop a .sqlite / .db file here.</div>
         </div>
       )}
 

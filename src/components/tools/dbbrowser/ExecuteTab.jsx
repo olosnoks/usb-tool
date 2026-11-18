@@ -3,12 +3,15 @@ import CodeMirror from '@uiw/react-codemirror';
 import { sql as sqlLang, SQLite } from '@codemirror/lang-sql';
 import { keymap, EditorView } from '@codemirror/view';
 import { Prec } from '@codemirror/state';
-import { Play, StepForward, FolderOpen, Save, Plus, X, Download, Eye, LineChart, CheckCircle2, XCircle } from 'lucide-react';
+import { Play, StepForward, FolderOpen, Save, Plus, X, Download, Eye, LineChart, CheckCircle2, XCircle, History, Search, Pin, Trash2, Copy, ListTree } from 'lucide-react';
 import { btn, btnPrimary, ResultGrid, Plot, downloadText, pickFile, input } from './common.jsx';
 import { ViewEditor } from './SchemaEditors.jsx';
-import { executeScript, statementAt, listObjects, listSchemas, columnsOf, lineCol, toCsv } from '../../../utils/sqliteStudio.js';
+import { addHistory, togglePin, removeHistory, filterHistory, parseHistory, canExplain, explainSql, planTree, toMarkdown, toTsv } from '../../../utils/sqliteQueryTools.js';
+import { executeScript, queryAll, statementAt, listObjects, listSchemas, columnsOf, lineCol, toCsv } from '../../../utils/sqliteStudio.js';
 
 export const STORE_KEY = 'dbbrowser.sqlTabs.v1';
+const HIST_KEY = 'dbbrowser.sqlHistory.v1';
+const loadHistory = () => { try { return parseHistory(localStorage.getItem(HIST_KEY)); } catch { return []; } };
 const loadTabs = () => {
   try {
     const t = JSON.parse(localStorage.getItem(STORE_KEY));
@@ -32,6 +35,11 @@ export default function ExecuteTab({ session, tabsRef }) {
   const [showPlot, setShowPlot] = useState(false);
   const [viewSql, setViewSql] = useState(null);
   const [renaming, setRenaming] = useState(null);
+  const [history, setHistory] = useState(loadHistory);
+  const [showHist, setShowHist] = useState(false);
+  const [histQ, setHistQ] = useState('');
+  const [plan, setPlan] = useState(null); // { sql, nodes } | { sql, error }
+  const [copied, setCopied] = useState('');
   const viewRef = useRef(null);
   const tab = tabs.find((t) => t.id === cur) || tabs[0];
   if (tabsRef) tabsRef.current = { tabs, cur: tab.id };
@@ -40,6 +48,11 @@ export default function ExecuteTab({ session, tabsRef }) {
     const t = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(tabs)); } catch { /* quota */ } }, 400);
     return () => clearTimeout(t);
   }, [tabs]);
+
+  useEffect(() => {
+    const t = setTimeout(() => { try { localStorage.setItem(HIST_KEY, JSON.stringify(history)); } catch { /* quota */ } }, 400);
+    return () => clearTimeout(t);
+  }, [history]);
 
   // Schema for autocompletion.
   const schema = useMemo(() => {
@@ -77,6 +90,8 @@ export default function ExecuteTab({ session, tabsRef }) {
     session.logSql(r.results.map((x) => x.sql).concat(r.error ? [`-- error: ${r.error}`] : []), 'user');
     session.refresh();
     setRunning(false);
+    setPlan(null);
+    setHistory((h) => r.results.reduce((acc, x) => addHistory(acc, x.sql, { ms: x.ms, rows: x.columns.length ? x.rows.length : x.changes }), h));
     const lastWithRows = [...r.results].reverse().findIndex((x) => x.columns.length);
     setResults((m) => ({ ...m, [tab.id]: { run: r, which: lastWithRows < 0 ? -1 : r.results.length - 1 - lastWithRows, text } }));
     if (r.error && r.errorAt != null) {
@@ -95,6 +110,29 @@ export default function ExecuteTab({ session, tabsRef }) {
     { key: 'Mod-Shift-Enter', run: () => { runRef.current('current'); return true; } },
   ])), []);
   const extensions = useMemo(() => [sqlLang({ dialect: SQLite, schema, upperCaseKeywords: true }), keys, editorTheme, EditorView.lineWrapping], [schema, keys]);
+
+  const explain = () => {
+    const view = viewRef.current;
+    if (!db || !view) return;
+    const text = view.state.doc.toString();
+    const { from, to, head } = view.state.selection.main;
+    const st = from !== to ? { sql: text.slice(from, to) } : statementAt(text, head);
+    if (!st || !canExplain(st.sql)) { setPlan({ sql: st?.sql || '', error: 'Put the cursor in a SELECT, INSERT, UPDATE, DELETE or WITH statement.' }); return; }
+    try {
+      const r = queryAll(db, explainSql(st.sql));
+      session.logSql(explainSql(st.sql), 'user');
+      setPlan({ sql: st.sql, nodes: planTree(r.rows) });
+    } catch (e) { setPlan({ sql: st.sql, error: e.message || String(e) }); }
+  };
+  const copyAs = async (kind, shown) => {
+    const txt = kind === 'md' ? toMarkdown(shown.columns, shown.rows) : toTsv(shown.columns, shown.rows);
+    try { await navigator.clipboard.writeText(txt); setCopied(kind); setTimeout(() => setCopied(''), 1200); } catch { setCopied('fail'); }
+  };
+  const loadFromHistory = (sql, newTab) => {
+    if (newTab) addTab(sql);
+    else setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, text: sql } : t)));
+  };
+  const shownHistory = useMemo(() => filterHistory(history, histQ), [history, histQ]);
 
   const addTab = (text = '', title) => {
     const id = Math.max(0, ...tabs.map((t) => t.id)) + 1;
@@ -125,9 +163,31 @@ export default function ExecuteTab({ session, tabsRef }) {
         <button className={btnPrimary} disabled={running || !db} onClick={() => run('all')} title="Execute all, or the selection (Ctrl+Enter / F5)"><Play size={12} /> Execute all</button>
         <button className={btn} disabled={running || !db} onClick={() => run('current')} title="Execute the statement under the cursor (Shift+F5 / Ctrl+Shift+Enter)"><StepForward size={12} /> Execute current</button>
         <span className="mx-1 h-4 border-l border-slate-700" />
+        <button className={btn} disabled={running || !db} onClick={explain} title="EXPLAIN QUERY PLAN for the statement under the cursor (or the selection)"><ListTree size={12} /> Explain</button>
+        <button className={btn + (showHist ? ' !border-cyan-700' : '')} onClick={() => setShowHist((x) => !x)} title="Query history"><History size={12} /> History{history.length ? ` (${history.length})` : ''}</button>
         <button className={btn} onClick={openSql}><FolderOpen size={12} /> Open SQL file</button>
         <button className={btn} onClick={saveSql}><Save size={12} /> Save SQL file</button>
       </div>
+      {showHist && (
+        <div className="mb-1 border border-slate-800 rounded bg-slate-950">
+          <div className="flex items-center gap-1 p-1 border-b border-slate-800">
+            <Search size={12} className="text-slate-500" />
+            <input aria-label="Search query history" value={histQ} onChange={(e) => setHistQ(e.target.value)} placeholder="Search history" className={input + ' flex-1 min-w-0 py-0.5'} />
+            <button className={btn} disabled={!history.length} onClick={() => { if (window.confirm('Clear all unpinned history?')) setHistory((h) => h.filter((x) => x.pinned)); }}><Trash2 size={12} /> Clear</button>
+          </div>
+          <ul className="max-h-40 overflow-auto text-[11px] font-mono">
+            {shownHistory.length === 0 && <li className="p-2 text-slate-600">{history.length ? 'No matches.' : 'Statements you execute are remembered here (kept in this browser only).'}</li>}
+            {shownHistory.map((h) => (
+              <li key={h.sql} className="flex items-center gap-1 px-1 py-0.5 hover:bg-slate-800/50 group">
+                <button onClick={() => setHistory(togglePin(history, h.sql))} title={h.pinned ? 'Unpin' : 'Pin'} aria-label={h.pinned ? 'Unpin' : 'Pin'} className={h.pinned ? 'text-amber-300' : 'text-slate-600 hover:text-slate-300'}><Pin size={11} /></button>
+                <button onClick={() => loadFromHistory(h.sql, false)} onDoubleClick={() => loadFromHistory(h.sql, true)} title="Click: replace the editor text. Double-click: open in a new tab." className="flex-1 min-w-0 text-left truncate text-gray-300">{h.sql.replace(/\s+/g, ' ')}</button>
+                <span className="shrink-0 text-slate-600">{h.runs > 1 ? `x${h.runs} ` : ''}{h.ms.toFixed(0)} ms</span>
+                <button onClick={() => setHistory(removeHistory(history, h.sql))} title="Remove" aria-label="Remove from history" className="opacity-40 group-hover:opacity-100 hover:text-red-300"><X size={11} /></button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="flex items-end gap-0.5 border-b border-slate-800 overflow-x-auto">
         {tabs.map((t) => (
           <div key={t.id} onClick={() => setCur(t.id)} onDoubleClick={() => setRenaming(t.id)}
@@ -144,6 +204,17 @@ export default function ExecuteTab({ session, tabsRef }) {
         <CodeMirror key={tab.id} value={tab.text} onChange={setText} height="220px" theme="dark" extensions={extensions}
           onCreateEditor={(view) => { viewRef.current = view; }} basicSetup={{ foldGutter: false, highlightActiveLine: true, autocompletion: true }} />
       </div>
+
+      {plan && (
+        <div className="mb-2 p-2 border border-slate-800 rounded bg-slate-900/40 text-[11px] font-mono">
+          <div className="flex items-center gap-1 mb-1 text-slate-400"><ListTree size={12} /> Query plan <span className="truncate text-slate-500">{plan.sql.replace(/\s+/g, ' ').slice(0, 100)}</span>
+            <button className="ml-auto text-slate-500 hover:text-gray-200" onClick={() => setPlan(null)} aria-label="Close plan"><X size={11} /></button></div>
+          {plan.error ? <div className="text-red-300">{plan.error}</div> : plan.nodes.map((n, i) => (
+            <div key={i} style={{ paddingLeft: n.depth * 14 }} className={n.scan ? 'text-amber-300' : n.usesIndex ? 'text-emerald-300' : 'text-gray-300'}>{n.depth ? '\u2514 ' : ''}{n.detail}</div>
+          ))}
+          {!plan.error && <div className="mt-1 text-slate-600">Amber = full table scan, green = uses an index or primary key. This is SQLite's own plan; the statement is not run.</div>}
+        </div>
+      )}
 
       {res && (
         <div className={`mb-2 p-2 border rounded text-xs font-mono max-h-36 overflow-auto ${res.run.error ? 'border-red-900 bg-red-950/20' : 'border-slate-800 bg-slate-900/40'}`}>
@@ -162,10 +233,12 @@ export default function ExecuteTab({ session, tabsRef }) {
 
       {shown && (
         <>
-          <div className="flex items-center gap-1 mb-1 text-xs">
-            <span className="text-slate-400 truncate">Result of: <span className="font-mono text-slate-300">{shown.sql.replace(/\s+/g, ' ').slice(0, 120)}</span>{shown.truncated ? ' (first 50,000 rows)' : ''}</span>
+          <div className="flex items-center gap-1 mb-1 text-xs flex-wrap">
+            <span className="text-slate-400 truncate min-w-0">Result of: <span className="font-mono text-slate-300">{shown.sql.replace(/\s+/g, ' ').slice(0, 120)}</span>{shown.truncated ? ' (first 50,000 rows)' : ''}</span>
             <button className={btn + ' ml-auto'} onClick={() => downloadText('query-result.csv', toCsv(shown.columns, shown.rows), 'text/csv')}><Download size={12} /> CSV</button>
             <button className={btn} onClick={() => downloadText('query-result.json', JSON.stringify(shown.rows.map((r) => Object.fromEntries(shown.columns.map((c, i) => [c, r[i] instanceof Uint8Array ? Array.from(r[i]) : r[i]]))), null, 2), 'application/json')}><Download size={12} /> JSON</button>
+            <button className={btn} onClick={() => copyAs('tsv', shown)} title="Copy as tab-separated text (pastes into spreadsheets)"><Copy size={12} /> {copied === 'tsv' ? 'Copied' : 'TSV'}</button>
+            <button className={btn} onClick={() => copyAs('md', shown)} title="Copy as a Markdown table"><Copy size={12} /> {copied === 'md' ? 'Copied' : 'MD'}</button>
             <button className={btn} disabled={!/^\s*(SELECT|WITH|VALUES)\b/i.test(shown.sql)} onClick={() => setViewSql(shown.sql)} title="Save this query as a view"><Eye size={12} /> Save as view</button>
             <button className={btn + (showPlot ? ' !border-cyan-800' : '')} onClick={() => setShowPlot((s) => !s)}><LineChart size={12} /> Plot</button>
           </div>
