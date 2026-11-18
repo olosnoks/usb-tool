@@ -1066,7 +1066,7 @@ It is a browser port of [usb-rea](https://github.com/emirmrkaljevic/usb-rea) by 
 3. **Mark actions.** In the **Action marker** tab, type a label such as \`brightness 50%\` and press Enter (or **Mark**) just before you click it in the app. Start the capture on the same computer: the timestamps use this PC's clock. **End current action**, **Undo last**, **Download .actions.json**, **Clear** and **Use in Analyze →** manage the list. Record at least 3 values per setting. If the PC clock and the capture clock disagree, the **Timestamp offset (s)** field on the Analyze tab is added to every marker time. Labels starting with \`seen\` (\`seen rpm 1180, temp 34\`) record what the app displayed, which is used to decode device replies.
 4. **Analyze.** In **Analyze capture**, load the capture, optionally pick the **Target device** (default: the device with the most host-to-device data), load or paste the markers JSON, and click **3. Infer protocol**. The analysis runs in a Web Worker, so the page stays responsive; a progress bar with the current stage is shown and **Cancel** stops it. **Try the demo (synthetic lamp capture)** runs the whole pipeline on a generated capture with no files.
 
-**Packets tab.** After a capture (or the demo) is loaded, the **Packets** tab lists its transfers (Frame, Time, Bus, Dev, EP, Dir, Type, length/setup/ASCII). Filter by device, endpoint number, In/Out, transfer type or a hex substring. Selecting a row shows a hexdump, and for control transfers a decoded setup packet. A **Descriptors found in capture** panel decodes any device, configuration, interface or endpoint descriptors seen; they are only present if the capture began before the device was enumerated.
+**Packets tab.** After a capture (or the demo) is loaded, the **Packets** tab lists its transfers (Frame, Time, Bus, Dev, EP, Dir, Type, length/setup/ASCII). Filter by device, endpoint number, In/Out, transfer type or a hex substring. Selecting a row shows a hexdump, and for control transfers a decoded setup packet. Toolbar buttons: **CSV** downloads the filtered transfers (frame, time, bus, device, endpoint, direction, type, length, setup and data as hex); **Copy Wireshark filter** copies a display filter equivalent to the current device, endpoint, direction, type and hex filters (shown under the toolbar; the hex substring becomes a \`frame contains\` test, so it needs an even number of hex digits). Shift-click a second row to diff its payload against the previously selected one: the diff shows both byte rows with \`^^\` under every differing offset, and **Clear diff** removes it. The collapsible **Endpoint statistics** table totals packets, bytes, min/max length and time span per device, endpoint, direction and type. A **Descriptors found in capture** panel decodes any device, configuration, interface or endpoint descriptors seen; they are only present if the capture began before the device was enumerated.
 
 If you have no markers, click each action with a pause between them, switch to **Labels only (split on pauses)** and list the labels in order, one per line. The traffic is split at the pauses.
 
@@ -1106,6 +1106,13 @@ Each output has **Copy** and **Download** buttons.
 - The browser cannot sniff USB, so capture with the OS tools.
 - You still need the vendor app during the recording. Document a device's protocol before the vendor drops support.
 - A matching VID:PID in the lookup is a hint, not proof. Vendors reuse IDs.
+- The Wireshark filter and CSV are generated from the capture you loaded; the Wireshark filter is not tested against Wireshark itself, so adjust it if a field name differs in your version.
+
+---
+
+### 5. Similar tools
+
+Wireshark with USBPcap or usbmon (raw capture and dissection), IO Ninja USB Monitor, Device Monitoring Studio, and the original usb-rea CLI. Those capture live; this tool analyzes saved captures and infers a protocol.
 `
   }
 ];
