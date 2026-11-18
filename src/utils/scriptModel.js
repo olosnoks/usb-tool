@@ -18,6 +18,8 @@ export function normalizeStep(step = {}) {
     id: String(step.id ?? Date.now() + Math.random().toString(36).slice(2, 6)),
     type: STEP_TYPES.includes(step.type) ? step.type : 'send',
     send: step.send ?? '',
+    sendFormat: step.sendFormat === 'hex' ? 'hex' : 'text',
+    disabled: step.disabled === true,
     lineEnding: Object.prototype.hasOwnProperty.call(LINE_ENDINGS, step.lineEnding) ? step.lineEnding : 'none',
     expect: step.expect ?? '',
     expectMode: EXPECT_MODES.includes(step.expectMode) ? step.expectMode : 'plain',
@@ -37,11 +39,26 @@ export function normalizeStep(step = {}) {
 
 function hexVal(c) { return /^[0-9a-fA-F]$/.test(c) ? parseInt(c, 16) : -1; }
 
+/** "AA 55 0x10, ff" -> bytes. Separators: whitespace, commas, colons. Throws on bad input. */
+export function parseHex(text) {
+  const tokens = String(text).split(/[\s,:]+/).filter(Boolean);
+  const out = [];
+  for (const raw of tokens) {
+    const t = raw.replace(/^0x/i, '');
+    if (!/^[0-9a-fA-F]+$/.test(t) || t.length % 2) throw new Error(`invalid hex "${raw}"`);
+    for (let i = 0; i < t.length; i += 2) out.push(parseInt(t.slice(i, i + 2), 16));
+  }
+  return out;
+}
+
 /**
  * Template -> bytes. Supports \r \n \t \0 \e \\ \xNN \$ and ${var}; other text
  * is UTF-8. An unknown ${var} is kept literally (so mistakes stay visible).
  */
-export function encodeSend(template, { vars = {}, lineEnding = 'none' } = {}) {
+export function encodeSend(template, { vars = {}, lineEnding = 'none', format = 'text' } = {}) {
+  if (format === 'hex') {
+    return Uint8Array.from([...parseHex(template), ...enc.encode(LINE_ENDINGS[lineEnding] ?? '')]);
+  }
   const out = [];
   const push = (str) => { for (const b of enc.encode(str)) out.push(b); };
   const s = String(template);
@@ -177,7 +194,7 @@ export async function runScript(inputSteps, io, { gapMs = 200, maxExecutions = 1
     }
     io.buffer.clear();
     if (step.send !== '' || step.lineEnding !== 'none') {
-      try { await io.send(encodeSend(step.send, { vars, lineEnding: step.lineEnding })); } catch (e) {
+      try { await io.send(encodeSend(step.send, { vars, lineEnding: step.lineEnding, format: step.sendFormat })); } catch (e) {
         return { ok: false, error: `send failed: ${e.message}`, output: '', captures: {} };
       }
     }
@@ -211,6 +228,11 @@ export async function runScript(inputSteps, io, { gapMs = 200, maxExecutions = 1
     if (!isActive()) { aborted = true; break; }
     const step = steps[i];
     let nextIndex = i + 1;
+    if (step.disabled) {
+      update(step, { status: 'skipped', timeMs: 0, iterations: [] });
+      i = nextIndex;
+      continue;
+    }
     update(step, { status: 'running', timeMs: 0, iterations: [] });
     let stepTime = 0;
     const iterations = [];
@@ -289,9 +311,9 @@ export function buildJUnit(suiteName, steps, results, { timestamp = new Date().t
     const r = results[step.id];
     const time = ((r?.timeMs || 0) / 1000).toFixed(3);
     let inner = '';
-    if (!r || r.status === 'running' || r.status === 'aborted') {
+    if (!r || r.status === 'running' || r.status === 'aborted' || r.status === 'skipped') {
       skipped++;
-      inner = `<skipped message="${r?.status === 'aborted' ? 'aborted' : 'not run'}"/>`;
+      inner = `<skipped message="${r?.status === 'aborted' ? 'aborted' : r?.status === 'skipped' ? 'disabled' : 'not run'}"/>`;
     } else if (r.status === 'fail') {
       failures++;
       inner = `<failure message="${xmlEsc(r.error || 'step failed')}"/>`;

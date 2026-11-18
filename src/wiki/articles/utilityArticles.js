@@ -388,7 +388,7 @@ The Deck keeps a rolling buffer of the last ~4 KB of received text and matches a
     content: `
 # Automated Test Runner & Scripts — Bench Testing Engine
 
-The **Automated Test Runner** (window title *AUTOMATED SERIAL TEST RUNNER & SCRIPTING*) lets you define a sequence of steps that send bytes to the connected serial device, wait for a response, toggle control lines or change the baud rate, with loops, retries and failure branches. It suits repetitive functional checks, modem or bootloader handshakes, and simple factory QA. It is a step table, not a JavaScript scripting environment.
+The **Automated Test Runner** (window title *Automation / Script Runner*) lets you define a sequence of steps that send bytes to the connected serial device, wait for a response, toggle control lines or change the baud rate, with loops, retries and failure branches. It suits repetitive functional checks, modem or bootloader handshakes, and simple factory QA. It is a step table, not a JavaScript scripting environment.
 
 ---
 
@@ -399,6 +399,7 @@ Each step has a **Step type** (\`send/expect\`, \`delay\`, \`set DTR\`, \`set RT
 | Field | Meaning |
 | :--- | :--- |
 | **Send** | The text transmitted. Escapes are decoded to real bytes: \`\\r\`, \`\\n\`, \`\\t\`, \`\\0\`, \`\\e\` (ESC), \`\\xNN\` (any byte), \`\\\\\` (a backslash) and \`\\$\` (a literal dollar sign). A backslash followed by anything else is sent as typed. \`\${name}\` is replaced by a captured variable (an unknown name is sent literally). |
+| **Send format** | \`text\` (default, escapes and variables as above) or \`hex\`: the Send box holds bytes such as \`AA 55 0x10\` (separated by spaces, commas or colons; two digits per byte). Escapes and variables are not expanded in hex mode, and a malformed hex string fails the step before anything is sent. |
 | **Line ending** | \`no EOL\` (default), \`CR\`, \`LF\` or \`CRLF\`, appended after the Send text. |
 | **Expect** | What must appear in the data received after the send. Leave empty to send without waiting. |
 | **Expect mode** | \`text\` (substring), \`regex\` (JavaScript regular expression; capture groups are stored as variables \`\${1}\`, \`\${2}\`... and named groups by name), \`any of (||)\` (several substrings separated by \`||\`), or \`must NOT appear\` (the step fails if the text shows up before the timeout). A **case** checkbox makes matching case-insensitive when cleared. |
@@ -411,9 +412,9 @@ Under each step, the flow controls are:
 - **retries**: extra attempts of the step before it counts as failed.
 - **on fail**: \`stop\` (end the suite), \`continue\`, or \`goto step\` (jump to a chosen step number). A built-in loop guard stops a suite after 10,000 step executions.
 
-Each row also has move-up, move-down, duplicate and remove buttons, and expands to show the received output and iteration details. **Add Step** appends a step; fields are locked while a suite is running.
+Each row also has an **enabled** checkbox (clear it to skip the step; it is reported as SKIPPED and does not fail the suite), a **run this step only** button (runs just that step, with the current variables empty, against the connected port), and move-up, move-down, duplicate and remove buttons, and expands to show the received output and iteration details. **Add Step** appends a step; fields are locked while a suite is running.
 
-**Presets** (the buttons in the header, labelled **AT**, **MicroPython**, **U-Boot**) replace the step list:
+**Presets** (the buttons in the toolbar, labelled **AT**, **MicroPython**, **U-Boot**) replace the step list:
 - **AT**: *AT Command Modem Test* (\`AT\`, \`ATE0\`, \`AT+CSQ\`).
 - **MicroPython**: *MicroPython REPL Handshake* (Ctrl+C twice expecting \`>>>\`, then print \`sys.platform\`).
 - **U-Boot**: *U-Boot Bootloader Interrupt* (three spaces expecting \`=>\`, then \`version\`).
@@ -426,12 +427,16 @@ Each row also has move-up, move-down, duplicate and remove buttons, and expands 
 
 ### 2. Exporting Reports
 
-Three buttons in the action bar download the results of the last run:
+Buttons in the toolbar download the results of the last run:
 - **JSON**: \`test_report_<timestamp>.json\` with the suite name, an ISO timestamp, and every step (all its settings) with its result, or \`untested\` if it has not run.
-- **JUnit XML**: \`test_report_<timestamp>.xml\`, one \`testcase\` per step (failures, skipped for steps not run or aborted, and the received output), which CI systems can ingest.
+- **JUnit XML**: \`test_report_<timestamp>.xml\`, one \`testcase\` per step (failures, skipped for steps not run, disabled or aborted, and the received output), which CI systems can ingest.
 - **CSV**: \`test_report_<timestamp>.csv\` with index, type, send, expect, mode, status, iterations, time_ms, error and output columns (cells starting with \`=\`, \`+\`, \`-\` or \`@\` are prefixed so spreadsheets do not run them as formulas).
 
-None of them include port VID/PID, baud rate, or a full transcript of the serial traffic.
+- **.py**: not a report but an export of the *suite* as a standalone pySerial script (\`pip install pyserial\`, then \`python suite.py COM3 115200\`) so it can run outside the browser. Send/expect (text, regex, any-of, must-not), delay, DTR/RTS, set-baud, repeat, retries and on-fail stop/continue are translated. **goto is not translated** (the script stops instead, with a comment), disabled steps are left out, and the generated script is a starting point to review, not a guaranteed identical run.
+
+None of the reports include port VID/PID, baud rate, or a full transcript of the serial traffic.
+
+**Similar tools:** Docklight (send/receive sequences and scripting), Tera Term macros (wait/send) and Expect/pexpect. This is a table-based subset of them that runs in the browser over Web Serial.
 
 ---
 
