@@ -8,7 +8,7 @@ import GcodeSenderWorkbench from '../src/components/tools/GcodeSenderWorkbench.j
 describe('GcodeSenderWorkbench', () => {
   it('renders the idle state without a serial context', () => {
     const html = renderToString(<GcodeSenderWorkbench />);
-    expect(html).toContain('G-CODE SENDER');
+    expect(html).toContain('CONNECT SERIAL');
     expect(html).toContain('NOT CONNECTED');
     expect(html).toContain('not detected');
     expect(html).toContain('The serial context is not available here');

@@ -1,11 +1,56 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Printer, Usb, Power, Thermometer, Flame, Home, Crosshair, Play, Pause, Square, Upload, Terminal, Fan, Gauge, RotateCcw, Unlock, Send, Activity, Target, Loader2, Wrench } from 'lucide-react';
+import { Printer, Usb, Power, Thermometer, Flame, Home, Crosshair, Play, Pause, Square, Upload, Terminal, Fan, Gauge, RotateCcw, Unlock, Send, Activity, Target, Loader2, Wrench, Zap, Save, Trash2 } from 'lucide-react';
 import { useOptionalSerial } from '../../context/SerialContext';
 import {
   REALTIME, prepareGcodeLines, classifyLine, createLineSplitter, resolveCoordinates, buildJog, homeLines, zeroLines,
   hotendLines, bedLines, fanLines, autoReportLines, extrudeLines, normalizeConsoleLine, makeTempSample, appendTempSample,
   estimateRemainingMs, utf8Length, GcodeStreamer,
 } from '../../utils/gcodeSender';
+import {
+  GRBL_OVERRIDE, overrideLabel, marlinOverrideLine, WCS_LIST, wcsZeroLine, describeGrblCode, parseMacro, MAX_MACROS,
+  analyzeGcode, formatDuration, travelWarnings,
+} from '../../utils/gcodeExtras';
+
+const MACRO_KEY = 'usb-tool.gcode-sender.macros';
+const DEFAULT_MACROS = [
+  { name: 'Park Z', body: 'G91\nG0 Z5\nG90' },
+  { name: 'Spindle off', body: 'M5' },
+];
+function loadMacros() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MACRO_KEY) || 'null');
+    if (Array.isArray(raw)) return raw.filter((m) => m && typeof m.name === 'string' && typeof m.body === 'string').slice(0, MAX_MACROS);
+  } catch { /* ignore */ }
+  return DEFAULT_MACROS;
+}
+
+/** Top-down XY preview of the analysed toolpath (cuts cyan, rapids dim). */
+function PathPreview({ analysis }) {
+  const { bounds, segments } = analysis;
+  if (!bounds || segments.length === 0) return null;
+  const W = 300;
+  const H = 160;
+  const pad = 8;
+  const w = Math.max(1e-6, bounds.max.X - bounds.min.X);
+  const h = Math.max(1e-6, bounds.max.Y - bounds.min.Y);
+  const sc = Math.min((W - 2 * pad) / w, (H - 2 * pad) / h);
+  const ox = (W - w * sc) / 2;
+  const oy = (H - h * sc) / 2;
+  const px = (x) => (ox + (x - bounds.min.X) * sc).toFixed(1);
+  const py = (y) => (H - oy - (y - bounds.min.Y) * sc).toFixed(1);
+  let cut = '';
+  let rapid = '';
+  for (const [x0, y0, x1, y1, kind] of segments) {
+    const d = `M${px(x0)},${py(y0)}L${px(x1)},${py(y1)}`;
+    if (kind === 1) cut += d; else rapid += d;
+  }
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full bg-slate-950 border border-slate-800 rounded" style={{ height: H }} role="img" aria-label="Toolpath preview, XY plane">
+      <path d={rapid} fill="none" stroke="#475569" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+      <path d={cut} fill="none" stroke="#22d3ee" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
 
 const enc = new TextEncoder();
 const JOG_STEPS = [0.1, 1, 10, 100];
@@ -51,7 +96,7 @@ function TempChart({ history }) {
 
 function Field({ label, children }) {
   return (
-    <label className="flex flex-col gap-1 text-[10px] uppercase tracking-wider text-slate-500">
+    <label className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wider text-slate-500">
       {label}
       {children}
     </label>
@@ -59,7 +104,7 @@ function Field({ label, children }) {
 }
 
 const inputCls = 'bg-slate-950 border border-slate-700 rounded px-2 py-1 font-mono text-xs text-gray-200 w-full';
-const btnCls = 'px-2.5 py-1.5 rounded border text-xs font-mono flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed';
+const btnCls = 'px-2 py-1 rounded border text-xs font-mono flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed';
 const btnNeutral = `${btnCls} border-slate-700 text-slate-300 hover:border-cyan-500 hover:text-cyan-300`;
 const btnAccent = `${btnCls} border-cyan-700 text-cyan-300 hover:bg-cyan-950`;
 const btnWarn = `${btnCls} border-amber-700 text-amber-300 hover:bg-amber-950`;
@@ -100,6 +145,17 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
   const wcoRef = useRef(null);
   const [settings, setSettings] = useState(null);
   const collectSettingsRef = useRef(false);
+
+  // Work coordinate system, macros, file analysis, Marlin overrides
+  const [fovPct, setFovPct] = useState('100');
+  const [flowPct, setFlowPct] = useState('100');
+  const [wcs, setWcs] = useState('G54');
+  const [macros, setMacros] = useState(loadMacros);
+  const [macroName, setMacroName] = useState('');
+  const [macroBody, setMacroBody] = useState('');
+  const [macroError, setMacroError] = useState('');
+  const [rapidFeed, setRapidFeed] = useState('3000');
+  const [macroRun, setMacroRun] = useState('');
 
   // Jog
   const [step, setStep] = useState(1);
@@ -195,6 +251,10 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
     }
 
     if (c.type !== 'ok' || !streamingNow) addLog('rx', line);
+    if (c.type === 'grbl-error' || c.type === 'grbl-alarm') {
+      const why = describeGrblCode(c.type === 'grbl-alarm' ? 'alarm' : 'error', c.code);
+      if (why) addLog('sys', `${c.type === 'grbl-alarm' ? 'ALARM' : 'error'}:${c.code} means: ${why}`);
+    }
 
     const temps = c.type === 'temp' ? c.temps : c.type === 'ok' ? c.temp : null;
     if (temps) {
@@ -318,15 +378,17 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
     [fw, commands],
   );
 
-  const startStream = () => {
-    if (!connected || !fw || commands.length === 0 || streamingRef.current) return;
+  const startStream = (cmdsOverride, label) => {
+    const list = Array.isArray(cmdsOverride) ? cmdsOverride : commands;
+    if (!connected || !fw || list.length === 0 || streamingRef.current) return;
+    setMacroRun(Array.isArray(cmdsOverride) ? label : '');
     if (pendingReadRef.current && Date.now() - pendingReadRef.current < 2000) {
       addLog('err', 'Wait for the temperature reply before starting a file.');
       return;
     }
     let s;
     try {
-      s = new GcodeStreamer({ firmware: fw, commands });
+      s = new GcodeStreamer({ firmware: fw, commands: list });
     } catch (err) {
       addLog('err', err.message);
       return;
@@ -334,7 +396,7 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
     streamerRef.current = s;
     streamStartRef.current = Date.now();
     setNow(Date.now());
-    addLog('sys', `Streaming ${commands.length} commands (${fw === 'marlin' ? 'one line at a time, numbered, with checksums' : 'character-counted 127-byte buffer'}).`);
+    addLog('sys', `Streaming ${list.length} commands (${fw === 'marlin' ? 'one line at a time, numbered, with checksums' : 'character-counted 127-byte buffer'}).`);
     for (const text of s.start()) {
       writeBytes(enc.encode(text));
       addLog('tx', text.trim());
@@ -373,6 +435,43 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
       : 'Stopped. Lines already sent to the printer will still finish.');
   };
 
+  const override = (byte) => realtime(byte, overrideLabel(byte));
+
+  const marlinOverride = (kind, pct) => {
+    try { sendLine(marlinOverrideLine(kind, pct)); } catch (e) { addLog('err', e.message); }
+  };
+
+  const zeroAxes = (axes) => {
+    if (fw === 'grbl') {
+      try { sendLines([wcsZeroLine(wcs, axes)]); } catch (e) { addLog('err', e.message); }
+    } else sendLines(zeroLines(fw, axes));
+  };
+
+  const persistMacros = (next) => {
+    setMacros(next);
+    try { localStorage.setItem(MACRO_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+  };
+
+  const saveMacro = () => {
+    const r = parseMacro(macroName, macroBody);
+    if (!r.ok) { setMacroError(r.error); return; }
+    setMacroError('');
+    persistMacros([...macros.filter((m) => m.name !== r.name), { name: r.name, body: macroBody }].slice(-MAX_MACROS));
+  };
+
+  const runMacro = (m) => {
+    const r = parseMacro(m.name, m.body);
+    if (!r.ok) { setMacroError(r.error); return; }
+    setMacroError('');
+    startStream(r.commands, `macro "${r.name}"`);
+  };
+
+  const analysis = useMemo(
+    () => (commands.length ? analyzeGcode(commands, { rapidFeed: Number(rapidFeed) > 0 ? Number(rapidFeed) : 3000, firmware: fw ?? 'grbl' }) : null),
+    [commands, rapidFeed, fw],
+  );
+  const travelWarn = useMemo(() => (analysis && fw === 'grbl' ? travelWarnings(analysis.size, settings) : []), [analysis, fw, settings]);
+
   const readSettings = () => {
     collectSettingsRef.current = true;
     setSettings([]);
@@ -393,35 +492,29 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
   const fwLabel = fw === 'marlin' ? 'MARLIN' : fw === 'grbl' ? 'GRBL 1.1' : 'UNKNOWN';
 
   return (
-    <div className="flex flex-col gap-3 p-3 text-gray-200 font-sans bg-slate-950 min-h-full">
-      {/* Header */}
-      <div className="flex flex-wrap items-center gap-3 border border-slate-800 rounded p-3 bg-slate-900/60">
-        <Printer size={20} className="text-cyan-400" />
-        <div className="flex-1 min-w-[200px]">
-          <div className="font-mono text-sm text-cyan-300">G-CODE SENDER</div>
-          <div className="text-[11px] text-slate-500">Marlin 3D printers and GRBL 1.1 CNC over the shared serial port</div>
-        </div>
-        <span className={`text-[11px] font-mono px-2 py-0.5 rounded border ${connected ? 'border-emerald-700 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>
+    <div className="flex flex-col gap-2 text-gray-200 font-sans">
+      {/* Status bar */}
+      <div className="flex flex-wrap items-center gap-2 border border-slate-800 rounded p-2 bg-slate-900/60">
+        <Printer size={14} className="text-cyan-400" aria-hidden="true" />
+        <span className={`text-[11px] font-mono px-1.5 py-0.5 rounded border ${connected ? 'border-emerald-700 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>
           {connected ? `CONNECTED @ ${serial?.baudRate ?? '?'} bps` : 'NOT CONNECTED'}
         </span>
-        <span className={`text-[11px] font-mono px-2 py-0.5 rounded border ${fw ? 'border-cyan-700 text-cyan-300' : 'border-slate-700 text-slate-500'}`}>
+        <span className={`text-[11px] font-mono px-1.5 py-0.5 rounded border ${fw ? 'border-cyan-700 text-cyan-300' : 'border-slate-700 text-slate-500'}`}>
           FIRMWARE: {fw ? fwLabel : 'not detected'}
           {detected?.version ? ` ${detected.version}` : ''}
         </span>
-        <Field label="Firmware">
-          <select className={inputCls} value={fwChoice} onChange={(e) => setFwChoice(e.target.value)} aria-label="Firmware">
-            <option value="auto">Auto-detect</option>
-            <option value="marlin">Marlin</option>
-            <option value="grbl">GRBL 1.1</option>
-          </select>
-        </Field>
+        <select className={`${inputCls} !w-auto ml-auto`} value={fwChoice} onChange={(e) => setFwChoice(e.target.value)} aria-label="Firmware" title="Firmware">
+          <option value="auto">Auto-detect</option>
+          <option value="marlin">Marlin</option>
+          <option value="grbl">GRBL 1.1</option>
+        </select>
         {!connected ? (
           <button className={btnAccent} onClick={() => serial?.connect?.()} disabled={!serial}>
-            <Usb size={13} /> CONNECT SERIAL
+            <Usb size={12} /> CONNECT SERIAL
           </button>
         ) : (
-          <button className={btnNeutral} onClick={detect} disabled={streaming}>
-            <Activity size={13} /> DETECT FIRMWARE
+          <button className={btnNeutral} onClick={detect} disabled={streaming} title="Send $I and M115 again">
+            <Activity size={12} /> DETECT
           </button>
         )}
       </div>
@@ -444,11 +537,11 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 @xl:grid-cols-2 gap-2">
         {/* Left column: temperatures (Marlin) or status (GRBL) */}
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
           {fw === 'marlin' && (
-            <section className="border border-slate-800 rounded p-3 bg-slate-900/60 flex flex-col gap-3">
+            <section className="border border-slate-800 rounded p-2.5 bg-slate-900/60 flex flex-col gap-2">
               <div className="flex items-center gap-2 text-xs font-mono text-slate-300"><Thermometer size={14} /> TEMPERATURE</div>
               <div className="grid grid-cols-2 gap-2 text-center">
                 <div className="border border-slate-800 rounded p-2 bg-slate-950">
@@ -501,12 +594,27 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
                   </div>
                 </Field>
               </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <Field label="Feedrate % (M220)">
+                  <div className="flex gap-1">
+                    <input className={`${inputCls} w-16`} value={fovPct} onChange={(e) => setFovPct(e.target.value)} aria-label="Feedrate override percent" />
+                    <button className={btnNeutral} disabled={busyDisabled} onClick={() => marlinOverride('feed', fovPct)}>SET</button>
+                  </div>
+                </Field>
+                <Field label="Flow % (M221)">
+                  <div className="flex gap-1">
+                    <input className={`${inputCls} w-16`} value={flowPct} onChange={(e) => setFlowPct(e.target.value)} aria-label="Flow override percent" />
+                    <button className={btnNeutral} disabled={busyDisabled} onClick={() => marlinOverride('flow', flowPct)}>SET</button>
+                  </div>
+                </Field>
+                <span className="text-[10px] text-slate-500 pb-1">10-500. Sent as a normal line, so not available while a file streams.</span>
+              </div>
               <p className="text-[10px] text-slate-500">Extrude and retract use M83 (relative E) and then M82 (absolute E) around the move. The chart only plots temperatures the printer actually reported.</p>
             </section>
           )}
 
           {fw === 'grbl' && (
-            <section className="border border-slate-800 rounded p-3 bg-slate-900/60 flex flex-col gap-3">
+            <section className="border border-slate-800 rounded p-2.5 bg-slate-900/60 flex flex-col gap-2">
               <div className="flex items-center justify-between text-xs font-mono text-slate-300">
                 <span className="flex items-center gap-2"><Gauge size={14} /> STATUS</span>
                 <label className="flex items-center gap-1.5 text-[10px] text-slate-500">
@@ -547,6 +655,26 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
                 <button className={btnNeutral} disabled={!connected || streaming} onClick={() => sendLine('$X')}><Unlock size={12} />UNLOCK ($X)</button>
                 <button className={btnNeutral} disabled={!connected} onClick={() => realtime(REALTIME.JOG_CANCEL, 'jog cancel')}>JOG CANCEL</button>
               </div>
+              <details className="text-[11px]">
+                <summary className="cursor-pointer text-slate-400 flex items-center gap-1"><Zap size={11} className="inline" /> Overrides (live, also during a stream)</summary>
+                <div className="mt-1.5 grid grid-cols-1 @md:grid-cols-3 gap-2">
+                  {[
+                    ['Feed', ['FEED_MINUS_10', '-10'], ['FEED_MINUS_1', '-1'], ['FEED_RESET', '100%'], ['FEED_PLUS_1', '+1'], ['FEED_PLUS_10', '+10']],
+                    ['Rapid', ['RAPID_25', '25%'], ['RAPID_50', '50%'], ['RAPID_100', '100%']],
+                    ['Spindle', ['SPINDLE_MINUS_10', '-10'], ['SPINDLE_MINUS_1', '-1'], ['SPINDLE_RESET', '100%'], ['SPINDLE_PLUS_1', '+1'], ['SPINDLE_PLUS_10', '+10']],
+                  ].map(([name, ...btns]) => (
+                    <div key={name} className="flex flex-col gap-1">
+                      <span className="text-[10px] uppercase text-slate-500">{name}{grblStatus?.overrides ? ` ${grblStatus.overrides[name.toLowerCase()]}%` : ''}</span>
+                      <div className="flex flex-wrap gap-1">
+                        {btns.map(([key, label]) => (
+                          <button key={key} className={`${btnNeutral} !px-1.5`} disabled={!connected} onClick={() => override(GRBL_OVERRIDE[key])} title={`${name} override ${label}`}>{label}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button className={`${btnWarn} mt-1.5`} disabled={!connected} onClick={() => override(GRBL_OVERRIDE.SPINDLE_STOP)} title="Toggle spindle stop; GRBL only accepts it during a feed hold">SPINDLE STOP (in hold)</button>
+              </details>
               <div className="flex flex-col gap-2">
                 <div className="flex gap-2 items-center">
                   <button className={btnNeutral} disabled={busyDisabled} onClick={readSettings}><Wrench size={12} />READ SETTINGS ($$)</button>
@@ -568,7 +696,7 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
           )}
 
           {/* File streaming */}
-          <section className="border border-slate-800 rounded p-3 bg-slate-900/60 flex flex-col gap-3">
+          <section className="border border-slate-800 rounded p-2.5 bg-slate-900/60 flex flex-col gap-2">
             <div className="flex items-center gap-2 text-xs font-mono text-slate-300"><Upload size={14} /> FILE</div>
             <div className="flex flex-wrap items-center gap-2">
               <label className={`${btnNeutral} cursor-pointer ${streaming ? 'opacity-40 pointer-events-none' : ''}`}>
@@ -585,8 +713,29 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
             {fw === 'marlin' && commands.length > 0 && (
               <div className="text-[10px] text-slate-500">Marlin: one line in flight, each with a line number and checksum. Slower than GRBL, but resends are handled.</div>
             )}
+            {analysis && (
+              <details className="text-[11px]" open>
+                <summary className="cursor-pointer text-slate-400">File analysis (estimate, not from the machine)</summary>
+                <div className="mt-1.5 flex flex-col gap-1.5">
+                  <PathPreview analysis={analysis} />
+                  <div className="font-mono text-slate-400 flex flex-wrap gap-x-4 gap-y-0.5">
+                    {analysis.size && <span>size X {analysis.size.X.toFixed(2)} Y {analysis.size.Y.toFixed(2)} Z {analysis.size.Z.toFixed(2)} mm</span>}
+                    {analysis.bounds && <span>X {analysis.bounds.min.X.toFixed(2)}..{analysis.bounds.max.X.toFixed(2)} Y {analysis.bounds.min.Y.toFixed(2)}..{analysis.bounds.max.Y.toFixed(2)} Z {analysis.bounds.min.Z.toFixed(2)}..{analysis.bounds.max.Z.toFixed(2)}</span>}
+                    <span>cut {analysis.cutLength.toFixed(0)} mm</span>
+                    <span>rapid {analysis.rapidLength.toFixed(0)} mm</span>
+                    <span>time ~{formatDuration(analysis.seconds)}</span>
+                  </div>
+                  <label className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                    Assumed rapid rate (mm/min, used for the time only)
+                    <input className={`${inputCls} w-20`} value={rapidFeed} onChange={(e) => setRapidFeed(e.target.value)} aria-label="Assumed rapid rate" />
+                  </label>
+                  {[...analysis.warnings, ...travelWarn].map((w) => <div key={w} className="text-amber-300">{w}</div>)}
+                  {analysis.spindleLeftOn && <div className="text-amber-300">The file ends with the spindle still on (no M5).</div>}
+                </div>
+              </details>
+            )}
             <div className="flex flex-wrap gap-2">
-              <button className={btnAccent} disabled={!connected || !fw || commands.length === 0 || streaming} onClick={startStream}><Play size={12} />START</button>
+              <button className={btnAccent} disabled={!connected || !fw || commands.length === 0 || streaming} onClick={() => startStream()}><Play size={12} />START</button>
               <button className={btnNeutral} disabled={!streaming || streamProg?.state !== 'running'} onClick={pauseStream}><Pause size={12} />PAUSE</button>
               <button className={btnNeutral} disabled={streamProg?.state !== 'paused'} onClick={resumeStream}><Play size={12} />RESUME</button>
               <button className={btnDanger} disabled={!streaming} onClick={stopStream}><Square size={12} />STOP</button>
@@ -597,6 +746,7 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
                   <div className="h-full bg-cyan-500 transition-all" style={{ width: `${Math.min(100, streamProg.percent).toFixed(1)}%` }} />
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-mono text-slate-400">
+                  {macroRun && <span>{macroRun}</span>}
                   <span>state <span className="text-slate-200">{streamProg.state}</span></span>
                   <span>{streamProg.done} / {streamProg.total} ({streamProg.percent.toFixed(1)}%)</span>
                   <span>elapsed {Math.round(elapsedMs / 1000)} s</span>
@@ -612,8 +762,8 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
         </div>
 
         {/* Right column: jog, zero and console */}
-        <div className="flex flex-col gap-3">
-          <section className="border border-slate-800 rounded p-3 bg-slate-900/60 flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
+          <section className="border border-slate-800 rounded p-2.5 bg-slate-900/60 flex flex-col gap-2">
             <div className="flex items-center gap-2 text-xs font-mono text-slate-300"><Crosshair size={14} /> JOG</div>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Step (mm)">
@@ -636,29 +786,60 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
               ))}
             </div>
             <div className="flex flex-wrap gap-2">
+              {fw === 'grbl' && (
+                <>
+                  <select className={`${inputCls} !w-auto`} value={wcs} onChange={(e) => setWcs(e.target.value)} aria-label="Work coordinate system" title="Work coordinate system that ZERO writes to">
+                    {WCS_LIST.map((w) => <option key={w} value={w}>{w}</option>)}
+                  </select>
+                  <button className={btnNeutral} disabled={busyDisabled} onClick={() => sendLine(wcs)} title={`Select ${wcs} as the active work coordinate system`}>USE {wcs}</button>
+                </>
+              )}
               <button className={btnAccent} disabled={busyDisabled} onClick={() => sendLines(homeLines(fw))}><Home size={12} />HOME ALL</button>
               {['X', 'Y', 'Z'].map((ax) => (
-                <button key={ax} className={btnNeutral} disabled={busyDisabled} onClick={() => sendLines(zeroLines(fw, [ax]))}>
+                <button key={ax} className={btnNeutral} disabled={busyDisabled} onClick={() => zeroAxes([ax])}>
                   <Target size={12} />ZERO {ax}
                 </button>
               ))}
-              <button className={btnNeutral} disabled={busyDisabled} onClick={() => sendLines(zeroLines(fw, ['X', 'Y', 'Z']))}>ZERO ALL</button>
+              <button className={btnNeutral} disabled={busyDisabled} onClick={() => zeroAxes(['X', 'Y', 'Z'])}>ZERO ALL</button>
             </div>
             <p className="text-[10px] text-slate-500">
               {fw === 'grbl'
-                ? 'GRBL: $J jog moves, $H homes (needs homing enabled), ZERO sets a work offset (G10 L20 P1).'
+                ? 'GRBL: $J jog moves, $H homes (needs homing enabled), ZERO sets the offset of the selected work coordinate system (G10 L20 P1-P6 for G54-G59). USE makes it the active one.'
                 : fw === 'marlin'
                   ? 'Marlin: G91 relative move then G90 back to absolute. HOME is G28. ZERO is G92, which changes the coordinate system until the next home.'
                   : 'Pick the firmware or detect it to enable the controls.'}
             </p>
           </section>
 
-          <section className="border border-slate-800 rounded p-3 bg-slate-900/60 flex flex-col gap-2 min-h-[260px]">
+          <details className="border border-slate-800 rounded p-2.5 bg-slate-900/60 text-xs">
+            <summary className="cursor-pointer font-mono text-slate-300">MACROS ({macros.length})</summary>
+            <div className="mt-2 flex flex-col gap-2">
+              <div className="flex flex-wrap gap-1.5">
+                {macros.length === 0 && <span className="text-[11px] text-slate-600">No macros saved.</span>}
+                {macros.map((m) => (
+                  <span key={m.name} className="flex">
+                    <button className={`${btnNeutral} rounded-r-none`} disabled={busyDisabled} onClick={() => runMacro(m)} title={m.body}>{m.name}</button>
+                    <button className={`${btnNeutral} rounded-l-none border-l-0 !px-1.5`} onClick={() => { setMacroName(m.name); setMacroBody(m.body); }} title={`Edit ${m.name}`} aria-label={`Edit macro ${m.name}`}>...</button>
+                    <button className={`${btnDanger} rounded-l-none border-l-0 !px-1.5`} onClick={() => persistMacros(macros.filter((x) => x.name !== m.name))} title={`Delete ${m.name}`} aria-label={`Delete macro ${m.name}`}><Trash2 size={11} /></button>
+                  </span>
+                ))}
+              </div>
+              <input className={inputCls} placeholder="Macro name" value={macroName} onChange={(e) => setMacroName(e.target.value)} aria-label="Macro name" maxLength={24} />
+              <textarea className={`${inputCls} h-20`} placeholder="One G-code line per row. Comments are removed." value={macroBody} onChange={(e) => setMacroBody(e.target.value)} aria-label="Macro G-code" spellCheck={false} />
+              <div className="flex items-center gap-2">
+                <button className={btnAccent} onClick={saveMacro}><Save size={12} />SAVE MACRO</button>
+                {macroError && <span className="text-rose-300 text-[11px]">{macroError}</span>}
+              </div>
+              <p className="text-[10px] text-slate-500">Macros are stored in this browser only. Running one streams it like a file (acknowledged line by line), so it is blocked while another stream runs. Check every line before you run it on a machine.</p>
+            </div>
+          </details>
+
+          <section className="border border-slate-800 rounded p-2.5 bg-slate-900/60 flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-xs font-mono text-slate-300"><Terminal size={14} /> CONSOLE</div>
               <button className={btnNeutral} onClick={() => setLog([])}>CLEAR</button>
             </div>
-            <div className="flex-1 min-h-[180px] max-h-[360px] overflow-auto border border-slate-800 rounded bg-black p-2 font-mono text-[11px] leading-5">
+            <div className="flex-1 min-h-[120px] max-h-[260px] overflow-auto border border-slate-800 rounded bg-black p-2 font-mono text-[11px] leading-5">
               {log.length === 0 && <div className="text-slate-600">Nothing yet. Replies from the device and what you send appear here.</div>}
               {log.map((l) => (
                 <div key={l.id} className={l.dir === 'tx' ? 'text-cyan-300' : l.dir === 'err' ? 'text-rose-300' : l.dir === 'sys' ? 'text-amber-300' : 'text-gray-300'}>
@@ -687,7 +868,7 @@ export default function GcodeSenderWorkbench({ onLogMessage }) {
       </div>
 
       <div className="text-[10px] text-slate-600 font-mono flex items-center gap-1">
-        <Power size={10} /> Nothing is sent until you connect a device and press a control. No simulated temperatures or positions are shown.
+        <Power size={10} /> Nothing is sent until you press a control. Keep an emergency stop within reach and never leave a running machine unattended.
       </div>
     </div>
   );
