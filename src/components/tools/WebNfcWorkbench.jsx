@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Nfc, Download, Copy, Check, Trash2, Lock, TriangleAlert, Play, Square, History, Plus, ArrowUp, ArrowDown, X, FileDown, Eye, EyeOff } from 'lucide-react';
+import { Nfc, Download, Copy, Check, Trash2, Lock, TriangleAlert, Play, Square, History, Plus, Eraser, Upload, ArrowUp, ArrowDown, X, FileDown, Eye, EyeOff } from 'lucide-react';
 import {
-  COMPOSER_KINDS, WSC_AUTH, WSC_ENC, buildNdefFromSpecs, buildWebNfcMessage, bytesToHex, decodeNdefRecords,
+  COMPOSER_KINDS, WSC_AUTH, buildEraseMessage, recordsToComposerEntries, tagFit, WSC_ENC, buildNdefFromSpecs, buildWebNfcMessage, bytesToHex, decodeNdefRecords,
   describeRecord, fromWebNfcEvent, hexToBytes, readNdefInput, wrapType2Tlv,
 } from '../../utils/webNfc.js';
 
@@ -13,7 +13,7 @@ import {
 
 const TABS = [['read', 'Read tag'], ['write', 'Write tag'], ['offline', 'Offline NDEF']];
 const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs font-mono text-gray-200 w-full';
-const btnBase = 'px-3 py-1.5 rounded text-xs border inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed';
+const btnBase = 'px-2.5 py-1 rounded text-xs border inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed';
 const btnEmerald = `${btnBase} border-emerald-800 bg-emerald-900/30 text-emerald-200 hover:bg-emerald-900/50`;
 const btnSlate = `${btnBase} border-slate-700 bg-slate-800 text-gray-200 hover:bg-slate-700`;
 const btnRose = `${btnBase} border-rose-800 bg-rose-900/30 text-rose-200 hover:bg-rose-900/50`;
@@ -221,11 +221,11 @@ function RecordView({ rec, index = 0, depth = 0 }) {
   );
 }
 
-function ReadTab({ support, scanning, scanError, onStart, onStop, last, history, selectedId, setSelectedId, onExport, onClear }) {
+function ReadTab({ support, scanning, scanError, onStart, onStop, last, history, selectedId, setSelectedId, onExport, onClear, onCopyToWrite, cloneNote }) {
   const shown = history.find((h) => h.id === selectedId) || last;
   return (
-    <div className="grid gap-3 md:grid-cols-[1fr_280px]">
-      <div className="space-y-3 min-w-0">
+    <div className="grid gap-2 @lg:grid-cols-[1fr_260px]">
+      <div className="space-y-2 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           {!scanning ? (
             <button type="button" onClick={onStart} disabled={!support.ok} className={btnEmerald}><Play size={12} /> Start scanning</button>
@@ -239,18 +239,24 @@ function ReadTab({ support, scanning, scanError, onStart, onStop, last, history,
         {scanError && <div className="p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{scanError}</div>}
         {!shown && <div className="p-4 border border-dashed border-slate-800 rounded text-xs text-slate-500">No tag read yet in this session.</div>}
         {shown && (
-          <div className="bg-slate-900/60 border border-slate-800 rounded p-3 space-y-2">
+          <div className="bg-slate-900/60 border border-slate-800 rounded p-2 space-y-2">
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="text-slate-500">Serial (UID)</span>
               <span className="font-mono text-cyan-300">{shown.serialNumber || '(not provided by the browser)'}</span>
               <span className="text-slate-600 ml-auto font-mono">{new Date(shown.at).toLocaleString()}</span>
             </div>
+            {shown.records.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => onCopyToWrite(shown)} title="Load these records into the Write tab to put them on another tag" className={btnSlate}><Upload size={12} /> Copy to Write tab</button>
+                {cloneNote && <span className="text-[11px] text-slate-400">{cloneNote}</span>}
+              </div>
+            )}
             {shown.records.length === 0 && <div className="text-xs text-slate-500">The tag holds no NDEF records.</div>}
             {shown.records.map((r, i) => <RecordView key={i} rec={r} index={i} />)}
           </div>
         )}
       </div>
-      <aside className="bg-slate-900/60 border border-slate-800 rounded p-3 min-w-0">
+      <aside className="bg-slate-900/60 border border-slate-800 rounded p-2 min-w-0">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-slate-300 inline-flex items-center gap-1.5"><History size={12} /> Scan history ({history.length})</span>
           <div className="flex gap-2">
@@ -259,7 +265,7 @@ function ReadTab({ support, scanning, scanError, onStart, onStop, last, history,
           </div>
         </div>
         {!history.length && <div className="text-[11px] text-slate-600">Each successful read is added here with its time.</div>}
-        <ul className="space-y-1 max-h-[420px] overflow-auto">
+        <ul className="space-y-1 max-h-72 overflow-auto">
           {history.map((h) => (
             <li key={h.id}>
               <button
@@ -302,9 +308,9 @@ function ComposerRow({ entry, index, count, onChange, onRemove, onMove }) {
           <button type="button" onClick={onRemove} aria-label="Remove record" className="p-1 text-slate-400 hover:text-rose-300"><X size={12} /></button>
         </span>
       </div>
-      <div className="grid gap-2 md:grid-cols-2">
+      <div className="grid gap-2 @md:grid-cols-2">
         {defs.map((d) => (
-          <label key={d.key} className={`text-[10px] text-slate-500 ${d.type === 'textarea' ? 'md:col-span-2' : ''}`}>
+          <label key={d.key} className={`text-[10px] text-slate-500 ${d.type === 'textarea' ? '@md:col-span-2' : ''}`}>
             {d.label}
             {d.type === 'textarea' && (
               <textarea rows={2} value={entry.f[d.key] ?? ''} onChange={(e) => setField(d.key, e.target.value)} className={`${inputCls} mt-0.5`} spellCheck={false} />
@@ -324,7 +330,7 @@ function ComposerRow({ entry, index, count, onChange, onRemove, onMove }) {
   );
 }
 
-function WriteTab({ support, entries, setEntries, overwrite, setOverwrite, preview, writing, writeStatus, writeError, onWrite, onAbort, lockState, setLockState, onLock }) {
+function WriteTab({ support, entries, setEntries, overwrite, setOverwrite, preview, writing, writeStatus, writeError, onWrite, onAbort, lockState, setLockState, onLock, onErase }) {
   const addEntry = () => setEntries((list) => [...list, { id: `r${Date.now()}${list.length}`, kind: 'text', f: defaultFields('text') }]);
   const updateEntry = (i, next) => setEntries((list) => list.map((e, j) => (j === i ? next : e)));
   const removeEntry = (i) => setEntries((list) => list.filter((_, j) => j !== i));
@@ -335,13 +341,13 @@ function WriteTab({ support, entries, setEntries, overwrite, setOverwrite, previ
     [copy[i], copy[j]] = [copy[j], copy[i]];
     return copy;
   });
-  const sizeNote = preview.size > 888 ? 'Larger than NTAG216 (888 bytes); no common NTAG fits this.'
-    : preview.size > 504 ? 'Needs an NTAG216 (888 bytes); NTAG213/215 are too small.'
-      : preview.size > 144 ? 'Needs an NTAG215 (504 bytes) or NTAG216; NTAG213 holds 144 bytes.'
-        : preview.size > 0 ? 'Fits NTAG213 (144 bytes) and larger tags.' : '';
+  const fit = preview.size > 0 ? tagFit(preview.size) : [];
+  const sizeNote = !fit.length ? ''
+    : !fit.some((t) => t.fits) ? 'Larger than NTAG216; no common NTAG fits this.'
+      : `Smallest tag that fits: ${fit.find((t) => t.fits).name}.`;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="space-y-2">
         <div className="text-xs text-slate-400">Compose the NDEF message. Records are written in this order.</div>
         {entries.length === 0 && <div className="text-xs text-slate-600">No records. Add one below.</div>}
@@ -359,19 +365,27 @@ function WriteTab({ support, entries, setEntries, overwrite, setOverwrite, previ
         <button type="button" onClick={addEntry} className={btnSlate}><Plus size={12} /> Add record</button>
       </div>
 
-      <div className="bg-slate-900/60 border border-slate-800 rounded p-3 space-y-2">
+      <div className="bg-slate-900/60 border border-slate-800 rounded p-2 space-y-2">
         <div className="text-xs text-slate-300">Message preview (built offline)</div>
         {preview.error && <div className="text-xs text-amber-300">{preview.error}</div>}
         {!preview.error && preview.size === 0 && <div className="text-xs text-slate-600">Add a record to see the bytes.</div>}
         {!preview.error && preview.size > 0 && (
           <>
             <div className="text-[11px] text-slate-400">{preview.size} bytes. {sizeNote}</div>
+            <div className="grid gap-1 @md:grid-cols-2">
+              {fit.map((t) => (
+                <div key={t.id} className="text-[10px] text-slate-400" title={`${t.name}: ${t.userBytes} bytes user memory, max NDEF message ${t.maxNdef} bytes`}>
+                  <div className="flex justify-between"><span>{t.name} ({t.maxNdef} B max)</span><span className={t.fits ? 'text-emerald-300' : 'text-rose-300'}>{t.fits ? `${t.percent}% used` : `${-t.free} B too big`}</span></div>
+                  <div className="h-1 rounded bg-slate-800 overflow-hidden"><div className={`h-full ${t.fits ? 'bg-emerald-600' : 'bg-rose-600'}`} style={{ width: `${t.percent}%` }} /></div>
+                </div>
+              ))}
+            </div>
             <div className="font-mono text-[10px] break-all text-slate-400 max-h-24 overflow-auto">{preview.hex}</div>
           </>
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-xs text-slate-300">
           <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
           Overwrite existing NDEF data (off: the write is refused if the tag already holds NDEF)
@@ -383,11 +397,12 @@ function WriteTab({ support, entries, setEntries, overwrite, setOverwrite, previ
         ) : (
           <button type="button" onClick={onAbort} className={btnRose}><Square size={12} /> Abort write</button>
         )}
+        <button type="button" onClick={onErase} disabled={!support.ok || writing} title="Overwrite the tag's NDEF content with a single empty record" className={btnSlate}><Eraser size={12} /> Erase tag</button>
         <span className="text-xs text-slate-500">{writing ? 'Keep the tag held against the phone...' : writeStatus}</span>
       </div>
       {writeError && <div className="p-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{writeError}</div>}
 
-      <div className="border border-rose-900 rounded p-3 bg-rose-950/20 space-y-2">
+      <div className="border border-rose-900 rounded p-2 bg-rose-950/20 space-y-2">
         <div className="text-xs text-rose-200 inline-flex items-center gap-1.5"><TriangleAlert size={12} /> Make tag read-only (permanent)</div>
         {lockState.step === 0 && (
           <>
@@ -459,7 +474,7 @@ function OfflineTab({ entries, buildSpecs, parseInput, setParseInput }) {
   };
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className="grid gap-2 @lg:grid-cols-2">
       <section className="space-y-2 min-w-0">
         <div className="text-xs text-slate-300">Parse raw NDEF</div>
         <div className="text-[11px] text-slate-500">
@@ -553,6 +568,8 @@ export default function WebNfcWorkbench({ onLogMessage }) {
   const [writeError, setWriteError] = useState('');
   const [lockState, setLockState] = useState({ step: 0, typed: '', ack: false });
   const opAbortRef = useRef(null);
+
+  const [cloneNote, setCloneNote] = useState('');
 
   // Offline state
   const [parseInput, setParseInput] = useState('');
@@ -665,6 +682,39 @@ export default function WebNfcWorkbench({ onLogMessage }) {
     }
   };
 
+  const copyToWrite = (scan) => {
+    const { entries: next, skipped } = recordsToComposerEntries(scan.records);
+    if (!next.length) {
+      setCloneNote(`Nothing copied. Not representable in the composer: ${skipped.join(', ')}.`);
+      return;
+    }
+    setEntries(next.map((e, i) => ({ id: `c${Date.now()}${i}`, ...e })));
+    setCloneNote(`Copied ${next.length} record(s) to the Write tab${skipped.length ? `; skipped ${skipped.join(', ')}` : ''}. Review them, then write.`);
+    setTab('write');
+  };
+
+  const eraseTag = async () => {
+    if (!window.confirm('Erase the NDEF content of the tag held against the phone? Its current message will be replaced by an empty record.')) return;
+    setWriteError('');
+    setWriteStatus('');
+    const ac = new AbortController();
+    opAbortRef.current = ac;
+    setWriting(true);
+    try {
+      await new window.NDEFReader().write(buildEraseMessage(), { overwrite: true, signal: ac.signal });
+      setWriteStatus('Tag NDEF content replaced with an empty record.');
+      log('NFC: tag erased (empty record written)', 'success');
+    } catch (e) {
+      const msg = describeNfcError(e);
+      if (e?.name !== 'AbortError') setWriteError(msg);
+      else setWriteStatus(msg);
+      log(`NFC erase: ${msg}`, 'error');
+    } finally {
+      if (opAbortRef.current === ac) opAbortRef.current = null;
+      setWriting(false);
+    }
+  };
+
   const abortOp = () => opAbortRef.current?.abort();
 
   const lockTag = async () => {
@@ -694,20 +744,18 @@ export default function WebNfcWorkbench({ onLogMessage }) {
   };
 
   return (
-    <div className="p-4 space-y-4 text-gray-200">
-      <header className="flex flex-wrap items-center gap-3">
-        <div className="p-2 rounded bg-emerald-900/30 border border-emerald-800"><Nfc size={18} className="text-emerald-300" /></div>
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-100">Web NFC Reader / Writer</div>
-          <div className="text-[11px] text-slate-500">NDEF tags via the browser's NDEFReader. Also an offline NDEF parser and builder.</div>
-        </div>
-        <span className={`ml-auto text-[10px] px-2 py-1 rounded border ${support.ok ? 'bg-emerald-900/30 text-emerald-300 border-emerald-800' : 'bg-amber-900/30 text-amber-300 border-amber-800'}`}>
+    <div className="space-y-2 text-gray-200">
+      <div className="flex flex-wrap items-center gap-2">
+        <Nfc size={14} className="text-emerald-300" aria-hidden="true" />
+        <span className="sr-only">Web NFC Reader / Writer</span>
+        <span className="text-[11px] text-slate-500">NDEF via NDEFReader, plus an offline parser/builder.</span>
+        <span className={`ml-auto text-[10px] px-2 py-0.5 rounded border ${support.ok ? 'bg-emerald-900/30 text-emerald-300 border-emerald-800' : 'bg-amber-900/30 text-amber-300 border-amber-800'}`}>
           {support.ok ? 'Web NFC ready' : 'Web NFC unavailable here'}
         </span>
-      </header>
+      </div>
 
       {!support.ok && (
-        <div className="p-3 border border-amber-900 rounded bg-amber-950/20 text-xs text-amber-200 space-y-1">
+        <div className="p-2 border border-amber-900 rounded bg-amber-950/20 text-xs text-amber-200 space-y-1">
           <div className="inline-flex items-center gap-1.5 font-semibold"><TriangleAlert size={12} /> Phone NFC needs Chrome for Android</div>
           <div>{support.reason}</div>
           <div className="text-amber-300/80">The Offline NDEF tab works on any browser.</div>
@@ -722,7 +770,7 @@ export default function WebNfcWorkbench({ onLogMessage }) {
             role="tab"
             aria-selected={tab === id}
             onClick={() => setTab(id)}
-            className={`px-3 py-1.5 text-xs border-b-2 -mb-px ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+            className={`px-2.5 py-1 text-xs border-b-2 -mb-px ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
           >
             {label}
           </button>
@@ -742,6 +790,8 @@ export default function WebNfcWorkbench({ onLogMessage }) {
           setSelectedId={setSelectedId}
           onExport={exportHistory}
           onClear={() => { setHistory([]); setSelectedId(null); }}
+          onCopyToWrite={copyToWrite}
+          cloneNote={cloneNote}
         />
       )}
       {tab === 'write' && (
@@ -760,6 +810,7 @@ export default function WebNfcWorkbench({ onLogMessage }) {
           lockState={lockState}
           setLockState={setLockState}
           onLock={lockTag}
+          onErase={eraseTag}
         />
       )}
       {tab === 'offline' && (
