@@ -461,3 +461,119 @@ export function decodeSonyReport(family, bytes) {
   if (family === 'DualSense') return decodeDualSenseUsbReport(bytes);
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Gamepad button tracker, axis range tracker, deadzone suggestion, report
+// ---------------------------------------------------------------------------
+
+/** Tracks press counts, press-to-press chatter and which buttons were ever pressed. */
+export function createButtonTracker() {
+  return { prev: [], counts: {}, lastPress: {}, chatter: {}, minGap: {}, everPressed: {} };
+}
+
+/**
+ * Feed one frame of button states [{ pressed }] taken at nowMs. Rising edges count as presses.
+ * A press within chatterMs of the previous press of the same button counts as chatter.
+ */
+export function updateButtonTracker(t, buttons, nowMs, { chatterMs = 50 } = {}) {
+  for (let i = 0; i < buttons.length; i++) {
+    const down = !!buttons[i]?.pressed;
+    const was = !!t.prev[i];
+    if (down) t.everPressed[i] = true;
+    if (down && !was) {
+      t.counts[i] = (t.counts[i] || 0) + 1;
+      if (t.lastPress[i] !== undefined) {
+        const dt = nowMs - t.lastPress[i];
+        if (t.minGap[i] === undefined || dt < t.minGap[i]) t.minGap[i] = dt;
+        if (dt < chatterMs) t.chatter[i] = (t.chatter[i] || 0) + 1;
+      }
+      t.lastPress[i] = nowMs;
+    }
+    t.prev[i] = down;
+  }
+  return t;
+}
+
+/** Summary of a button tracker for a pad with buttonCount buttons. */
+export function buttonTrackerSummary(t, buttonCount) {
+  let tested = 0;
+  let totalPresses = 0;
+  let totalChatter = 0;
+  for (let i = 0; i < buttonCount; i++) {
+    if (t.everPressed[i]) tested++;
+    totalPresses += t.counts[i] || 0;
+    totalChatter += t.chatter[i] || 0;
+  }
+  return { tested, buttonCount, totalPresses, totalChatter };
+}
+
+/** Per-axis min/max seen so far. */
+export function createAxisTracker() {
+  return { min: [], max: [] };
+}
+
+export function updateAxisTracker(t, axes) {
+  for (let i = 0; i < axes.length; i++) {
+    const v = axes[i];
+    if (!Number.isFinite(v)) continue;
+    if (t.min[i] === undefined || v < t.min[i]) t.min[i] = v;
+    if (t.max[i] === undefined || v > t.max[i]) t.max[i] = v;
+  }
+  return t;
+}
+
+/** Report per axis; fullRange is true when both ends reached at least threshold (default 0.95). */
+export function axisRangeReport(t, axisCount, threshold = 0.95) {
+  const out = [];
+  for (let i = 0; i < axisCount; i++) {
+    const min = t.min[i];
+    const max = t.max[i];
+    out.push({
+      axis: i,
+      min: min ?? null,
+      max: max ?? null,
+      fullRange: min !== undefined && max !== undefined && min <= -threshold && max >= threshold,
+    });
+  }
+  return out;
+}
+
+/**
+ * Suggest a radial deadzone from a driftStats() result: the worst resting magnitude plus a
+ * 2 % margin, rounded up to the next 1 %, never below 5 % and capped at 50 %.
+ */
+export function suggestDeadzone(drift, { margin = 0.02, floor = 0.05, cap = 0.5 } = {}) {
+  if (!drift || !Number.isFinite(drift.maxMagnitude)) return null;
+  const v = Math.ceil((drift.maxMagnitude + margin) * 100 - 1e-9) / 100;
+  return Math.min(cap, Math.max(floor, v));
+}
+
+/** Plain-object report of a gamepad session, ready for JSON.stringify or formatGamepadReport(). */
+export function buildGamepadReport({ pad, drift, circularity, rate, buttons, axes, deadzone }) {
+  return {
+    generatedBy: 'Skon USB Tool input tester',
+    pad: pad ? { id: pad.id, mapping: pad.mapping || 'non-standard', buttons: pad.buttons, axes: pad.axes } : null,
+    drift: drift || null,
+    suggestedDeadzone: drift ? suggestDeadzone(drift) : null,
+    deadzoneInUse: deadzone ?? null,
+    circularity: circularity || null,
+    reportRate: rate || null,
+    buttons: buttons || null,
+    axes: axes || null,
+  };
+}
+
+export function formatGamepadReport(r) {
+  const f = (v, d = 2) => (v === null || v === undefined || !Number.isFinite(v) ? 'n/a' : v.toFixed(d));
+  const lines = ['Gamepad test report'];
+  if (r.pad) lines.push(`Pad: ${r.pad.id} (mapping ${r.pad.mapping}, ${r.pad.buttons} buttons, ${r.pad.axes} axes)`);
+  if (r.drift) {
+    lines.push(`Drift (${r.drift.stick || '?'} stick): avg ${f(r.drift.avgPct)}%, max ${f(r.drift.maxPct)}%, centre x ${f(r.drift.centerX, 3)} y ${f(r.drift.centerY, 3)}`);
+    if (r.suggestedDeadzone !== null) lines.push(`Suggested deadzone: ${r.suggestedDeadzone.toFixed(2)}`);
+  }
+  if (r.circularity) lines.push(`Circularity: coverage ${f(r.circularity.coverage * 100, 0)}%, error ${f(r.circularity.errorPct)}%`);
+  if (r.reportRate) lines.push(`Report rate: avg ${f(r.reportRate.avgHz, 1)} Hz, jitter ${f(r.reportRate.jitterMs)} ms`);
+  if (r.buttons) lines.push(`Buttons tested: ${r.buttons.tested}/${r.buttons.buttonCount}, presses ${r.buttons.totalPresses}, chatter ${r.buttons.totalChatter}`);
+  if (r.axes) lines.push('Axis range: ' + r.axes.map((a) => `[${a.axis}] ${f(a.min, 2)}..${f(a.max, 2)}${a.fullRange ? '' : ' (partial)'}`).join('  '));
+  return lines.join('\n');
+}

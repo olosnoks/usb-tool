@@ -348,3 +348,53 @@ describe('Sony HID decoders', () => {
     expect(txt).toBe('0000  01 ab ff 00\n0004  02');
   });
 });
+
+import {
+  createButtonTracker, updateButtonTracker, buttonTrackerSummary, createAxisTracker, updateAxisTracker,
+  axisRangeReport, suggestDeadzone, buildGamepadReport, formatGamepadReport,
+} from '../src/utils/inputTester.js';
+
+describe('gamepad button and axis trackers', () => {
+  it('counts rising edges and flags chatter', () => {
+    const t = createButtonTracker();
+    const dn = [{ pressed: true }, { pressed: false }];
+    const up = [{ pressed: false }, { pressed: false }];
+    updateButtonTracker(t, dn, 0);
+    updateButtonTracker(t, dn, 16); // still held: no new press
+    updateButtonTracker(t, up, 32);
+    updateButtonTracker(t, dn, 48); // 48 ms after first press: chatter
+    updateButtonTracker(t, up, 64);
+    updateButtonTracker(t, dn, 500);
+    expect(t.counts[0]).toBe(3);
+    expect(t.chatter[0]).toBe(1);
+    expect(t.minGap[0]).toBe(48);
+    expect(buttonTrackerSummary(t, 2)).toEqual({ tested: 1, buttonCount: 2, totalPresses: 3, totalChatter: 1 });
+  });
+  it('reports axis range', () => {
+    const t = createAxisTracker();
+    updateAxisTracker(t, [-1, 0.5]);
+    updateAxisTracker(t, [1, 0.6]);
+    const r = axisRangeReport(t, 3);
+    expect(r[0].fullRange).toBe(true);
+    expect(r[1].fullRange).toBe(false);
+    expect(r[2].min).toBeNull();
+  });
+  it('suggests a deadzone with margin, floor and cap', () => {
+    expect(suggestDeadzone({ maxMagnitude: 0.1 })).toBe(0.12);
+    expect(suggestDeadzone({ maxMagnitude: 0 })).toBe(0.05);
+    expect(suggestDeadzone({ maxMagnitude: 0.9 })).toBe(0.5);
+    expect(suggestDeadzone(null)).toBeNull();
+  });
+  it('builds and formats a report', () => {
+    const r = buildGamepadReport({
+      pad: { id: 'X', mapping: 'standard', buttons: 17, axes: 4 },
+      drift: { stick: 'left', avgPct: 1, maxPct: 3, centerX: 0.01, centerY: 0, maxMagnitude: 0.03 },
+      buttons: { tested: 2, buttonCount: 17, totalPresses: 4, totalChatter: 0 },
+    });
+    expect(r.suggestedDeadzone).toBe(0.05);
+    const txt = formatGamepadReport(r);
+    expect(txt).toContain('Pad: X');
+    expect(txt).toContain('Suggested deadzone: 0.05');
+    expect(txt).toContain('Buttons tested: 2/17');
+  });
+});

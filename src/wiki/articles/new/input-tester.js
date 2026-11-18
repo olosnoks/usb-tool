@@ -28,6 +28,14 @@ Each detected pad shows its index, its ID string, and its mapping. A pad with ma
 
 Every button is listed with its analog value from 0 to 1 and a bar. A pressed button is highlighted. The axes are listed as raw numbers below the buttons.
 
+Each button tile also shows whether it has been **tested** (pressed at least once since the last reset), how many times it was pressed, and a **chatter** count. A press that comes less than 50 ms after the previous press of the same button counts as chatter, which usually means a bouncing or worn switch (the shortest gap is shown as a tooltip). The header shows totals: buttons tested out of the total, presses, and chatter. The reset button clears the counts and the axis ranges.
+
+Below the axes, **Range seen** lists the minimum and maximum reached by each axis since the last reset. Sweep each stick fully; an axis that has reached both -0.95 and +0.95 is marked \`ok\`. An axis that never gets there may point to a worn gate or a pad that needs calibration.
+
+### Session report
+
+The copy button puts a short text report on the clipboard, and the download button saves the same data as \`gamepad-report.json\`. The report holds the pad ID and mapping, the last drift result with its suggested deadzone, the circularity result if one was captured, the report rate, button totals and axis ranges. Nothing is sent anywhere.
+
 ### Sticks and deadzone
 
 The two sticks are drawn on circular plots. A fading trail shows the last 90 frames. The dashed amber ring is the **deadzone**, and you set it with the slider from 0 to 0.5. A green dot is outside the deadzone, a grey dot is inside it.
@@ -43,6 +51,8 @@ Release both sticks, pick the stick under test (**left** or **right**), and pres
 - the centre offset on x and y.
 
 Keep your hands off the stick during the capture. Any movement is counted as drift.
+
+After a capture the tool shows a **suggested deadzone**: the worst resting distance plus 2 %, rounded up to the next 1 %, with a minimum of 0.05 and a maximum of 0.50. **Apply** sets the deadzone slider to that value. It is a starting point, not a calibration; the pad itself is not changed.
 
 ### Circularity
 
@@ -135,6 +145,10 @@ If unadjusted movement is not available, the tool says so, and the result may in
 | WebHID connect does nothing | The browser dialog was cancelled, or the device is not a Sony product | Choose the controller in the dialog; only Sony vendor 0x054C devices are listed |
 | DPI result far from the labelled DPI | Pointer acceleration applied, or the distance was not exact | Turn off enhance pointer precision, mark the ruler carefully, and repeat |
 | Polling rate reads lower than the spec sheet | Browser coalescing and frame timing | Treat the figure as the browser event rate; compare between mice rather than with the spec |
+
+## Similar tools
+
+Features were compared with gamepad-tester.com (now hardwaretester.com), Gamepadla, TestMyGamePad and similar online testers, and with the controller calibration screens in Steam and Windows. This tool does not write calibration to the pad, and it does not measure true USB polling rate or input latency.
 
 ## Related tools in this app
 
