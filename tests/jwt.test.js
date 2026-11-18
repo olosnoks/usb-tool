@@ -305,3 +305,26 @@ describe('components render', () => {
     expect(html).toContain('Sign');
   });
 });
+
+import { explainClaims, tokenTimeline, curlBearer, jwtCliCommand } from '../src/utils/jwt.js';
+
+describe('jwt developer helpers', () => {
+  it('explains registered and unknown claims', () => {
+    const rows = explainClaims({ iss: 'x', exp: 1700000000, custom: 1 });
+    expect(rows[0]).toMatchObject({ claim: 'iss', name: 'Issuer', known: true });
+    expect(rows[1].time).toBe('2023-11-14T22:13:20Z');
+    expect(rows[2]).toMatchObject({ known: false, description: '' });
+  });
+  it('computes the lifetime timeline', () => {
+    expect(tokenTimeline({ iat: 100 }, 150)).toBeNull();
+    const t = tokenTimeline({ iat: 100, exp: 200 }, 150);
+    expect(t).toMatchObject({ lifetime: 100, fraction: 0.5, state: 'valid' });
+    expect(tokenTimeline({ iat: 100, exp: 200 }, 300)).toMatchObject({ fraction: 1, state: 'expired' });
+    expect(tokenTimeline({ nbf: 500, iat: 100, exp: 900 }, 200).state).toBe('not-yet');
+  });
+  it('builds curl and jwt-cli commands with quoting', () => {
+    expect(curlBearer(' a.b.c ', 'https://x.test/a')).toBe("curl -H 'Authorization: Bearer a.b.c' 'https://x.test/a'");
+    expect(jwtCliCommand('a.b.c', "se'cret")).toBe("jwt decode --secret 'se'\''cret' 'a.b.c'");
+    expect(jwtCliCommand('a.b.c')).toBe("jwt decode 'a.b.c'");
+  });
+});

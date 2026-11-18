@@ -409,3 +409,78 @@ export async function fetchJwksForIssuer(iss, fetchImpl) {
   const url = `${base}/.well-known/jwks.json`;
   return { jwks: await fetchJwks(url, fetchImpl), url };
 }
+
+// ---------------------------------------------------------------------------
+// Developer helpers: claim explanations, lifetime timeline, copy-as commands
+// ---------------------------------------------------------------------------
+
+const CLAIM_INFO = {
+  iss: ['Issuer', 'Who created and signed the token (usually the identity provider URL).'],
+  sub: ['Subject', 'Who the token is about, usually a stable user or client id.'],
+  aud: ['Audience', 'Who the token is meant for. An API must reject tokens whose aud does not include it.'],
+  exp: ['Expiration time', 'Unix time after which the token must be rejected.'],
+  nbf: ['Not before', 'Unix time before which the token must be rejected.'],
+  iat: ['Issued at', 'Unix time the token was created.'],
+  jti: ['JWT ID', 'Unique token id, useful for revocation lists and replay detection.'],
+  scope: ['Scope', 'Space-separated permissions granted (OAuth 2.0).'],
+  scp: ['Scopes', 'Permissions granted (list or string, used by Azure AD and Okta).'],
+  azp: ['Authorized party', 'The client id the token was issued to (OIDC).'],
+  nonce: ['Nonce', 'Value that ties an ID token to the login request that asked for it (OIDC).'],
+  auth_time: ['Authentication time', 'Unix time the user actually logged in (OIDC).'],
+  acr: ['Auth context class', 'How strongly the user authenticated (OIDC).'],
+  amr: ['Auth methods', 'Methods used to log in, for example pwd or mfa (OIDC).'],
+  at_hash: ['Access token hash', 'Hash binding this ID token to an access token (OIDC).'],
+  sid: ['Session ID', 'Identifier of the login session (OIDC).'],
+  email: ['Email', 'User email address.'],
+  email_verified: ['Email verified', 'Whether the provider verified that email.'],
+  name: ['Name', 'Display name of the user.'],
+  roles: ['Roles', 'Roles assigned to the user.'],
+  groups: ['Groups', 'Groups the user belongs to.'],
+  client_id: ['Client ID', 'OAuth client the token was issued to.'],
+  cnf: ['Confirmation', 'Proof-of-possession key binding (DPoP / mTLS).'],
+  typ: ['Type', 'Token type, for example at+jwt for an access token.'],
+};
+const TIME_CLAIMS = new Set(['exp', 'nbf', 'iat', 'auth_time', 'updated_at']);
+
+/** One row per payload claim: { claim, name, description, value, time } (time = ISO string for NumericDate claims). */
+export function explainClaims(payload) {
+  return Object.keys(payload || {}).map((claim) => {
+    const [name, description] = CLAIM_INFO[claim] || ['', ''];
+    const v = payload[claim];
+    let time = '';
+    if (TIME_CLAIMS.has(claim) && isNumericDate(v)) {
+      const d = new Date(v * 1000);
+      if (!Number.isNaN(d.getTime())) time = d.toISOString().replace('.000', '');
+    }
+    return { claim, name, description, value: v, time, known: Boolean(name) };
+  });
+}
+
+/**
+ * Lifetime timeline: start (nbf, else iat), end (exp), lifetime and how far
+ * through it `nowSec` is. Returns null without an exp and a start.
+ * { start, end, lifetime, elapsed, fraction (0..1), state: 'not-yet'|'valid'|'expired' }
+ */
+export function tokenTimeline(payload, nowSec = Math.floor(Date.now() / 1000)) {
+  const exp = payload?.exp;
+  if (!isNumericDate(exp)) return null;
+  const start = isNumericDate(payload.nbf) ? payload.nbf : isNumericDate(payload.iat) ? payload.iat : null;
+  if (start === null || exp <= start) return null;
+  const lifetime = exp - start;
+  const fraction = Math.min(1, Math.max(0, (nowSec - start) / lifetime));
+  const state = nowSec < start ? 'not-yet' : nowSec >= exp ? 'expired' : 'valid';
+  return { start, end: exp, lifetime, elapsed: nowSec - start, fraction, state };
+}
+
+const shq = (s) => `'${String(s).replace(/'/g, `'\''`)}'`;
+
+/** curl command that sends the token as a Bearer header. */
+export function curlBearer(token, url = 'https://api.example.com/') {
+  return `curl -H ${shq(`Authorization: Bearer ${String(token).trim()}`)} ${shq(url)}`;
+}
+
+/** Export command for the jwt-cli tool (mike-engel): decode, or decode with an HS secret. */
+export function jwtCliCommand(token, secret = '') {
+  const t = shq(String(token).trim());
+  return secret ? `jwt decode --secret ${shq(secret)} ${t}` : `jwt decode ${t}`;
+}
