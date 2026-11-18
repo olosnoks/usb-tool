@@ -5,7 +5,8 @@ import {
   KissDecoder, decodeFrame, buildDetect, buildQuery, buildRomRead, buildRadioState, buildSetRadio,
   validateRadioParams, decodeEeprom, timeOnAir, bitRateBps, sensitivityDbm, linkBudget,
   dutyCycleAllowance, symbolTimeMs, ldroAuto, toHex, CMD, RNODE_BAUD, BANDWIDTHS_HZ,
-  TXPOWER_MIN_DBM, TXPOWER_MAX_DBM,
+  TXPOWER_MIN_DBM, TXPOWER_MAX_DBM, REGIONS, regionCheck, rnodeconfCommand, reticulumInterfaceConfig,
+  sampleStats, sparklinePoints, maxPayloadForToa,
 } from '../../utils/rnodeLora.js';
 
 /**
@@ -48,6 +49,16 @@ function KV({ k, v }) {
   );
 }
 
+function Spark({ samples, label, tone = 'stroke-cyan-400' }) {
+  const pts = sparklinePoints(samples, 120, 24);
+  if (!pts) return <span className="text-slate-600 text-xs">-</span>;
+  return (
+    <svg viewBox="0 0 120 24" className="w-28 h-6" role="img" aria-label={label}>
+      <polyline points={pts} fill="none" className={tone} strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 function RnodeTab({ onLogMessage }) {
   const serial = useOptionalSerial();
   const connected = !!serial?.isConnected;
@@ -68,6 +79,9 @@ function RnodeTab({ onLogMessage }) {
   const [form, setForm] = useState({ freqMhz: '868.000', bwHz: 125000, sf: 7, cr: 5, txPower: 14 });
   const [formErrors, setFormErrors] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [region, setRegion] = useState('eu868');
+  const [portName, setPortName] = useState('/dev/ttyUSB0');
+  const [copied, setCopied] = useState('');
 
   const addLog = (text, kind = 'info') => {
     setLog((prev) => {
@@ -167,18 +181,40 @@ function RnodeTab({ onLogMessage }) {
     const freqHz = Math.round(Number(form.freqMhz) * 1e6);
     const params = { freqHz, bwHz: Number(form.bwHz), sf: Number(form.sf), cr: Number(form.cr), txPowerDbm: Number(form.txPower) };
     const errs = validateRadioParams(params);
-    setFormErrors(errs);
-    if (errs.length) return;
+    const reg = regionCheck(region, Number(form.freqMhz), Number(form.txPower));
+    setFormErrors([...errs, ...reg.messages]);
+    if (errs.length || !reg.ok) return;
     const ok = await send(buildSetRadio(params), 'radio parameters');
     if (ok) setSent({ ...params, at: nowStamp() });
   });
+
+  const freqNum = Number(form.freqMhz);
+  const powerNum = Number(form.txPower);
+  const regionResult = useMemo(() => regionCheck(region, freqNum, powerNum), [region, freqNum, powerNum]);
+  const exportData = useMemo(() => {
+    const params = { freqHz: Math.round(freqNum * 1e6), bwHz: Number(form.bwHz), sf: Number(form.sf), cr: Number(form.cr), txPowerDbm: powerNum };
+    try {
+      return { cmd: rnodeconfCommand(params, portName || '/dev/ttyUSB0'), cfg: reticulumInterfaceConfig(params, portName || '/dev/ttyUSB0'), err: '' };
+    } catch (e) {
+      return { cmd: '', cfg: '', err: e.message };
+    }
+  }, [form, portName]);
+  const copyText = async (key, text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      setTimeout(() => setCopied(''), 1500);
+    } catch { setCopied(''); }
+  };
+  const rssiStats = sampleStats(stats.rssiSamples);
+  const snrStats = sampleStats(stats.snrSamples);
 
   const hasPort = connected;
   const baudMismatch = hasPort && baud && Number(baud) !== RNODE_BAUD;
 
   return (
-    <div className="space-y-3">
-      <div className="bg-slate-950 border border-slate-800 rounded p-3 flex flex-wrap items-center gap-2">
+    <div className="space-y-2">
+      <div className="bg-slate-950 border border-slate-800 rounded p-2 flex flex-wrap items-center gap-2">
         <Plug size={14} className={connected ? 'text-emerald-400' : 'text-slate-500'} />
         <span className="text-xs text-gray-300">
           {connected ? `Serial connected${baud ? ` at ${baud} baud` : ''}` : 'No serial port connected.'}
@@ -192,10 +228,10 @@ function RnodeTab({ onLogMessage }) {
           </button>
         )}
         {!serial && <span className="text-[11px] text-amber-300">Serial context unavailable in this view.</span>}
-        <span className="ml-auto text-[10px] text-slate-500">Uses the shared serial port; RNode firmware runs at {RNODE_BAUD} baud.</span>
+        <span className="ml-auto text-[10px] text-slate-500" title={`RNode firmware runs at ${RNODE_BAUD} baud`}>Shared port, {RNODE_BAUD} baud</span>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         <button className={btnCls} disabled={!hasPort || busy} onClick={() => run(() => send(buildDetect(), 'detect'))}>
           <RefreshCw size={12} /> Detect RNode
         </button>
@@ -221,7 +257,7 @@ function RnodeTab({ onLogMessage }) {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 @md:grid-cols-4 gap-2">
         <Stat label="Detect" value={info.detected === null ? '-' : info.detected ? 'RNode' : 'no reply'} tone={info.detected ? 'text-emerald-300' : 'text-slate-400'} />
         <Stat label="Firmware" value={info.fwVersion ?? '-'} />
         <Stat label="Platform" value={info.platform ? info.platform.name : '-'} />
@@ -232,8 +268,8 @@ function RnodeTab({ onLogMessage }) {
         <Stat label="Data frames" value={stats.rxData} />
       </div>
 
-      <div className="grid md:grid-cols-2 gap-3">
-        <section className="bg-slate-950 border border-slate-800 rounded p-3">
+      <div className="grid @lg:grid-cols-2 gap-2">
+        <section className="bg-slate-950 border border-slate-800 rounded p-2.5">
           <h3 className="text-xs font-semibold text-gray-200 mb-2">Radio parameters</h3>
           <div className="grid grid-cols-2 gap-2 text-xs">
             <label className="flex flex-col gap-1 text-slate-400">Frequency (MHz)
@@ -254,19 +290,47 @@ function RnodeTab({ onLogMessage }) {
                 {CR_OPTIONS.map((c) => <option key={c} value={c}>4/{c}</option>)}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-slate-400 col-span-2">TX power (dBm, {TXPOWER_MIN_DBM}-{TXPOWER_MAX_DBM})
+            <label className="flex flex-col gap-1 text-slate-400">TX power (dBm, {TXPOWER_MIN_DBM}-{TXPOWER_MAX_DBM})
               <input type="number" className={inputCls} value={form.txPower} onChange={(e) => setForm({ ...form, txPower: e.target.value })} aria-label="TX power dBm" />
             </label>
+            <label className="flex flex-col gap-1 text-slate-400">Regulatory region
+              <select className={inputCls} value={region} onChange={(e) => setRegion(e.target.value)} aria-label="Regulatory region">
+                {Object.entries(REGIONS).map(([id, r]) => <option key={id} value={id}>{r.label}</option>)}
+              </select>
+            </label>
           </div>
+          {region !== 'none' && (
+            <div className={`mt-2 p-1.5 rounded border text-[11px] ${regionResult.ok ? 'border-emerald-900 bg-emerald-950/20 text-emerald-300' : 'border-amber-900 bg-amber-950/30 text-amber-300'}`} data-testid="region-check">
+              {regionResult.ok
+                ? `Within ${regionResult.band.note}. Duty cycle ${regionResult.duty * 100}%; max ${regionResult.maxDbm} dBm.`
+                : regionResult.messages.join(' ')}
+              {!regionResult.ok && ' Apply is blocked; pick "Other / licensed" only if you hold the right licence.'}
+            </div>
+          )}
           {formErrors.length > 0 && (
             <div className="mt-2 p-2 border border-red-900 rounded bg-red-950/30 text-[11px] text-red-300">{formErrors.join(' ')}</div>
           )}
           <div className="mt-2 flex items-center gap-2">
-            <button className={btnCls} disabled={!hasPort || busy} onClick={applyRadio}>
+            <button className={btnCls} disabled={!hasPort || busy || !regionResult.ok} onClick={applyRadio}>
               <Send size={12} /> Apply to device
             </button>
-            <span className="text-[10px] text-slate-500">Sends frequency, bandwidth, TX power, SF, CR. Radio state is unchanged.</span>
+            <span className="text-[10px] text-slate-500">Sends freq, BW, TX power, SF, CR. Radio state unchanged. The region check is advisory and ignores antenna gain; you are responsible for local rules.</span>
           </div>
+          <details className="mt-2 text-[11px]">
+            <summary className="cursor-pointer text-slate-400 hover:text-slate-200">Export for rnodeconf / Reticulum</summary>
+            <label className="flex flex-col gap-1 text-slate-400 mt-1">Port name in the export
+              <input className={inputCls} value={portName} onChange={(e) => setPortName(e.target.value)} aria-label="Export port name" />
+            </label>
+            {exportData.err ? <div className="mt-1 text-red-300">{exportData.err}</div> : (
+              <div className="mt-1 space-y-1">
+                <div className="text-slate-500">Text only: run it yourself with the CLI; this tool does not execute it.</div>
+                <pre className="bg-slate-900 border border-slate-800 rounded p-1.5 font-mono text-[11px] text-gray-200 whitespace-pre-wrap break-all">{exportData.cmd}</pre>
+                <button className={btnCls} onClick={() => copyText('cmd', exportData.cmd)}>{copied === 'cmd' ? 'Copied' : 'Copy command'}</button>
+                <pre className="bg-slate-900 border border-slate-800 rounded p-1.5 font-mono text-[11px] text-gray-200 whitespace-pre-wrap">{exportData.cfg}</pre>
+                <button className={btnCls} onClick={() => copyText('cfg', exportData.cfg)}>{copied === 'cfg' ? 'Copied' : 'Copy Reticulum config'}</button>
+              </div>
+            )}
+          </details>
           <div className="mt-3 text-[11px] text-slate-400 space-y-1">
             <div className="text-slate-500 uppercase text-[10px] tracking-wide">Last applied by this tool</div>
             {sent ? (
@@ -287,30 +351,34 @@ function RnodeTab({ onLogMessage }) {
           </div>
         </section>
 
-        <section className="bg-slate-950 border border-slate-800 rounded p-3">
+        <section className="bg-slate-950 border border-slate-800 rounded p-2.5">
           <h3 className="text-xs font-semibold text-gray-200 mb-2">Live statistics</h3>
-          <KV k="RSSI samples (last 60)" v={stats.rssiSamples.length ? `min ${Math.min(...stats.rssiSamples)} / max ${Math.max(...stats.rssiSamples)} dBm` : '-'} />
-          <KV k="SNR samples (last 60)" v={stats.snrSamples.length ? `min ${fmt(Math.min(...stats.snrSamples), 2)} / max ${fmt(Math.max(...stats.snrSamples), 2)} dB` : '-'} />
+          <KV k="RSSI (last 60)" v={rssiStats ? `min ${rssiStats.min} / avg ${fmt(rssiStats.mean, 1)} / max ${rssiStats.max} dBm` : '-'} />
+          <div className="py-0.5"><Spark samples={stats.rssiSamples} label="RSSI trend" /></div>
+          <KV k="SNR (last 60)" v={snrStats ? `min ${fmt(snrStats.min, 2)} / avg ${fmt(snrStats.mean, 2)} / max ${fmt(snrStats.max, 2)} dB` : '-'} />
+          <div className="py-0.5"><Spark samples={stats.snrSamples} label="SNR trend" tone="stroke-amber-400" /></div>
           <KV k="Device RX counter" v={stats.deviceRx ?? '-'} />
           <KV k="Device TX counter" v={stats.deviceTx ?? '-'} />
           <KV k="Channel airtime (short / long)" v={stats.channel ? `${fmt(stats.channel.shortAirtimePct, 2)}% / ${fmt(stats.channel.longAirtimePct, 2)}%` : '-'} />
           <KV k="Channel load (short / long)" v={stats.channel ? `${fmt(stats.channel.shortLoadPct, 2)}% / ${fmt(stats.channel.longLoadPct, 2)}%` : '-'} />
           <KV k="Noise floor" v={stats.channel ? `${stats.channel.noiseFloor} dBm` : '-'} />
           <KV k="Device errors" v={stats.errors.length ? stats.errors.slice(-3).join(' | ') : 'none'} />
-          <p className="text-[10px] text-slate-500 mt-2">
-            RSSI and SNR arrive from the device with each received packet. Channel airtime is sent only when the device
-            answers the stats query. Counters and airtime replies are decoded from RNode/RNS sources but not yet verified on hardware.
-          </p>
+          <details className="mt-2"><summary className="text-[10px] text-slate-500 cursor-pointer">About these numbers</summary>
+            <p className="text-[10px] text-slate-500 mt-1">
+              RSSI and SNR arrive from the device with each received packet. Channel airtime is sent only when the device
+              answers the stats query. Counters and airtime replies are decoded from RNode/RNS sources but not yet verified on hardware.
+            </p>
+          </details>
         </section>
       </div>
 
-      <section className="bg-slate-950 border border-slate-800 rounded p-3">
+      <section className="bg-slate-950 border border-slate-800 rounded p-2.5">
         <h3 className="text-xs font-semibold text-gray-200 mb-2">EEPROM (provisioned data, read only)</h3>
         {eepromError && <div className="mb-2 p-2 border border-red-900 rounded bg-red-950/30 text-[11px] text-red-300">{eepromError}</div>}
         {!eeprom ? (
           <p className="text-xs text-slate-500">Press "Read EEPROM" to decode the device's provisioned product, serial and stored radio config.</p>
         ) : (
-          <div className="grid md:grid-cols-2 gap-4">
+          <div className="grid @lg:grid-cols-2 gap-3">
             <div>
               <KV k="Provisioned" v={eeprom.provisioned ? 'yes (info lock 0x73)' : 'no'} />
               <KV k="Product" v={`${eeprom.productName} (0x${eeprom.product.toString(16).padStart(2, '0')})`} />
@@ -336,12 +404,12 @@ function RnodeTab({ onLogMessage }) {
         </p>
       </section>
 
-      <section className="bg-slate-950 border border-slate-800 rounded p-3">
+      <section className="bg-slate-950 border border-slate-800 rounded p-2.5">
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-xs font-semibold text-gray-200">Protocol log</h3>
           <button className="text-[10px] text-slate-500 hover:text-slate-300" onClick={() => setLog([])}>Clear</button>
         </div>
-        <div className="h-40 overflow-auto font-mono text-[11px] space-y-0.5">
+        <div className="h-32 overflow-auto font-mono text-[11px] space-y-0.5">
           {log.length === 0 && <div className="text-slate-600">No traffic yet.</div>}
           {log.map((l, i) => (
             <div key={i} className={l.kind === 'err' ? 'text-red-300' : l.kind === 'ok' ? 'text-emerald-300' : l.kind === 'tx' ? 'text-cyan-300' : 'text-slate-400'}>
@@ -357,7 +425,7 @@ function RnodeTab({ onLogMessage }) {
 function CalcTab() {
   const [f, setF] = useState({
     sf: 7, bwHz: 125000, cr: 5, payload: 20, preamble: 8, implicit: false, crc: true, ldro: 'auto',
-    txPower: 14, txGain: 2.15, rxGain: 2.15, cable: 0, freqMhz: 868, nf: 6, fade: 10, duty: 1,
+    txPower: 14, txGain: 2.15, rxGain: 2.15, cable: 0, freqMhz: 868, nf: 6, fade: 10, duty: 1, interval: 60,
   });
   const set = (k) => (e) => {
     const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
@@ -381,8 +449,11 @@ function CalcTab() {
       for (let s = 7; s <= 12; s += 1) {
         perSf.push({ sf: s, toa: timeOnAir({ payloadBytes: num(f.payload), sf: s, bwHz, cr, preamble: num(f.preamble), implicitHeader: f.implicit, crc: f.crc, ldro: f.ldro }).totalMs });
       }
+      const intervalS = num(f.interval);
+      const maxPayload = Number(f.duty) >= 100 || !(intervalS > 0) ? null
+        : maxPayloadForToa(intervalS * 1000 * (num(f.duty) / 100), { sf, bwHz, cr, preamble: num(f.preamble), implicitHeader: f.implicit, crc: f.crc, ldro: f.ldro });
       return {
-        error: '', toa, sens, lb, duty, perSf,
+        error: '', toa, sens, lb, duty, perSf, maxPayload,
         symbolMs: symbolTimeMs(sf, bwHz), bitrate: bitRateBps({ sf, bwHz, cr }), ldroAuto: ldroAuto(sf, bwHz),
         warn: sf === 6 && !f.implicit ? 'SF6 is normally used with an implicit header only.' : '',
       };
@@ -395,8 +466,8 @@ function CalcTab() {
   const lab = 'flex flex-col gap-1 text-[11px] text-slate-400';
 
   return (
-    <div className="grid md:grid-cols-[18rem_1fr] gap-3">
-      <section className="bg-slate-950 border border-slate-800 rounded p-3 space-y-2">
+    <div className="grid @lg:grid-cols-[18rem_1fr] gap-2">
+      <section className="bg-slate-950 border border-slate-800 rounded p-2.5 space-y-2">
         <h3 className="text-xs font-semibold text-gray-200">Modulation</h3>
         <div className="grid grid-cols-2 gap-2">
           <label className={lab}>Spreading factor
@@ -451,13 +522,13 @@ function CalcTab() {
         </div>
       </section>
 
-      <section className="space-y-3">
+      <section className="space-y-2">
         {result.error ? (
           <div className="p-3 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{result.error}</div>
         ) : (
           <>
             {result.warn && <div className="p-2 border border-amber-900 rounded bg-amber-950/30 text-[11px] text-amber-300">{result.warn}</div>}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 @xl:grid-cols-4 gap-2">
               <Stat label="Time on air" value={fmt(result.toa.totalMs, 2)} unit="ms" />
               <Stat label="Symbol time" value={fmt(result.symbolMs, 3)} unit="ms" />
               <Stat label="Bit rate" value={fmt(result.bitrate, 1)} unit="bps" />
@@ -467,15 +538,21 @@ function CalcTab() {
               <Stat label="Free-space range" value={fmt(result.lb.rangeKm, result.lb.rangeKm < 10 ? 2 : 0)} unit="km" tone="text-emerald-300" />
               <Stat label="Max msgs / hour" value={f.duty === '100' ? 'unlimited' : result.duty.maxMessagesPerHour} tone="text-emerald-300" />
             </div>
-            <div className="bg-slate-950 border border-slate-800 rounded p-3">
+            <div className="bg-slate-950 border border-slate-800 rounded p-2.5">
               <KV k="Preamble time" v={`${fmt(result.toa.preambleMs, 2)} ms`} />
               <KV k="Payload symbols" v={result.toa.payloadSymbols} />
               <KV k="Payload time" v={`${fmt(result.toa.payloadMs, 2)} ms`} />
               <KV k="Duty-cycle budget per hour" v={`${fmt(result.duty.allowedMsPerHour / 1000, 0)} s (${f.duty}%)`} />
               <KV k="Minimum off time after one message" v={f.duty === '100' ? 'none' : `${fmt(result.duty.minOffTimeMs / 1000, 2)} s`} />
               <KV k="Path loss at 1 km (free space)" v={`${fmt(result.lb.fsplAt1kmDb, 2)} dB`} />
+              <KV k="Longest payload at the duty limit, one message per" v={
+                <span className="inline-flex items-center gap-1">
+                  <input type="number" min="1" className={`${inputCls} w-16`} value={f.interval} onChange={set('interval')} aria-label="Message interval seconds" /> s:
+                  <span>{result.maxPayload === null ? '-' : result.maxPayload < 0 ? 'none fits' : `${result.maxPayload} bytes`}</span>
+                </span>
+              } />
             </div>
-            <div className="bg-slate-950 border border-slate-800 rounded p-3">
+            <div className="bg-slate-950 border border-slate-800 rounded p-2.5">
               <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Time on air by spreading factor (same bandwidth, payload, CR)</div>
               <table className="w-full text-xs font-mono">
                 <thead className="text-slate-500 text-left"><tr><th className="font-normal">SF</th><th className="font-normal">ToA (ms)</th><th className="font-normal">Msgs/h at duty</th></tr></thead>
@@ -504,24 +581,20 @@ function CalcTab() {
 export default function RnodeLoraWorkbench({ onLogMessage }) {
   const [tab, setTab] = useState('rnode');
   return (
-    <div className="p-3 space-y-3 text-gray-200">
-      <header className="flex items-center gap-3 flex-wrap">
-        <Radio size={16} className="text-cyan-400" />
-        <h2 className="text-sm font-semibold">RNode &amp; LoRa</h2>
-        <nav className="flex gap-1 ml-auto" role="tablist">
-          {TABS.map(([id, label, Icon]) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={tab === id}
-              onClick={() => setTab(id)}
-              className={`px-2.5 py-1 text-xs rounded inline-flex items-center gap-1.5 border ${tab === id ? 'bg-cyan-900/40 border-cyan-800 text-cyan-200' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}`}
-            >
-              <Icon size={12} /> {label}
-            </button>
-          ))}
-        </nav>
-      </header>
+    <div className="space-y-2 text-gray-200">
+      <nav className="flex gap-1" role="tablist" aria-label="RNode and LoRa">
+        {TABS.map(([id, label, Icon]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`px-2.5 py-1 text-xs rounded inline-flex items-center gap-1.5 border ${tab === id ? 'bg-cyan-900/40 border-cyan-800 text-cyan-200' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'}`}
+          >
+            <Icon size={12} /> {label}
+          </button>
+        ))}
+      </nav>
       {tab === 'rnode' ? <RnodeTab onLogMessage={onLogMessage} /> : <CalcTab />}
     </div>
   );
