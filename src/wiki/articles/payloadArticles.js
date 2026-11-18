@@ -300,22 +300,33 @@ Modern endpoint protection systems (Windows Defender, AMSI, EDR) inspect command
 
 ### 3. Step-by-Step Usage & Hardware Export
 
-1. Write or paste your DuckyScript into the editor.
-2. Click **Run Simulation**:
-   - The virtual typing simulator visualizes keystroke execution speed and timing delays in real time.
-3. Switch to the **CyberChef Obfuscation** tab to encode strings and evade heuristic detections.
-4. **Deploy to Hardware**:
-   - **Hak5 Rubber Ducky**: Click **Download payload.txt**.
-   - **Flipper Zero**: Click **Export for Flipper** (saves formatted file ready for \`/ext/badusb/\`).
-   - **ESP32-S2 / S3**: Click **Generate C++ Header** to compile directly into native USB Arduino code!
+1. Write, paste or **Open** a \`.txt\` DuckyScript file in the **Script** editor (a few starter scripts are under **Presets**).
+2. Pick a **Dialect** (Rubber Ducky 1.0, DuckyScript 3.0 or Flipper Zero BadUSB). The checker under the editor lists errors and warnings with line numbers, and the counter shows an estimated run time.
+3. Press **Convert** to rewrite the script for the selected dialect: \`WINDOWS\`/\`COMMAND\` become \`GUI\`, \`DEFAULTDELAY\` becomes \`DEFAULT_DELAY\`, \`STRINGLN\` is split into \`STRING\` + \`ENTER\` for 1.0, and lines the target cannot run are commented out as \`REM [unsupported ...]\` with a note listing each change.
+4. Press **Simulate** to step through the keystrokes. This is a text preview only; nothing is sent to any device, and long delays are capped at 1.5 s.
+5. Choose an export format: **Flipper .txt** (the script itself), **Arduino** (\`Keyboard.h\` sketch) or **Pico / Python** (CircuitPython \`adafruit_hid\`). Use **Copy** or **Save**. Lines with no equivalent in the chosen export are skipped and reported under the output.
+6. **Push to Flipper** writes the script to \`/ext/badusb/skon_script.txt\` on a Flipper Zero connected in the Flipper tab (Web Serial, Chromium browsers).
+
+---
+
+### What the checker covers
+
+- Unknown commands, bad or missing \`DELAY\`/\`DEFAULT_DELAY\` values, empty \`STRING\`, \`REPEAT\` without a previous command, unknown keys and modifier combinations with no final key (\`CTRL ALT DELETE\` and \`CTRL-SHIFT ESC\` styles both work).
+- DuckyScript 3.0 structure: \`IF\`/\`WHILE\`/\`FUNCTION\` must be closed, \`ELSE\` needs an \`IF\`, and \`STRING_BLOCK\`/\`STRINGLN_BLOCK\`/\`REM_BLOCK\` must be closed. Block bodies are not checked.
+- Dialect limits: 3.0-only commands flagged in 1.0, and unsupported control flow flagged for Flipper. The Flipper \`ID VID:PID\` line must be first and correctly formatted.
+- Timing estimate: about 10 ms per typed character, 20 ms per key press, plus \`DELAY\`, \`DEFAULT_DELAY\` and \`STRING_DELAY\`, with \`REPEAT\` expanded. Real devices vary with host and USB polling.
+
+**Limitations:** the checker follows the public Hak5 and Flipper documentation but is not a full compiler. It does not evaluate 3.0 variables or conditions, does not check non-US keyboard layouts, and cannot produce a Rubber Ducky \`inject.bin\`. Always test on the real device. Use it only on devices you own or are authorised to test.
+
+**Similar tools:** Hak5 PayloadStudio (browser IDE with live error checking and \`inject.bin\` compile), the Flipper Zero BadUSB app and its file-format documentation, and the Arduino Keyboard and Adafruit HID libraries used by the exports.
 
 ---
 
 ### Implementation & Architecture
 
-- **Component:** [\`components/tools/DuckyScriptStudio.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/DuckyScriptStudio.jsx) (inside the BadUSB & Payload Studio) is a **pure client-side transpiler** — it needs no connected device to compose and build payloads.
-- **Compilation:** it parses DuckyScript (\`STRING\`, \`DELAY\`, \`GUI\`, \`CTRL\`, key combos, loops) and emits ready-to-flash HID keyboard code for two targets — **Arduino** (\`Keyboard.h\`) and **CircuitPython** (\`adafruit_hid\`) — plus export to Flipper Zero BadUSB.
-- **Keymap & presets:** DuckyScript tokens map to USB HID keycodes and modifier bitmasks; \`DUCKY_PRESETS\` seeds common payloads, and the suite's integrated CyberChef tab can obfuscate the generated strings before deployment.
+- **Component:** [\`components/tools/DuckyScriptStudio.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/DuckyScriptStudio.jsx) (inside the BadUSB & Payload Studio) is **client-side**; it needs no connected device to compose and check scripts.
+- **Logic:** the pure functions live in \`utils/duckyScript.js\` (lint, timing, dialect conversion, Arduino and CircuitPython export) and are covered by unit tests.
+- **Presets and CyberChef:** \`DUCKY_PRESETS\` seeds a few benign diagnostic scripts, and the suite's CyberChef tab is a separate tool in the same window.
 
 ---
 
