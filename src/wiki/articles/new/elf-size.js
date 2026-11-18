@@ -3,7 +3,7 @@ export default {
   toolId: 'elf-size',
   category: 'analysis',
   title: 'ELF / Map Size Analyzer — FLASH and RAM budget from ELF and GNU ld maps',
-  summary: 'Offline firmware size analysis. Reads an ELF (32/64-bit, little or big endian) and/or a GNU ld .map file, shows FLASH and RAM totals and memory-region usage, ranks symbols and object files, draws a treemap, and compares two builds. Nothing is uploaded.',
+  summary: 'Offline firmware size analysis. Reads an ELF (32/64-bit, little or big endian) and/or a GNU ld .map file, shows FLASH and RAM totals and memory-region usage, ranks symbols and object files, draws a treemap, checks usage against a flash/RAM budget, prints arm-none-eabi-size style totals and compares two builds. Nothing is uploaded.',
   tags: ['ELF', 'Map file', 'Firmware size', 'FLASH', 'RAM', 'bss', 'arm-none-eabi-size', 'Symbol table', 'Treemap', 'Binary diff', 'Linker map'],
   readTime: '6 min read',
   content: `
@@ -20,11 +20,19 @@ Two slots are available. **Build A** is the primary build used by every view exc
 
 ## Views
 
-- **Summary** shows the ELF totals and loaded sections with their address, load address (LMA), size and per-section FLASH and RAM bytes. It also lists the program headers (PT_LOAD and others). For a map, it shows every memory region with its used bytes, percentage and a usage bar, plus each output section with its run and load regions.
+- **Summary** shows the ELF totals, a collapsible **size-style totals** block, a **Budget** panel, and loaded sections with their address, load address (LMA), size and per-section FLASH and RAM bytes. It also lists the program headers (PT_LOAD and others). For a map, it shows every memory region with its used bytes, percentage and a usage bar, plus each output section with its run and load regions.
 - **Symbols** lists ELF symbols sorted by size. Filters cover name substring, type (FUNC, OBJECT, NOTYPE and others), binding (GLOBAL, LOCAL, WEAK), region, and section. The "top" selector limits rows. The "group by C++ namespace" option sums sizes by the first \`::\` segment.
 - **Objects** aggregates a map by library (archive, or a loose object file) and by object file, with each share of the total. It needs a map for build A.
 - **Treemap** draws squared rectangles sized in bytes. For an ELF it is region, then section, then symbol. For a map it is section, then library, then object. The region filter restricts the view to FLASH or RAM.
-- **Compare** diffs build A against build B. It covers sections and symbols (ELF in both slots) and object files and libraries (map in both slots). Rows are sorted by growth, largest increase first. You can filter by status (grew, shrank, added, removed) and by minimum change.
+- **Compare** diffs build A against build B. It covers sections and symbols (ELF in both slots) and object files and libraries (map in both slots). Rows are sorted by growth, largest increase first. You can filter by status (grew, shrank, added, removed) and by minimum change. **Copy Markdown** puts a FLASH/RAM delta table plus the ten largest growths and reductions of the current view on the clipboard, ready for a PR comment.
+
+## Size-style totals
+
+Under the ELF stats, the collapsible "size-style totals" block prints the same columns as \`arm-none-eabi-size\` (Berkeley format): **text** (allocated read-only sections, including code and rodata), **data** (allocated writable sections with file contents), **bss** (allocated writable NOBITS, including .noinit), **dec** (their sum) and **hex**. A Copy button copies the two lines. This is computed from section headers, so it should match the \`size\` tool for the same file; it is not the output of that tool.
+
+## Budget
+
+The Budget panel compares the ELF's FLASH and RAM totals with limits you type: \`64K\`, \`1.5M\`, \`512KiB\`, \`0x10000\` or a plain byte count (K = 1024). The MCU preset list fills in datasheet flash and RAM sizes for a few common parts (ATmega328P, STM32F103C8, STM32F411CE, RP2040, nRF52840, ESP32-C3); these are only convenience values, so check them against your linker script. The bar turns amber above 70 % and red above 90 %, and the text shows free bytes or how far over budget you are. Limits are not saved between sessions.
 
 Every table has a CSV export. Spreadsheet formulas in names are neutralized with a leading apostrophe.
 
@@ -58,6 +66,10 @@ Non-loaded sections (.debug_*, .comment, the symbol and string tables) are exclu
 | "Not a GNU ld map file" | The text is not a linker map, or it was produced by a different linker | Enable the GNU ld map output for your toolchain |
 | Symbol table is empty | The ELF is stripped | Use the unstripped ELF |
 | Compare shows no object rows | Only one slot has a map | Load a map in both A and B |
+
+## Similar tools
+
+I compared this against \`arm-none-eabi-size\` (totals only), Bloaty McBloatface (sections, symbols and compile units, with diffs), Puncover (needs debug info and the ARM toolchain, adds stack estimates), Mbed memap and ESP-IDF \`idf.py size\` (map-file based region reports). This tool does not do stack analysis, compile-unit grouping or C++ demangling, which those tools offer.
 
 ## Related tools
 
