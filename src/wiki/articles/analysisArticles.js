@@ -628,7 +628,7 @@ address scanning, chip identification, and register read/write.
 > **Hardware: Bus Pirate v3/v4.** "Connect Bus Pirate" opens it over Web
 > Serial (115200 baud), switches it to binary (BBIO) mode and raw I2C, and every
 > scan, read and write goes to the real bus. Power, pull-ups and I2C bus speed are
-> set from the toolbar once connected; SPI transfers use the Bus Pirate's raw SPI mode. There is
+> set from the toolbar once connected, together with the SPI speed and SPI mode (0-3); SPI transfers use the Bus Pirate's raw SPI mode. There is
 > no demo or simulated bus: the tool needs a Bus Pirate.
 
 ---
@@ -669,7 +669,7 @@ When performing a bus sweep, cross-reference responding addresses against this s
 <details>
 <summary>SPI Protocol Timing & Mode Selection (Modes 0 to 3)</summary>
 
-Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Communication requires setting the matching **CPOL (Clock Polarity)** and **CPHA (Clock Phase)** mode. (The Bus Explorer's SPI transfer and flash dump use mode 0 only.)
+Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Communication requires setting the matching **CPOL (Clock Polarity)** and **CPHA (Clock Phase)** mode. (The Bus Explorer's SPI transfer and flash dump use the mode picked in the toolbar, mode 0 by default.)
 
 | SPI Mode | CPOL (Idle State) | CPHA (Sample Edge) | Description & Typical Silicon |
 | :--- | :--- | :--- | :--- |
@@ -695,22 +695,28 @@ Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Commu
 | :--- | :--- | :--- |
 | **CONNECT BUS PIRATE (SERIAL)** | Button | Opens a Bus Pirate v3/v4 over Web Serial (115200 baud), enters binary mode and raw I2C. |
 | **SCAN I2C BUS (7-BIT SWEEP)** | Button | Sends START + address for every address \`0x08\`–\`0x77\` and lists those that ACK. |
-| **3.3V/5V power, pull-ups, speed** | Checkboxes + Dropdown | Shown once connected: switch the Bus Pirate's supply and pull-ups, and set the I2C speed (5 / 50 / 100 / 400 kHz). |
+| **3.3V/5V power, pull-ups, I2C speed, SPI speed, SPI mode** | Checkboxes + Dropdowns | Shown once connected: switch the Bus Pirate's supply and pull-ups, set the I2C speed (5 / 50 / 100 / 400 kHz), the SPI speed (30 kHz - 8 MHz) and the SPI mode (0-3). |
+| **i2cdetect** | Button | Appears after a scan. Copies the result in the same layout as \`i2cdetect -y\` on Linux. |
 | **Address Grid** | Hex Matrix | Responding addresses with chip-identification badges from the built-in dictionary; click one to select it. |
 | **Chip Intelligence** | Panel | Device name, category and description of the selected address. |
 | **Quick Register Write (Hex)** | Inputs + **WRITE** | Writes one byte to a register, then reads the dump again. |
-| **Register Dump (32 from start)** | Input + **READ REGISTERS** | Reads 32 registers from the start register you enter (write pointer, repeated START, read). |
-| **SPI Transfer** | Input + **TRANSFER** | Sends hex bytes with CS held low (SPI mode 0) and shows the bytes clocked back as MISO (\`9F 00 00 00\` reads a flash JEDEC ID). |
+| **Register Dump** | Input + length dropdown + **READ REGISTERS**, **COPY**, **SAVE** | Reads 16, 32, 64, 128 or 256 registers from the start register you enter (write pointer, repeated START, read; clipped at 0xFF). Registers that changed since the previous read of the same device and range are highlighted amber. **COPY** and **SAVE** export an \`i2cdump\`-style listing with an ASCII column. |
+| **I2C Transfer** | Input + **RUN** | Runs an \`i2ctransfer\`-style script such as \`w1@0x68 0x75 r1\`: \`w<N>@<addr> bytes\` writes, \`r<N>[@<addr>]\` reads up to 256 bytes. Messages are joined with repeated START and end with one STOP. Results are kept in a log (last 50). A missing ACK is reported as an error. |
+| **SPI Transfer** | Input + **TRANSFER** | Sends hex bytes with CS held low (in the SPI mode chosen in the toolbar) and shows the bytes clocked back as MISO (\`9F 00 00 00\` reads a flash JEDEC ID). |
 | **Sensor Readout** | Panel | **IDENTIFY** matches the selected address to a built-in driver (BME280/BMP280, MPU-6050 family, DS3231, ADS1115, INA219, SSD1306); **READ** and **LIVE (1 s)** show values, and SSD1306 OLEDs get **CHECKER / FULL / CLEAR** test patterns. |
 | **SPI Flash Dump** | Panel | **READ JEDEC ID** identifies the chip, then **DUMP** reads the entered number of bytes and **SAVE .BIN** downloads them. |
 | **DISCONNECT** | Button | Turns the supplies off and returns the Bus Pirate to its text console. |
+
+#### Similar tools
+
+The layout of the dump, the scan output and the transfer syntax follows Linux **i2c-tools** (\`i2cdetect\`, \`i2cdump\`, \`i2ctransfer\`). The Bus Pirate 5 terminal and Total Phase's **Aardvark Control Center** are other tools for the same job. Unlike Control Center this tool has no XML batch scripts and no bus sniffer.
 
 ---
 
 ### 2b. Implementation & Architecture
 
 - **Component:** [\`src/components/tools/BusExplorerWorkbench.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/BusExplorerWorkbench.jsx) renders the header, scan bar, address grid, and register panel, and holds \`isConnected\`, \`detectedDevices\`, and scan state.
-- **Driver:** [\`src/utils/busExplorerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/busExplorerDriver.js) drives a real Bus Pirate through its binary protocol (\`BusPirate\` class: BBIO entry, I2C START/STOP/bulk write/read with ACK checking, SPI transfers). \`scanI2cBus()\` walks \`0x08\`–\`0x77\` and reports which addresses ACK; \`readRegisters(start, count)\` / \`writeRegister(reg, val)\` operate on the device at \`activeAddress\` (set from the address you select); \`spiTransfer()\` / \`spiFlashId()\` cover SPI. A device must be connected — there is no simulated bus.
+- **Driver:** [\`src/utils/busExplorerDriver.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/busExplorerDriver.js) drives a real Bus Pirate through its binary protocol (\`BusPirate\` class: BBIO entry, I2C START/STOP/bulk write/read with ACK checking, SPI transfers). \`scanI2cBus()\` walks \`0x08\`–\`0x77\` and reports which addresses ACK; \`readRegisters(start, count)\` / \`writeRegister(reg, val)\` / \`i2cTransfer(addr, ops)\` operate on the device at \`activeAddress\` (set from the address you select); \`spiTransfer()\` / \`spiFlashId()\` cover SPI. A device must be connected — there is no simulated bus.
 - **Errors:** a missing ACK is reported as an error ("No ACK from 0x50") rather than read as zeros.
 
 ---
@@ -723,7 +729,7 @@ Serial Peripheral Interface (SPI) is a 4-wire full-duplex synchronous bus. Commu
 3. In Skon's USB Tool, click **CONNECT BUS PIRATE (SERIAL)** and pick its port; tick **3.3V/5V power** and **pull-ups** if the breakout needs them, and pick the I2C speed.
 4. Click **SCAN I2C BUS (7-BIT SWEEP)**.
 5. Address \`0x68\` responds with an ACK and turns green. Click it: **Chip Intelligence** shows the dictionary match, *MPU-6050 / DS3231* (6-DoF IMU / precision RTC).
-6. In the **Register Dump** panel set the start register to \`0x75\` and click **READ REGISTERS**. The first cell (\`R_0x75\`) is the WHO_AM_I register.
+6. In the **Register Dump** panel set the start register to \`0x75\` and click **READ REGISTERS** (or run \`w1@0x68 0x75 r1\` in **I2C Transfer**). The first cell (\`R_0x75\`) is the WHO_AM_I register.
 7. The sensor returns \`0x68\`. This confirms beyond doubt that the chip is an **InvenSense MPU-6050**! (**IDENTIFY** in the Sensor Readout panel can also match a built-in driver.)
 8. In **Quick Register Write**, enter register \`0x6B\` (Power Management 1) and value \`0x00\`, then click **WRITE** to wake the accelerometer from sleep mode. The dump refreshes afterwards.
 

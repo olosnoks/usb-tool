@@ -8,6 +8,7 @@
  */
 
 import { SerialLink } from './serialLink';
+import { spiModeToConfig } from './busExplorerTools';
 
 
 export const I2C_CHIP_DATABASE = {
@@ -160,6 +161,34 @@ export class BusPirate {
     }
   }
 
+  /**
+   * Run messages ({type:'w', bytes} | {type:'r', count}) against one address.
+   * Each message starts with START / repeated START; one STOP ends the transfer.
+   * Returns [{ type, bytes }] (bytes written, or bytes read).
+   */
+  async i2cTransaction(addr, ops) {
+    const results = [];
+    try {
+      for (const op of ops) {
+        await this.i2cStart();
+        if (op.type === 'w') {
+          const acks = await this.i2cWrite([(addr << 1) & 0xfe, ...op.bytes]);
+          if (!acks[0]) throw new Error(`No ACK from 0x${addr.toString(16)}`);
+          const nack = acks.findIndex((a) => !a);
+          if (nack > 0) throw new Error(`Byte ${nack} of the write was not acknowledged`);
+          results.push({ type: 'w', bytes: [...op.bytes] });
+        } else {
+          const [ackR] = await this.i2cWrite([((addr << 1) | 1) & 0xff]);
+          if (!ackR) throw new Error(`No ACK from 0x${addr.toString(16)} for the read`);
+          results.push({ type: 'r', bytes: await this.i2cRead(op.count) });
+        }
+      }
+    } finally {
+      await this.i2cStop();
+    }
+    return results;
+  }
+
   async i2cWriteRegister(addr, reg, values) {
     await this.i2cStart();
     try {
@@ -219,7 +248,7 @@ export class BusExplorerClient {
     this.activeAddress = 0x68;
     this.link = null;
     this.bp = null;
-    this.settings = { power: false, pullups: false, i2cSpeed: 2, spiSpeed: 3 };
+    this.settings = { power: false, pullups: false, i2cSpeed: 2, spiSpeed: 3, spiMode: 0 };
     this._owner = { name: 'I2C / SPI Bus Explorer', release: () => this.disconnect() };
   }
 
@@ -253,7 +282,7 @@ export class BusExplorerClient {
       await this.bp.setSpeed(this.settings.i2cSpeed);
     } else {
       await this.bp.enterSpi();
-      await this.bp.spiConfigure({ push: true, idleHigh: false, edge: true, sampleEnd: false });
+      await this.bp.spiConfigure(spiModeToConfig(this.settings.spiMode));
       await this.bp.setSpeed(this.settings.spiSpeed);
     }
     await this.bp.configurePeripherals({ power: this.settings.power, pullups: this.settings.pullups, cs: type === 'spi' });
@@ -265,6 +294,7 @@ export class BusExplorerClient {
     if (!this.bp) return this.settings;
     if (this.busType === 'i2c' && 'i2cSpeed' in changes) await this.bp.setSpeed(this.settings.i2cSpeed);
     if (this.busType === 'spi' && 'spiSpeed' in changes) await this.bp.setSpeed(this.settings.spiSpeed);
+    if (this.busType === 'spi' && 'spiMode' in changes) await this.bp.spiConfigure(spiModeToConfig(this.settings.spiMode));
     await this.bp.configurePeripherals({ power: this.settings.power, pullups: this.settings.pullups, cs: this.busType === 'spi' });
     return this.settings;
   }
@@ -298,6 +328,12 @@ export class BusExplorerClient {
     if (!found.length) this.log('No device ACKed. Check SDA/SCL wiring, a shared ground, and pull-ups (turn them on here if the board has none).');
     this.log(`Scan complete: ${this.detectedDevices.length} device(s) ACKed.`);
     return this.detectedDevices;
+  }
+
+  /** Run an i2ctransfer-style message list against `addr` (see parseI2cTransfer). */
+  async i2cTransfer(addr, ops) {
+    if (this.busType !== 'i2c') await this.setBus('i2c');
+    return this.bp.i2cTransaction(addr, ops);
   }
 
   /** Read `count` consecutive registers from the active device. */
