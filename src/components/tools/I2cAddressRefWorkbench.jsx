@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Search, Cpu, Copy, Check, AlertTriangle, Info, ArrowLeftRight, Layers } from 'lucide-react';
+import { Search, Copy, Check, AlertTriangle, Info, ArrowLeftRight, Layers } from 'lucide-react';
 import {
   I2C_DEVICES,
   I2C_CATEGORIES,
@@ -16,6 +16,7 @@ import {
   parseScanText,
   analyzeScan,
 } from '../../utils/i2cAddressDb.js';
+import { freeAddresses, assignSingleBus, planBuses, muxOptions, planToText } from '../../utils/i2cPlanner.js';
 
 /**
  * Offline I2C address reference. Nothing here touches hardware: the address map, the
@@ -30,9 +31,9 @@ const TABS = [
   ['conflicts', 'Conflict checker'],
 ];
 
-const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono text-gray-200 focus:outline-none focus:border-cyan-700';
-const cardCls = 'bg-slate-950 border border-slate-800 rounded p-3';
-const btnCls = 'px-2.5 py-1 text-xs rounded border border-slate-700 text-gray-300 hover:border-cyan-700 hover:text-cyan-300 disabled:opacity-40';
+const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-cyan-700';
+const cardCls = 'bg-slate-950 border border-slate-800 rounded p-2.5';
+const btnCls = 'px-2 py-0.5 text-[11px] rounded border border-slate-700 text-gray-300 hover:border-cyan-700 hover:text-cyan-300 disabled:opacity-40';
 
 const copyText = (t) => {
   if (typeof navigator !== 'undefined' && navigator.clipboard) navigator.clipboard.writeText(String(t));
@@ -44,8 +45,8 @@ const GRID_COLS = 16;
 
 function AddressGrid({ selected, onSelect, counts }) {
   return (
-    <div className="inline-block">
-      <div className="grid gap-1" style={{ gridTemplateColumns: `2.5rem repeat(${GRID_COLS}, 2rem)` }}>
+    <div className="max-w-full overflow-x-auto">
+      <div className="grid gap-0.5 min-w-[20rem] max-w-[34rem]" style={{ gridTemplateColumns: `2rem repeat(${GRID_COLS}, minmax(0, 1fr))` }}>
         <div />
         {Array.from({ length: GRID_COLS }, (_, c) => (
           <div key={`h${c}`} className="text-[10px] text-slate-600 text-center font-mono">{c.toString(16).toUpperCase()}</div>
@@ -70,7 +71,7 @@ function AddressGrid({ selected, onSelect, counts }) {
                   onClick={() => onSelect(addr)}
                   title={title}
                   aria-label={title}
-                  className={`h-8 w-8 border rounded text-[10px] font-mono ${cls}`}
+                  className={`h-6 border rounded text-[10px] font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 ${cls}`}
                 >
                   {addr.toString(16).toUpperCase().padStart(2, '0')}
                 </button>
@@ -79,7 +80,7 @@ function AddressGrid({ selected, onSelect, counts }) {
           </React.Fragment>
         ))}
       </div>
-      <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-slate-500">
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
         <span><span className="inline-block w-3 h-3 border border-cyan-900 bg-slate-900 align-middle mr-1" />address has known parts</span>
         <span><span className="inline-block w-3 h-3 border border-slate-900 align-middle mr-1" />no entry</span>
         <span><span className="inline-block w-3 h-3 border border-amber-900 bg-amber-950/30 align-middle mr-1" />reserved by the I2C spec</span>
@@ -130,10 +131,10 @@ function MapTab() {
   const reserved = selected === null ? null : reservedMeaning(selected);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[auto_1fr]">
+    <div className="grid gap-2 @3xl:grid-cols-[auto_1fr]">
       <div>
         <AddressGrid selected={selected} onSelect={setSelected} counts={counts} />
-        <div className={`${cardCls} mt-3 min-h-[5rem]`}>
+        <div className={`${cardCls} mt-2 min-h-[4rem]`}>
           {selected === null && <div className="text-xs text-slate-500">Click an address to see the parts that use it.</div>}
           {selected !== null && (
             <>
@@ -153,7 +154,7 @@ function MapTab() {
         </div>
       </div>
 
-      <div className="min-w-0 space-y-3">
+      <div className="min-w-0 space-y-2">
         {selected !== null && !reserved && selectedDevices.length > 0 && (
           <div className="space-y-2">
             <div className="text-xs text-slate-400">Parts that use {formatAddress(selected)}:</div>
@@ -174,7 +175,7 @@ function MapTab() {
           </div>
           <div className="text-[10px] text-slate-600 mt-1">{results.length} of {I2C_DEVICES.length} parts</div>
         </div>
-        <div className="max-h-[28rem] overflow-auto border border-slate-800 rounded">
+        <div className="max-h-[24rem] overflow-auto border border-slate-800 rounded">
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-slate-900 text-slate-400">
               <tr className="text-left">
@@ -207,6 +208,17 @@ function MapTab() {
         <div className="text-[10px] text-slate-600">Categories: {I2C_CATEGORIES.join(' · ')}</div>
       </div>
     </div>
+  );
+}
+
+function FreeAddresses({ found }) {
+  const free = useMemo(() => freeAddresses(found), [found]);
+  return (
+    <details className="text-[11px] text-slate-400">
+      <summary className="cursor-pointer text-slate-300">Free addresses on this bus ({free.length})</summary>
+      <div className="mt-1 font-mono text-[10px] text-cyan-300/80 leading-relaxed break-words">{free.map(formatAddress).join(' ')}</div>
+      <div className="mt-1 text-slate-500">Usable 7-bit addresses (0x08 to 0x77) that did not answer in the pasted scan. A device that is powered off or not wired will not show up, so this is only a guide.</div>
+    </details>
   );
 }
 
@@ -246,7 +258,7 @@ function ScanTab() {
   };
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+    <div className="grid gap-2 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
       <div className="space-y-2">
         <label htmlFor="i2c-scan-input" className="text-xs text-slate-400 block">Scan output</label>
         <textarea
@@ -255,7 +267,7 @@ function ScanTab() {
           onChange={(e) => setText(e.target.value)}
           placeholder={SCAN_PLACEHOLDER}
           spellCheck={false}
-          className={`${inputCls} w-full h-64 resize-y text-[11px] leading-snug`}
+          className={`${inputCls} w-full h-48 resize-y text-[11px] leading-snug`}
         />
         <div className="flex gap-2">
           <button type="button" className={`${btnCls} text-cyan-300 border-cyan-900`} onClick={analyze} disabled={!text.trim()}>Analyze</button>
@@ -319,6 +331,7 @@ function ScanTab() {
                 </div>
               ))}
             </div>
+            <FreeAddresses found={result.analysis.map((a) => a.address)} />
             {result.analysis.some((a) => a.idChecks.length > 0) && (
               <div className="text-[11px] text-slate-500 leading-relaxed">
                 To confirm a part, read its ID register on the real bus with the <span className="text-slate-300">I2C &amp; SPI Bus Explorer</span> tool
@@ -347,8 +360,8 @@ function ConvertTab() {
   const fromByte = byteVal === null ? null : fromEightBitByte(byteVal);
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className={`${cardCls} space-y-3`}>
+    <div className="grid gap-2 @xl:grid-cols-2">
+      <div className={`${cardCls} space-y-2`}>
         <div className="text-xs text-slate-400 flex items-center gap-1.5"><ArrowLeftRight size={12} /> 7-bit address to bus bytes</div>
         <input className={`${inputCls} w-full`} value={addrText} onChange={(e) => setAddrText(e.target.value)} aria-label="7-bit address" />
         {addr === null ? (
@@ -363,7 +376,7 @@ function ConvertTab() {
         )}
       </div>
 
-      <div className={`${cardCls} space-y-3`}>
+      <div className={`${cardCls} space-y-2`}>
         <div className="text-xs text-slate-400 flex items-center gap-1.5"><ArrowLeftRight size={12} /> 8-bit bus byte to 7-bit address</div>
         <input className={`${inputCls} w-full`} value={byteText} onChange={(e) => setByteText(e.target.value)} aria-label="8-bit byte" />
         {!fromByte ? (
@@ -382,6 +395,47 @@ function ConvertTab() {
   );
 }
 
+function PlanCard({ picked }) {
+  const single = useMemo(() => assignSingleBus(picked), [picked]);
+  const multi = useMemo(() => (single.ok ? null : planBuses(picked)), [single, picked]);
+  if (picked.length < 2) return null;
+  const muxes = multi ? muxOptions(multi.busCount) : [];
+  return (
+    <div className={`${cardCls} space-y-1.5`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-gray-200 font-semibold">Suggested addressing</span>
+        <button type="button" className={btnCls} onClick={() => copyText(planToText(single, multi))} title="Copy the plan as tab-separated text">
+          <span className="inline-flex items-center gap-1"><Copy size={11} /> Copy</span>
+        </button>
+      </div>
+      {single.ok ? (
+        <>
+          <div className="text-[11px] text-emerald-300">All selected parts fit on one bus if you set their address pins or jumpers as below.</div>
+          <ul className="text-[11px] font-mono space-y-0.5">
+            {single.assignment.map((a) => <li key={a.id}><span className="text-cyan-300">{a.hex}</span> <span className="text-gray-300">{a.part}</span></li>)}
+          </ul>
+        </>
+      ) : (
+        <>
+          <div className="text-[11px] text-amber-300">
+            No single-bus assignment exists with these parts. Split them over {multi.busCount} buses (for example I2C multiplexer channels, or separate I2C ports).
+          </div>
+          {multi.buses.map((bus, i) => (
+            <div key={i} className="text-[11px] font-mono">
+              <div className="text-slate-400">Bus / channel {i}</div>
+              {bus.map((a) => <div key={a.id} className="pl-2"><span className="text-cyan-300">{a.hex}</span> <span className="text-gray-300">{a.part}</span></div>)}
+            </div>
+          ))}
+          <div className="text-[10px] text-slate-500">
+            Greedy split: the bus count is small but not guaranteed minimal.{' '}
+            {muxes.length > 0 ? `Multiplexers in the database with enough channels: ${muxes.map((m) => `${m.part} (${m.channels})`).join(', ')}.` : 'More buses than one database multiplexer offers; use several multiplexers or ports.'}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ConflictsTab() {
   const [picked, setPicked] = useState([]);
   const [filter, setFilter] = useState('');
@@ -391,11 +445,11 @@ function ConflictsTab() {
   const toggle = (id) => setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+    <div className="grid gap-2 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="space-y-2 min-w-0">
         <div className="text-xs text-slate-400 flex items-center gap-1.5"><Layers size={12} /> Pick the parts you plan to put on one bus</div>
         <input className={`${inputCls} w-full`} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="filter parts" aria-label="filter parts" />
-        <div className="max-h-96 overflow-auto border border-slate-800 rounded">
+        <div className="max-h-72 overflow-auto border border-slate-800 rounded">
           {list.map((d) => (
             <label key={d.id} className="flex items-start gap-2 px-2 py-1 border-b border-slate-900 last:border-0 text-xs hover:bg-slate-900/60 cursor-pointer">
               <input type="checkbox" className="mt-0.5" checked={picked.includes(d.id)} onChange={() => toggle(d.id)} />
@@ -438,6 +492,7 @@ function ConflictsTab() {
                 </ul>
               </div>
             ))}
+            <PlanCard picked={picked} />
             <div className="text-[11px] text-slate-500 leading-relaxed">
               Based only on the addresses in this database. Check the actual part (solder jumpers, address pins, firmware settings) before you wire it.
             </div>
@@ -452,24 +507,20 @@ export default function I2cAddressRefWorkbench() {
   const [tab, setTab] = useState('map');
 
   return (
-    <div className="p-4 text-gray-200 space-y-4 font-sans">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <div className="flex items-center gap-2 text-cyan-300 text-sm font-semibold">
-            <Cpu size={16} /> I2C Address Reference &amp; Scan Identifier
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1 max-w-2xl leading-relaxed">
-            Offline reference: {I2C_DEVICES.length} common parts with their addresses (Adafruit I2C address list plus datasheets) and
-            ID registers to confirm a part. This tool does not talk to any bus.
-          </div>
+    <div className="text-gray-200 space-y-2 font-sans">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-[11px] text-slate-500">
+          I2C Address Reference &middot; {I2C_DEVICES.length} parts (Adafruit list and datasheets). This tool does not talk to any bus.
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-1 flex-wrap" role="tablist">
           {TABS.map(([id, label]) => (
             <button
               key={id}
               type="button"
+              role="tab"
+              aria-selected={tab === id}
               onClick={() => setTab(id)}
-              className={`px-2.5 py-1 text-xs rounded border ${tab === id ? 'border-cyan-600 text-cyan-300 bg-cyan-950/30' : 'border-slate-800 text-slate-400 hover:text-gray-200'}`}
+              className={`px-2 py-0.5 text-[11px] rounded border ${tab === id ? 'border-cyan-600 text-cyan-300 bg-cyan-950/30' : 'border-slate-800 text-slate-400 hover:text-gray-200'}`}
             >
               {label}
             </button>
