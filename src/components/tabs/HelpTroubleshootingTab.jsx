@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
+import { hex4, parseVidPid, findBridge, detectCapabilities, adviceFor, filterEntries, TROUBLE_ENTRIES } from '../../utils/setupDiagnostics.js';
 import { UDEV_SETUP_COMMAND, UDEV_RULES_PATH, DIALOUT_COMMAND } from '../../data/udevRules.js';
 import { 
   HelpCircle, 
@@ -15,7 +16,10 @@ import {
   Layers,
   Smartphone,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Search,
+  RefreshCw,
+  Trash2
 } from 'lucide-react';
 
 const COMMON_DRIVERS = [
@@ -69,6 +73,141 @@ const COMMON_DRIVERS = [
   }
 ];
 
+function guessOs() {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  if (/windows/i.test(ua)) return 'windows';
+  if (/mac/i.test(ua)) return 'mac';
+  return 'linux';
+}
+
+function TroubleshootList() {
+  const [q, setQ] = useState('');
+  const rows = useMemo(() => filterEntries(TROUBLE_ENTRIES, q), [q]);
+  return (
+    <div className="space-y-2">
+      <label className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 focus-within:border-amber-500/50">
+        <Search className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search symptoms (e.g. timeout, windows, baud)"
+          aria-label="Search troubleshooting entries"
+          className="w-full bg-transparent text-[11px] text-slate-200 outline-none placeholder:text-slate-600"
+        />
+      </label>
+      <div className="grid grid-cols-1 @md:grid-cols-2 gap-2">
+        {rows.map((e) => (
+          <div key={e.id} className="bg-slate-950 p-2 rounded-lg border border-slate-800">
+            <div className="text-[11px] font-bold text-amber-300 pb-0.5">{e.title}</div>
+            <p className="text-[10px] text-slate-400 leading-relaxed">{e.body}</p>
+          </div>
+        ))}
+        {rows.length === 0 && <div className="text-[11px] text-slate-500">No matching entries.</div>}
+      </div>
+    </div>
+  );
+}
+
+function DiagnosticsPanel() {
+  const os = guessOs();
+  const caps = useMemo(() => {
+    const n = typeof navigator !== 'undefined' ? navigator : {};
+    return detectCapabilities({
+      secure: typeof window !== 'undefined' && !!window.isSecureContext,
+      ua: n.userAgent || '',
+      serial: 'serial' in n,
+      usb: 'usb' in n,
+      hid: 'hid' in n,
+      bluetooth: 'bluetooth' in n,
+    });
+  }, []);
+  const [devices, setDevices] = useState(null); // null = not scanned yet
+  const [err, setErr] = useState('');
+  const [lookup, setLookup] = useState('');
+
+  const refresh = useCallback(async () => {
+    setErr('');
+    const out = [];
+    try {
+      if (navigator.serial?.getPorts) {
+        for (const port of await navigator.serial.getPorts()) {
+          const i = port.getInfo?.() || {};
+          out.push({ kind: 'Serial', vid: i.usbVendorId, pid: i.usbProductId, handle: port });
+        }
+      }
+      if (navigator.usb?.getDevices) {
+        for (const d of await navigator.usb.getDevices()) {
+          out.push({ kind: 'USB', vid: d.vendorId, pid: d.productId, name: d.productName, handle: d });
+        }
+      }
+      setDevices(out);
+    } catch (e) {
+      setErr(String(e?.message || e));
+    }
+  }, []);
+
+  const forget = async (d) => {
+    try { await d.handle.forget?.(); } catch (e) { setErr(String(e?.message || e)); }
+    refresh();
+  };
+
+  const parsed = parseVidPid(lookup);
+  const bridge = parsed ? findBridge(parsed.vid) : null;
+
+  return (
+    <div className="border border-slate-800 rounded-lg bg-[#030712]/90 p-2 space-y-2" data-testid="setup-diagnostics">
+      <div className="text-[11px] font-bold text-slate-100 flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />BROWSER CHECK</div>
+      <ul className="grid grid-cols-1 @md:grid-cols-2 gap-1">
+        {caps.rows.map((r) => (
+          <li key={r.id} className="text-[10px] flex items-start gap-1.5 bg-slate-950 border border-slate-800 rounded px-2 py-1">
+            <span className={r.ok ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>{r.ok ? 'OK' : 'NO'}</span>
+            <span className="text-slate-300">{r.label}{!r.ok && <span className="block text-slate-500">{r.fix}</span>}</span>
+          </li>
+        ))}
+      </ul>
+      {caps.notes.map((n) => <div key={n} className="text-[10px] text-amber-300">{n}</div>)}
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-bold text-slate-100">PERMITTED DEVICES</div>
+        <button onClick={refresh} title="List devices this site already has permission for" className="flex items-center gap-1 px-2 py-1 rounded bg-slate-900 border border-slate-700 text-[10px] text-cyan-300 hover:border-cyan-500/40">
+          <RefreshCw className="w-3 h-3" /> Scan
+        </button>
+      </div>
+      {err && <div className="text-[10px] text-rose-400">{err}</div>}
+      {devices && devices.length === 0 && <div className="text-[10px] text-slate-500">No devices have been granted to this site yet. Connect one from the Terminal or another tool first. (Browsers never list devices you have not permitted.)</div>}
+      {devices && devices.map((d, i) => (
+        <div key={i} className="bg-slate-950 border border-slate-800 rounded p-2 flex items-start justify-between gap-2">
+          <div className="min-w-0 text-[10px]">
+            <div className="text-slate-200 font-bold">{d.kind}{d.name ? ` - ${d.name}` : ''} <span className="text-cyan-400 font-mono">{d.vid !== undefined ? `${hex4(d.vid)}:${hex4(d.pid)}` : 'non-USB port'}</span></div>
+            {d.vid !== undefined && <div className="text-slate-500">{adviceFor(d.vid, os)}</div>}
+          </div>
+          {typeof d.handle.forget === 'function' && (
+            <button onClick={() => forget(d)} title="Revoke this site's permission for the device" aria-label="Forget device" className="p-1 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-300 shrink-0">
+              <Trash2 className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      ))}
+
+      <div className="text-[11px] font-bold text-slate-100">VID:PID LOOKUP</div>
+      <input
+        value={lookup}
+        onChange={(e) => setLookup(e.target.value)}
+        placeholder="1a86:7523 or VID_1A86&PID_7523 (Device Manager / lsusb)"
+        aria-label="VID:PID lookup"
+        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[11px] text-slate-200 outline-none focus:border-cyan-500/50 placeholder:text-slate-600"
+      />
+      {lookup.trim() && !parsed && <div className="text-[10px] text-rose-400">Could not read that. Use hex like 1a86:7523.</div>}
+      {parsed && (
+        <div className="text-[10px] text-slate-300" data-testid="lookup-result">
+          <span className="text-cyan-400">{hex4(parsed.vid)}{parsed.pid !== null ? `:${hex4(parsed.pid)}` : ''}</span>{' - '}
+          {bridge ? <>{bridge.name}. Windows: {bridge.windows}. Linux/macOS: {bridge.other}.</> : 'Vendor not in the built-in bridge list.'}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function HelpTroubleshootingTab() {
   const [copiedKey, setCopiedKey] = useState(null);
   
@@ -93,9 +232,11 @@ export default function HelpTroubleshootingTab() {
   };
 
   return (
-    <div className="flex flex-col gap-3 font-mono">
+    <div className="flex flex-col gap-2 font-mono">
+      <DiagnosticsPanel />
+
       {/* 1. Linux Permissions & udev Rules Dropdown */}
-      <div className={`border rounded-xl shadow-xl transition-all overflow-hidden ${
+      <div className={`border rounded-lg transition-all overflow-hidden ${
         openSections.linux ? 'bg-[#030712] border-purple-500/50 shadow-purple-glow' : 'bg-[#030712]/90 border-slate-800 hover:border-slate-700'
       }`}>
         <div 
@@ -104,7 +245,7 @@ export default function HelpTroubleshootingTab() {
           aria-expanded={openSections.linux}
           tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSection('linux'); }}
-          className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-900/50"
+          className="p-2 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-900/50"
         >
           <div className="flex items-center gap-2.5 truncate">
             <div className={`p-1.5 rounded-lg border shrink-0 ${
@@ -113,10 +254,10 @@ export default function HelpTroubleshootingTab() {
               <Terminal className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-xs @sm:text-sm font-bold text-slate-100 flex items-center gap-2">
-                <span>HOW TO CONFIGURE LINUX USB PERMISSIONS & UDEV RULES</span>
+              <h2 className="text-[11px] @sm:text-xs font-bold text-slate-100 flex items-center gap-2">
+                <span>LINUX USB PERMISSIONS & UDEV RULES</span>
               </h2>
-              <div className="text-[11px] text-slate-500 hidden @sm:block">
+              <div className="text-[10px] text-slate-500 hidden @sm:block">
                 Fix "Access Denied" on /dev/ttyUSB* & /dev/ttyACM* ports without needing root
               </div>
             </div>
@@ -128,21 +269,21 @@ export default function HelpTroubleshootingTab() {
                 ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' 
                 : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-purple-500/40 hover:text-purple-300'
             }`}>
-              <span>{openSections.linux ? 'HIDE INSTRUCTIONS' : 'CLICK TO EXPAND'}</span>
+              <span>{openSections.linux ? 'HIDE' : 'SHOW'}</span>
               {openSections.linux ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </span>
           </div>
         </div>
 
         {openSections.linux && (
-          <div className="p-4 border-t border-slate-900 bg-[#020510] space-y-3">
+          <div className="p-2.5 border-t border-slate-900 bg-[#020510] space-y-3">
             <p className="text-[11px] text-slate-400 leading-relaxed">
               On Linux (Ubuntu, Debian, Arch, Fedora), non-root users are restricted from accessing <code className="text-purple-300 bg-slate-900 px-1 py-0.5 rounded">/dev/ttyUSB*</code> and <code className="text-purple-300 bg-slate-900 px-1 py-0.5 rounded">/dev/ttyACM*</code> nodes by default. Do either of these (the udev rule below is per-vendor and never makes ports world-writable):
             </p>
 
-            <div className="grid grid-cols-1 @md:grid-cols-2 gap-4 pt-1">
+            <div className="grid grid-cols-1 @md:grid-cols-2 gap-2 pt-1">
               {/* Method A: Dialout group */}
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between gap-2.5">
+              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex flex-col justify-between gap-2.5">
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-200">Option 1: Add User to `dialout` Group</span>
@@ -166,7 +307,7 @@ export default function HelpTroubleshootingTab() {
               </div>
 
               {/* Method B: udev rule. The displayed text and the copied text are the same string. */}
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between gap-2.5 @md:col-span-2">
+              <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex flex-col justify-between gap-2.5 @md:col-span-2">
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-200">Option 2: Per-vendor udev rule (uaccess, 0660)</span>
@@ -203,7 +344,7 @@ export default function HelpTroubleshootingTab() {
       </div>
 
       {/* 2. Common USB-UART Bridge Drivers Dropdown */}
-      <div className={`border rounded-xl shadow-xl transition-all overflow-hidden ${
+      <div className={`border rounded-lg transition-all overflow-hidden ${
         openSections.drivers ? 'bg-[#030712] border-cyan-500/50 shadow-cyan-glow' : 'bg-[#030712]/90 border-slate-800 hover:border-slate-700'
       }`}>
         <div 
@@ -212,7 +353,7 @@ export default function HelpTroubleshootingTab() {
           aria-expanded={openSections.drivers}
           tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSection('drivers'); }}
-          className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-900/50"
+          className="p-2 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-900/50"
         >
           <div className="flex items-center gap-2.5 truncate">
             <div className={`p-1.5 rounded-lg border shrink-0 ${
@@ -221,10 +362,10 @@ export default function HelpTroubleshootingTab() {
               <Cpu className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-xs @sm:text-sm font-bold text-slate-100 flex items-center gap-2">
-                <span>HOW TO IDENTIFY & INSTALL USB-TO-UART BRIDGE DRIVERS</span>
+              <h2 className="text-[11px] @sm:text-xs font-bold text-slate-100 flex items-center gap-2">
+                <span>USB-TO-UART BRIDGE DRIVERS</span>
               </h2>
-              <div className="text-[11px] text-slate-500 hidden @sm:block">
+              <div className="text-[10px] text-slate-500 hidden @sm:block">
                 CH340/CH341, CP2102, FTDI FT232, PL2303, ESP32-S3 CDC, and RP2040 Pico
               </div>
             </div>
@@ -236,19 +377,19 @@ export default function HelpTroubleshootingTab() {
                 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' 
                 : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-cyan-500/40 hover:text-cyan-300'
             }`}>
-              <span>{openSections.drivers ? 'HIDE DRIVERS' : 'CLICK TO EXPAND'}</span>
+              <span>{openSections.drivers ? 'HIDE' : 'SHOW'}</span>
               {openSections.drivers ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </span>
           </div>
         </div>
 
         {openSections.drivers && (
-          <div className="p-4 border-t border-slate-900 bg-[#020510]">
-            <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-3">
+          <div className="p-2.5 border-t border-slate-900 bg-[#020510]">
+            <div className="grid grid-cols-1 @md:grid-cols-2 @lg:grid-cols-3 gap-2">
               {COMMON_DRIVERS.map((driver) => (
                 <div
                   key={driver.name}
-                  className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 hover:border-slate-700 flex flex-col justify-between gap-3 shadow-md transition-all"
+                  className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700 flex flex-col justify-between gap-3 shadow-md transition-all"
                 >
                   <div>
                     <div className="flex items-center justify-between">
@@ -283,7 +424,7 @@ export default function HelpTroubleshootingTab() {
       </div>
 
       {/* 3. Diagnostic & Troubleshooting Checklist Dropdown */}
-      <div className={`border rounded-xl shadow-xl transition-all overflow-hidden ${
+      <div className={`border rounded-lg transition-all overflow-hidden ${
         openSections.troubleshooting ? 'bg-[#030712] border-amber-500/50 shadow-amber-glow' : 'bg-[#030712]/90 border-slate-800 hover:border-slate-700'
       }`}>
         <div 
@@ -292,7 +433,7 @@ export default function HelpTroubleshootingTab() {
           aria-expanded={openSections.troubleshooting}
           tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleSection('troubleshooting'); }}
-          className="p-3.5 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-900/50"
+          className="p-2 flex items-center justify-between cursor-pointer select-none transition-colors hover:bg-slate-900/50"
         >
           <div className="flex items-center gap-2.5 truncate">
             <div className={`p-1.5 rounded-lg border shrink-0 ${
@@ -301,10 +442,10 @@ export default function HelpTroubleshootingTab() {
               <AlertTriangle className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-xs @sm:text-sm font-bold text-slate-100 flex items-center gap-2">
-                <span>HOW TO TROUBLESHOOT SERIAL CONNECTIVITY & FLASHER ERRORS</span>
+              <h2 className="text-[11px] @sm:text-xs font-bold text-slate-100 flex items-center gap-2">
+                <span>TROUBLESHOOTING (SEARCHABLE)</span>
               </h2>
-              <div className="text-[11px] text-slate-500 hidden @sm:block">
+              <div className="text-[10px] text-slate-500 hidden @sm:block">
                 Solutions for port locks, packet header timeouts, baud mismatch, and missing capacitors
               </div>
             </div>
@@ -316,51 +457,15 @@ export default function HelpTroubleshootingTab() {
                 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
                 : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-amber-500/40 hover:text-amber-300'
             }`}>
-              <span>{openSections.troubleshooting ? 'HIDE CHECKLIST' : 'CLICK TO EXPAND'}</span>
+              <span>{openSections.troubleshooting ? 'HIDE' : 'SHOW'}</span>
               {openSections.troubleshooting ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </span>
           </div>
         </div>
 
         {openSections.troubleshooting && (
-          <div className="p-4 border-t border-slate-900 bg-[#020510]">
-            <div className="grid grid-cols-1 @md:grid-cols-2 gap-3 text-xs">
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                <div className="font-bold text-amber-300 flex items-center gap-1.5 pb-1">
-                  <span>⚠️ "Failed to open serial port / Access Denied"</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Serial ports can only be opened by one process at a time. Make sure you close the <strong>Arduino IDE Serial Monitor</strong>, <strong>Cura 3D Slicer</strong>, <strong>PlatformIO Terminal</strong>, or any other browser tab using Web Serial.
-                </p>
-              </div>
-
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                <div className="font-bold text-rose-300 flex items-center gap-1.5 pb-1">
-                  <span>⚡ "ESP32: Timed out waiting for packet header"</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Many cheap ESP32 boards lack the proper 10uF capacitor between <strong>EN and GND</strong>, causing the automatic DTR/RTS reset pulse to miss. <strong>Workaround:</strong> Hold down the physical <strong>BOOT / IO0 button</strong> on the board while clicking "Flash Partitions", then release it once flashing begins.
-                </p>
-              </div>
-
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                <div className="font-bold text-cyan-300 flex items-center gap-1.5 pb-1">
-                  <span>🔤 "Terminal shows garbage / unreadable characters"</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Your baud rate is mismatched. ESP8266 ROM boot output uses <strong>74880 bps</strong>, while ESP32 typically uses <strong>115200 bps</strong>. Open the <strong>Baud Hunter</strong> in Tab 1 to automatically detect and apply the correct rate.
-                </p>
-              </div>
-
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                <div className="font-bold text-emerald-300 flex items-center gap-1.5 pb-1">
-                  <span>🌐 "Browser compatibility & Mobile OTG"</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  The Web Serial API requires Google Chrome, Microsoft Edge, Opera, or Brave on Desktop. On Android, you can connect directly with a USB-OTG cable using Chrome via the built-in WebUSB driver fallback!
-                </p>
-              </div>
-            </div>
+          <div className="p-2.5 border-t border-slate-900 bg-[#020510]">
+            <TroubleshootList />
           </div>
         )}
       </div>
