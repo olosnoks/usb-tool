@@ -100,8 +100,8 @@ Pick an endpoint from the filterable list. Parameter inputs are generated from t
     toolId: 'web-analyzer',
     category: 'webapp',
     title: 'Web Analyzer — headers grade, cookies, tech, links & passive scan',
-    summary: 'One fetch of a URL gives an A-F security-header grade, redirect chain, technology fingerprint, cookie flags, passive findings, links, resources and forms, with Markdown and JSON export.',
-    tags: ['Web Analyzer', 'Security headers', 'CSP', 'HSTS', 'Cookies', 'CORS', 'CWE', 'Passive scan', 'OWASP', 'Redirects'],
+    summary: 'One fetch of a URL gives an A-F security-header grade with copy-paste fixes, SEO and accessibility hints, redirect chain, technology fingerprint, cookie flags, passive findings, a link checker, resources and forms, with Markdown and JSON export.',
+    tags: ['Web Analyzer', 'Security headers', 'CSP', 'HSTS', 'Cookies', 'CORS', 'CWE', 'Passive scan', 'OWASP', 'Redirects', 'Link checker', 'SEO', 'Accessibility'],
     readTime: '4 min read',
     content: `
 # Web Analyzer
@@ -114,12 +114,17 @@ ${CORS_NOTE}
 - **Summary:** status, size, time, final URL and page title.
 - **Redirect chain:** each hop with its status. Shown only when the proxy reports it.
 - **Security headers:** a letter grade **A to F** with a score out of 100. It grades header **values**, not just presence, across 11 weighted checks: Content-Security-Policy, Strict-Transport-Security, X-Frame-Options (or CSP \`frame-ancestors\`), X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Cross-Origin-Opener/Embedder/Resource-Policy, Subresource Integrity on external scripts and styles, and mixed content. Each row says why it passed or failed. A broken CSP or HSTS value, or active mixed content, caps the grade at C.
+- **Suggested header fixes:** under the grade, a collapsible list of the headers that are missing or weak, with baseline values you can copy as an **nginx**, **Apache** or **_headers** (Cloudflare Pages / Netlify) snippet. The CSP suggestion is sent as \`Content-Security-Policy-Report-Only\` so you can see what would break first. These are generic starting values, not a policy tailored to your site: test on staging.
+- **SEO and accessibility hints:** quick checks on the fetched HTML: \`lang\` on \`<html>\`, title (missing, very short or over 60 characters), meta description, viewport (and pinch-zoom blocking), noindex, canonical link, Open Graph tags, \`<h1>\` count, images without \`alt\`, links with no text, form controls without a label, and a page served over plain http. These are regex checks on the HTML as served, so content added later by JavaScript is not seen. This is not a full Lighthouse audit.
+- **Link checker:** press **Check links** to test the links found on the page (same-origin links or all links, first 200). Each link gets a HEAD request, with a GET fallback, four at a time; **Stop** cancels. Results show ok, redirected, broken (4xx/5xx) and no response, and the list can be saved as **CSV**. Cross-origin links are limited by CORS, so without the proxy many show "no response", which means blocked or unreachable and is not proof the link is broken.
 - **Technology:** frameworks, servers and CMSs matched from headers, HTML, cookies and script URLs, with the evidence on hover.
 - **Cookies:** Secure / HttpOnly / SameSite flags with warnings.
 - **Passive scan:** findings with severity and CWE for cleartext transport, missing HSTS/CSP, clickjacking exposure, version banners, permissive CORS and cookie flags.
 - **Links, Scripts, Stylesheets, Images, Forms,** plus a collapsible list of response headers and meta tags.
 
-**Export (.md)** and **Export (.json)** save the analysis (and any Path Prober / Crawler results you ran) to a file.
+The **Export (.md)** and **Export (.json)** buttons save the analysis (including the SEO hints, suggested fixes and, in Markdown, the link check, plus any Path Prober / Crawler results you ran) to a file.
+
+**Similar tools:** MDN HTTP Observatory and securityheaders.com (header grading), Lighthouse (SEO and accessibility audits). Those are server-side or full-browser tools; this one runs a lighter version of the same ideas in your browser against a single response.
 
 ### Cookies and redirects need the proxy
 Browsers hide \`Set-Cookie\` from \`fetch\`, and cross-origin pages expose few headers without CORS. The bundled local proxy (**Use localhost** in the proxy bar) forwards the real \`Set-Cookie\` values and the redirect chain. Without it the Cookies section says cookie flags cannot be seen, and the passive scan notes that few headers were readable. The grade then reflects only the headers the browser could read, so treat it as incomplete.
