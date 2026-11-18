@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Radio, Upload, Download, ZoomIn, ZoomOut, Info, AlertTriangle, Activity } from 'lucide-react';
+import { Upload, Download, ZoomIn, ZoomOut, Info, AlertTriangle, Activity, Copy } from 'lucide-react';
 import {
   analyzeIqBuffer, exportableAnalysis, formatFromFilename, parseRtl433Filename,
   ISM_FORMATS, ISM_MAX_BYTES, ISM_DEVICES,
+  sliceRows,
 } from '../../utils/ismDecoder.js';
+import {
+  flexSpec, segmentsToCsv, groupRows, rowDiff, checksumHints, cursorMeasure, bitsToBinary,
+} from '../../utils/ismDecoder/rowTools.js';
 
 /**
  * 433 / 868 / 915 MHz ISM decoder for offline IQ recordings.
@@ -21,7 +25,7 @@ const btn = 'px-2.5 py-1 text-xs rounded border border-slate-700 bg-slate-800 te
 const fmtHz = (hz) => (hz ? `${(hz / 1e6).toFixed(3)} MHz` : 'unknown');
 const fmtRate = (r) => (r >= 1e6 ? `${(r / 1e6).toFixed(3)} MS/s` : `${(r / 1e3).toFixed(1)} kS/s`);
 
-function drawWave(canvas, r, start, spp) {
+function drawWave(canvas, r, start, spp, cursors = []) {
   const ctx = canvas.getContext('2d');
   const W = canvas.width;
   const H = canvas.height;
@@ -95,15 +99,28 @@ function drawWave(canvas, r, start, spp) {
     const w = Math.max(1, (seg.markUs * r.sampleRate) / 1e6 / spp);
     ctx.fillRect(x, 3, w, 5);
   }
+
+  // measurement cursors
+  cursors.forEach((cs, i) => {
+    const x = (cs - start) / spp;
+    if (x < 0 || x > W) return;
+    ctx.strokeStyle = i === 0 ? '#f472b6' : '#a78bfa';
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x) + 0.5, 0);
+    ctx.lineTo(Math.round(x) + 0.5, H);
+    ctx.stroke();
+  });
 }
 
 function Waveform({ result }) {
   const canvasRef = useRef(null);
   const [spp, setSpp] = useState(1);
   const [start, setStart] = useState(0);
+  const [cursors, setCursors] = useState([]);
 
   useEffect(() => {
     if (!result) return;
+    setCursors([]);
     setSpp(Math.max(1, Math.floor(result.samples / (WAVE_W * 0.9))));
     setStart(0);
   }, [result]);
@@ -114,21 +131,36 @@ function Waveform({ result }) {
   useEffect(() => {
     const c = canvasRef.current;
     if (!c || !result) return;
-    drawWave(c, result, Math.min(start, maxStart), spp);
-  }, [result, start, spp, maxStart]);
+    drawWave(c, result, Math.min(start, maxStart), spp, cursors);
+  }, [result, start, spp, maxStart, cursors]);
 
   if (!result) return null;
+  const onCanvasClick = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!rect.width) return;
+    const px = ((e.clientX - rect.left) / rect.width) * WAVE_W;
+    const sample = Math.max(0, Math.min(N - 1, Math.round(Math.min(start, maxStart) + px * spp)));
+    setCursors((c) => (c.length === 1 ? [c[0], sample] : [sample]));
+  };
+  const meas = cursors.length === 2 ? cursorMeasure(cursors[0], cursors[1], result.sampleRate) : null;
   const zoomBy = (f) => setSpp((v) => Math.max(1, Math.min(Math.max(1, Math.floor(N / WAVE_W)), Math.round(v * f))));
   return (
     <div className="bg-slate-950 border border-slate-800 rounded p-2">
       <div className="flex items-center gap-2 flex-wrap mb-1">
-        <span className="text-[11px] text-slate-400">{result.mode === 'fsk' ? 'FM discriminator' : 'Envelope'} (cyan), adaptive threshold (amber), pulses (green)</span>
+        <span className="text-[11px] text-slate-400">{result.mode === 'fsk' ? 'FM discriminator' : 'Envelope'} (cyan), threshold (amber), pulses (green). Click the plot to place cursors A and B.</span>
         <span className="ml-auto flex items-center gap-1">
-          <button className={btn} onClick={() => zoomBy(0.5)} aria-label="Zoom in"><ZoomIn size={11} /></button>
-          <button className={btn} onClick={() => zoomBy(2)} aria-label="Zoom out"><ZoomOut size={11} /></button>
+          {cursors.length > 0 && <button className={btn} onClick={() => setCursors([])} title="Clear cursors">Clear</button>}
+          <button className={btn} onClick={() => zoomBy(0.5)} aria-label="Zoom in" title="Zoom in"><ZoomIn size={11} /></button>
+          <button className={btn} onClick={() => zoomBy(2)} aria-label="Zoom out" title="Zoom out"><ZoomOut size={11} /></button>
         </span>
       </div>
-      <canvas ref={canvasRef} width={WAVE_W} height={WAVE_H} className="w-full h-auto rounded" aria-label="Signal waveform" />
+      <canvas ref={canvasRef} width={WAVE_W} height={WAVE_H} className="w-full h-auto rounded cursor-crosshair" aria-label="Signal waveform" onClick={onCanvasClick} />
+      {cursors.length > 0 && (
+        <div className="text-[11px] font-mono text-slate-300" data-testid="cursor-readout">
+          A {(cursors[0] * 1e3 / result.sampleRate).toFixed(3)} ms
+          {meas && ` | B ${(cursors[1] * 1e3 / result.sampleRate).toFixed(3)} ms | delta ${meas.us.toFixed(1)} us${meas.hz ? ` (${meas.hz.toFixed(1)} Hz)` : ''}`}
+        </div>
+      )}
       <input
         type="range"
         min={0}
@@ -202,6 +234,84 @@ function DecodeCard({ d }) {
   );
 }
 
+function CustomSlicer({ result }) {
+  const g = result.analysis.guess;
+  const initMod = g.modulation === 'fsk-pcm' ? 'nrz' : (g.modulation === 'unknown' ? 'pwm' : g.modulation);
+  const [modulation, setModulation] = useState(initMod);
+  const [threshold, setThreshold] = useState(String(g.thresholdUs || ''));
+  const [halfBit, setHalfBit] = useState(String(Math.round(g.halfBitUs || 0) || ''));
+  const [reset, setReset] = useState(String(g.resetUs || 3000));
+  const [invert, setInvert] = useState(false);
+  const [view, setView] = useState('hex');
+
+  const rows = useMemo(() => sliceRows(result.segments, {
+    modulation,
+    thresholdUs: Number(threshold) || 0,
+    halfBitUs: Number(halfBit) || 0,
+    invert,
+    resetUs: Number(reset) || 3000,
+  }), [result, modulation, threshold, halfBit, reset, invert]);
+  const groups = useMemo(() => groupRows(rows), [rows]);
+  const diff = useMemo(() => rowDiff(rows), [rows]);
+  const needsThr = modulation === 'pwm' || modulation === 'ppm';
+
+  return (
+    <section className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2">
+      <h3 className="text-xs font-semibold text-slate-300">Manual slicer ({rows.length} row(s), {groups.length} distinct)</h3>
+      <div className="flex items-center gap-2 flex-wrap text-xs">
+        <select className={inputCls} value={modulation} onChange={(e) => setModulation(e.target.value)} aria-label="Slicer modulation">
+          <option value="pwm">PWM (mark width)</option>
+          <option value="ppm">PPM (gap width)</option>
+          <option value="manchester">Manchester</option>
+          <option value="nrz">NRZ / PCM</option>
+        </select>
+        {needsThr ? (
+          <label className="flex items-center gap-1 text-slate-500">threshold us
+            <input className={`${inputCls} w-16`} type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)} aria-label="Slicer threshold in microseconds" />
+          </label>
+        ) : (
+          <label className="flex items-center gap-1 text-slate-500">half-bit us
+            <input className={`${inputCls} w-16`} type="number" value={halfBit} onChange={(e) => setHalfBit(e.target.value)} aria-label="Slicer half-bit in microseconds" />
+          </label>
+        )}
+        <label className="flex items-center gap-1 text-slate-500">reset us
+          <input className={`${inputCls} w-16`} type="number" value={reset} onChange={(e) => setReset(e.target.value)} aria-label="Slicer reset gap in microseconds" />
+        </label>
+        <label className="flex items-center gap-1 text-slate-500">
+          <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} /> invert
+        </label>
+        <select className={inputCls} value={view} onChange={(e) => setView(e.target.value)} aria-label="Row display">
+          <option value="hex">hex</option>
+          <option value="bin">binary</option>
+        </select>
+      </div>
+      {diff && (
+        <div className="text-[11px] font-mono break-all">
+          <span className="text-slate-500">bit diff over {diff.length} bits, {diff.varying} vary: </span>
+          <span className="text-slate-300">{diff.mask}</span>
+        </div>
+      )}
+      {groups.length === 0 && <div className="text-[11px] text-slate-600">No rows of 8 bits or more with these settings.</div>}
+      <div className="max-h-56 overflow-auto font-mono text-[11px] space-y-1">
+        {groups.slice(0, 60).map((r, i) => {
+          const hints = checksumHints(r.bits);
+          return (
+            <div key={i} className="border-b border-slate-900 last:border-0 pb-0.5">
+              <div className="flex gap-2">
+                <span className="text-slate-500 w-16 text-right shrink-0">{(r.firstUs / 1000).toFixed(2)} ms</span>
+                <span className="text-slate-500 w-10 shrink-0">{r.bits.length}b</span>
+                <span className="text-slate-500 w-8 shrink-0">x{r.count}</span>
+                <span className="text-gray-200 break-all">{view === 'bin' ? bitsToBinary(r.bits) : r.hex}</span>
+              </div>
+              {hints.length > 0 && <div className="text-amber-300/80">checksum hint: {hints.join('; ')} (may be chance)</div>}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default function IsmDecoderWorkbench({ onLogMessage }) {
   const [file, setFile] = useState(null);
   const [format, setFormat] = useState('cu8');
@@ -269,7 +379,21 @@ export default function IsmDecoderWorkbench({ onLogMessage }) {
     URL.revokeObjectURL(a.href);
   };
 
+  const downloadText = (text, name, type) => {
+    const blob = new Blob([text], { type });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  const baseName = file && file.name ? file.name.replace(/\.[^.]+$/, '') : 'ism';
+  const exportCsv = () => result && downloadText(segmentsToCsv(result.segments), `${baseName}-pulses.csv`, 'text/csv');
   const guess = result ? result.analysis.guess : null;
+  const flex = result ? flexSpec(guess, result.segments, 'ism-capture') : null;
+  const copyFlex = async () => {
+    try { await navigator.clipboard.writeText(`rtl_433 -r ${file ? file.name : 'capture.cu8'} ${flex}`); } catch { /* clipboard blocked */ }
+  };
   const scale = useMemo(() => {
     if (!result) return 1;
     let m = 0;
@@ -283,14 +407,8 @@ export default function IsmDecoderWorkbench({ onLogMessage }) {
   const waveResult = useMemo(() => (result ? { ...result, scale } : null), [result, scale]);
 
   return (
-    <div className="flex flex-col gap-3 p-3 text-gray-200 text-sm font-sans">
-      <div className="flex items-center gap-2 flex-wrap">
-        <Radio size={16} className="text-cyan-400" />
-        <span className="font-semibold">ISM 433 / 868 / 915 MHz decoder</span>
-        <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700">RF / offline IQ</span>
-      </div>
-
-      <div className="bg-slate-950 border border-slate-800 rounded p-3 space-y-2">
+    <div className="flex flex-col gap-2 text-gray-200 text-xs font-sans">
+      <div className="bg-slate-950 border border-slate-800 rounded p-2 space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
           <label className={`${btn} cursor-pointer`}>
             <Upload size={12} /> Load IQ recording
@@ -327,13 +445,13 @@ export default function IsmDecoderWorkbench({ onLogMessage }) {
             <Activity size={12} /> {busy ? 'Decoding...' : 'Analyze'}
           </button>
         </div>
-        <div className="text-[11px] text-slate-500 flex items-start gap-1">
-          <Info size={12} className="mt-0.5 shrink-0" />
-          <span>
+        <details className="text-[11px] text-slate-500">
+          <summary className="cursor-pointer flex items-center gap-1"><Info size={12} /> File names and formats</summary>
+          <div className="mt-1">
             Recordings from rtl_433 are named like <span className="font-mono">g001_433.92M_250k.cu8</span>; the frequency and rate are read from the name.
             Formats: .cu8 (RTL-SDR), .cs8 (HackRF), .cs16, .complex16u, .cf32. Files up to {ISM_MAX_BYTES / 1048576} MiB. Analysis runs on this tab.
-          </span>
-        </div>
+          </div>
+        </details>
       </div>
 
       {error && (
@@ -343,7 +461,7 @@ export default function IsmDecoderWorkbench({ onLogMessage }) {
       )}
 
       {!result && !error && (
-        <div className="p-6 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded">
+        <div className="p-4 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded">
           Load an IQ recording to analyze. Nothing is shown until a file is loaded and analyzed.
         </div>
       )}
@@ -355,13 +473,16 @@ export default function IsmDecoderWorkbench({ onLogMessage }) {
             <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700">{(result.durationS * 1000).toFixed(1)} ms</span>
             <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700">{result.decodes.length} device decode(s)</span>
             {result.truncated && <span className="px-2 py-0.5 rounded bg-amber-900/30 border border-amber-800 text-amber-300">pulse list capped; analysis uses the first pulses</span>}
-            <button className={`${btn} ml-auto`} onClick={exportJson}><Download size={12} /> Export JSON</button>
+            <span className="ml-auto flex items-center gap-1">
+              <button className={btn} onClick={exportCsv} title="Pulse list as CSV"><Download size={12} /> CSV</button>
+              <button className={btn} onClick={exportJson} title="Full analysis as JSON"><Download size={12} /> JSON</button>
+            </span>
           </div>
 
           <Waveform result={waveResult} />
 
-          <div className="grid md:grid-cols-2 gap-3">
-            <section className="bg-slate-950 border border-slate-800 rounded p-3">
+          <div className="grid @lg:grid-cols-2 gap-2">
+            <section className="bg-slate-950 border border-slate-800 rounded p-2">
               <h3 className="text-xs font-semibold text-slate-300 mb-2">Pulse analyzer (rtl_433 -A style)</h3>
               <div className="text-xs mb-2">
                 <span className="text-slate-500">Guess: </span>
@@ -373,14 +494,23 @@ export default function IsmDecoderWorkbench({ onLogMessage }) {
                 <span className="text-slate-500">half-bit clock</span><span>{guess.halfBitUs ? `${Math.round(guess.halfBitUs)} us` : '-'}</span>
                 <span className="text-slate-500">reset (estimate)</span><span>{guess.resetUs ? `${guess.resetUs} us` : '-'}</span>
               </div>
-              <div className="grid grid-cols-1 gap-3">
+              {flex && (
+                <div className="mb-2 text-[11px]">
+                  <div className="flex items-center gap-1 text-slate-500">
+                    rtl_433 flex spec (export for the rtl_433 CLI, a starting point)
+                    <button className={`${btn} ml-auto`} onClick={copyFlex} title="Copy an rtl_433 command"><Copy size={11} /></button>
+                  </div>
+                  <code className="block font-mono text-cyan-200 break-all" data-testid="flex-spec">{flex}</code>
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-2">
                 <ClusterBars title="Mark (pulse) widths" clusters={result.analysis.clusters.marks} />
                 <ClusterBars title="Gap widths" clusters={result.analysis.clusters.gaps} />
                 <ClusterBars title="Period (mark + gap)" clusters={result.analysis.clusters.periods} />
               </div>
             </section>
 
-            <section className="bg-slate-950 border border-slate-800 rounded p-3">
+            <section className="bg-slate-950 border border-slate-800 rounded p-2">
               <h3 className="text-xs font-semibold text-slate-300 mb-2">Bit rows (hex, {result.analyzerRowCount} row(s), first {result.analyzerRows.length} shown)</h3>
               {result.analyzerRows.length === 0 && <div className="text-[11px] text-slate-600">No rows: the modulation could not be guessed for this recording.</div>}
               <div className="max-h-72 overflow-auto font-mono text-[11px] space-y-0.5">
@@ -395,7 +525,9 @@ export default function IsmDecoderWorkbench({ onLogMessage }) {
             </section>
           </div>
 
-          <section className="bg-slate-950 border border-slate-800 rounded p-3">
+          <CustomSlicer key={`${result.samples}-${result.pulseCount}-${result.sens}-${result.mode}`} result={result} />
+
+          <section className="bg-slate-950 border border-slate-800 rounded p-2">
             <h3 className="text-xs font-semibold text-slate-300 mb-2">Decoded devices</h3>
             {result.decodes.length === 0 && (
               <div className="text-[11px] text-slate-500">
@@ -403,19 +535,20 @@ export default function IsmDecoderWorkbench({ onLogMessage }) {
                 Try the threshold slider or check the sample rate and format.
               </div>
             )}
-            <div className="grid md:grid-cols-2 gap-2">
+            <div className="grid @lg:grid-cols-2 gap-2">
               {result.decodes.map((d, i) => <DecodeCard key={`${d.deviceId}-${i}`} d={d} />)}
             </div>
           </section>
 
-          <section className="bg-slate-950 border border-slate-800 rounded p-3 text-[11px] text-slate-400 space-y-1">
-            <div className="flex items-center gap-1 text-slate-300 text-xs font-semibold"><AlertTriangle size={12} /> Scope and limits</div>
+          <details className="bg-slate-950 border border-slate-800 rounded p-2 text-[11px] text-slate-400 space-y-1">
+            <summary className="cursor-pointer flex items-center gap-1 text-slate-300 text-xs font-semibold"><AlertTriangle size={12} /> Scope and limits</summary>
             <div>Decoders: {ISM_DEVICES.length} rtl_433-derived layouts. Acurite 592TXR/Tower, Ambient F007TH, Fine Offset WH2, Nexus/Rubicson temperature, Prologue, and a generic EV1527/PT2262 24-bit remote.</div>
             <div>Not implemented: LaCrosse TX141x, Oregon Scientific v2.1, Rubicson/EMOS CRC variants, and FSK PCM frame decoders. FSK mode shows the discriminator and bit runs only.</div>
             <div>Nexus, Prologue and EV1527 have no checksum in the protocol; their results are marked as structural or unverified.</div>
             <div>Decoders were tested on synthesized frames built from the same layouts, not on captures from real sensors. Polarity or timing may need adjustment for a specific recording.</div>
             <div>The pulse analyzer is an estimate. Check the histogram and the rows before trusting a guessed modulation.</div>
-          </section>
+            <div>The manual slicer re-slices the detected pulses only; it does not re-run demodulation. Checksum hints are guesses on short rows. Receive and decode only; nothing is transmitted.</div>
+          </details>
         </>
       )}
     </div>
