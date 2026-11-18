@@ -51,6 +51,8 @@ After **Analyze**, the waveform shows:
 
 Use the zoom buttons and the position slider to move around. The status line shows the time window and samples per pixel.
 
+**Cursors**: click the plot to place cursor A (pink), click again for cursor B (violet). The readout shows both times and the interval in microseconds, plus the matching frequency (1 / interval), which is handy for measuring a pulse width or a bit period. A third click starts over; **Clear** removes them.
+
 ## Pulse analyzer
 
 The analyzer follows the idea of rtl_433's \`-A\` option:
@@ -64,7 +66,21 @@ The analyzer follows the idea of rtl_433's \`-A\` option:
 - **Limits**: the short and long widths, the slicing threshold, the half-bit clock and an estimate of the packet reset gap.
 - **Bit rows** in hex, one per packet, sliced with the guessed modulation.
 
+**rtl_433 flex spec**: for PWM, PPM, Manchester and FSK guesses the analyzer shows a \`-X "n=...,m=...,s=...,l=...,r=..."\` string built from the measured widths. This is an export for the rtl_433 command line, not something this app runs. The copy button puts a full \`rtl_433 -r <file> -X ...\` command on the clipboard. Check it against the rtl_433 documentation before relying on it.
+
 Treat the guess as a starting point. Look at the histogram: a clean PWM or PPM signal has two or three tight clusters.
+
+## Manual slicer
+
+Below the analyzer rows, the **Manual slicer** lets you override the guess and slice the same detected pulses yourself, in the style of Universal Radio Hacker:
+
+- choose PWM, PPM, Manchester or NRZ / PCM,
+- set the threshold (PWM, PPM) or the half-bit time (Manchester, NRZ) in microseconds, and the packet reset gap,
+- tick **invert** to flip the bits, and switch the display between hex and binary.
+
+Identical rows are grouped with a repeat count (\`x3\`). When there are two or more rows, a **bit diff** line compares them from bit 0: \`0\` or \`1\` where all rows agree, \`x\` where they differ, which points at counters, sensor values and checksums. For rows of at least three bytes, the slicer also tests whether the last byte is a byte sum, XOR or CRC-8 (a few common polynomials, init 0x00 or 0xFF) of the bytes before it. A hint on a short row can be chance (about 1 in 256 per test), so confirm it on several different rows.
+
+The slicer works on the pulses already found. To change the threshold position or minimum pulse, press **Analyze** again.
 
 ## Device decoders
 
@@ -85,7 +101,9 @@ Nexus, Prologue and EV1527 have no checksum in the protocol, so their results ar
 
 ## Export
 
-**Export JSON** saves the analyzer output, the bit rows, every decoded device with its checks, and the pulse list (start time, mark and gap in microseconds, up to the first 50,000 pulses).
+**CSV** saves the pulse list (index, start, mark and gap in microseconds). **JSON** saves the analyzer output, the bit rows, every decoded device with its checks, and the pulse list (start time, mark and gap in microseconds, up to the first 50,000 pulses).
+
+The notes on file names and formats, and the scope and limits box, are collapsed by default; click them to expand.
 
 ## What it does not do
 
@@ -102,6 +120,10 @@ Nexus, Prologue and EV1527 have no checksum in the protocol, so their results ar
 - **Garbage bit rows**: the rate is probably wrong. A 2 MS/s capture loaded as 250 kS/s stretches every pulse by eight times.
 - **Very large file error**: the 64 MiB limit is there to keep the tab responsive. Capture a shorter window.
 - **Firefox or Safari**: the analysis is plain JavaScript and should work there. Recording the signal is a separate step with SDR software.
+
+## Similar tools
+
+rtl_433 (pulse analyzer \`-A\`, flex decoder \`-X\`, over 200 device decoders, live SDR input), Universal Radio Hacker (manual demodulation and protocol-field analysis) and inspectrum (cursors and symbol extraction on a spectrogram). This tool covers a small part of each, offline in the browser: it has no live radio input, no spectrogram and far fewer device decoders than rtl_433.
 
 ## Related tools in this app
 
