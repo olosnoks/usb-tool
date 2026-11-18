@@ -281,7 +281,7 @@ The summary shows which route answered ("site relay", "proxy" or "direct"). On a
     content: `
 # IP / CIDR Calculator
 
-A subnet calculator for **IPv4 and IPv6**. It runs entirely in the browser with no network access. Use the tabs **Calculate**, **Split**, **VLSM**, **Aggregate** and **Contains / overlap**.
+A subnet calculator for **IPv4 and IPv6**. It runs entirely in the browser with no network access. Use the tabs **Calculate**, **Split**, **VLSM**, **Aggregate**, **Contains / overlap**, **Exclude** and **Prefix table**.
 
 ---
 
@@ -292,6 +292,8 @@ Type an address with a prefix (\`192.168.1.10/24\`, \`10.0.0.1/255.255.255.0\`, 
 - A class/scope label (for example private ranges are highlighted).
 - The **reverse DNS name** for the address (\`in-addr.arpa\` / \`ip6.arpa\`).
 - A binary view with the network bits highlighted.
+- For IPv4, a Cisco-style ACL entry (\`network wildcard\`).
+- A collapsible **Other forms** section for the address: decimal integer, hex, IPv4-mapped IPv6 and binary (IPv4); compressed and expanded form (IPv6).
 
 Each row has a copy button; **Copy all** and **Export (.md)** take the whole report.
 
@@ -306,6 +308,15 @@ Paste one CIDR per line to merge adjacent and overlapping networks into the smal
 
 ### Contains / overlap
 Give network A and a network or address B. The result is one of: identical, A contains B, B contains A, partial overlap, or no shared addresses.
+
+### Exclude
+Enter a parent network and a network to remove from it. The result is the minimal list of CIDR blocks that remain. If the two do not overlap, the parent is returned unchanged. Both must be the same IP version.
+
+### Prefix table
+A reference table. IPv4 lists every prefix /0 to /32 with netmask, wildcard, total and usable addresses. IPv6 lists every fourth prefix (/0, /4 ... /128) with the address count.
+
+### Similar tools
+Compared against \`ipcalc\`, \`sipcalc\`, jodies ipcalc and web subnet calculators.
 
 ### Notes
 IPv6 results have no broadcast or netmask rows. The calculator does arithmetic only; it does not look anything up or check whether addresses are in use.
