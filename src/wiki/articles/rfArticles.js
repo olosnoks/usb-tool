@@ -1264,6 +1264,16 @@ The workbench includes a built-in firmware flasher for Nordic Semiconductor nRF5
 
 ---
 
+### 3b. Browsing, Filtering & Reading
+
+- **Device name filter:** under **Connection options**, type a name prefix to make the browser chooser list only devices whose advertised name starts with it. Leave it empty to list every device.
+- **Tree filter:** once connected, the filter box matches service and characteristic names, UUIDs and short ids (\`0x2a19\` or \`2a19\`). The capability menu keeps only readable, writable, or notify/indicate characteristics. Services with no matching characteristics are hidden, and a count shows how many match.
+- **Collapse:** each service header has a chevron, and **Collapse all / Expand all** acts on the services currently shown.
+- **Read this value:** the refresh button on a readable characteristic reads just that one value, without re-reading the whole tree. **Copy hex value** puts the last value on the clipboard.
+- **Layout:** the long explanatory text is folded into small collapsible sections so the window stays compact.
+
+---
+
 ### 4. Exports, Advertisements & Cleanup
 
 - **GATT export:** **Export JSON** and **Export Markdown** save the discovered service tree: UUIDs, names, properties, and the last value read for each characteristic and descriptor (hex, decoded text, byte length, timestamp, or the read error). Live handles are stripped, so the file is plain data.
@@ -1279,7 +1289,12 @@ The workbench includes a built-in firmware flasher for Nordic Semiconductor nRF5
 - **DFU Engine:** [\`src/utils/nordicDfu.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/nordicDfu.js) — Nordic Secure DFU protocol implementation and packet assembler.
 - **Exporters:** [\`src/utils/bleExport.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/bleExport.js) — GATT JSON/Markdown and notification CSV (pure functions).
 - **Workbench:** [\`src/components/tools/BleExplorer.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/tools/BleExplorer.jsx) — interactive GATT tree browser, live chart visualizer, and hexadecimal console.
-- **Tests:** [\`tests/bleDriver.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/bleDriver.test.js) and [\`tests/nordicDfu.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/nordicDfu.test.js).
+- **View helpers:** [\`src/utils/bleView.js\`](https://github.com/olosnoks/usb-tool/blob/main/src/utils/bleView.js) — chooser options and tree filtering (pure functions).
+- **Tests:** [\`tests/bleView.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/bleView.test.js), [\`tests/bleDriver.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/bleDriver.test.js) and [\`tests/nordicDfu.test.js\`](https://github.com/olosnoks/usb-tool/blob/main/tests/nordicDfu.test.js).
+
+### Similar tools
+
+nRF Connect for Mobile (Nordic) and LightBlue (Punch Through) are the closest equivalents; Python's Bleak is the scripting option. Unlike the mobile apps, this tool cannot act as a peripheral or GATT server, because Web Bluetooth only supports the client role.
 `
   }
 ];

@@ -18,12 +18,15 @@ import {
   TerminalSquare,
   KeyRound,
   Download,
-  ChevronDown
+  ChevronDown,
+  Search,
+  Copy
 } from 'lucide-react';
 import {
   buildGattTree,
   readAllValues,
   isPairingError,
+  readCharacteristic,
   parseCharacteristicValue,
   bytesToHex,
   canonicalUuid,
@@ -45,6 +48,7 @@ import {
   releaseBleSession,
   NOTIFY_HISTORY_CAP
 } from '../../utils/bleExport';
+import { buildRequestOptions, filterGattTree, countCharacteristics } from '../../utils/bleView';
 import pkg from '../../../package.json';
 
 function downloadText(text, filename, mime) {
@@ -119,6 +123,11 @@ export default function BleExplorer() {
   // is how many devices react to an unencrypted read of a protected value).
   const [pairingHint, setPairingHint] = useState(null);
   const [writeTarget, setWriteTarget] = useState(null);
+  const [nameFilter, setNameFilter] = useState('');
+  const [treeQuery, setTreeQuery] = useState('');
+  const [treeFlag, setTreeFlag] = useState('');
+  const [collapsed, setCollapsed] = useState({}); // service uuid -> true
+  const [readingOne, setReadingOne] = useState(null); // characteristic uuid being read
   const lastDeviceRef = useRef(null);
   const readingRef = useRef(false);
   const { connectBle, isConnected: serialConnected, transportType: serialTransport } = useSerial();
@@ -215,10 +224,9 @@ export default function BleExplorer() {
       // acceptAllDevices lets any peripheral appear; optionalServices must be
       // declared up-front or GATT access to those services is blocked.
       // The browser silently drops blocklisted services (e.g. HID) from this list.
-      const dev = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: buildOptionalServices(customServices)
-      });
+      const dev = await navigator.bluetooth.requestDevice(
+        buildRequestOptions({ namePrefix: nameFilter, optionalServices: buildOptionalServices(customServices) })
+      );
       lastDeviceRef.current = dev;
       setPairingHint(null);
       setValues({});
@@ -338,6 +346,33 @@ export default function BleExplorer() {
     }
   };
 
+  // Read one characteristic on demand (no need to re-read the whole tree).
+  const handleReadOne = async (ch) => {
+    if (readingOne || readingRef.current) return;
+    setReadingOne(ch.uuid);
+    try {
+      const v = await readCharacteristic(ch._ref);
+      setValues((prev) => ({ ...prev, [ch.uuid]: { ...v, ts: Date.now(), notifying: prev[ch.uuid]?.notifying } }));
+      addLog(`Read ${ch.name}: ${v.hex || '(empty)'}`, 'ok');
+    } catch (err) {
+      setValues((prev) => ({ ...prev, [ch.uuid]: { error: err.message || String(err), ts: Date.now(), notifying: prev[ch.uuid]?.notifying } }));
+      addLog(`Read ${ch.name} failed: ${err.message}`, 'err');
+    } finally {
+      setReadingOne(null);
+    }
+  };
+
+  const handleCopyHex = async (ch) => {
+    const hex = values[ch.uuid]?.hex;
+    if (!hex) return;
+    try {
+      await navigator.clipboard.writeText(hex);
+      addLog(`Copied ${ch.name} value (${hex.split(' ').length} byte(s)) to the clipboard.`, 'ok');
+    } catch {
+      addLog('Clipboard access was blocked by the browser.', 'err');
+    }
+  };
+
   // Writes go through the inline composer (formats, preview, history).
   const handleWrite = (ch) => setWriteTarget(ch);
 
@@ -443,45 +478,38 @@ export default function BleExplorer() {
     downloadText(notificationsToCsv(historyRef.current), `ble_notifications_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`, 'text/csv');
   };
 
-  const totalChars = tree.reduce((a, s) => a + s.characteristics.length, 0);
+  const totalChars = countCharacteristics(tree);
+  const shownTree = filterGattTree(tree, { query: treeQuery, flag: treeFlag });
+  const shownChars = countCharacteristics(shownTree);
+  const filtering = !!(treeQuery.trim() || treeFlag);
   const totalDescs = tree.reduce((a, s) => a + s.characteristics.reduce((b, c) => b + (c.descriptors?.length || 0), 0), 0);
 
   // --- Render -------------------------------------------------------------
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 space-y-4 text-slate-200">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-blue-950/60 border border-blue-500/30">
-            <Bluetooth className="w-6 h-6 text-blue-400" />
-          </div>
-          <div>
-            <p className="text-xs text-slate-400">
-              Web Bluetooth GATT client — every service, characteristic, descriptor and value on the device
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => handleExportGatt('json')}
-            disabled={tree.length === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-xs text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Download className="w-3.5 h-3.5" /> Export JSON
-          </button>
-          <button
-            onClick={() => handleExportGatt('markdown')}
-            disabled={tree.length === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-xs text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Download className="w-3.5 h-3.5" /> Export Markdown
-          </button>
+    <div className="w-full space-y-2 text-slate-200">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <StatusBadge
           status={status}
           label={status === 'online' ? 'GATT' : status === 'connecting' ? 'LINK' : 'IDLE'}
           value={status === 'online' ? 'Connected' : 'Offline'}
           pulse={status === 'connecting'}
         />
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => handleExportGatt('json')}
+            disabled={tree.length === 0}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-[11px] text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3 h-3" /> JSON
+          </button>
+          <button
+            onClick={() => handleExportGatt('markdown')}
+            disabled={tree.length === 0}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-[11px] text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3 h-3" /> Markdown
+          </button>
         </div>
       </div>
 
@@ -495,22 +523,26 @@ export default function BleExplorer() {
         </div>
       )}
 
-      <div className="flex items-start gap-2 p-3 rounded-lg bg-slate-900/60 border border-slate-700/40 text-xs text-slate-400">
-        <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-400" />
-        Web Bluetooth is a GATT <em>client</em>: it connects only to a device you pick in the
-        chooser and cannot passively sniff advertisements. For promiscuous BLE sniffing you need
-        external hardware (e.g. an nRF/Ubertooth over serial).
-      </div>
+      <details className="rounded-lg bg-slate-900/60 border border-slate-700/40 text-[11px] text-slate-400">
+        <summary className="flex items-center gap-1.5 px-2 py-1.5 cursor-pointer select-none">
+          <Info className="w-3.5 h-3.5 text-blue-400" /> About Web Bluetooth limits
+        </summary>
+        <p className="px-2 pb-2">
+          Web Bluetooth is a GATT <em>client</em>: it connects only to a device you pick in the
+          chooser and cannot passively sniff advertisements. For promiscuous BLE sniffing you need
+          external hardware (e.g. an nRF/Ubertooth over serial).
+        </p>
+      </details>
 
       {/* Connection + device summary */}
-      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-3">
+      <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-2">
         <p className="text-xs text-slate-400">{statusMsg}</p>
         {pairingHint && <PairingHelp reason={pairingHint} deviceName={lastDeviceRef.current?.name} onDismiss={() => setPairingHint(null)} />}
         <div className="flex flex-wrap items-center gap-2">
           {status !== 'online' && lastDeviceRef.current && status !== 'connecting' && (
             <button
               onClick={handleReconnect}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-slate-200 text-sm font-semibold transition"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-slate-200 text-xs font-semibold transition"
             >
               <RefreshCw className="w-4 h-4" />
               Reconnect {lastDeviceRef.current.name || 'device'}
@@ -520,7 +552,7 @@ export default function BleExplorer() {
             <button
               onClick={handleConnect}
               disabled={!bleAvailable || status === 'connecting'}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600/80 hover:bg-blue-500 disabled:opacity-40 text-white text-sm font-semibold transition"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-semibold transition"
             >
               {status === 'connecting' ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -533,7 +565,7 @@ export default function BleExplorer() {
             <>
               <button
                 onClick={handleDisconnect}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rose-900/60 hover:bg-rose-800 border border-rose-500/30 text-rose-200 text-sm font-semibold transition"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-800 border border-rose-500/30 text-rose-200 text-xs font-semibold transition"
               >
                 <Power className="w-4 h-4" />
                 Disconnect
@@ -541,7 +573,7 @@ export default function BleExplorer() {
               <button
                 onClick={() => readEverything(tree)}
                 disabled={reading}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-slate-200 text-sm font-semibold transition disabled:opacity-50"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-slate-200 text-xs font-semibold transition disabled:opacity-50"
               >
                 <RefreshCw className={`w-4 h-4 ${reading ? 'animate-spin' : ''}`} />
                 {reading ? 'Reading…' : 'Re-read all'}
@@ -550,6 +582,21 @@ export default function BleExplorer() {
             </>
           )}
         </div>
+        <details className="text-xs">
+          <summary className="cursor-pointer select-none text-slate-400 text-[11px]">
+            Connection options{customServices.length || nameFilter ? ` (${customServices.length} custom service(s)${nameFilter ? ', name filter' : ''})` : ''}
+          </summary>
+          <div className="pt-1.5 space-y-1.5">
+            <label className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+              Only list devices named
+              <input
+                value={nameFilter}
+                onChange={(e) => setNameFilter(e.target.value)}
+                aria-label="Device name prefix filter"
+                placeholder="name prefix (empty = all devices)"
+                className="flex-1 min-w-[10rem] px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200 placeholder:text-slate-600"
+              />
+            </label>
         <div className="space-y-1.5">
           <div className="text-[11px] text-slate-500">
             All Bluetooth SIG services and common vendor services (Nordic UART, HM-10, Microchip, Flipper, DFU)
@@ -561,7 +608,7 @@ export default function BleExplorer() {
               onChange={(e) => setCustomInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleAddCustom(); }}
               placeholder="ffe0 or 0000aaaa-0000-1000-8000-00805f9b34fb"
-              className="flex-1 min-w-[16rem] px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200 placeholder:text-slate-600"
+              className="flex-1 min-w-[10rem] px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200 placeholder:text-slate-600"
             />
             <button
               onClick={handleAddCustom}
@@ -583,8 +630,10 @@ export default function BleExplorer() {
             </div>
           )}
         </div>
+          </div>
+        </details>
         {device && (
-          <div className="grid grid-cols-2 @sm:grid-cols-5 gap-2 text-xs">
+          <div className="grid grid-cols-2 @md:grid-cols-5 gap-1.5 text-xs">
             <Field label="Name" value={device.name || '(no name)'} />
             <Field label="Device ID" value={device.id} mono />
             <Field label="Services" value={tree.length} />
@@ -670,12 +719,56 @@ export default function BleExplorer() {
         </div>
       )}
 
-      {/* GATT tree: everything, always expanded */}
-      {tree.map((service) => (
+      {tree.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="ble-tree-filter">
+          <label className="relative flex-1 min-w-[10rem]">
+            <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              value={treeQuery}
+              onChange={(e) => setTreeQuery(e.target.value)}
+              aria-label="Filter services and characteristics"
+              placeholder="Filter by name, UUID or 0x2a19"
+              className="w-full pl-6 pr-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200 placeholder:text-slate-600"
+            />
+          </label>
+          <select
+            value={treeFlag}
+            onChange={(e) => setTreeFlag(e.target.value)}
+            aria-label="Filter by capability"
+            className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-xs text-slate-200"
+          >
+            <option value="">All capabilities</option>
+            <option value="read">Readable</option>
+            <option value="write">Writable</option>
+            <option value="notify">Notify / indicate</option>
+          </select>
+          <button
+            onClick={() => setCollapsed(shownTree.every((sv) => collapsed[sv.uuid]) ? {} : Object.fromEntries(shownTree.map((sv) => [sv.uuid, true])))}
+            className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600/40 text-[11px] text-slate-200"
+          >
+            {shownTree.every((sv) => collapsed[sv.uuid]) ? 'Expand all' : 'Collapse all'}
+          </button>
+          {filtering && <span className="text-[11px] text-slate-500">{shownChars} of {totalChars} characteristics</span>}
+        </div>
+      )}
+      {tree.length > 0 && filtering && shownTree.length === 0 && (
+        <div className="text-xs text-slate-500 px-1">Nothing matches the filter.</div>
+      )}
+
+      {/* GATT tree */}
+      {shownTree.map((service) => (
         <div key={service.uuid} className="rounded-xl bg-slate-900/60 border border-slate-700/50">
-          <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-slate-800">
-            <Radio className="w-4 h-4 text-blue-400" />
-            <span className="text-sm font-semibold text-slate-100">{service.name}</span>
+          <div className="flex flex-wrap items-center gap-2 px-2.5 py-1.5 border-b border-slate-800">
+            <button
+              onClick={() => setCollapsed((c) => ({ ...c, [service.uuid]: !c[service.uuid] }))}
+              aria-expanded={!collapsed[service.uuid]}
+              title={collapsed[service.uuid] ? 'Expand service' : 'Collapse service'}
+              className="text-slate-400 hover:text-slate-200"
+            >
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${collapsed[service.uuid] ? '-rotate-90' : ''}`} />
+            </button>
+            <Radio className="w-3.5 h-3.5 text-blue-400" />
+            <span className="text-xs font-semibold text-slate-100">{service.name}</span>
             {service.short != null && <span className="text-[11px] font-mono text-blue-300">{hex16(service.short)}</span>}
             <span className="text-[11px] font-mono text-slate-500 break-all">{service.uuid}</span>
             <span className="ml-auto text-[11px] text-slate-500">
@@ -696,23 +789,33 @@ export default function BleExplorer() {
             )}
           </div>
 
-          <div className="p-3 space-y-2">
+          {!collapsed[service.uuid] && <div className="p-2 space-y-1.5">
             {service.characteristics.length === 0 && (
               <div className="text-xs text-slate-500 px-1">No characteristics exposed.</div>
             )}
             {service.characteristics.map((ch) => {
               const val = values[ch.uuid];
               return (
-                <div key={ch.uuid} className="px-3 py-2.5 rounded-lg bg-slate-950/60 border border-slate-800 space-y-2">
+                <div key={ch.uuid} className="px-2.5 py-2 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1.5">
                   <div className="flex items-start gap-2 flex-wrap">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-semibold text-slate-200">{ch.name}</span>
+                        <span className="text-xs font-semibold text-slate-200">{ch.name}</span>
                         {ch.short != null && <span className="text-[11px] font-mono text-blue-300">{hex16(ch.short)}</span>}
                       </div>
                       <div className="text-[11px] font-mono text-slate-500 break-all">{ch.uuid}</div>
                     </div>
                     <div className="ml-auto flex items-center gap-1">
+                      {ch.properties.read && (
+                        <IconBtn title="Read this value" onClick={() => handleReadOne(ch)}>
+                          <RefreshCw className={`w-3.5 h-3.5 ${readingOne === ch.uuid ? 'animate-spin' : ''}`} />
+                        </IconBtn>
+                      )}
+                      {values[ch.uuid]?.hex && (
+                        <IconBtn title="Copy hex value" onClick={() => handleCopyHex(ch)}>
+                          <Copy className="w-3.5 h-3.5" />
+                        </IconBtn>
+                      )}
                       {(ch.properties.write || ch.properties.writeWithoutResponse) && (
                         <IconBtn title="Write" onClick={() => handleWrite(ch)}>
                           <Pencil className="w-3.5 h-3.5" />
@@ -768,7 +871,7 @@ export default function BleExplorer() {
                 </div>
               );
             })}
-          </div>
+          </div>}
         </div>
       ))}
 
@@ -784,12 +887,12 @@ export default function BleExplorer() {
       {tree.length > 0 && <DfuPanel tree={tree} addLog={addLog} />}
 
       {/* Log */}
-      <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
+      <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5">
         <div className="flex items-center gap-2">
           <BluetoothConnected className="w-4 h-4 text-slate-400" />
-          <span className="text-sm font-semibold text-slate-300">Session Log</span>
+          <span className="text-xs font-semibold text-slate-300">Session Log</span>
         </div>
-        <div className="font-mono text-xs space-y-0.5 max-h-56 overflow-y-auto">
+        <div className="font-mono text-xs space-y-0.5 max-h-40 overflow-y-auto">
           {log.length === 0 && <div className="text-slate-600">No activity yet.</div>}
           {log.map((entry, i) => (
             <div
