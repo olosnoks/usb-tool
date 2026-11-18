@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Radio, Plug, Unplug, RefreshCw, Users, Map as MapIcon, Send, Activity, Terminal, Settings2, Layers, Download, Trash2, Signal,
+  Radio, Plug, Unplug, RefreshCw, Users, Map as MapIcon, Send, Activity, Terminal, Settings2, Layers, Download, Trash2, Signal, Copy, MessageSquare, Search,
 } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import { useOptionalSerial } from '../../context/SerialContext';
@@ -9,6 +9,9 @@ import {
   buildHeartbeatFrame, buildTextFrame, configJson, createSession, decodeFromRadioPayload, nodeIdFromNum,
   recordOutgoingText, summarizeChannels, summarizeNodes,
 } from '../../utils/meshtastic.js';
+import {
+  annotateNodes, filterNodes, sortNodes, nodesToCsv, filterMessages, messagesToCsv, cliCommands, formatDistance,
+} from '../../utils/meshtastic/nodeTools.js';
 
 const TABS = [
   ['nodes', 'NODES', Users],
@@ -69,6 +72,12 @@ export default function MeshtasticWorkbench({ onLogMessage }) {
   const [target, setTarget] = useState('broadcast');
   const [channelIndex, setChannelIndex] = useState(0);
   const [notice, setNotice] = useState(null);
+  const [nodeQuery, setNodeQuery] = useState('');
+  const [onlyPositioned, setOnlyPositioned] = useState(false);
+  const [onlyDirect, setOnlyDirect] = useState(false);
+  const [sortKey, setSortKey] = useState('lastHeard');
+  const [sortDir, setSortDir] = useState('desc');
+  const [msgScope, setMsgScope] = useState('all');
 
   const log = (text, level = 'info') => {
     if (typeof logRef.current === 'function') logRef.current(text, level);
@@ -233,7 +242,22 @@ export default function MeshtasticWorkbench({ onLogMessage }) {
     refresh();
   };
 
-  const nodes = summarizeNodes(session);
+  const nodes = annotateNodes(summarizeNodes(session));
+  const shownNodes = sortNodes(filterNodes(nodes, { query: nodeQuery, onlyPositioned, onlyDirect }), sortKey, sortDir);
+  const shownMessages = filterMessages(session.messages, msgScope);
+  const senderName = (num) => session.nodes.get(num)?.user?.long_name || nodeIdFromNum(num);
+  const copyText = async (text, what) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice(`Copied ${what}. Run it in a terminal that has the meshtastic CLI installed.`);
+    } catch {
+      setNotice(`Could not copy to the clipboard. ${what}: ${text}`);
+    }
+  };
+  const sortBy = (key) => {
+    if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir(key === 'name' || key === 'distance' || key === 'hops' ? 'asc' : 'desc'); }
+  };
   const channels = summarizeChannels(session);
   const peers = nodes.filter((n) => !n.isMe);
   const positioned = nodes.filter((n) => n.position);
@@ -244,8 +268,8 @@ export default function MeshtasticWorkbench({ onLogMessage }) {
 
   if (!serial) {
     return (
-      <div className="flex flex-col gap-3 p-3 text-slate-200">
-        <div className="rounded border border-slate-800 bg-slate-950 p-3 text-xs text-slate-400">
+      <div className="flex flex-col gap-2 text-slate-200">
+        <div className="rounded border border-slate-800 bg-slate-950 p-2 text-xs text-slate-400">
           The Meshtastic client uses the app's shared serial port. Open it from the app shell.
         </div>
       </div>
@@ -253,27 +277,24 @@ export default function MeshtasticWorkbench({ onLogMessage }) {
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-3 p-3 text-slate-200">
-      {/* Header */}
-      <div className="flex flex-wrap items-center gap-2 rounded border border-slate-800 bg-[#171920] p-3">
-        <Radio className="h-4 w-4 text-cyan-400" />
-        <div className="mr-auto min-w-0">
-          <div className="text-sm font-semibold text-cyan-200">Meshtastic Client</div>
-          <div className="text-[11px] text-slate-500">
-            Meshtastic serial API at 115200 baud over the shared port. Read-only: no config writes.
-          </div>
-        </div>
+    <div className="flex min-w-0 flex-col gap-2 text-slate-200">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-1.5 rounded border border-slate-800 bg-[#171920] p-2">
+        <Radio className="h-3.5 w-3.5 text-cyan-400" />
+        <span className="mr-auto min-w-0 truncate text-[11px] text-slate-500" title="Meshtastic serial API at 115200 baud over the shared port. Read-only: no config writes.">
+          Serial API, 115200 baud, read-only config
+        </span>
         {!isConnected ? (
-          <button type="button" onClick={connectAndSync} className="flex items-center gap-1.5 rounded border border-cyan-700 bg-cyan-950/40 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/40">
-            <Plug className="h-3.5 w-3.5" /> CONNECT &amp; SYNC
+          <button type="button" onClick={connectAndSync} className="flex items-center gap-1 rounded border border-cyan-700 bg-cyan-950/40 px-2 py-1 text-[11px] text-cyan-200 hover:bg-cyan-900/40">
+            <Plug className="h-3 w-3" /> CONNECT &amp; SYNC
           </button>
         ) : (
           <>
-            <button type="button" onClick={startSync} className="flex items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">
-              <RefreshCw className="h-3.5 w-3.5" /> RE-SYNC CONFIG
+            <button type="button" onClick={startSync} title="Repeat the config handshake" className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[11px] hover:bg-slate-800">
+              <RefreshCw className="h-3 w-3" /> RE-SYNC
             </button>
-            <button type="button" onClick={disconnect} className="flex items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">
-              <Unplug className="h-3.5 w-3.5" /> DISCONNECT
+            <button type="button" onClick={disconnect} className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[11px] hover:bg-slate-800">
+              <Unplug className="h-3 w-3" /> DISCONNECT
             </button>
           </>
         )}
@@ -282,7 +303,7 @@ export default function MeshtasticWorkbench({ onLogMessage }) {
       {notice && <div className="rounded border border-amber-800 bg-amber-950/30 p-2 text-xs text-amber-200">{notice}</div>}
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-1.5 @md:grid-cols-5">
         <Kpi label="Session" value={sessionLabel} tone={sessionLabel === 'READY' ? 'emerald' : 'slate'} />
         <Kpi
           label="My node"
@@ -295,13 +316,13 @@ export default function MeshtasticWorkbench({ onLogMessage }) {
       </div>
 
       {/* Tabs */}
-      <div className="flex flex-wrap gap-1 border-b border-slate-800 pb-1">
+      <div className="flex flex-wrap gap-0.5 border-b border-slate-800">
         {TABS.map(([id, label, Icon]) => (
           <button
             key={id}
             type="button"
             onClick={() => setTab(id)}
-            className={`flex items-center gap-1 rounded-t px-2.5 py-1 font-mono text-[11px] ${tab === id ? 'bg-slate-800 text-cyan-200' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`flex items-center gap-1 rounded-t px-2 py-0.5 font-mono text-[11px] ${tab === id ? 'bg-slate-800 text-cyan-200' : 'text-slate-500 hover:text-slate-300'}`}
           >
             <Icon className="h-3 w-3" /> {label}
           </button>
@@ -309,57 +330,121 @@ export default function MeshtasticWorkbench({ onLogMessage }) {
       </div>
 
       {tab === 'nodes' && (
-        <div className="overflow-x-auto">
-          <div className="mb-2 flex justify-end">
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <label className="flex min-w-[8rem] flex-1 items-center gap-1 rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 focus-within:border-cyan-600">
+              <Search className="h-3 w-3 text-slate-500" />
+              <input
+                value={nodeQuery}
+                onChange={(e) => setNodeQuery(e.target.value)}
+                aria-label="Filter nodes"
+                placeholder="Filter name, id, hardware, role"
+                className="w-full bg-transparent font-mono text-[11px] text-slate-100 outline-none"
+              />
+            </label>
+            <label className="flex items-center gap-1 text-slate-400">
+              <input type="checkbox" checked={onlyPositioned} onChange={(e) => setOnlyPositioned(e.target.checked)} /> has position
+            </label>
+            <label className="flex items-center gap-1 text-slate-400" title="Nodes reporting 0 hops away">
+              <input type="checkbox" checked={onlyDirect} onChange={(e) => setOnlyDirect(e.target.checked)} /> direct only
+            </label>
+            <button
+              type="button"
+              disabled={shownNodes.length === 0}
+              onClick={() => downloadText(nodesToCsv(shownNodes), 'meshtastic-nodes.csv', 'text/csv')}
+              title="Save the nodes currently shown as CSV"
+              className="flex items-center gap-1 rounded border border-slate-700 px-1.5 py-0.5 hover:bg-slate-800 disabled:opacity-40"
+            >
+              <Download className="h-3 w-3" /> CSV
+            </button>
             <button
               type="button"
               disabled={nodes.length === 0}
               onClick={() => downloadJson(nodes, 'meshtastic-nodes.json')}
-              className="flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[11px] hover:bg-slate-800 disabled:opacity-40"
+              title="Save all nodes as JSON"
+              className="flex items-center gap-1 rounded border border-slate-700 px-1.5 py-0.5 hover:bg-slate-800 disabled:opacity-40"
             >
-              <Download className="h-3 w-3" /> EXPORT NODES (JSON)
+              <Download className="h-3 w-3" /> JSON
             </button>
           </div>
           {nodes.length === 0 ? (
             <Empty>No nodes yet. Connect and sync to read the device's node database.</Empty>
           ) : (
-            <table className="w-full text-left font-mono text-[11px]">
-              <thead className="text-slate-500">
-                <tr className="border-b border-slate-800">
-                  <th className="py-1 pr-2">Name</th>
-                  <th className="pr-2">Short</th>
-                  <th className="pr-2">ID</th>
-                  <th className="pr-2">Hardware</th>
-                  <th className="pr-2">Role</th>
-                  <th className="pr-2">Last heard</th>
-                  <th className="pr-2">SNR</th>
-                  <th className="pr-2">Battery</th>
-                  <th className="pr-2">Position</th>
-                </tr>
-              </thead>
-              <tbody>
-                {nodes.map((n) => (
-                  <tr key={n.num} className="border-b border-slate-900 hover:bg-slate-900/60">
-                    <td className="py-1 pr-2 text-slate-200">
-                      {n.longName || <span className="text-slate-600">(no name yet)</span>}
-                      {n.isMe && <span className="ml-1 rounded bg-cyan-900/60 px-1 text-[9px] text-cyan-200">ME</span>}
-                    </td>
-                    <td className="pr-2">{n.shortName || '—'}</td>
-                    <td className="pr-2 text-cyan-300">{n.id}</td>
-                    <td className="pr-2">{n.hwModel !== undefined ? `${n.hwModel} ${n.hwName}` : '—'}</td>
-                    <td className="pr-2 text-slate-400">{n.role || '—'}</td>
-                    <td className="pr-2">{formatAge(n.ageSecs)}</td>
-                    <td className="pr-2">{n.snr !== null && n.snr !== undefined ? `${Number(n.snr).toFixed(1)} dB` : '—'}</td>
-                    <td className="pr-2">{formatBattery(n.battery)}</td>
-                    <td className="pr-2">{n.position ? `${n.position.lat.toFixed(5)}, ${n.position.lon.toFixed(5)}` : '—'}</td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left font-mono text-[11px]">
+                <thead className="text-slate-500">
+                  <tr className="border-b border-slate-800">
+                    <SortTh id="name" label="Name" {...{ sortKey, sortDir, sortBy }} />
+                    <th className="pr-2">ID</th>
+                    <th className="pr-2">Hardware</th>
+                    <th className="pr-2">Role</th>
+                    <SortTh id="lastHeard" label="Last heard" {...{ sortKey, sortDir, sortBy }} />
+                    <SortTh id="hops" label="Hops" {...{ sortKey, sortDir, sortBy }} />
+                    <SortTh id="snr" label="SNR" {...{ sortKey, sortDir, sortBy }} />
+                    <SortTh id="battery" label="Battery" {...{ sortKey, sortDir, sortBy }} />
+                    <SortTh id="distance" label="Distance" {...{ sortKey, sortDir, sortBy }} />
+                    <th className="pr-2">Position</th>
+                    <th className="pr-2" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {shownNodes.map((n) => (
+                    <tr key={n.num} className="border-b border-slate-900 hover:bg-slate-900/60">
+                      <td className="py-0.5 pr-2 text-slate-200">
+                        {n.longName || <span className="text-slate-600">(no name yet)</span>}
+                        {n.shortName ? <span className="ml-1 text-slate-500">[{n.shortName}]</span> : null}
+                        {n.isMe && <span className="ml-1 rounded bg-cyan-900/60 px-1 text-[9px] text-cyan-200">ME</span>}
+                      </td>
+                      <td className="pr-2 text-cyan-300">{n.id}</td>
+                      <td className="pr-2">{n.hwModel !== undefined ? `${n.hwModel} ${n.hwName}` : '—'}</td>
+                      <td className="pr-2 text-slate-400">{n.role || '—'}</td>
+                      <td className="pr-2">{formatAge(n.ageSecs)}</td>
+                      <td className="pr-2">{n.hopsAway ?? '—'}{n.viaMqtt ? ' MQTT' : ''}</td>
+                      <td className="pr-2" title={n.signal ? `Rough rating from SNR: ${n.signal}` : ''}>
+                        {n.snr !== null && n.snr !== undefined ? `${Number(n.snr).toFixed(1)} dB` : '—'}
+                        {n.signal ? <span className={`ml-1 ${SIGNAL_STYLE[n.signal]}`}>{n.signal}</span> : null}
+                      </td>
+                      <td className="pr-2">{formatBattery(n.battery)}</td>
+                      <td className="pr-2">{n.distanceKm !== null ? `${formatDistance(n.distanceKm)} ${n.compass}` : '—'}</td>
+                      <td className="pr-2">{n.position ? `${n.position.lat.toFixed(5)}, ${n.position.lon.toFixed(5)}` : '—'}</td>
+                      <td className="whitespace-nowrap pr-1">
+                        {!n.isMe && (
+                          <>
+                            <button
+                              type="button"
+                              title={`Direct message ${n.longName || n.id}`}
+                              aria-label={`Direct message ${n.longName || n.id}`}
+                              onClick={() => { setTarget(String(n.num)); setTab('messages'); }}
+                              className="rounded p-0.5 text-slate-400 hover:bg-slate-800 hover:text-cyan-200"
+                            >
+                              <MessageSquare className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              title="Copy a meshtastic CLI traceroute command for this node (the browser does not run it)"
+                              aria-label={`Copy CLI traceroute command for ${n.id}`}
+                              onClick={() => copyText(cliCommands(n.id).traceroute, 'traceroute command')}
+                              className="rounded p-0.5 text-slate-400 hover:bg-slate-800 hover:text-cyan-200"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {shownNodes.length === 0 && <Empty>No nodes match the filter.</Empty>}
+            </div>
           )}
-          <div className="mt-2 text-[10px] text-slate-600">
-            Node IDs use the !xxxxxxxx form. Roles, hop counts and SNR are shown only where the device reports them.
-          </div>
+          <details className="text-[10px] text-slate-600">
+            <summary className="cursor-pointer">About these columns</summary>
+            Node IDs use the !xxxxxxxx form. Hops, SNR and role are shown only where the device reports them. Distance and
+            direction are measured from your node's last position to the other node's last position. The SNR label is a rough
+            guide (good at 0 dB or more, fair down to -10 dB, weak below), not a firmware value. The copy button gives text for
+            the meshtastic Python CLI; this tool does not send traceroutes.
+          </details>
         </div>
       )}
 
@@ -400,12 +485,29 @@ export default function MeshtasticWorkbench({ onLogMessage }) {
       )}
 
       {tab === 'messages' && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <select value={msgScope} onChange={(e) => setMsgScope(e.target.value)} aria-label="Message filter" className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 font-mono">
+              <option value="all">All messages</option>
+              <option value="direct">Direct only</option>
+              {channelOptions.map((c) => <option key={c.index} value={`channel:${c.index}`}>Channel {c.index}{c.name ? ` ${c.name}` : ''}</option>)}
+            </select>
+            <span className="mr-auto text-slate-500">{shownMessages.length} of {session.messages.length}</span>
+            <button
+              type="button"
+              disabled={shownMessages.length === 0}
+              onClick={() => downloadText(messagesToCsv(shownMessages, senderName), 'meshtastic-messages.csv', 'text/csv')}
+              title="Save the messages shown as CSV"
+              className="flex items-center gap-1 rounded border border-slate-700 px-1.5 py-0.5 hover:bg-slate-800 disabled:opacity-40"
+            >
+              <Download className="h-3 w-3" /> CSV
+            </button>
+          </div>
           <div className="max-h-[320px] min-h-[120px] overflow-y-auto rounded border border-slate-800 bg-slate-950 p-2 font-mono text-[11px]">
-            {session.messages.length === 0 ? (
-              <Empty>No text messages yet. Incoming TEXT_MESSAGE_APP packets appear here.</Empty>
-            ) : session.messages.map((m) => {
-              const sender = session.nodes.get(m.from)?.user?.long_name || nodeIdFromNum(m.from);
+            {shownMessages.length === 0 ? (
+              <Empty>{session.messages.length === 0 ? 'No text messages yet. Incoming TEXT_MESSAGE_APP packets appear here.' : 'No messages match this filter.'}</Empty>
+            ) : shownMessages.map((m) => {
+              const sender = senderName(m.from);
               return (
                 <div key={`${m.id}-${m.direction}-${m.time}`} className="border-b border-slate-900 py-1">
                   <div className="flex flex-wrap gap-2 text-[10px] text-slate-500">
@@ -420,7 +522,7 @@ export default function MeshtasticWorkbench({ onLogMessage }) {
               );
             })}
           </div>
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto_auto]">
+          <div className="grid grid-cols-1 gap-1.5 @md:grid-cols-[1fr_auto_auto]">
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -508,7 +610,7 @@ export default function MeshtasticWorkbench({ onLogMessage }) {
 
 function Kpi({ label, value, sub, tone }) {
   return (
-    <div className="rounded border border-slate-800 bg-slate-950 p-2">
+    <div className="rounded border border-slate-800 bg-slate-950 px-2 py-1">
       <div className="text-[9px] uppercase tracking-wider text-slate-500">{label}</div>
       <div className={`truncate font-mono text-sm ${tone === 'emerald' ? 'text-emerald-300' : 'text-slate-100'}`}>{value}</div>
       {sub ? <div className="truncate text-[10px] text-slate-600">{sub}</div> : null}
@@ -516,8 +618,21 @@ function Kpi({ label, value, sub, tone }) {
   );
 }
 
+const SIGNAL_STYLE = { good: 'text-emerald-400', fair: 'text-amber-300', weak: 'text-rose-400' };
+
+function SortTh({ id, label, sortKey, sortDir, sortBy }) {
+  const active = sortKey === id;
+  return (
+    <th className="py-1 pr-2" aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" onClick={() => sortBy(id)} className={`font-mono ${active ? 'text-cyan-300' : 'hover:text-slate-300'}`}>
+        {label}{active ? (sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : ''}
+      </button>
+    </th>
+  );
+}
+
 function Empty({ children }) {
-  return <div className="p-4 text-center text-xs text-slate-500">{children}</div>;
+  return <div className="p-3 text-center text-xs text-slate-500">{children}</div>;
 }
 
 function TelemetryTable({ session, nodes }) {
@@ -623,7 +738,11 @@ function NodeMap({ positioned }) {
 }
 
 function downloadJson(data, name) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  downloadText(JSON.stringify(data, null, 2), name, 'application/json');
+}
+
+function downloadText(text, name, type) {
+  const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

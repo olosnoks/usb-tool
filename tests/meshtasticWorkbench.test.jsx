@@ -13,7 +13,7 @@ describe('MeshtasticWorkbench', () => {
         <MeshtasticWorkbench />
       </SerialProvider>,
     );
-    expect(html).toContain('Meshtastic Client');
+    expect(html).toContain('Serial API, 115200 baud');
     expect(html).toContain('CONNECT &amp; SYNC');
     expect(html).toContain('NOT CONNECTED');
     expect(html).toContain('No nodes yet');

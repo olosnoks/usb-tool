@@ -30,10 +30,16 @@ While a session is ready the tool sends a heartbeat frame about once a minute to
 ## The panels
 
 - **Top strip.** Session state, your node (long name and firmware version), node count, channel count and packet counts. Encrypted packets are counted but not decoded.
-- **NODES.** One row per node: long and short name, ID in \`!xxxxxxxx\` form, hardware model number and name, role, last heard, SNR, battery and position. **EXPORT NODES (JSON)** saves this table. Battery values above 100 mean the node is on external power.
+- **NODES.** One row per node: long and short name, ID in \`!xxxxxxxx\` form, hardware model number and name, role, last heard, hops away (with an MQTT marker), SNR with a rough rating, battery, distance and compass direction from your node, and position. Battery values above 100 mean the node is on external power.
+  - The filter box matches name, short name, ID, hardware and role. **has position** and **direct only** (0 hops) narrow the list further.
+  - Click a column heading (Name, Last heard, Hops, SNR, Battery, Distance) to sort; click again to reverse. Rows with no value for that column always sort last.
+  - Distance and direction use great-circle maths from your node's last known position to the other node's last known position. They show a dash if either node has no fix.
+  - The SNR label is a rule of thumb, not a firmware value: good at 0 dB or more, fair down to -10 dB, weak below that. Usable SNR depends on the modem preset.
+  - The speech-bubble button opens a direct message to that node. The copy button puts a \`meshtastic --traceroute '!id'\` command on the clipboard for the official Python CLI. This tool does not send traceroutes itself.
+  - **CSV** saves the rows currently shown (after filtering and sorting). **JSON** saves all nodes.
 - **MAP.** Plots every node that reports a real GPS fix, using Leaflet and OpenStreetMap tiles. Nodes reporting 0,0 are treated as having no fix.
 - **CHANNELS.** Index, role (primary, secondary or disabled), name, uplink and downlink flags, and the **length** of each channel key. The key bytes are never shown and cannot be entered here.
-- **MESSAGES.** Text messages received on any channel or directly to you, plus the messages you sent. Choose **Broadcast on channel** and a channel index, or pick a node for a direct message. Press Enter to send and Shift+Enter for a new line.
+- **MESSAGES.** Text messages received on any channel or directly to you, plus the messages you sent. Choose **Broadcast on channel** and a channel index, or pick a node for a direct message. Press Enter to send and Shift+Enter for a new line. The filter above the list shows all messages, direct messages only, or one channel, and **CSV** saves the messages currently shown.
 - **TELEMETRY.** Device metrics for nodes that have sent them: battery, voltage, channel utilisation, air utilisation for transmit and uptime.
 - **CONFIG (READ-ONLY).** The decoded device config and module config as JSON. Wi-Fi and MQTT passwords are shown as \`[redacted]\`. The security and key sections are not decoded at all, and the tool cannot write config.
 - **DEVICE LOG.** Debug text the firmware prints on the serial port, plus structured log records. Use it to see what the device is doing when a sync stalls.
@@ -66,6 +72,10 @@ The protobuf codec is written by hand, with no third-party library. Field number
 - **No map points.** Nodes without a GPS fix are listed but not plotted. Check the MAP tab's count.
 - **Messages stay "sent".** Broadcast traffic is often never acknowledged. Try a direct message to a node to see a real acknowledgement.
 - **Battery shows "external power".** This is the firmware's convention for values above 100%, not an error.
+
+## Similar tools
+
+The features were chosen after comparing against the Meshtastic web client (client.meshtastic.org), the Android and Apple apps (sortable node list with distance, hops and signal), and the \`meshtastic\` Python CLI (\`--nodes\`, \`--traceroute\`, \`--export-config\`). Traceroute, channel QR sharing and config writing are not implemented here.
 
 ## Related tools
 
