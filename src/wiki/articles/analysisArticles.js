@@ -1086,13 +1086,19 @@ You need **two** USB-UART adapters connected to your computer:
 
 | UI Element | Type | Purpose & Behavior |
 | :--- | :--- | :--- |
-| **PORT A / PORT B** | Dropdowns | Pick which connected board is on each side (shown as name and baud). Locked while the bridge is active. |
+| **A / B** | Dropdowns | Pick which connected board is on each side (shown as name and baud). Locked while the bridge is active. |
 | **+ Add serial port** | Button | Adds and connects another board via the browser serial picker. |
 | **START MitM BRIDGE / BRIDGE ACTIVE (SNIFFING)** | Button | Starts or stops forwarding bytes between the two boards. Needs two distinct boards. |
+| **Board status row** | Chips | Connection state, baud selector (locked while connected) and a **Connect** button per board. |
+| **Search text or hex...** | Input | Filters the feed by printable text (case-insensitive) or by hex bytes such as \`0D 0A\`. |
+| **All / A>B / B>A** | Segmented buttons | Shows both directions or only one. Affects the display and the exports. |
+| **Text+Hex / Text / Hex** | Segmented buttons | Chooses what each feed row shows. |
+| **Freeze view / Resume view** | Toggle | Freezes the displayed feed so you can read it. Forwarding and capture keep running; the counter line says how many new chunks are hidden. |
+| **Auto-scroll** | Checkbox | Keeps the feed scrolled to the newest chunk. |
+| **Export JSON / CSV / Hex dump** | Buttons | Download the capture (the frozen snapshot while frozen) as \`serial_bridge_capture_<timestamp>.json\`, \`.csv\` (time, direction, from, to, delta ms, byte count, hex, text) or \`.txt\` (a 16-bytes-per-line hex dump with ASCII per chunk). |
+| **Clear Feed** | Icon button | Empties the log and unfreezes the view. |
+| **Counter line** | Text | Bytes and chunks per direction, total bytes, average bytes per second (based on the inter-chunk delays) and how many rows are shown. Counts cover the retained log (last 2000 chunks). |
 | **Feed viewport** | Viewport | Log of each chunk: time, direction (cyan for A to B, amber for B to A), delta in ms, text and hex. |
-| **Search dialogue text or hex...** | Input | Filters the feed. |
-| **Export JSON** | Button | Downloads the feed as \`serial_bridge_capture_<timestamp>.json\`. |
-| **Clear Feed** | Icon button | Empties the log. |
 
 ---
 
@@ -1105,7 +1111,7 @@ You need **two** USB-UART adapters connected to your computer:
 4. Open the bridge, choose the two boards in **PORT A** and **PORT B**, and click **START MitM BRIDGE**. The scooter powers on normally; the button reads **BRIDGE ACTIVE (SNIFFING)**.
 5. In the feed, observe periodic 100ms packets flowing back and forth (with the \`+ms\` delta since the previous chunk).
 6. Pull the brake lever: observe which byte flips value in the \`A -> B\` stream. Use the search box to filter by text or hex.
-7. Click **Export JSON** to save the capture for offline analysis. (The bridge only observes and relays; it cannot modify or inject bytes.)
+7. Click **Export JSON**, **CSV** or **Hex dump** to save the capture for offline analysis. (The bridge only observes and relays; it cannot modify or inject bytes.)
 
 ---
 
@@ -1119,7 +1125,9 @@ You need **two** USB-UART adapters connected to your computer:
 > inline hint explains what to do.
 
 - **Component:** [\`src/components/SerialBridgeDeck.jsx\`](https://github.com/olosnoks/usb-tool/blob/main/src/components/SerialBridgeDeck.jsx) is built on the **multi-board** capability of \`SerialContext\`: two independently-connected boards (A and B) registered in the same provider.
-- **Data flow:** while active, \`subscribeRx\` receives every chunk read from either board; a chunk from board A is written to board B with \`sendRawToBoard\` and vice-versa, and each chunk is logged with its direction (\`A->B\` / \`B->A\`), the delay since the previous chunk, hex and printable text. The log keeps the last 2000 entries. The relay forwards bytes unchanged: there is no injection, filtering or rewriting.
+- **Data flow:** while active, \`subscribeRx\` receives every chunk read from either board; a chunk from board A is written to board B with \`sendRawToBoard\` and vice-versa, and each chunk is logged with its direction (\`A->B\` / \`B->A\`), the delay since the previous chunk, hex and printable text. The log keeps the last 2000 entries. The relay forwards bytes unchanged: there is no injection, filtering or rewriting. Display filters, freeze and view modes only affect what you see, never what is forwarded. The helpers for filtering, statistics and exports live in \`src/utils/serialBridgeLog.js\`.
+
+**Similar tools:** Eltima Serial Port Monitor, Free Serial Port Monitor and Device Monitoring Studio also capture and filter serial traffic; those capture a port on the same PC, whereas this bridge sits between two physical devices through two adapters.
 
 ---
 

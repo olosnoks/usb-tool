@@ -1,21 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSerial } from '../context/SerialContext';
-import { 
-  ArrowLeftRight, 
-  Play, 
-  Pause, 
-  Trash2, 
-  Download, 
-  Search, 
-  Radio, 
-  CheckCircle2, 
-  Clock, 
-  Share2, 
-  Sliders,
-  Cpu,
+import {
+  ArrowLeftRight,
+  Trash2,
+  Download,
+  Search,
+  Radio,
   Plus,
-  Plug
+  Plug,
+  Pause as PauseIcon,
+  FileText
 } from 'lucide-react';
+import { filterLog, computeStats, logToCsv, logToText } from '../utils/serialBridgeLog';
 
 export default function SerialBridgeDeck({
   boards = [],
@@ -32,6 +28,9 @@ export default function SerialBridgeDeck({
   const [internalBridgeLog, setInternalBridgeLog] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
+  const [dirFilter, setDirFilter] = useState('both');
+  const [viewMode, setViewMode] = useState('both');
+  const [frozen, setFrozen] = useState(null);
 
   const boardAId = parentBridgeConfig ? parentBridgeConfig.boardAId : internalBoardAId;
   const boardBId = parentBridgeConfig ? parentBridgeConfig.boardBId : internalBoardBId;
@@ -91,6 +90,7 @@ export default function SerialBridgeDeck({
         time: new Date(now).toTimeString().split(' ')[0] + '.' + String(now % 1000).padStart(3, '0'),
         dir,
         deltaMs,
+        len: bytes.length,
         hex: Array.from(bytes).map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' '),
         text: dec.decode(bytes).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '.')
       };
@@ -127,93 +127,89 @@ export default function SerialBridgeDeck({
     }
   };
 
-  const handleExportJson = () => {
-    if (bridgeLog.length === 0) return;
-    const jsonStr = JSON.stringify(bridgeLog, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
+  const names = { a: (boards.find((b) => b.id === boardAId) || {}).name, b: (boards.find((b) => b.id === boardBId) || {}).name };
+
+  const download = (content, type, ext) => {
+    const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `serial_bridge_capture_${Date.now()}.json`;
+    link.download = `serial_bridge_capture_${Date.now()}.${ext}`;
     link.click();
     URL.revokeObjectURL(url);
   };
+  const shownSource = frozen || bridgeLog;
+  const handleExportJson = () => { if (shownSource.length) download(JSON.stringify(shownSource, null, 2), 'application/json', 'json'); };
+  const handleExportCsv = () => { if (shownSource.length) download(logToCsv(shownSource, names), 'text/csv', 'csv'); };
+  const handleExportText = () => { if (shownSource.length) download(logToText(shownSource, names), 'text/plain', 'txt'); };
 
-  const filteredLogs = searchQuery.trim()
-    ? bridgeLog.filter(l => l.text.toLowerCase().includes(searchQuery.toLowerCase()) || l.hex.includes(searchQuery))
-    : bridgeLog;
+  const filteredLogs = filterLog(shownSource, { query: searchQuery, dir: dirFilter });
+  const stats = computeStats(bridgeLog);
 
-  const boardA = boards.find(b => b.id === boardAId);
-  const boardB = boards.find(b => b.id === boardBId);
+  const boardA = boardAx;
+  const boardB = boardBx;
+  const btn = 'flex items-center gap-1 px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-[11px] disabled:opacity-40';
+  const seg = (active) => `px-1.5 py-0.5 text-[10px] ${active ? 'bg-cyan-500/20 text-cyber-cyan' : 'text-slate-400 hover:text-slate-200'}`;
 
   return (
-    <div className="bg-cyber-darkest border border-cyber-border rounded-xl shadow-xl p-4 flex flex-col gap-3 font-mono text-xs">
-      {/* Title Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-cyber-border">
-        <div className="flex items-center gap-2">
-          <ArrowLeftRight className="w-4 h-4 text-cyber-cyan" />
-          <h2 className="font-bold text-slate-100 tracking-wider">MULTI-BOARD MitM SERIAL BRIDGE & PACKET SNIFFER</h2>
-        </div>
-
-        {/* Port Selectors & Activation Button */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
-            <span className="text-[10px] text-cyber-cyan font-bold pl-1">PORT A:</span>
-            <select
-              value={boardAId}
-              onChange={(e) => setBoardAId(e.target.value)}
-              disabled={isBridgeActive}
-              className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-slate-200 outline-none text-xs"
-            >
-              {boards.map(b => (
-                <option key={b.id} value={b.id}>{b.name} ({b.baudRate})</option>
-              ))}
-            </select>
-
-            <span className="text-slate-600 px-1">⟷</span>
-
-            <span className="text-[10px] text-cyber-amber font-bold">PORT B:</span>
-            <select
-              value={boardBId}
-              onChange={(e) => setBoardBId(e.target.value)}
-              disabled={isBridgeActive}
-              className="bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-slate-200 outline-none text-xs"
-            >
-              {boards.map(b => (
-                <option key={b.id} value={b.id}>{b.name} ({b.baudRate})</option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            onClick={() => addNewBoard?.()}
+    <div className="flex flex-col gap-2 font-mono text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-950 p-1 rounded border border-slate-800">
+          <label className="text-[10px] text-cyber-cyan font-bold pl-1" htmlFor="bridge-port-a">A</label>
+          <select
+            id="bridge-port-a"
+            value={boardAId}
+            onChange={(e) => setBoardAId(e.target.value)}
             disabled={isBridgeActive}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs disabled:opacity-40"
-            title="Open the browser serial picker and add another board"
+            className="bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 text-slate-200 outline-none text-[11px] max-w-[9rem]"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>+ Add serial port</span>
-          </button>
-
-          <button
-            onClick={toggleBridge}
-            disabled={!canStart}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-xs transition-all border ${
-              isBridgeActive
-                ? 'bg-emerald-500/20 text-cyber-emerald border-emerald-500/50 shadow-emerald-glow animate-pulse'
-                : 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-slate-950 shadow-cyan-glow hover:brightness-110'
-            }`}
+            {boards.map(b => (
+              <option key={b.id} value={b.id}>{b.name} ({b.baudRate})</option>
+            ))}
+          </select>
+          <ArrowLeftRight className="w-3 h-3 text-slate-600" />
+          <label className="text-[10px] text-cyber-amber font-bold" htmlFor="bridge-port-b">B</label>
+          <select
+            id="bridge-port-b"
+            value={boardBId}
+            onChange={(e) => setBoardBId(e.target.value)}
+            disabled={isBridgeActive}
+            className="bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 text-slate-200 outline-none text-[11px] max-w-[9rem]"
           >
-            <ArrowLeftRight className="w-3.5 h-3.5" />
-            <span>{isBridgeActive ? 'BRIDGE ACTIVE (SNIFFING)' : 'START MitM BRIDGE'}</span>
-          </button>
+            {boards.map(b => (
+              <option key={b.id} value={b.id}>{b.name} ({b.baudRate})</option>
+            ))}
+          </select>
         </div>
+
+        <button
+          onClick={() => addNewBoard?.()}
+          disabled={isBridgeActive}
+          className={btn}
+          title="Open the browser serial picker and add another board"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>+ Add serial port</span>
+        </button>
+
+        <button
+          onClick={toggleBridge}
+          disabled={!canStart}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded font-bold text-[11px] transition-all border ${canStart ? "" : "opacity-40"} ${
+            isBridgeActive
+              ? 'bg-emerald-500/20 text-cyber-emerald border-emerald-500/50 shadow-emerald-glow animate-pulse'
+              : 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-slate-950 shadow-cyan-glow hover:brightness-110'
+          }`}
+        >
+          <ArrowLeftRight className="w-3.5 h-3.5" />
+          <span>{isBridgeActive ? 'BRIDGE ACTIVE (SNIFFING)' : 'START MitM BRIDGE'}</span>
+        </button>
       </div>
 
       {/* Per-board connection state + baud */}
-      <div className="flex flex-wrap gap-2" data-testid="bridge-board-status">
+      <div className="flex flex-wrap gap-1.5" data-testid="bridge-board-status">
         {boards.map((b) => (
-          <div key={b.id} className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[11px]">
+          <div key={b.id} className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[11px]">
             <span className={`w-2 h-2 rounded-full ${b.isConnected ? 'bg-emerald-400' : b.isConnecting ? 'bg-amber-400 animate-pulse' : 'bg-slate-600'}`} />
             <span className="text-slate-200">{b.name}</span>
             <span className="text-slate-500">{b.isConnected ? 'connected' : b.isConnecting ? 'connecting' : 'disconnected'}</span>
@@ -245,79 +241,99 @@ export default function SerialBridgeDeck({
         </div>
       )}
 
-      {/* Control / Filter Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 bg-[#030712] border border-slate-800 rounded-lg p-2">
-        <div className="relative flex items-center">
+      {/* Filter / export bar */}
+      <div className="flex flex-wrap items-center gap-1.5 bg-[#030712] border border-slate-800 rounded p-1.5">
+        <div className="relative flex items-center flex-1 min-w-[8rem]">
           <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 pointer-events-none" />
           <input
             type="text"
-            placeholder="Search dialogue text or hex..."
+            aria-label="Search dialogue text or hex"
+            placeholder="Search text or hex..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-slate-950 border border-slate-800 rounded pl-7 pr-2 py-1 text-xs text-slate-200 outline-none focus:border-cyan-500 w-48 @sm:w-64"
+            className="bg-slate-950 border border-slate-800 rounded pl-7 pr-2 py-0.5 text-[11px] text-slate-200 outline-none focus:border-cyan-500 w-full"
           />
         </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleExportJson}
-            disabled={bridgeLog.length === 0}
-            className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs disabled:opacity-40"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export JSON</span>
-          </button>
-
-          <button
-            onClick={() => parentClearBridgeLog ? parentClearBridgeLog() : setInternalBridgeLog([])}
-            className="p-1 rounded bg-slate-900 text-slate-400 hover:text-rose-400 border border-slate-800"
-            title="Clear Feed"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+        <div className="flex border border-slate-800 rounded overflow-hidden" role="group" aria-label="Direction filter">
+          {[['both', 'All'], ['A->B', 'A>B'], ['B->A', 'B>A']].map(([v, l]) => (
+            <button key={v} onClick={() => setDirFilter(v)} aria-pressed={dirFilter === v} className={seg(dirFilter === v)} title={`Show ${v === 'both' ? 'both directions' : v.replace('->', ' to ')}`}>{l}</button>
+          ))}
         </div>
+        <div className="flex border border-slate-800 rounded overflow-hidden" role="group" aria-label="View mode">
+          {[['both', 'Text+Hex'], ['text', 'Text'], ['hex', 'Hex']].map(([v, l]) => (
+            <button key={v} onClick={() => setViewMode(v)} aria-pressed={viewMode === v} className={seg(viewMode === v)}>{l}</button>
+          ))}
+        </div>
+        <button
+          onClick={() => setFrozen(frozen ? null : bridgeLog)}
+          aria-pressed={!!frozen}
+          className={`${btn} ${frozen ? 'text-cyber-amber border-amber-500/50' : ''}`}
+          title="Freeze the displayed feed. Forwarding and capture continue in the background."
+        >
+          <PauseIcon className="w-3.5 h-3.5" /><span>{frozen ? 'Resume view' : 'Freeze view'}</span>
+        </button>
+        <label className="flex items-center gap-1 text-[10px] text-slate-400">
+          <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> Auto-scroll
+        </label>
+        <button onClick={handleExportJson} disabled={shownSource.length === 0} className={btn} title="Download the capture as JSON">
+          <Download className="w-3.5 h-3.5" /><span>Export JSON</span>
+        </button>
+        <button onClick={handleExportCsv} disabled={shownSource.length === 0} className={btn} title="Download the capture as CSV">
+          <span>CSV</span>
+        </button>
+        <button onClick={handleExportText} disabled={shownSource.length === 0} className={btn} title="Download the capture as a text hex dump">
+          <FileText className="w-3.5 h-3.5" /><span>Hex dump</span>
+        </button>
+        <button
+          onClick={() => { setFrozen(null); if (parentClearBridgeLog) parentClearBridgeLog(); else setInternalBridgeLog([]); }}
+          className="p-1 rounded bg-slate-900 text-slate-400 hover:text-rose-400 border border-slate-800"
+          title="Clear Feed"
+          aria-label="Clear Feed"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
       </div>
 
-      {/* Synchronized Sniffer Feed Viewport */}
-      <div 
+      {/* Counters */}
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-500" data-testid="bridge-stats">
+        <span className="text-cyber-cyan">A&gt;B {stats.aToB.bytes} B / {stats.aToB.chunks} chunks</span>
+        <span className="text-cyber-amber">B&gt;A {stats.bToA.bytes} B / {stats.bToA.chunks} chunks</span>
+        <span>total {stats.bytes} B{stats.bytesPerSec ? `, ~${stats.bytesPerSec} B/s avg` : ''}</span>
+        {frozen && <span className="text-cyber-amber">view frozen ({Math.max(0, bridgeLog.length - frozen.length)} new hidden)</span>}
+        <span>showing {filteredLogs.length}/{shownSource.length}</span>
+      </div>
+
+      {/* Sniffer feed */}
+      <div
         ref={logContainerRef}
-        className="h-64 overflow-y-auto bg-[#030712] border border-slate-800 rounded-xl p-3 flex flex-col gap-1.5"
+        className="h-64 overflow-y-auto bg-[#030712] border border-slate-800 rounded p-2 flex flex-col gap-1"
       >
         {filteredLogs.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-slate-600 gap-1 select-none">
+          <div className="h-full flex flex-col items-center justify-center text-slate-600 gap-1 select-none text-center">
             <Radio className="w-6 h-6 animate-pulse text-slate-700" />
             <span>{isBridgeActive ? 'Awaiting serial traffic between Port A and Port B...' : 'Select two boards and click "START MitM BRIDGE"'}</span>
           </div>
         ) : (
           filteredLogs.map((entry) => (
-            <div 
+            <div
               key={entry.id}
-              className={`flex items-start gap-2.5 p-1.5 rounded border text-[11px] font-mono ${
-                entry.dir === 'A->B' 
-                  ? 'bg-cyan-950/20 border-cyan-500/30 text-cyan-200' 
+              className={`flex flex-wrap items-start gap-x-2 gap-y-0.5 p-1 rounded border text-[11px] font-mono ${
+                entry.dir === 'A->B'
+                  ? 'bg-cyan-950/20 border-cyan-500/30 text-cyan-200'
                   : 'bg-amber-950/20 border-amber-500/30 text-amber-200'
               }`}
             >
-              <span className="text-[10px] text-slate-500 whitespace-nowrap">
-                {entry.time}
-              </span>
-
-              <span className={`px-1.5 py-0.2 rounded font-bold text-[9px] uppercase whitespace-nowrap ${
+              <span className="text-[10px] text-slate-500 whitespace-nowrap">{entry.time}</span>
+              <span className={`px-1.5 rounded font-bold text-[9px] uppercase whitespace-nowrap ${
                 entry.dir === 'A->B' ? 'bg-cyan-500/20 text-cyber-cyan' : 'bg-amber-500/20 text-cyber-amber'
               }`}>
                 {entry.dir === 'A->B' ? `${boardA?.name || 'A'} ➔ ${boardB?.name || 'B'}` : `${boardB?.name || 'B'} ➔ ${boardA?.name || 'A'}`}
               </span>
-
-              {entry.deltaMs > 0 && (
-                <span className="text-[9px] text-slate-500">
-                  +{entry.deltaMs}ms
-                </span>
-              )}
-
-              <div className="flex-1 break-all">
-                <span className="text-slate-100">{entry.text}</span>
-                {entry.hex && (
-                  <span className="text-[10px] text-slate-500 block font-mono">
+              {entry.deltaMs > 0 && <span className="text-[9px] text-slate-500">+{entry.deltaMs}ms</span>}
+              <div className="basis-full @md:basis-0 @md:flex-1 break-all">
+                {viewMode !== 'hex' && <span className="text-slate-100">{entry.text}</span>}
+                {viewMode !== 'text' && entry.hex && (
+                  <span className={`text-[10px] block font-mono ${viewMode === 'hex' ? 'text-slate-200' : 'text-slate-500'}`}>
                     HEX: {entry.hex}
                   </span>
                 )}
