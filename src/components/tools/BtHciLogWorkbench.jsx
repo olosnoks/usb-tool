@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Bluetooth, Upload, Download, Play, Activity, Network, Layers, AlertTriangle } from 'lucide-react';
+import { Upload, Download, Play, Activity, Network, Layers, AlertTriangle, ListChecks, FileDown } from 'lucide-react';
 import {
   parseCapture,
   analyzeCapture,
@@ -14,6 +14,13 @@ import {
   hex16,
   propNames,
 } from '../../utils/btsnoop.js';
+import {
+  findIssues,
+  connectionTraffic,
+  filterDirection,
+  packetsToBtsnoop,
+  deltaMs,
+} from '../../utils/btsnoopInsights.js';
 
 /**
  * Bluetooth HCI log viewer (offline). Opens an Android btsnoop_hci.log, or a pcap / pcapng
@@ -33,12 +40,19 @@ const TABS = [
   ['packets', 'Packets', Activity],
   ['gatt', 'GATT', Layers],
   ['conns', 'Connections', Network],
+  ['issues', 'Issues', ListChecks],
 ];
+const DIR_FILTERS = [['all', 'Any dir'], ['sent', 'TX'], ['received', 'RX']];
+const SEVERITY_CLS = {
+  error: 'text-red-300 border-red-900 bg-red-950/40',
+  warn: 'text-amber-300 border-amber-900 bg-amber-950/40',
+  info: 'text-slate-300 border-slate-700 bg-slate-800',
+};
 const PAGE = 400;
 const EXAMPLE_LABEL = 'Built-in example (synthetic, invented session, not captured from a device)';
 
 const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-gray-200';
-const btnCls = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs border-slate-700 bg-slate-900 hover:border-cyan-600 text-gray-200';
+const btnCls = 'inline-flex items-center gap-1 px-2 py-1 rounded border text-xs border-slate-700 bg-slate-900 hover:border-cyan-600 text-gray-200';
 const TYPE_BADGE = {
   cmd: 'bg-amber-950/60 text-amber-300 border-amber-900',
   evt: 'bg-slate-800 text-slate-300 border-slate-700',
@@ -48,8 +62,8 @@ const TYPE_BADGE = {
   unknown: 'bg-rose-950/60 text-rose-300 border-rose-900',
 };
 
-function download(name, text, mime = 'text/csv') {
-  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+function download(name, data, mime = 'text/csv') {
+  const blob = new Blob([data], { type: mime.startsWith('text') ? `${mime};charset=utf-8` : mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -62,9 +76,9 @@ function download(name, text, mime = 'text/csv') {
 
 function Stat({ label, value }) {
   return (
-    <div className="bg-slate-950 border border-slate-800 rounded px-3 py-2">
+    <div className="bg-slate-950 border border-slate-800 rounded px-2 py-1">
       <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="font-mono text-sm text-gray-100">{value}</div>
+      <div className="font-mono text-xs text-gray-100">{value}</div>
     </div>
   );
 }
@@ -130,19 +144,21 @@ function PacketDetail({ pk, connLabel }) {
   );
 }
 
-function PacketsTab({ analysis }) {
+function PacketsTab({ analysis, jumpTo }) {
   const [type, setType] = useState('all');
   const [handleText, setHandleText] = useState('');
   const [text, setText] = useState('');
+  const [dir, setDir] = useState('all');
   const [limit, setLimit] = useState(PAGE);
-  const [selected, setSelected] = useState(null);
+  const [selected, setSelected] = useState(jumpTo ? jumpTo.no : null);
 
   const handle = parseHandle(handleText);
   const badHandle = handleText.trim() !== '' && handle === null;
   const filtered = useMemo(
-    () => filterPackets(analysis.packets, { type, handle, text }),
-    [analysis, type, handle, text],
+    () => filterDirection(filterPackets(analysis.packets, { type, handle, text }), dir),
+    [analysis, type, handle, text, dir],
   );
+  const deltas = useMemo(() => deltaMs(analysis.packets), [analysis]);
   const shown = filtered.slice(0, limit);
   const selectedPk = selected === null ? null : analysis.packets[selected - 1] || null;
   const connLabel = (pk) => {
@@ -155,9 +171,18 @@ function PacketsTab({ analysis }) {
     download('bt-hci-filtered.csv', packetsToCsv(filtered));
   };
 
+  const exportSnoop = () => {
+    download('bt-hci-filtered.btsnoop', packetsToBtsnoop(filtered), 'application/octet-stream');
+  };
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-end gap-2">
+        <label className="text-[10px] text-slate-500">Direction
+          <select className={`${inputCls} block`} value={dir} onChange={(e) => setDir(e.target.value)} aria-label="Direction filter">
+            {DIR_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </label>
         <label className="text-[10px] text-slate-500">Type
           <select className={`${inputCls} block`} value={type} onChange={(e) => setType(e.target.value)}>
             {TYPE_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -181,19 +206,23 @@ function PacketsTab({ analysis }) {
             aria-label="Text filter"
           />
         </label>
-        <button className={btnCls} onClick={exportCsv} disabled={filtered.length === 0}>
-          <Download size={12} /> Export filtered CSV ({filtered.length})
+        <button className={btnCls} onClick={exportCsv} disabled={filtered.length === 0} title="Export the filtered packets as CSV">
+          <Download size={12} /> CSV ({filtered.length})
+        </button>
+        <button className={btnCls} onClick={exportSnoop} disabled={filtered.length === 0} title="Write the filtered packets to a new btsnoop file (H4) to share a trimmed log">
+          <FileDown size={12} /> btsnoop
         </button>
       </div>
       {badHandle && <div className="text-[11px] text-red-300">Handle must be a hex number, e.g. 0x0040.</div>}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 @xl:grid-cols-2 gap-2">
         <div className="min-w-0">
-          <div className="max-h-[420px] overflow-auto border border-slate-800 rounded">
+          <div className="max-h-[380px] overflow-auto border border-slate-800 rounded">
             <table className="w-full text-[11px] font-mono">
               <thead className="sticky top-0 bg-slate-900 text-slate-500">
                 <tr>
                   <th className="text-left px-2 py-1">#</th>
                   <th className="text-left px-2 py-1">Time s</th>
+                  <th className="text-right px-2 py-1" title="Milliseconds since the previous packet in the file">&Delta; ms</th>
                   <th className="text-left px-2 py-1">Dir</th>
                   <th className="text-left px-2 py-1">Type</th>
                   <th className="text-left px-2 py-1">Summary</th>
@@ -208,13 +237,14 @@ function PacketsTab({ analysis }) {
                   >
                     <td className="px-2 py-0.5 text-slate-500">{p.no}</td>
                     <td className="px-2 py-0.5 text-slate-400 whitespace-nowrap">{(p.relUs / 1e6).toFixed(6)}</td>
+                    <td className="px-2 py-0.5 text-slate-500 text-right whitespace-nowrap">{deltas.get(p.no)?.toFixed(2)}</td>
                     <td className="px-2 py-0.5 text-slate-500">{p.direction === 'sent' ? 'TX' : p.direction === 'received' ? 'RX' : '?'}</td>
                     <td className="px-2 py-0.5"><span className={`px-1 rounded border ${TYPE_BADGE[p.type] || TYPE_BADGE.unknown}`}>{p.type}</span></td>
                     <td className="px-2 py-0.5 text-gray-200 truncate max-w-[360px]" title={p.summary}>{p.summary}</td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={5} className="px-2 py-3 text-slate-500">No packets match the filter.</td></tr>
+                  <tr><td colSpan={6} className="px-2 py-3 text-slate-500">No packets match the filter.</td></tr>
                 )}
               </tbody>
             </table>
@@ -247,7 +277,7 @@ function GattTab({ analysis, connId, setConnId }) {
   const attOps = conn.attOps;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap text-xs">
         <span className="text-slate-500">Connection</span>
         <select className={inputCls} value={conn.id} onChange={(e) => { setConnId(Number(e.target.value)); setSel(null); }}>
@@ -264,7 +294,7 @@ function GattTab({ analysis, connId, setConnId }) {
       )}
       {model && attOps > 0 && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 @md:grid-cols-4 gap-2">
             <Stat label="Services" value={model.services.length} />
             <Stat label="Characteristics" value={model.characteristics.length} />
             <Stat label="Handles accessed" value={model.handles.length} />
@@ -379,7 +409,47 @@ function GattTab({ analysis, connId, setConnId }) {
   );
 }
 
+function fmtBps(v) {
+  if (v === null || v === undefined) return '-';
+  return v >= 1024 ? `${(v / 1024).toFixed(1)} KiB/s` : `${v.toFixed(0)} B/s`;
+}
+
+function IssuesTab({ analysis, onJump }) {
+  const issues = useMemo(() => findIssues(analysis), [analysis]);
+  if (issues.length === 0) {
+    return <div className="text-xs text-slate-500 p-2">Nothing flagged: no failed or unanswered commands, abnormal disconnects, ATT errors or parser warnings.</div>;
+  }
+  return (
+    <div className="space-y-1">
+      <div className="text-[11px] text-slate-500">{issues.length} item(s). Click one to open that packet. Slow means 500 ms or more between a command and its response.</div>
+      <div className="overflow-auto max-h-[460px] border border-slate-800 rounded">
+        <table className="w-full text-[11px] font-mono">
+          <thead className="sticky top-0 bg-slate-900 text-slate-500">
+            <tr>
+              <th className="text-left px-2 py-1">#</th>
+              <th className="text-left px-2 py-1">Level</th>
+              <th className="text-left px-2 py-1">Kind</th>
+              <th className="text-left px-2 py-1">Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {issues.slice(0, 1000).map((it, i) => (
+              <tr key={i} onClick={() => it.no && onJump(it.no)} className="cursor-pointer border-t border-slate-900 hover:bg-slate-900 align-top">
+                <td className="px-2 py-0.5 text-slate-400">{it.no || '-'}</td>
+                <td className="px-2 py-0.5"><span className={`px-1 rounded border ${SEVERITY_CLS[it.severity]}`}>{it.severity}</span></td>
+                <td className="px-2 py-0.5 text-slate-300 whitespace-nowrap">{it.category}</td>
+                <td className="px-2 py-0.5 text-gray-200 break-words">{it.message}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ConnsTab({ analysis, onPick }) {
+  const traffic = useMemo(() => connectionTraffic(analysis), [analysis]);
   if (analysis.connections.length === 0) {
     return <div className="text-xs text-slate-500 p-3">No connections seen in this capture.</div>;
   }
@@ -397,6 +467,8 @@ function ConnsTab({ analysis, onPick }) {
             <th className="text-left px-2 py-1">Interval</th>
             <th className="text-right px-2 py-1">Pkts</th>
             <th className="text-right px-2 py-1">ATT</th>
+            <th className="text-right px-2 py-1" title="ACL payload bytes, host to controller / controller to host">TX / RX bytes</th>
+            <th className="text-right px-2 py-1" title="Average over the time between the first and last ACL packet">Avg rate TX / RX</th>
             <th className="text-left px-2 py-1">End reason</th>
           </tr>
         </thead>
@@ -412,6 +484,8 @@ function ConnsTab({ analysis, onPick }) {
               <td className="px-2 py-0.5 text-slate-400">{c.interval !== null && c.interval !== undefined ? `${(c.interval * 1.25).toFixed(2)} ms` : '-'}</td>
               <td className="px-2 py-0.5 text-right">{c.packets}</td>
               <td className="px-2 py-0.5 text-right">{c.attOps}</td>
+              <td className="px-2 py-0.5 text-right whitespace-nowrap">{traffic[c.id]?.txBytes ?? 0} / {traffic[c.id]?.rxBytes ?? 0}</td>
+              <td className="px-2 py-0.5 text-right whitespace-nowrap">{fmtBps(traffic[c.id]?.txBps)} / {fmtBps(traffic[c.id]?.rxBps)}</td>
               <td className="px-2 py-0.5 text-slate-400 truncate max-w-[220px]">{c.status ? `failed: ${c.reason}` : c.reason || (c.endNo ? '-' : 'open at end of capture')}</td>
             </tr>
           ))}
@@ -430,6 +504,7 @@ export default function BtHciLogWorkbench({ onLogMessage }) {
   const [tab, setTab] = useState('packets');
   const [connId, setConnId] = useState(null);
   const [showWarnings, setShowWarnings] = useState(false);
+  const [jump, setJump] = useState(null);
 
   const ingest = (bytes, label) => {
     try {
@@ -440,6 +515,8 @@ export default function BtHciLogWorkbench({ onLogMessage }) {
       setFormat({ name: cap.format, linkType: cap.linkType });
       setError('');
       setShowWarnings(false);
+      setJump(null);
+      setTab('packets');
       const firstAtt = an.connections.find((c) => c.attOps > 0) || an.connections[0] || null;
       setConnId(firstAtt ? firstAtt.id : null);
       onLogMessage?.(`BT HCI log: ${cap.format} with ${an.packets.length} packet(s) from ${label}`, 'info');
@@ -465,24 +542,16 @@ export default function BtHciLogWorkbench({ onLogMessage }) {
   const stats = analysis ? analysis.stats : null;
 
   return (
-    <div className="p-3 space-y-3 text-gray-200 bg-slate-950 min-h-full">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Bluetooth size={18} className="text-cyan-400" />
-          <div>
-            <div className="text-sm font-semibold">Bluetooth HCI Log Viewer</div>
-            <div className="text-[11px] text-slate-500">Offline decoder for btsnoop_hci.log, pcap and pcapng (link 201). Parsed in your browser; nothing is uploaded or captured.</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <label className={`${btnCls} cursor-pointer`}>
-            <Upload size={12} /> Open capture file
-            <input type="file" accept=".log,.cfa,.btsnoop,.pcap,.pcapng,.bin,application/octet-stream" className="hidden" onChange={onFile} />
-          </label>
-          <button className={btnCls} onClick={() => ingest(makeExampleCapture(), EXAMPLE_LABEL)}>
-            <Play size={12} /> Load example
-          </button>
-        </div>
+    <div className="space-y-2 text-gray-200 bg-slate-950 min-h-full">
+      <div className="flex items-center gap-2 flex-wrap">
+        <label className={`${btnCls} cursor-pointer`} title="Open a btsnoop_hci.log, pcap or pcapng (link 201). Parsed in your browser; nothing is uploaded.">
+          <Upload size={12} /> Open capture file
+          <input type="file" accept=".log,.cfa,.btsnoop,.pcap,.pcapng,.bin,application/octet-stream" className="hidden" onChange={onFile} />
+        </label>
+        <button className={btnCls} onClick={() => ingest(makeExampleCapture(), EXAMPLE_LABEL)}>
+          <Play size={12} /> Load example
+        </button>
+        <span className="text-[11px] text-slate-500">Offline: nothing is captured from hardware and nothing is uploaded.</span>
       </div>
 
       {error && (
@@ -492,12 +561,13 @@ export default function BtHciLogWorkbench({ onLogMessage }) {
       )}
 
       {!analysis && !error && (
-        <div className="p-4 border border-dashed border-slate-800 rounded text-xs text-slate-400 space-y-2">
+        <div className="p-3 border border-dashed border-slate-800 rounded text-xs text-slate-400 space-y-1">
           <div>Open an Android <span className="font-mono">btsnoop_hci.log</span> (or a pcap/pcapng with link type 201) to decode it.</div>
-          <div className="text-slate-500">
-            On Android, enable Developer options, then "Bluetooth HCI snoop log", reproduce the session, and pull the log
+          <details className="text-slate-500">
+            <summary className="cursor-pointer">How to get a log from Android</summary>
+            Enable Developer options, then "Bluetooth HCI snoop log", reproduce the session, and pull the log
             (for example from a bug report). The file is parsed locally.
-          </div>
+          </details>
         </div>
       )}
 
@@ -507,7 +577,7 @@ export default function BtHciLogWorkbench({ onLogMessage }) {
             <span className="text-slate-300">{sourceLabel}</span>
             <span>{format.name} capture, link type {format.linkType}</span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2">
+          <div className="grid grid-cols-2 @md:grid-cols-4 @xl:grid-cols-8 gap-1.5">
             <Stat label="Packets" value={stats.total} />
             <Stat label="Commands" value={stats.cmd} />
             <Stat label="Events" value={stats.evt} />
@@ -536,14 +606,23 @@ export default function BtHciLogWorkbench({ onLogMessage }) {
               <button
                 key={id}
                 onClick={() => setTab(id)}
-                className={`px-3 py-1.5 text-xs inline-flex items-center gap-1.5 border-b-2 -mb-px ${tab === id ? 'border-cyan-500 text-cyan-300' : 'border-transparent text-slate-400 hover:text-gray-200'}`}
+                className={`px-2 py-1 text-xs inline-flex items-center gap-1 border-b-2 -mb-px ${tab === id ? 'border-cyan-500 text-cyan-300' : 'border-transparent text-slate-400 hover:text-gray-200'}`}
               >
                 <Icon size={12} /> {label}
               </button>
             ))}
           </div>
 
-          {tab === 'packets' && <PacketsTab analysis={analysis} />}
+          {tab === 'packets' && <PacketsTab analysis={analysis} jumpTo={jump} />}
+          {tab === 'issues' && (
+            <IssuesTab
+              analysis={analysis}
+              onJump={(no) => {
+                setJump({ no });
+                setTab('packets');
+              }}
+            />
+          )}
           {tab === 'gatt' && <GattTab analysis={analysis} connId={connId} setConnId={setConnId} />}
           {tab === 'conns' && (
             <ConnsTab
