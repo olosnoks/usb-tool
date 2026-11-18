@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { Binary, Copy, Check } from 'lucide-react';
+import { Copy, Check } from 'lucide-react';
 import {
   WIDTHS, parseNumber, parseDecimal, analyzeNumber, hexOf, toUnsigned, toSigned,
   toggleBit, getBit, parseFieldSpec, getField, setField, fieldMax, fieldMask, genCMacros,
   FLOAT_FORMATS, floatFormat, decodeFloat, encodeFloat, floatFromBytes, floatSpecials,
   parseHexBytes, parseQFormat, qInfo, qFromRaw, qFromReal, bitwiseOp, inspectBytes,
+  reverseBits, toggleFloatBit, floatNeighbors, evalExpression,
 } from '../../utils/bitConverter.js';
 
 /**
@@ -14,6 +15,7 @@ import {
  */
 
 const TABS = [
+  ['calc', 'Calc'],
   ['number', 'Number'],
   ['bits', 'Bits & fields'],
   ['float', 'Float'],
@@ -28,8 +30,8 @@ const BITWISE_OPTIONS = [
   ['rol', 'rotate A left by B'], ['ror', 'rotate A right by B'],
 ];
 
-const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-sm font-mono text-gray-200 focus:outline-none focus:border-cyan-700';
-const selectCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-xs text-gray-200';
+const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-cyan-700';
+const selectCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-gray-200';
 const btnCls = 'px-2 py-1 text-xs rounded border border-slate-700 text-slate-300 hover:border-cyan-700 hover:text-cyan-300';
 
 const hexBytes = (bytes) => bytes.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
@@ -62,7 +64,7 @@ function CopyBtn({ text, label = 'Copy' }) {
 
 function KV({ k, v, copyable = true }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-1 border-b border-slate-900 last:border-0">
+    <div className="flex items-center justify-between gap-3 py-0.5 border-b border-slate-900 last:border-0">
       <span className="text-slate-500 text-xs shrink-0">{k}</span>
       <span className="flex items-center gap-1.5 font-mono text-xs text-gray-200 break-all text-right">
         {String(v)}
@@ -72,7 +74,7 @@ function KV({ k, v, copyable = true }) {
   );
 }
 
-const H = ({ children }) => <div className="text-[11px] uppercase tracking-wide text-slate-500 mt-4 mb-1">{children}</div>;
+const H = ({ children }) => <div className="text-[11px] uppercase tracking-wide text-slate-500 mt-3 mb-1">{children}</div>;
 const Err = ({ children }) => (
   <div className="p-2 mt-2 border border-red-900 rounded bg-red-950/30 text-xs text-red-300">{children}</div>
 );
@@ -146,11 +148,11 @@ function NumberTab({ width }) {
 
           <H>Interpretations by width (two&apos;s complement)</H>
           <div className="font-mono text-xs">
-            <div className="grid grid-cols-[4rem_1fr_1fr_1fr] gap-2 text-slate-500 pb-1 border-b border-slate-800">
+            <div className="grid grid-cols-[2.5rem_1fr_1fr_1fr] @md:grid-cols-[4rem_1fr_1fr_1fr] gap-2 text-slate-500 pb-1 border-b border-slate-800">
               <span>bits</span><span>unsigned</span><span>signed</span><span>hex</span>
             </div>
             {a.widths.map((w) => (
-              <div key={w.width} className="grid grid-cols-[4rem_1fr_1fr_1fr] gap-2 py-1 border-b border-slate-900 text-gray-200 break-all">
+              <div key={w.width} className="grid grid-cols-[2.5rem_1fr_1fr_1fr] @md:grid-cols-[4rem_1fr_1fr_1fr] gap-2 py-0.5 border-b border-slate-900 text-gray-200 break-all">
                 <span className="text-slate-400">{w.width}</span>
                 <span>{w.unsigned.toString()}</span>
                 <span>{w.signed.toString()}</span>
@@ -163,6 +165,7 @@ function NumberTab({ width }) {
           <KV k="bytes, big-endian" v={hexBytes(a.bytesBE)} />
           <KV k="bytes, little-endian" v={hexBytes(a.bytesLE)} />
           <KV k="byte-swapped value" v={`${a.swapped.toString()} (${a.swappedHex})`} />
+          <KV k="bit-reversed value" v={hexOf(reverseBits(a.unsigned, width), width)} />
           <KV k="ASCII view (big-endian)" v={`"${a.ascii}"`} />
 
           <H>Bit counts</H>
@@ -180,6 +183,55 @@ function NumberTab({ width }) {
   );
 }
 
+/* --------------------------------------------------------------------- Calc */
+
+function CalcTab({ width }) {
+  const [text, setText] = useState('(0xF0 | 0x0F) & ~(1 << 3)');
+  const [hist, setHist] = useState([]);
+  const r = useMemo(() => evalExpression(text, width), [text, width]);
+  return (
+    <div>
+      <label className="block text-xs text-slate-400">
+        C-style integer expression: + - * / % &lt;&lt; &gt;&gt; &amp; | ^ ~ ( ), literals 0x 0b 0o decimal
+        <input
+          className={`${inputCls} w-full mt-1`}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && r.ok) setHist((h) => [{ text, hex: hexOf(r.value, width) }, ...h.filter((x) => x.text !== text)].slice(0, 8));
+          }}
+          spellCheck={false}
+          aria-label="Expression"
+        />
+      </label>
+      {!r.ok ? <Err>{r.error}</Err> : (
+        <>
+          {r.wrapped && <div className="text-xs text-amber-300 mt-1.5">The exact result does not fit {width} bits; showing the wrapped value (exact: {r.raw.toString()}).</div>}
+          <H>Result at {width} bits (Enter saves to history)</H>
+          <KV k="hex" v={hexOf(r.value, width)} />
+          <KV k="unsigned" v={r.value.toString()} />
+          <KV k="signed" v={r.signed.toString()} />
+          <KV k="binary" v={'0b' + r.value.toString(2).padStart(width, '0')} />
+          <KV k="octal" v={'0o' + r.value.toString(8)} />
+        </>
+      )}
+      {hist.length > 0 && (
+        <>
+          <H>History</H>
+          <div className="flex flex-wrap gap-1.5">
+            {hist.map((h) => (
+              <button key={h.text} type="button" className={`${btnCls} font-mono`} title="Load this expression" onClick={() => setText(h.text)}>
+                {h.text} = {h.hex}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <Note>Math is exact, then wrapped to the width like C unsigned arithmetic. Division truncates toward zero. Precedence follows C.</Note>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------- Bits & fields */
 
 const DEFAULT_FIELDS = 'EN[0] MODE[3:1] DIV[11:4]';
@@ -188,7 +240,7 @@ function FieldRow({ field, value, onCommit }) {
   const max = fieldMax(field);
   const parse = (t) => parseInRange(t, 0n, max);
   return (
-    <div className="grid grid-cols-[6rem_5rem_1fr_7rem_6rem] gap-2 items-center py-1 border-b border-slate-900 font-mono text-xs">
+    <div className="grid grid-cols-[4rem_3.5rem_1fr] @md:grid-cols-[6rem_5rem_1fr_7rem_6rem] gap-2 items-center py-1 border-b border-slate-900 font-mono text-xs">
       <span className="text-cyan-300">{field.name}</span>
       <span className="text-slate-400">[{field.msb}:{field.lsb}]</span>
       <NumInput
@@ -198,8 +250,8 @@ function FieldRow({ field, value, onCommit }) {
         onCommit={onCommit}
         className="w-full py-1"
       />
-      <span className="text-slate-400 break-all">{hexOf(getField(value, field), field.width)}</span>
-      <span className="text-slate-500 break-all">mask 0x{fieldMask(field).toString(16).toUpperCase()}</span>
+      <span className="hidden @md:inline text-slate-400 break-all">{hexOf(getField(value, field), field.width)}</span>
+      <span className="hidden @md:inline text-slate-500 break-all">mask 0x{fieldMask(field).toString(16).toUpperCase()}</span>
     </div>
   );
 }
@@ -238,20 +290,20 @@ function BitsTab({ width }) {
       </div>
 
       <H>Bit grid ({width} bits, click to toggle)</H>
-      <div className="flex flex-wrap gap-x-4 gap-y-3">
+      <div className="flex flex-wrap gap-x-3 gap-y-2">
         {nibbles.map((hi) => (
           <div key={hi} className="flex gap-1">
             {[3, 2, 1, 0].map((k) => {
               const i = hi + k;
               const on = getBit(value, i) === 1n;
               return (
-                <div key={i} className="flex flex-col items-center w-7">
+                <div key={i} className="flex flex-col items-center w-6">
                   <button
                     type="button"
                     aria-label={`bit ${i}`}
                     aria-pressed={on}
                     onClick={() => setReg(toggleBit(value, i, width))}
-                    className={`w-7 h-7 rounded font-mono text-sm border ${on ? 'bg-cyan-900/60 border-cyan-600 text-cyan-200' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
+                    className={`w-6 h-6 rounded font-mono text-xs border ${on ? 'bg-cyan-900/60 border-cyan-600 text-cyan-200' : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-600'}`}
                   >
                     {on ? '1' : '0'}
                   </button>
@@ -281,8 +333,8 @@ function BitsTab({ width }) {
       )}
       {parsed.fields.length > 0 && (
         <div className="mt-2">
-          <div className="grid grid-cols-[6rem_5rem_1fr_7rem_6rem] gap-2 text-[10px] uppercase text-slate-600 pb-1 border-b border-slate-800">
-            <span>name</span><span>bits</span><span>value (edit to insert)</span><span>hex</span><span>mask</span>
+          <div className="grid grid-cols-[4rem_3.5rem_1fr] @md:grid-cols-[6rem_5rem_1fr_7rem_6rem] gap-2 text-[10px] uppercase text-slate-600 pb-1 border-b border-slate-800">
+            <span>name</span><span>bits</span><span>value (edit to insert)</span><span className="hidden @md:inline">hex</span><span className="hidden @md:inline">mask</span>
           </div>
           {parsed.fields.map((f) => (
             <FieldRow
@@ -363,6 +415,7 @@ function FloatTab() {
   }
 
   const specials = floatSpecials(fmt);
+  const neighbors = res ? floatNeighbors(fmt, BigInt(res.hex)) : null;
   const digits = res ? res.hex.slice(2) : '';
   const be = res ? hexBytes(digits.match(/../g).map((h) => parseInt(h, 16))) : '';
   const le = res ? hexBytes(digits.match(/../g).map((h) => parseInt(h, 16)).reverse()) : '';
@@ -377,35 +430,35 @@ function FloatTab() {
       </label>
       <div className="grid gap-2 mt-3">
         <label className="text-xs text-slate-400 flex items-center gap-2">
-          <span className="w-44">Decimal (nearest value is computed)</span>
+          <span className="w-24 @md:w-44 shrink-0">Decimal</span>
           <input
             aria-label="Decimal input"
             value={decText}
             onFocus={() => setSrc('dec')}
             onChange={(e) => { setSrc('dec'); setDecText(e.target.value); }}
-            className={`${inputCls} flex-1`}
+            className={`${inputCls} flex-1 min-w-0`}
             spellCheck={false}
           />
         </label>
         <label className="text-xs text-slate-400 flex items-center gap-2">
-          <span className="w-44">Bit pattern (hex)</span>
+          <span className="w-24 @md:w-44 shrink-0">Bit pattern (hex)</span>
           <input
             aria-label="Bit pattern input"
             value={bitsText}
             onFocus={() => setSrc('bits')}
             onChange={(e) => { setSrc('bits'); setBitsText(e.target.value); }}
-            className={`${inputCls} flex-1`}
+            className={`${inputCls} flex-1 min-w-0`}
             spellCheck={false}
           />
         </label>
         <label className="text-xs text-slate-400 flex items-center gap-2">
-          <span className="w-44">Bytes</span>
+          <span className="w-24 @md:w-44 shrink-0">Bytes</span>
           <input
             aria-label="Byte input"
             value={bytesText}
             onFocus={() => setSrc('bytes')}
             onChange={(e) => { setSrc('bytes'); setBytesText(e.target.value); }}
-            className={`${inputCls} flex-1`}
+            className={`${inputCls} flex-1 min-w-0`}
             spellCheck={false}
           />
           <select aria-label="Byte order" value={endian} onChange={(e) => setEndian(e.target.value)} className={selectCls}>
@@ -436,14 +489,26 @@ function FloatTab() {
       {res && (
         <>
           <H>Breakdown ({info.bits} bits)</H>
-          <div className="font-mono text-sm bg-slate-950 border border-slate-800 rounded p-2 break-all">
-            <span className="text-amber-300" title="sign">{res.signBits}</span>
-            <span className="text-slate-600"> </span>
-            <span className="text-cyan-300" title="exponent">{res.expBits}</span>
-            <span className="text-slate-600"> </span>
-            <span className="text-emerald-300" title="mantissa">{res.mantBits}</span>
+          <div className="flex flex-wrap gap-px font-mono text-xs bg-slate-950 border border-slate-800 rounded p-1.5" role="group" aria-label="Float bits, click to toggle">
+            {(res.signBits + res.expBits + res.mantBits).split('').map((c, k) => {
+              const idx = info.bits - 1 - k;
+              const color = k === 0 ? 'text-amber-300' : k <= info.ebits ? 'text-cyan-300' : 'text-emerald-300';
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  aria-label={`float bit ${idx}`}
+                  aria-pressed={c === '1'}
+                  title={`bit ${idx} (${k === 0 ? 'sign' : k <= info.ebits ? 'exponent' : 'mantissa'})`}
+                  onClick={() => { setSrc('bits'); setBitsText(hexOf(toggleFloatBit(fmt, BigInt(res.hex), idx), info.bits)); }}
+                  className={`w-4 h-5 rounded-sm hover:bg-slate-800 ${color} ${c === '1' ? 'font-bold bg-slate-900' : 'opacity-60'} ${k === 1 || k === 1 + info.ebits ? 'ml-1.5' : ''}`}
+                >
+                  {c}
+                </button>
+              );
+            })}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">sign · exponent · mantissa (bias {res.bias})</div>
+          <div className="text-[11px] text-slate-500 mt-1">sign (amber) · exponent (cyan) · mantissa (green), bias {res.bias}. Click a bit to flip it.</div>
           <KV k="hex" v={res.hex} />
           <KV k="bytes, big-endian" v={be} />
           <KV k="bytes, little-endian" v={le} />
@@ -455,6 +520,22 @@ function FloatTab() {
           />
           <KV k="class" v={res.kind === 'nan' ? `NaN (${res.quiet ? 'quiet' : 'signaling'})` : res.kind} copyable={false} />
           <KV k="value" v={String(res.value)} />
+          {neighbors && (neighbors.up !== null || neighbors.down !== null) && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+              <span className="text-[11px] text-slate-500">Neighbours:</span>
+              {[['down', 'prev value'], ['up', 'next value']].map(([k, label]) => neighbors[k] !== null && (
+                <button
+                  key={k}
+                  type="button"
+                  className={btnCls}
+                  title={`Load the ${label} (one step) as the bit pattern`}
+                  onClick={() => { setSrc('bits'); setBitsText(hexOf(neighbors[k], info.bits)); }}
+                >
+                  {label} {hexOf(neighbors[k], info.bits)} = {String(decodeFloat(fmt, neighbors[k]).value)}
+                </button>
+              ))}
+            </div>
+          )}
           {enc && (
             <>
               <KV k="input" v={String(enc.input)} copyable={false} />
@@ -685,20 +766,27 @@ function BitwiseTab({ width }) {
 /* ------------------------------------------------------------------ shell */
 
 export default function BitConverterWorkbench() {
-  const [tab, setTab] = useState('number');
+  const [tab, setTab] = useState('calc');
   const [width, setWidth] = useState(32);
 
   return (
-    <div className="h-full overflow-auto bg-slate-950 text-gray-200 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Binary size={18} className="text-cyan-400" />
-          <div>
-            <div className="text-sm font-semibold">Bits &amp; Numbers Converter</div>
-            <div className="text-[11px] text-slate-500">Offline. Everything is computed in your browser; nothing is sent anywhere.</div>
-          </div>
+    <div className="min-h-[calc(100%+1.5rem)] -m-3 p-2 bg-slate-950 text-gray-200">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800">
+        <div role="tablist" className="flex flex-wrap gap-0.5">
+          {TABS.map(([k, label]) => (
+            <button
+              key={k}
+              role="tab"
+              aria-selected={tab === k}
+              type="button"
+              onClick={() => setTab(k)}
+              className={`px-2 py-1 text-xs border-b-2 -mb-px ${tab === k ? 'border-cyan-500 text-cyan-300' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        <label className="text-xs text-slate-400 flex items-center gap-2">
+        <label className="text-xs text-slate-400 flex items-center gap-1.5" title="Offline: everything is computed in your browser">
           Width
           <select aria-label="Register width" value={width} onChange={(e) => setWidth(Number(e.target.value))} className={selectCls}>
             {WIDTHS.map((w) => <option key={w} value={w}>{w} bits</option>)}
@@ -706,22 +794,8 @@ export default function BitConverterWorkbench() {
         </label>
       </div>
 
-      <div role="tablist" className="flex flex-wrap gap-1 mt-3 border-b border-slate-800">
-        {TABS.map(([k, label]) => (
-          <button
-            key={k}
-            role="tab"
-            aria-selected={tab === k}
-            type="button"
-            onClick={() => setTab(k)}
-            className={`px-3 py-1.5 text-xs border-b-2 -mb-px ${tab === k ? 'border-cyan-500 text-cyan-300' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-3">
+      <div className="mt-2">
+        {tab === 'calc' && <CalcTab width={width} />}
         {tab === 'number' && <NumberTab width={width} />}
         {tab === 'bits' && <BitsTab width={width} />}
         {tab === 'float' && <FloatTab />}
