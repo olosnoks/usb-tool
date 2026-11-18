@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FileCode, Upload, Download, Copy, Check, Layers, Scissors, GitMerge, AlertTriangle, ShieldCheck, ShieldAlert, Trash2 } from 'lucide-react';
+import { FileCode, Upload, Download, Copy, Check, Layers, Scissors, GitMerge, Terminal, AlertTriangle, ShieldCheck, ShieldAlert, Trash2 } from 'lucide-react';
 import {
   FirmwareError, FORMAT_INFO, OUTPUT_FORMATS, UF2_FAMILIES, parseFirmware, parseNumber, describeImage,
   convertImage, verifyOutput, relocateImage, splitImageAt, splitImageBySegment, mergeImages,
+  parseRanges, cropImage, excludeImage, padImageToAlign, insertChecksum, srecCatCommand,
 } from '../../utils/firmwareConvert.js';
 
 /**
@@ -25,7 +26,7 @@ const hx32 = (n) => `0x${(n >>> 0).toString(16).toUpperCase().padStart(8, '0')}`
 const fmtBytes = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(2)} MiB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KiB` : `${n} B`);
 
 const inputCls = 'bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs font-mono text-gray-200 focus:outline-none focus:border-cyan-700';
-const cardCls = 'bg-slate-950 border border-slate-800 rounded p-3';
+const cardCls = 'bg-slate-950 border border-slate-800 rounded p-2.5';
 
 function Field({ label, children, hint }) {
   return (
@@ -107,6 +108,13 @@ export default function FirmwareConverterWorkbench({ onLogMessage }) {
   const [uf2Custom, setUf2Custom] = useState('0xe48bff56');
   const [splitMode, setSplitMode] = useState('none');
   const [splitAddr, setSplitAddr] = useState('0x08000000');
+  const [cropText, setCropText] = useState('');
+  const [excludeText, setExcludeText] = useState('');
+  const [alignText, setAlignText] = useState('');
+  const [csumOn, setCsumOn] = useState(false);
+  const [csumAlgo, setCsumAlgo] = useState('crc32');
+  const [csumAddr, setCsumAddr] = useState('');
+  const [csumEndian, setCsumEndian] = useState('little');
   const [outputs, setOutputs] = useState(null);
   const [outError, setOutError] = useState('');
 
@@ -120,6 +128,10 @@ export default function FirmwareConverterWorkbench({ onLogMessage }) {
     if (n < 0 || n > 255) throw new FirmwareError('Fill byte must be 0x00 to 0xFF');
     return n;
   }), [fillText]);
+  const cropRes = useMemo(() => (cropText.trim() ? attempt(() => parseRanges(cropText)) : { value: null, error: '' }), [cropText]);
+  const excludeRes = useMemo(() => (excludeText.trim() ? attempt(() => parseRanges(excludeText)) : { value: null, error: '' }), [excludeText]);
+  const alignRes = useMemo(() => (alignText.trim() ? attempt(() => parseNumber(alignText)) : { value: null, error: '' }), [alignText]);
+  const csumAddrRes = useMemo(() => (csumAddr.trim() ? attempt(() => parseNumber(csumAddr)) : { value: null, error: '' }), [csumAddr]);
   const splitRes = useMemo(() => attempt(() => parseNumber(splitAddr)), [splitAddr]);
 
   // Parse every loaded file with the chosen input format.
@@ -142,10 +154,39 @@ export default function FirmwareConverterWorkbench({ onLogMessage }) {
   const workRes = useMemo(() => {
     if (!sourceImage) return { value: null, error: '' };
     if (offsetRes.error) return { value: null, error: `Offset: ${offsetRes.error}` };
-    return attempt(() => relocateImage(sourceImage, offsetRes.value));
-  }, [sourceImage, offsetRes]);
-  const working = workRes.value;
+    const bad = [['Crop', cropRes], ['Exclude', excludeRes], ['Align', alignRes], ['Checksum address', csumAddrRes]].find(([, r]) => r.error);
+    if (bad) return { value: null, error: `${bad[0]}: ${bad[1].error}` };
+    if (fillRes.error) return { value: null, error: `Fill: ${fillRes.error}` };
+    return attempt(() => {
+      let img = relocateImage(sourceImage, offsetRes.value);
+      if (cropRes.value) img = cropImage(img, cropRes.value);
+      if (excludeRes.value) img = excludeImage(img, excludeRes.value);
+      if (alignRes.value !== null) img = padImageToAlign(img, alignRes.value, fillRes.value);
+      return img;
+    });
+  }, [sourceImage, offsetRes, cropRes, excludeRes, alignRes, csumAddrRes, fillRes]);
+  const csumRes = useMemo(() => {
+    if (!csumOn || !workRes.value) return { value: null, error: '' };
+    return attempt(() => insertChecksum(workRes.value, { algo: csumAlgo, address: csumAddrRes.value, endian: csumEndian, fill: fillRes.value ?? 0xff }));
+  }, [csumOn, workRes, csumAlgo, csumAddrRes, csumEndian, fillRes]);
+  const working = csumOn ? csumRes.value?.image ?? null : workRes.value;
   const info = useMemo(() => (working ? describeImage(working) : null), [working]);
+  const cmd = useMemo(() => {
+    if (!active?.image) return null;
+    const src = view === 'merged' ? parsed.filter((p) => p.image) : [active];
+    return srecCatCommand({
+      inputs: src.map((p) => ({ name: p.name, format: p.image.meta.format, base: p.image.meta.format === 'bin' ? baseRes.value ?? 0 : 0 })),
+      offset: offsetRes.value ?? 0,
+      crop: cropRes.value ?? [],
+      exclude: excludeRes.value ?? [],
+      format: outFormat,
+      fillGaps,
+      fill: fillRes.value ?? 0xff,
+      recordSize: Number(recordSize),
+      outName: (active.name || 'out').replace(/\.[^.]+$/, ''),
+      span: info?.span ? { start: info.start, end: info.end } : null,
+    });
+  }, [active, view, parsed, baseRes, offsetRes, cropRes, excludeRes, outFormat, fillGaps, fillRes, recordSize, info]);
 
   // Outputs belong to the settings they were built with; drop them when anything changes.
   useEffect(() => {
@@ -237,27 +278,27 @@ export default function FirmwareConverterWorkbench({ onLogMessage }) {
   const fileFormat = info?.format ? (FORMAT_INFO[info.format]?.label ?? info.format) : '-';
 
   return (
-    <div className="p-3 space-y-3 text-gray-200 text-xs bg-slate-950 min-h-full">
-      <div className="flex items-center gap-2 flex-wrap">
-        <FileCode size={18} className="text-cyan-400" />
-        <h2 className="text-sm font-semibold text-gray-100">Firmware File Converter &amp; Inspector</h2>
-        <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-900/40 text-cyan-200 border border-cyan-800">OFFLINE</span>
-        <span className="text-[10px] text-slate-500">Files stay in this browser. Nothing is uploaded.</span>
+    <div className="space-y-2 text-gray-200 text-xs bg-slate-950 min-h-full">
+      <div className="flex items-center gap-2 flex-wrap text-[10px] text-slate-500">
+        <FileCode size={12} className="text-cyan-400" />
+        <span className="text-gray-300">Firmware File Converter &amp; Inspector</span>
+        <span className="px-1.5 py-0.5 rounded bg-cyan-900/40 text-cyan-200 border border-cyan-800">OFFLINE</span>
+        <span>Files stay in this browser.</span>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 @xl:grid-cols-2 gap-2">
         {/* Input */}
-        <section className={`${cardCls} space-y-3`}>
+        <section className={`${cardCls} space-y-2`}>
           <div className="text-[10px] uppercase tracking-wide text-slate-500">1. Input</div>
           <div
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
             onDragLeave={() => setDragging(false)}
             onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
-            className={`border-2 border-dashed rounded p-4 text-center ${dragging ? 'border-cyan-500 bg-cyan-950/30' : 'border-slate-800'}`}
+            className={`border-2 border-dashed rounded p-2.5 text-center ${dragging ? 'border-cyan-500 bg-cyan-950/30' : 'border-slate-800'}`}
           >
-            <Upload size={18} className="mx-auto text-slate-500 mb-1" />
-            <div className="text-slate-400 mb-2">Drop firmware files here, or choose them</div>
-            <label className="inline-block px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 cursor-pointer text-gray-200">
+            <Upload size={14} className="mx-auto text-slate-500" />
+            <div className="text-slate-400 mb-1">Drop firmware files here, or choose them</div>
+            <label className="inline-block px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 cursor-pointer text-gray-200">
               Choose file(s)
               <input
                 type="file"
@@ -267,7 +308,7 @@ export default function FirmwareConverterWorkbench({ onLogMessage }) {
                 onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
               />
             </label>
-            <div className="text-[10px] text-slate-600 mt-2">Several files can be loaded to merge them. Nothing runs until you choose an action.</div>
+            <div className="text-[10px] text-slate-600 mt-1">Several files can be loaded to merge them.</div>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -305,6 +346,54 @@ export default function FirmwareConverterWorkbench({ onLogMessage }) {
           <Field label="Relocate by offset" hint={offsetRes.error ? `Invalid: ${offsetRes.error}` : 'Added to every address (decimal, 0x hex or negative). Applies to the view and to outputs.'}>
             <input value={offset} onChange={(e) => setOffset(e.target.value)} className={`${inputCls} ${offsetRes.error ? 'border-red-800' : ''}`} spellCheck={false} aria-label="Offset" />
           </Field>
+          <details className="border border-slate-800 rounded bg-slate-900/50">
+            <summary className="cursor-pointer px-2 py-1 text-[11px] text-slate-400">Edit: crop, exclude, pad, checksum{(cropText || excludeText || alignText || csumOn) ? ' (active)' : ''}</summary>
+            <div className="p-2 grid grid-cols-1 @md:grid-cols-2 gap-2">
+              <Field label="Keep only ranges (crop)" hint={cropRes.error ? `Invalid: ${cropRes.error}` : 'start-end (inclusive) or start+length, comma separated'}>
+                <input value={cropText} onChange={(e) => setCropText(e.target.value)} placeholder="0x08000000-0x0800FFFF" className={`${inputCls} ${cropRes.error ? 'border-red-800' : ''}`} spellCheck={false} aria-label="Crop ranges" />
+              </Field>
+              <Field label="Remove ranges (exclude)" hint={excludeRes.error ? `Invalid: ${excludeRes.error}` : 'Same syntax; applied after crop'}>
+                <input value={excludeText} onChange={(e) => setExcludeText(e.target.value)} placeholder="0x0800F000+0x100" className={`${inputCls} ${excludeRes.error ? 'border-red-800' : ''}`} spellCheck={false} aria-label="Exclude ranges" />
+              </Field>
+              <Field label="Pad end to multiple of (bytes)" hint={alignRes.error ? `Invalid: ${alignRes.error}` : 'Uses the fill byte; empty = off'}>
+                <input value={alignText} onChange={(e) => setAlignText(e.target.value)} placeholder="256" className={`${inputCls} ${alignRes.error ? 'border-red-800' : ''}`} spellCheck={false} aria-label="Pad alignment" />
+              </Field>
+              <Field label="Fill byte (gaps, padding, checksum range)" hint={fillRes.error ? `Invalid: ${fillRes.error}` : undefined}>
+                <input value={fillText} onChange={(e) => setFillText(e.target.value)} className={`${inputCls} ${fillRes.error ? 'border-red-800' : ''}`} spellCheck={false} aria-label="Fill byte shared" />
+              </Field>
+              <div className="@md:col-span-2 space-y-1.5">
+                <label className="flex items-center gap-2 text-[11px] text-gray-300">
+                  <input type="checkbox" checked={csumOn} onChange={(e) => setCsumOn(e.target.checked)} />
+                  Insert a 32-bit checksum word
+                </label>
+                {csumOn && (
+                  <div className="grid grid-cols-3 gap-2">
+                    <Field label="Algorithm">
+                      <select value={csumAlgo} onChange={(e) => setCsumAlgo(e.target.value)} className={inputCls} aria-label="Checksum algorithm">
+                        <option value="crc32">CRC-32 (IEEE)</option>
+                        <option value="sum32">Negated byte sum</option>
+                      </select>
+                    </Field>
+                    <Field label="Byte order">
+                      <select value={csumEndian} onChange={(e) => setCsumEndian(e.target.value)} className={inputCls} aria-label="Checksum byte order">
+                        <option value="little">Little-endian</option>
+                        <option value="big">Big-endian</option>
+                      </select>
+                    </Field>
+                    <Field label="Write at" hint={csumAddrRes.error ? `Invalid: ${csumAddrRes.error}` : 'Empty = end of image'}>
+                      <input value={csumAddr} onChange={(e) => setCsumAddr(e.target.value)} className={`${inputCls} ${csumAddrRes.error ? 'border-red-800' : ''}`} spellCheck={false} aria-label="Checksum address" />
+                    </Field>
+                  </div>
+                )}
+                {csumOn && csumRes.error && <div className="text-[10px] text-red-300">{csumRes.error}</div>}
+                {csumOn && csumRes.value && (
+                  <div className="text-[10px] text-emerald-300 font-mono">
+                    {csumAlgo === 'crc32' ? 'CRC-32' : 'Sum'} {hx32(csumRes.value.value)} over {csumRes.value.covered.toLocaleString()} byte(s), written at {hx(csumRes.value.address, 8)}. It covers the lowest address up to the slot; later data is not included.
+                  </div>
+                )}
+              </div>
+            </div>
+          </details>
           {parseErrors.length > 0 && (
             <div className="p-2 border border-red-900 rounded bg-red-950/30 text-red-300 space-y-0.5">
               {parseErrors.map((e) => <div key={e} className="font-mono break-all">{e}</div>)}
@@ -314,12 +403,12 @@ export default function FirmwareConverterWorkbench({ onLogMessage }) {
         </section>
 
         {/* Inspector */}
-        <section className={`${cardCls} space-y-3`}>
+        <section className={`${cardCls} space-y-2`}>
           <div className="text-[10px] uppercase tracking-wide text-slate-500">2. Inspector</div>
           {!info && <div className="text-slate-500 py-6 text-center">Load a file to see its segment map, digests, start address and warnings.</div>}
           {info && (
             <>
-              <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 @lg:grid-cols-3 gap-1.5">
                 <Kpi label="Format" value={fileFormat} />
                 <Kpi label="Data bytes" value={`${info.dataBytes.toLocaleString()} (${fmtBytes(info.dataBytes)})`} />
                 <Kpi label="Address range" value={info.span ? `${hx(info.start, 8)}..${hx(info.end, 8)}` : '-'} />
@@ -403,9 +492,9 @@ export default function FirmwareConverterWorkbench({ onLogMessage }) {
       </div>
 
       {/* Convert */}
-      <section className={`${cardCls} space-y-3`}>
+      <section className={`${cardCls} space-y-2`}>
         <div className="text-[10px] uppercase tracking-wide text-slate-500">3. Convert, split and download</div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 @lg:grid-cols-4 gap-2">
           <Field label="Output format">
             <select value={outFormat} onChange={(e) => setOutFormat(e.target.value)} className={inputCls} aria-label="Output format">
               {OUTPUT_FORMATS.map((f) => <option key={f} value={f}>{FORMAT_INFO[f].label}</option>)}
@@ -509,7 +598,17 @@ export default function FirmwareConverterWorkbench({ onLogMessage }) {
             )}
           </div>
         )}
-        <div className="flex items-center gap-1 text-[10px] text-slate-600"><Scissors size={10} /> Split and merge run on the file as it is shown (after any relocation). Outputs are re-read and compared before download.</div>
+        {cmd && (
+          <details className="border border-slate-800 rounded bg-slate-900/50">
+            <summary className="cursor-pointer px-2 py-1 text-[11px] text-slate-400 inline-flex items-center gap-1 w-full"><Terminal size={11} /> Equivalent srec_cat command (for the CLI)</summary>
+            <div className="p-2 space-y-1">
+              <div className="flex items-start gap-2"><code className="font-mono text-[11px] text-cyan-200 break-all flex-1">{cmd.command}</code><CopyButton text={cmd.command} /></div>
+              {cmd.notes.map((n) => <div key={n} className="text-[10px] text-amber-300">{n}</div>)}
+              <div className="text-[10px] text-slate-600">Text only, not run here. Pad, checksum and split are not included; check it against the SRecord manual.</div>
+            </div>
+          </details>
+        )}
+        <div className="flex items-center gap-1 text-[10px] text-slate-600"><Scissors size={10} /> Split and merge run on the file as shown (after edits). Outputs are re-read and compared before download.</div>
       </section>
     </div>
   );

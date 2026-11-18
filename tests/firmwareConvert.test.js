@@ -412,3 +412,66 @@ describe('inspector summary', () => {
     expect(() => parseNumber('zz')).toThrow(FirmwareError);
   });
 });
+
+describe('crop, exclude, pad, checksum, srec_cat export', () => {
+  const img = () => plain([
+    { address: 0x1000, data: Uint8Array.from([1, 2, 3, 4]) },
+    { address: 0x2000, data: Uint8Array.from([5, 6, 7, 8]) },
+  ], 0x1000, 'entry');
+
+  it('parses ranges (inclusive end and start+length)', async () => {
+    const { parseRanges } = await import('../src/utils/firmwareConvert.js');
+    expect(parseRanges('0x1000-0x1FFF, 0x3000+0x10')).toEqual([{ start: 0x1000, end: 0x2000 }, { start: 0x3000, end: 0x3010 }]);
+    expect(() => parseRanges('')).toThrow(FirmwareError);
+    expect(() => parseRanges('0x20-0x10')).toThrow(/reversed/);
+    expect(() => parseRanges('nonsense')).toThrow(FirmwareError);
+  });
+
+  it('crops and excludes', async () => {
+    const { cropImage, excludeImage } = await import('../src/utils/firmwareConvert.js');
+    const c = cropImage(img(), [{ start: 0x1002, end: 0x2002 }]);
+    expect(c.segments.map((s) => [s.address, [...s.data]])).toEqual([[0x1002, [3, 4]], [0x2000, [5, 6]]]);
+    expect(c.startAddress).toBeNull();
+    const e = excludeImage(img(), [{ start: 0x1001, end: 0x1003 }]);
+    expect(e.segments.map((s) => [s.address, [...s.data]])).toEqual([[0x1000, [1]], [0x1003, [4]], [0x2000, [5, 6, 7, 8]]]);
+    expect(e.startAddress).toBe(0x1000);
+  });
+
+  it('pads the end to an alignment', async () => {
+    const { padImageToAlign } = await import('../src/utils/firmwareConvert.js');
+    const p = padImageToAlign(img(), 0x100, 0xaa);
+    const last = p.segments[1];
+    expect(last.data.length).toBe(0x100);
+    expect(last.data[4]).toBe(0xaa);
+    expect(() => padImageToAlign(img(), 0)).toThrow(FirmwareError);
+  });
+
+  it('inserts a CRC-32 at the end, little-endian', async () => {
+    const { insertChecksum } = await import('../src/utils/firmwareConvert.js');
+    const base = plain([{ address: 0x100, data: enc('123456789') }]);
+    const r = insertChecksum(base, {});
+    expect(r.value).toBe(0xcbf43926);
+    expect(r.address).toBe(0x109);
+    expect([...r.image.segments[0].data.slice(9)]).toEqual([0x26, 0x39, 0xf4, 0xcb]);
+    const big = insertChecksum(base, { endian: 'big' });
+    expect([...big.image.segments[0].data.slice(9)]).toEqual([0xcb, 0xf4, 0x39, 0x26]);
+  });
+
+  it('negated byte sum makes the total zero and rejects a slot below the image', async () => {
+    const { insertChecksum } = await import('../src/utils/firmwareConvert.js');
+    const base = plain([{ address: 0, data: Uint8Array.from([1, 2, 3]) }]);
+    const r = insertChecksum(base, { algo: 'sum32' });
+    expect(r.value).toBe((0x100000000 - 6) >>> 0);
+    expect(() => insertChecksum(plain([{ address: 0x10, data: Uint8Array.from([1]) }]), { address: 0 })).toThrow(FirmwareError);
+  });
+
+  it('builds an srec_cat command and flags unsupported formats', async () => {
+    const { srecCatCommand } = await import('../src/utils/firmwareConvert.js');
+    const r = srecCatCommand({ inputs: [{ name: 'fw.hex', format: 'hex' }], crop: [{ start: 0x1000, end: 0x2000 }], format: 'srec', recordSize: 32, outName: 'fw' });
+    expect(r.command).toBe('srec_cat fw.hex -intel -crop 0x00001000 0x00002000 -output-block-size=32 -o fw.srec');
+    expect(r.ok).toBe(true);
+    const u = srecCatCommand({ inputs: [{ name: 'fw.uf2', format: 'uf2' }], format: 'uf2' });
+    expect(u.ok).toBe(false);
+    expect(u.notes.length).toBe(2);
+  });
+});
