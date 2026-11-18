@@ -7,13 +7,14 @@
 // RPC data: command | length of the rest | rest. Strings are length-prefixed.
 
 export const IMPROV_TYPE = { STATE: 0x01, ERROR: 0x02, RPC: 0x03, RESULT: 0x04 };
-export const IMPROV_CMD = { WIFI_SETTINGS: 0x01, GET_STATE: 0x02, GET_INFO: 0x03, SCAN: 0x04 };
+export const IMPROV_CMD = { WIFI_SETTINGS: 0x01, GET_STATE: 0x02, GET_INFO: 0x03, SCAN: 0x04, IDENTIFY: 0x05 };
 export const IMPROV_STATE = { READY: 0x02, PROVISIONING: 0x03, PROVISIONED: 0x04 };
 export const IMPROV_ERRORS = {
   0x00: null,
   0x01: 'invalid RPC packet',
   0x02: 'unknown RPC command',
   0x03: 'unable to connect to the network',
+  0x04: 'not authorized (press the button on the device first)',
   0xff: 'unknown error'
 };
 
@@ -116,3 +117,61 @@ export function parseMicropythonScan(line) {
   }
   return out;
 }
+
+// ---- helpers added for the workbench UI ----
+
+export const IMPROV_STATE_NAMES = {
+  0x00: 'Unknown (no state received yet)',
+  0x01: 'Authorization required (press the button on the device)',
+  0x02: 'Authorized, ready to provision',
+  0x03: 'Provisioning (device is connecting)',
+  0x04: 'Provisioned'
+};
+
+/** "49 4d 50 ..." for a frame, so the bytes can be compared with a capture. */
+export function frameToHex(bytes) {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(' ');
+}
+
+/** One-line description of a decoded packet for the packet log. */
+export function describeImprovPacket(pkt) {
+  if (pkt.kind === 'state') return `state 0x${pkt.state.toString(16).padStart(2, '0')}: ${IMPROV_STATE_NAMES[pkt.state] || 'unknown'}`;
+  if (pkt.kind === 'error') return pkt.code === 0 ? 'error state: none' : `error 0x${pkt.code.toString(16).padStart(2, '0')}: ${pkt.message}`;
+  if (pkt.kind === 'result') return `result for command 0x${pkt.command.toString(16).padStart(2, '0')}: ${pkt.strings.length ? pkt.strings.join(' | ') : '(empty)'}`;
+  return `type 0x${(pkt.type ?? 0).toString(16).padStart(2, '0')} (${pkt.data?.length || 0} bytes)`;
+}
+
+/**
+ * Checks credentials before sending. Returns { errors, warnings }.
+ * Improv strings are length-prefixed with one byte and the whole RPC data must fit in 255 bytes.
+ */
+export function validateWifiCredentials(ssid, password) {
+  const errors = [], warnings = [];
+  const sb = enc.encode(ssid || '').length, pb = enc.encode(password || '').length;
+  if (!sb) errors.push('SSID is empty.');
+  if (sb > 32) errors.push(`SSID is ${sb} bytes; Wi-Fi allows at most 32.`);
+  if (pb > 63) errors.push(`Password is ${pb} bytes; WPA allows at most 63 characters.`);
+  if (sb + pb + 4 > 255) errors.push('SSID and password do not fit in one Improv packet (255 bytes).');
+  if (pb > 0 && pb < 8) warnings.push('WPA2/WPA3 passwords are 8 to 63 characters; this one is shorter.');
+  if (!pb && sb) warnings.push('No password: only valid for an open network.');
+  return { errors, warnings };
+}
+
+/** Escapes text for use inside a double-quoted ESP-AT argument. */
+export const atEscape = (s) => String(s).replace(/[\\",]/g, (c) => '\\' + c);
+
+/** Quotes text as a Python string literal (single quotes). */
+export function pyQuote(s) {
+  return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '\\r').replace(/\n/g, '\\n') + "'";
+}
+
+export const buildAtScan = () => 'AT+CWLAP\r\n';
+export const buildAtProvision = (ssid, password) => `AT+CWMODE=1\r\nAT+CWJAP="${atEscape(ssid)}","${atEscape(password)}"\r\n`;
+export const buildMicropythonScan = () =>
+  "import network; w = network.WLAN(network.STA_IF); w.active(True); print('SCAN_RES:', w.scan())\r\n";
+export const buildMicropythonProvision = (ssid, password) =>
+  `import network, time; w=network.WLAN(network.STA_IF); w.active(True); w.connect(${pyQuote(ssid)}, ${pyQuote(password)}); time.sleep(5); print('IP:', w.ifconfig()[0])\r\n`;
+
+/** Multi-line Python for the MicroPython mode, to paste into Thonny or mpremote. */
+export const micropythonSnippet = (ssid, password) =>
+  `import network, time\nw = network.WLAN(network.STA_IF)\nw.active(True)\nw.connect(${pyQuote(ssid)}, ${pyQuote(password)})\ntime.sleep(5)\nprint('IP:', w.ifconfig()[0])\n`;

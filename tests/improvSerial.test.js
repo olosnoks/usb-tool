@@ -44,3 +44,41 @@ describe('Improv serial', () => {
     expect(mp).toEqual([{ ssid: 'Home', rssi: -48, secure: true }, { ssid: 'Guest', rssi: -77, secure: false }]);
   });
 });
+
+import { frameToHex, describeImprovPacket, validateWifiCredentials, atEscape, pyQuote, buildAtProvision,
+  buildMicropythonProvision, micropythonSnippet, decodeImprov } from '../src/utils/improvSerial';
+
+describe('Improv workbench helpers', () => {
+  it('builds the identify RPC and decodes the not-authorized error', () => {
+    expect(improvRpc(IMPROV_CMD.IDENTIFY)[9]).toBe(0x05);
+    expect(decodeImprov(IMPROV_TYPE.ERROR, Uint8Array.of(4)).message).toMatch(/not authorized/);
+  });
+
+  it('formats frames and packets for the log', () => {
+    expect(frameToHex(Uint8Array.of(0x49, 0x0a, 0xff))).toBe('49 0a ff');
+    expect(describeImprovPacket({ kind: 'state', state: 4 })).toMatch(/Provisioned/);
+    expect(describeImprovPacket({ kind: 'result', command: 4, strings: ['A', '-50', 'YES'] })).toBe('result for command 0x04: A | -50 | YES');
+    expect(describeImprovPacket({ kind: 'error', code: 0, message: null })).toBe('error state: none');
+  });
+
+  it('validates credential lengths in bytes', () => {
+    expect(validateWifiCredentials('', 'x').errors.length).toBe(1);
+    expect(validateWifiCredentials('a'.repeat(33), 'password1').errors[0]).toMatch(/32/);
+    expect(validateWifiCredentials('Home', 'p'.repeat(64)).errors[0]).toMatch(/63/);
+    expect(validateWifiCredentials('é'.repeat(17), 'password1').errors.length).toBe(1);   // 34 bytes
+    expect(validateWifiCredentials('Home', 'short').warnings.length).toBe(1);
+    expect(validateWifiCredentials('Home', 'goodpassword')).toEqual({ errors: [], warnings: [] });
+  });
+
+  it('escapes AT and Python arguments', () => {
+    const BS = String.fromCharCode(92);
+    expect(atEscape('a"b,c' + BS + 'd')).toBe('a' + BS + '"b' + BS + ',c' + BS + BS + 'd');
+    expect(buildAtProvision('My "Net"', 'p,w')).toBe(
+      'AT+CWMODE=1\r\nAT+CWJAP="My ' + BS + '"Net' + BS + '"","p' + BS + ',w"\r\n');
+    expect(pyQuote("it's" + BS)).toBe("'it" + BS + "'s" + BS + BS + "'");
+    expect(pyQuote('a\nb')).toBe("'a" + BS + "nb'");
+    const line = buildMicropythonProvision("o'neil", 'pw');
+    expect(line).toContain("w.connect('o" + BS + "'neil', 'pw')");
+    expect(micropythonSnippet('A', 'B')).toContain("w.connect('A', 'B')" + String.fromCharCode(10));
+  });
+});
