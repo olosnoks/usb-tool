@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Radio, Play, Square, Volume2, VolumeX, Download, Plane, Usb, Circle } from 'lucide-react';
+import { Play, Square, Volume2, VolumeX, Download, Plane, Usb, Circle, ChevronLeft, ChevronRight, Star, Trash2, Image as ImageIcon, FileText } from 'lucide-react';
 import { DspCore, SPEC_RANGE_DB, SPEC_FLOOR_PAD_DB } from '../../utils/hackrfDsp.js';
+import {
+  BAND_PRESETS, STEP_OPTIONS, stepFreqHz, fracToHz, updatePeakHold, updateAverage, findPeaks,
+  toRtlPowerCsv, spectrumFileName, addBookmark, removeBookmark, loadBookmarks, saveBookmarks, formatFreq,
+} from '../../utils/rtlSdrTools.js';
 import {
   RtlSdrReceiver, RtlSdrWebUsb, isWebUsbAvailable, isValidSampleRate,
   u8ToInt8, IqRecorder, cu8FileName,
@@ -74,7 +78,21 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
   const [stats, setStats] = useState({ mbps: 0, bytes: 0, peakDb: null, floorDb: null, squelchOpen: null });
   const [aircraft, setAircraft] = useState([]);
   const [adsbFrames, setAdsbFrames] = useState(0);
+  const [stepHz, setStepHz] = useState(25000);
+  const [showHold, setShowHold] = useState(false);
+  const [showAvg, setShowAvg] = useState(false);
+  const [hover, setHover] = useState(null);
+  const [peaks, setPeaks] = useState([]);
+  const [bookmarks, setBookmarks] = useState(() => loadBookmarks());
+  const [bookmarkName, setBookmarkName] = useState('');
 
+  const holdRef = useRef(null);
+  const avgRef = useRef(null);
+  const lastSpecRef = useRef(null);
+  const showHoldRef = useRef(false);
+  const showAvgRef = useRef(false);
+  showHoldRef.current = showHold;
+  showAvgRef.current = showAvg;
   const receiverRef = useRef(null);
   const dspRef = useRef(null);
   const adsbRef = useRef(null);
@@ -110,15 +128,20 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
     for (let g = 1; g < 4; g++) {
       ctx.beginPath(); ctx.moveTo(0, (h * g) / 4); ctx.lineTo(w, (h * g) / 4); ctx.stroke();
     }
-    ctx.strokeStyle = '#22d3ee';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let x = 0; x < w; x++) {
-      const b = Math.min(spec.length - 1, Math.floor((x * spec.length) / w));
-      const y = h - dbToT(spec[b], floorDb) * h;
-      if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
+    const trace = (arr, color) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 0; x < w; x++) {
+        const b = Math.min(arr.length - 1, Math.floor((x * arr.length) / w));
+        const y = h - dbToT(arr[b], floorDb) * h;
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    };
+    if (showHoldRef.current && holdRef.current) trace(holdRef.current, '#f59e0b');
+    if (showAvgRef.current && avgRef.current) trace(avgRef.current, '#a78bfa');
+    trace(spec, '#22d3ee');
   }, []);
 
   const drawWaterfallRow = useCallback((spec, floorDb) => {
@@ -172,6 +195,9 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
         const { spec, peakDb, floorDb } = out.spectrum;
         live.peakDb = peakDb;
         live.floorDb = floorDb;
+        lastSpecRef.current = spec;
+        holdRef.current = updatePeakHold(holdRef.current, spec);
+        avgRef.current = updateAverage(avgRef.current, spec);
         drawSpectrum(spec, floorDb);
         drawWaterfallRow(spec, floorDb);
       }
@@ -202,6 +228,11 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
         squelchOpen: live.squelchOpen,
       });
       setAdsbFrames(live.frames);
+      if (lastSpecRef.current && centerRef.current) {
+        const spec = lastSpecRef.current;
+        const floor = live.floorDb ?? -100;
+        setPeaks(findPeaks(spec, centerRef.current, sampleRateRef.current, { count: 3, minDb: floor + 10 }));
+      }
       setAircraft(adsbRef.current && modeRef.current === 'ADSB' ? adsbRef.current.getAircraftList().slice(0, 40) : []);
       live.bytes = 0;
       live.t0 = performance.now();
@@ -271,6 +302,8 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
     if (!rx) return;
     try {
       await rx.tune(hz);
+      holdRef.current = null;
+      avgRef.current = null;
       setCenterHz(rx.centerHz);
       setFreqMHz((rx.centerHz / 1e6).toFixed(3));
       log(`Tuned to ${formatMHz(rx.centerHz)}.`);
@@ -303,6 +336,8 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
   };
 
   const applySampleRate = async (rate) => {
+    holdRef.current = null;
+    avgRef.current = null;
     setSampleRate(rate);
     const rx = receiverRef.current;
     if (rx) {
@@ -444,33 +479,132 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
     setRecording(true);
   };
 
+  const nudge = (dir) => {
+    const base = centerRef.current || Math.round(parseFloat(freqMHz) * 1e6);
+    const hz = stepFreqHz(base, stepHz, dir);
+    if (hz == null) return;
+    setFreqMHz((hz / 1e6).toFixed(3));
+    if (receiverRef.current) tuneTo(hz);
+  };
+
+  const onFreqKeyDown = (e) => {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      nudge(e.key === 'ArrowUp' ? 1 : -1);
+    }
+  };
+
+  const onSpectrumMove = (e) => {
+    const canvas = specCanvasRef.current;
+    const spec = lastSpecRef.current;
+    if (!canvas || !spec || !centerRef.current) return;
+    const rect = canvas.getBoundingClientRect();
+    const frac = (e.clientX - rect.left) / rect.width;
+    const b = Math.min(spec.length - 1, Math.max(0, Math.floor(frac * spec.length)));
+    setHover({ hz: fracToHz(frac, centerRef.current, sampleRateRef.current), db: spec[b] });
+  };
+
+  const goToPreset = async (hz, presetMode) => {
+    if (presetMode && presetMode !== modeRef.current) await selectMode(presetMode);
+    if (presetMode === 'ADSB') return;
+    setFreqMHz((hz / 1e6).toFixed(3));
+    if (receiverRef.current) tuneTo(hz);
+  };
+
+  const onSelectSaved = (e) => {
+    const [kind, idx] = e.target.value.split(':');
+    e.target.value = '';
+    const item = kind === 'p' ? BAND_PRESETS[Number(idx)] : bookmarks[Number(idx)];
+    if (item) goToPreset(item.hz, item.mode);
+  };
+
+  const saveBookmark = () => {
+    const hz = centerRef.current || Math.round(parseFloat(freqMHz) * 1e6);
+    if (!Number.isFinite(hz)) return;
+    const next = addBookmark(bookmarks, { name: bookmarkName.trim() || formatFreq(hz), hz, mode });
+    setBookmarks(next);
+    saveBookmarks(next);
+    setBookmarkName('');
+  };
+
+  const deleteBookmark = (b) => {
+    const next = removeBookmark(bookmarks, b.hz, b.mode);
+    setBookmarks(next);
+    saveBookmarks(next);
+  };
+
+  const downloadBlob = (blob, name) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+
+  const saveSpectrumCsv = () => {
+    const spec = lastSpecRef.current;
+    if (!spec || !centerRef.current) return;
+    const csv = toRtlPowerCsv(spec, centerRef.current, sampleRateRef.current);
+    downloadBlob(new Blob([csv], { type: 'text/csv' }), spectrumFileName(centerRef.current));
+    log('Saved one spectrum row (rtl_power-style CSV, dBFS).');
+  };
+
+  const saveWaterfallPng = () => {
+    const canvas = wfCanvasRef.current;
+    if (!canvas) return;
+    canvas.toBlob((blob) => {
+      if (blob) downloadBlob(blob, spectrumFileName(centerRef.current || 0).replace(/\.csv$/, '.png'));
+    }, 'image/png');
+  };
+
+  const resetHold = () => { holdRef.current = null; avgRef.current = null; };
+
   const sampleOk = isValidSampleRate(sampleRate);
   const ready = status === 'ready';
 
+  const inputCls = 'bg-slate-950 border border-slate-700 rounded px-1.5 py-1 focus:outline-none focus:border-cyan-500';
+  const btnCls = 'px-2 py-1 rounded border border-slate-700 hover:border-cyan-500 disabled:opacity-40 focus:outline-none focus:border-cyan-500';
+
   return (
-    <div className="flex flex-col gap-3 p-3 text-slate-200 bg-slate-950 min-h-full font-mono text-xs">
-      {/* Header */}
-      <div className="flex flex-wrap items-center gap-3 border border-slate-800 rounded-md p-3 bg-slate-900/60">
-        <Radio className="w-5 h-5 text-cyan-400" />
-        <div className="flex-1 min-w-[220px]">
-          <div className="text-sm font-semibold text-slate-100">RTL-SDR Receiver</div>
-          <div className="text-slate-400">
-            RTL2832U + Rafael R820T/R828D over WebUSB. Spectrum, waterfall, WFM/NFM/AM audio, ADS-B 1090 and .cu8 recording.
-            On Windows, install the WinUSB driver for the dongle with Zadig first (the default driver blocks WebUSB).
-          </div>
-        </div>
+    <div className="flex flex-col gap-2 text-slate-200 bg-slate-950 min-h-full font-mono text-xs">
+      {/* Connection bar */}
+      <div className="flex flex-wrap items-center gap-2">
         <span className={`px-2 py-0.5 rounded border ${status === 'ready' ? 'border-emerald-500 text-emerald-300' : status === 'error' ? 'border-rose-500 text-rose-300' : 'border-slate-700 text-slate-400'}`}>
           {status === 'ready' ? `CONNECTED: ${deviceName}` : status === 'connecting' ? 'CONNECTING' : status === 'error' ? 'ERROR' : 'NOT CONNECTED'}
         </span>
         {status !== 'ready' ? (
           <button type="button" onClick={connect} disabled={status === 'connecting'}
-            className="flex items-center gap-1 px-3 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50">
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50">
             <Usb className="w-3.5 h-3.5" /> CONNECT RTL-SDR (WEBUSB)
           </button>
         ) : (
-          <button type="button" onClick={disconnect} className="px-3 py-1.5 rounded border border-slate-700 hover:border-rose-500">
+          <button type="button" onClick={disconnect} className="px-2.5 py-1 rounded border border-slate-700 hover:border-rose-500">
             DISCONNECT
           </button>
+        )}
+        {!streaming ? (
+          <button type="button" onClick={startStreaming} disabled={!ready}
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40">
+            <Play className="w-3.5 h-3.5" /> START
+          </button>
+        ) : (
+          <button type="button" onClick={stopStreaming}
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-rose-700 hover:bg-rose-600">
+            <Square className="w-3.5 h-3.5" /> STOP
+          </button>
+        )}
+        <button type="button" onClick={toggleRecord} disabled={!streaming && !recording}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded border ${recording ? 'border-rose-500 text-rose-300' : 'border-slate-700'} disabled:opacity-40`}>
+          {recording ? <Download className="w-3.5 h-3.5" /> : <Circle className="w-3.5 h-3.5" />}
+          {recording ? 'STOP & SAVE .CU8' : 'RECORD IQ (.CU8)'}
+        </button>
+        {recordInfo && (
+          <span className="text-slate-400">
+            saved {recordInfo.name} ({(recordInfo.bytes / 1e6).toFixed(1)} MB{recordInfo.truncated ? ', capped' : ''})
+          </span>
         )}
       </div>
 
@@ -485,17 +619,44 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
       )}
 
       {/* Tuning and receiver controls */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <form onSubmit={onTuneSubmit} className="border border-slate-800 rounded-md p-3 bg-slate-900/40 flex flex-col gap-2">
+      <div className="grid grid-cols-1 @lg:grid-cols-2 gap-2">
+        <form onSubmit={onTuneSubmit} className="border border-slate-800 rounded-md p-2 bg-slate-900/40 flex flex-col gap-1.5">
           <div className="text-slate-400 uppercase tracking-wide">Tuning</div>
-          <div className="flex gap-2 items-center">
-            <input value={freqMHz} onChange={(e) => setFreqMHz(e.target.value)} disabled={!ready}
-              className="w-32 bg-slate-950 border border-slate-700 rounded px-2 py-1" aria-label="Frequency in MHz" />
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <button type="button" onClick={() => nudge(-1)} disabled={!ready} title="Tune down one step" aria-label="Tune down one step" className={btnCls}>
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <input value={freqMHz} onChange={(e) => setFreqMHz(e.target.value)} onKeyDown={onFreqKeyDown} disabled={!ready}
+              className={`w-24 ${inputCls}`} aria-label="Frequency in MHz" title="Arrow up / down steps the frequency" />
+            <button type="button" onClick={() => nudge(1)} disabled={!ready} title="Tune up one step" aria-label="Tune up one step" className={btnCls}>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
             <span className="text-slate-400">MHz</span>
-            <button type="submit" disabled={!ready} className="px-2 py-1 rounded border border-slate-700 hover:border-cyan-500 disabled:opacity-40">TUNE</button>
+            <button type="submit" disabled={!ready} className={btnCls}>TUNE</button>
+            <select value={stepHz} onChange={(e) => setStepHz(Number(e.target.value))} className={inputCls} aria-label="Tuning step" title="Step for the arrow buttons and keys">
+              {STEP_OPTIONS.map((s) => <option key={s} value={s}>{s >= 1e6 ? `${s / 1e6} MHz` : `${s / 1e3} kHz`}</option>)}
+            </select>
           </div>
-          <div className="flex gap-2 items-center">
-            <span className="text-slate-400 w-20">Mode</span>
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <select defaultValue="" onChange={onSelectSaved} className={`${inputCls} max-w-[11rem]`} aria-label="Presets and bookmarks" title="Jump to a band preset or saved bookmark">
+              <option value="">Presets / bookmarks...</option>
+              <optgroup label="Band presets">
+                {BAND_PRESETS.map((p, i) => <option key={p.name} value={`p:${i}`}>{p.name}</option>)}
+              </optgroup>
+              {bookmarks.length > 0 && (
+                <optgroup label="Bookmarks">
+                  {bookmarks.map((b, i) => <option key={`${b.hz}-${b.mode}`} value={`b:${i}`}>{b.name} ({b.mode})</option>)}
+                </optgroup>
+              )}
+            </select>
+            <input value={bookmarkName} onChange={(e) => setBookmarkName(e.target.value)} placeholder="bookmark name"
+              className={`w-28 ${inputCls}`} aria-label="Bookmark name" />
+            <button type="button" onClick={saveBookmark} className={btnCls} title="Save the current frequency and mode as a bookmark (stored in this browser)" aria-label="Save bookmark">
+              <Star className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1 items-center">
+            <span className="text-slate-400 w-12">Mode</span>
             {MODES.map((m) => (
               <button key={m.id} type="button" title={m.hint} disabled={!ready && m.id !== mode}
                 onClick={() => selectMode(m.id)}
@@ -504,41 +665,44 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
               </button>
             ))}
           </div>
-          <div className="flex gap-2 items-center">
-            <span className="text-slate-400 w-20">Sample rate</span>
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <span className="text-slate-400 w-12">Rate</span>
             <select value={sampleRate} disabled={!ready || mode === 'ADSB'} onChange={(e) => applySampleRate(Number(e.target.value))}
-              className="bg-slate-950 border border-slate-700 rounded px-2 py-1">
+              className={inputCls} aria-label="Sample rate">
               {SAMPLE_RATES.map((r) => <option key={r} value={r}>{(r / 1e6).toFixed(3)} MS/s</option>)}
             </select>
             {!sampleOk && <span className="text-rose-300">unsupported</span>}
-          </div>
-          <div className="flex gap-2 items-center">
-            <span className="text-slate-400 w-20">PPM</span>
+            <span className="text-slate-400 ml-1">PPM</span>
             <input value={ppm} onChange={(e) => setPpm(e.target.value)} disabled={!ready}
-              className="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1" aria-label="Frequency correction ppm" />
-            <button type="button" onClick={applyPpm} disabled={!ready} className="px-2 py-1 rounded border border-slate-700 disabled:opacity-40">APPLY</button>
+              className={`w-14 ${inputCls}`} aria-label="Frequency correction ppm" />
+            <button type="button" onClick={applyPpm} disabled={!ready} className={btnCls}>APPLY</button>
           </div>
-          <div className="text-slate-500">Mode hint: {MODES.find((m) => m.id === mode)?.hint}</div>
+          {bookmarks.length > 0 && (
+            <details className="text-slate-400">
+              <summary className="cursor-pointer">Manage bookmarks ({bookmarks.length})</summary>
+              <ul className="mt-1 space-y-0.5">
+                {bookmarks.map((b) => (
+                  <li key={`${b.hz}-${b.mode}`} className="flex items-center gap-1.5">
+                    <span className="flex-1 truncate">{b.name} - {formatFreq(b.hz)} {b.mode}</span>
+                    <button type="button" onClick={() => deleteBookmark(b)} title={`Delete ${b.name}`} aria-label={`Delete bookmark ${b.name}`}
+                      className="p-1 rounded border border-slate-700 hover:border-rose-500">
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </form>
 
-        <div className="border border-slate-800 rounded-md p-3 bg-slate-900/40 flex flex-col gap-2">
+        <div className="border border-slate-800 rounded-md p-2 bg-slate-900/40 flex flex-col gap-1.5">
           <div className="text-slate-400 uppercase tracking-wide">Gain, AGC and audio</div>
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 items-center">
             <label className="flex items-center gap-1">
               <input type="checkbox" checked={tunerAuto} disabled={!ready}
                 onChange={(e) => { setTunerAuto(e.target.checked); applyGain(e.target.checked, gainDb); }} />
               Tuner AGC (auto gain)
             </label>
-          </div>
-          <div className="flex gap-2 items-center">
-            <span className="text-slate-400 w-20">Gain</span>
-            <input type="range" min={0} max={49} step={1} value={gainDb} disabled={!ready || tunerAuto}
-              onChange={(e) => setGainDb(Number(e.target.value))}
-              onMouseUp={() => applyGain(false, gainDb)} onTouchEnd={() => applyGain(false, gainDb)}
-              className="flex-1" aria-label="Manual gain in dB" />
-            <span className="w-16 text-right">{tunerAuto ? 'auto' : `${gainDb} dB`}</span>
-          </div>
-          <div className="flex gap-2 items-center">
             <label className="flex items-center gap-1">
               <input type="checkbox" checked={rtlAgc} disabled={!ready}
                 onChange={(e) => { setRtlAgc(e.target.checked); receiverRef.current?.setRtlAgc(e.target.checked).catch((err) => setError(err.message)); }} />
@@ -546,15 +710,23 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
             </label>
           </div>
           <div className="flex gap-2 items-center">
-            <span className="text-slate-400 w-20">Squelch</span>
-            <input type="range" min={-120} max={0} step={1} value={squelchDb} onChange={(e) => setSquelchDb(Number(e.target.value))}
-              className="flex-1" aria-label="Squelch threshold dBFS" />
-            <span className="w-24 text-right">{squelchDb <= -120 ? 'off' : `${squelchDb} dBFS`}</span>
+            <span className="text-slate-400 w-14">Gain</span>
+            <input type="range" min={0} max={49} step={1} value={gainDb} disabled={!ready || tunerAuto}
+              onChange={(e) => setGainDb(Number(e.target.value))}
+              onMouseUp={() => applyGain(false, gainDb)} onTouchEnd={() => applyGain(false, gainDb)}
+              className="flex-1 min-w-0" aria-label="Manual gain in dB" />
+            <span className="w-14 text-right">{tunerAuto ? 'auto' : `${gainDb} dB`}</span>
           </div>
           <div className="flex gap-2 items-center">
-            <span className="text-slate-400 w-20">Volume</span>
+            <span className="text-slate-400 w-14">Squelch</span>
+            <input type="range" min={-120} max={0} step={1} value={squelchDb} onChange={(e) => setSquelchDb(Number(e.target.value))}
+              className="flex-1 min-w-0" aria-label="Squelch threshold dBFS" />
+            <span className="w-20 text-right">{squelchDb <= -120 ? 'off' : `${squelchDb} dBFS`}</span>
+          </div>
+          <div className="flex gap-2 items-center">
+            <span className="text-slate-400 w-14">Volume</span>
             <input type="range" min={0} max={1} step={0.05} value={volume} onChange={(e) => setVolume(Number(e.target.value))}
-              className="flex-1" aria-label="Volume" />
+              className="flex-1 min-w-0" aria-label="Volume" />
             <button type="button" onClick={audioOn ? stopAudio : startAudio} disabled={mode === 'ADSB'}
               className="flex items-center gap-1 px-2 py-1 rounded border border-slate-700 disabled:opacity-40">
               {audioOn ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
@@ -564,36 +736,13 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
         </div>
       </div>
 
-      {/* Stream controls and KPIs */}
-      <div className="flex flex-wrap items-center gap-2">
-        {!streaming ? (
-          <button type="button" onClick={startStreaming} disabled={!ready}
-            className="flex items-center gap-1 px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40">
-            <Play className="w-3.5 h-3.5" /> START
-          </button>
-        ) : (
-          <button type="button" onClick={stopStreaming}
-            className="flex items-center gap-1 px-3 py-1.5 rounded bg-rose-700 hover:bg-rose-600">
-            <Square className="w-3.5 h-3.5" /> STOP
-          </button>
-        )}
-        <button type="button" onClick={toggleRecord} disabled={!streaming && !recording}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded border ${recording ? 'border-rose-500 text-rose-300' : 'border-slate-700'} disabled:opacity-40`}>
-          {recording ? <Download className="w-3.5 h-3.5" /> : <Circle className="w-3.5 h-3.5" />}
-          {recording ? 'STOP & SAVE .CU8' : 'RECORD IQ (.CU8)'}
-        </button>
-        {recordInfo && (
-          <span className="text-slate-400">
-            saved {recordInfo.name} ({(recordInfo.bytes / 1e6).toFixed(1)} MB{recordInfo.truncated ? ', capped' : ''})
-          </span>
-        )}
-        <div className="ml-auto grid grid-cols-2 md:grid-cols-5 gap-2 text-right">
-          <div><div className="text-slate-500">Center</div><div>{centerHz ? formatMHz(centerHz) : '-'}</div></div>
-          <div><div className="text-slate-500">Span</div><div>{(sampleRate / 1e6).toFixed(3)} MHz</div></div>
-          <div><div className="text-slate-500">Throughput</div><div>{streaming ? `${stats.mbps.toFixed(2)} MB/s` : '-'}</div></div>
-          <div><div className="text-slate-500">Peak / floor</div><div>{stats.peakDb != null ? `${stats.peakDb.toFixed(0)} / ${stats.floorDb?.toFixed(0)} dB` : '-'}</div></div>
-          <div><div className="text-slate-500">Channel</div><div>{mode === 'ADSB' ? `${adsbFrames} frames` : audioOn ? (stats.squelchOpen ? 'open' : 'squelched') : '-'}</div></div>
-        </div>
+      {/* KPIs */}
+      <div className="grid grid-cols-2 @md:grid-cols-5 gap-2 text-right">
+        <div><div className="text-slate-500">Center</div><div>{centerHz ? formatMHz(centerHz) : '-'}</div></div>
+        <div><div className="text-slate-500">Span</div><div>{(sampleRate / 1e6).toFixed(3)} MHz</div></div>
+        <div><div className="text-slate-500">Throughput</div><div>{streaming ? `${stats.mbps.toFixed(2)} MB/s` : '-'}</div></div>
+        <div><div className="text-slate-500">Peak / floor</div><div>{stats.peakDb != null ? `${stats.peakDb.toFixed(0)} / ${stats.floorDb?.toFixed(0)} dB` : '-'}</div></div>
+        <div><div className="text-slate-500">Channel</div><div>{mode === 'ADSB' ? `${adsbFrames} frames` : audioOn ? (stats.squelchOpen ? 'open' : 'squelched') : '-'}</div></div>
       </div>
 
       {tunerProbe && (
@@ -605,19 +754,51 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
 
       {/* Spectrum + waterfall */}
       <div className="border border-slate-800 rounded-md bg-black overflow-hidden">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1 bg-slate-950 border-b border-slate-800 text-slate-400">
+          <label className="flex items-center gap-1" title="Amber trace: maximum seen since the last retune or reset">
+            <input type="checkbox" checked={showHold} onChange={(e) => setShowHold(e.target.checked)} /> Peak hold
+          </label>
+          <label className="flex items-center gap-1" title="Violet trace: smoothed average">
+            <input type="checkbox" checked={showAvg} onChange={(e) => setShowAvg(e.target.checked)} /> Average
+          </label>
+          <button type="button" onClick={resetHold} className="px-1.5 py-0.5 rounded border border-slate-700 hover:border-cyan-500" title="Clear peak hold and average">RESET</button>
+          <span className="ml-auto flex gap-1.5">
+            <button type="button" onClick={saveSpectrumCsv} disabled={!streaming} title="Save the current spectrum as one rtl_power-style CSV row (dBFS, uncalibrated)" aria-label="Save spectrum CSV"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-slate-700 hover:border-cyan-500 disabled:opacity-40">
+              <FileText className="w-3 h-3" /> CSV
+            </button>
+            <button type="button" onClick={saveWaterfallPng} disabled={!streaming} title="Save the waterfall image as PNG" aria-label="Save waterfall PNG"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-slate-700 hover:border-cyan-500 disabled:opacity-40">
+              <ImageIcon className="w-3 h-3" /> PNG
+            </button>
+          </span>
+        </div>
         <canvas ref={specCanvasRef} width={1024} height={150} onClick={onSpectrumClick}
+          onMouseMove={onSpectrumMove} onMouseLeave={() => setHover(null)}
           className="w-full h-[150px] cursor-crosshair" aria-label="Spectrum; click to tune" />
-        <div className="flex justify-between px-2 py-0.5 text-slate-500 bg-slate-950">
+        <div className="flex justify-between gap-2 px-2 py-0.5 text-slate-500 bg-slate-950">
           <span>{ready && centerHz ? formatMHz(centerHz - sampleRate / 2) : '-'}</span>
-          <span>click the spectrum to tune</span>
+          <span className="truncate">{hover ? `${formatMHz(hover.hz)}  ${hover.db.toFixed(1)} dB` : 'click the spectrum to tune'}</span>
           <span>{ready && centerHz ? formatMHz(centerHz + sampleRate / 2) : '-'}</span>
         </div>
-        <canvas ref={wfCanvasRef} width={1024} height={200} className="w-full h-[200px]" aria-label="Waterfall" />
+        <canvas ref={wfCanvasRef} width={1024} height={200} className="w-full h-[180px]" aria-label="Waterfall" />
       </div>
 
+      {streaming && peaks.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-slate-400">
+          <span>Strongest:</span>
+          {peaks.map((p) => (
+            <button key={p.index} type="button" onClick={() => { setFreqMHz((p.hz / 1e6).toFixed(3)); tuneTo(Math.round(p.hz / 1000) * 1000); }}
+              title="Tune to this signal" className="px-1.5 py-0.5 rounded border border-slate-700 hover:border-cyan-500">
+              {formatMHz(p.hz)} {p.db.toFixed(0)} dB
+            </button>
+          ))}
+        </div>
+      )}
+
       {mode === 'ADSB' && (
-        <div className="border border-slate-800 rounded-md p-3 bg-slate-900/40">
-          <div className="flex items-center gap-2 text-slate-400 uppercase tracking-wide mb-2">
+        <div className="border border-slate-800 rounded-md p-2 bg-slate-900/40 overflow-x-auto">
+          <div className="flex items-center gap-2 text-slate-400 uppercase tracking-wide mb-1">
             <Plane className="w-3.5 h-3.5" /> Aircraft (Mode-S DF17/18 frames; the shared decoder does not check CRC)
           </div>
           {aircraft.length === 0 ? (
@@ -648,10 +829,19 @@ export default function RtlSdrWorkbench({ onLogMessage }) {
         </div>
       )}
 
-      <div className="text-slate-500 leading-relaxed">
-        Not yet verified on hardware: the register programming is ported from librtlsdr and webrtlsdr but has only been run against a
-        simulated bus. Demodulation and the spectrum run on the page's main thread.
-      </div>
+      <details className="text-slate-500 leading-relaxed">
+        <summary className="cursor-pointer">About this receiver</summary>
+        <div className="mt-1 space-y-1">
+          <div>
+            RTL2832U + Rafael R820T/R828D over WebUSB. Receive only: spectrum, waterfall, WFM/NFM/AM audio, ADS-B 1090 and .cu8 recording.
+            On Windows, install the WinUSB driver for the dongle with Zadig first (the default driver blocks WebUSB).
+          </div>
+          <div>
+            Not yet verified on hardware: the register programming is ported from librtlsdr and webrtlsdr but has only been run against a
+            simulated bus. Demodulation and the spectrum run on the page's main thread.
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
