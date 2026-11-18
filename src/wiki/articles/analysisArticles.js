@@ -881,14 +881,19 @@ After connecting, a banner states the slave and baud being polled.
 | **Interval:** | Number | Auto-poll delay in ms after each reply. |
 | **POLL ONCE** | Button | Sends one read of the chosen table and shows the result. |
 | **START AUTO-POLL** | Toggle | Repeats the read; reads "AUTO-POLLING (n ms after each reply)" while active. |
-| **Result table** | Table | Registers: Address, Register, Label, Type, Raw Hex, UINT16, INT16 and Value. Coils / discrete inputs: Address, Number and ON/OFF state. Unmapped registers show generic "Register N" labels. |
+| **Result table** | Table | Registers: Address, Register, Label, Type, Raw Hex, UINT16, INT16 and Value. Coils / discrete inputs: Address, Number and ON/OFF state. Unmapped registers show generic "Register N" labels. Rows whose raw value changed since the previous poll get an amber highlight, and a **TREND** column draws a small line of the last 60 polled values of each register (numeric values only; it resets when you change table or disconnect). |
 | **Stats line** | Counters | Sent, OK, Timeouts, CRC, Exceptions, ID/FC mismatch and response min/avg/max time, with a **reset** button. |
 | **Log polls to CSV / Download CSV / Clear** | Checkbox + buttons | Records every polled value with a timestamp and downloads it as CSV. |
 | **REGISTER MAP** | Collapsible panel | Per range: start, type (u16 to f64, ascii), word order (ABCD / CDAB / BADC / DCBA), scale, offset, unit, label. **Load example: solar inverter**, **Clear map**, **Export JSON** and **Import JSON** manage maps. With no map the table is generic. |
+| **REQUEST FRAME & CLI EXPORT** | Collapsible panel | Shows the exact read request (slave, function, address, quantity, CRC-16) the current settings send. Also builds an \`mbpoll\` command line (open-source Modbus CLI) with the same slave, baud, parity, stop bits, table, start and quantity; type your **Port:** name (e.g. COM3 or /dev/ttyUSB0) and press **COPY**. This only produces text for that separate tool; the page does not run it. |
 | **WRITE (FC05 / FC06 / FC15 / FC16)** | Form | **Function:** single register, multiple registers, single coil or multiple coils; **Address:**; for multiple registers a **Type:** and **Order:** plus **Values**; coils take a state or bits like \`1 0 1\`. The **WRITE** button reports success only when the slave echoes correctly. |
 | **Report Server ID (FC17)** / **Read Device ID (FC43/14)** | Buttons | Query the device's identity strings (not every slave supports them). |
 | **SCAN SLAVE IDs / STOP SCAN** | Button | Probes a range of IDs (**Scan from:** / **to:**) with a one-register read; a valid exception reply also counts. Found IDs appear as buttons that set **Slave ID:**. Unanswered IDs wait up to 300 ms, so 1-247 can take over a minute. |
 | **DISCONNECT** | Button | Stops polling and clears the table. |
+
+---
+
+**Similar tools:** Modbus Poll (Witte Software), QModMaster, mbpoll and modpoll cover the same job on the desktop. This workbench is browser-only and RTU-only (no TCP or ASCII), and has no scripting or raw bus monitor.
 
 ---
 

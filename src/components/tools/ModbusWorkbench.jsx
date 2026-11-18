@@ -8,7 +8,9 @@ import {
   Edit3,
   Radio,
   Check,
-  Search
+  Search,
+  Copy,
+  Terminal
 } from 'lucide-react';
 import {
   ModbusClient,
@@ -28,6 +30,7 @@ import {
   modiconNumber,
   pollLogToCsv
 } from '../../utils/modbusTypes';
+import { readRequestHex, mbpollCommand, pushHistory, sparklinePoints, changedAddresses } from '../../utils/modbusTools';
 import { useSerial } from '../../context/SerialContext';
 
 export function formatWriteFeedback(result, addr, val) {
@@ -38,7 +41,7 @@ export function formatWriteFeedback(result, addr, val) {
 const BAUDS = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400];
 const LOG_CAP = 5000;
 const inputCls = 'bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs font-bold font-mono outline-none';
-const btnCls = 'flex items-center gap-1 px-3 py-1 rounded bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-800 text-xs font-bold disabled:opacity-40';
+const btnCls = 'flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-800 text-xs font-bold disabled:opacity-40';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function Field({ label, children }) {
@@ -85,6 +88,11 @@ export default function ModbusWorkbench() {
   const [isAutoPolling, setIsAutoPolling] = useState(false);
   const [rows, setRows] = useState([]);
   const [bitRows, setBitRows] = useState([]);
+  const [history, setHistory] = useState({});
+  const [changed, setChanged] = useState(() => new Set());
+  const prevRowsRef = useRef([]);
+  const [portName, setPortName] = useState('/dev/ttyUSB0');
+  const [cmdCopied, setCmdCopied] = useState(false);
   const [pollError, setPollError] = useState('');
   const [stats, setStats] = useState(client.stats);
 
@@ -149,6 +157,9 @@ export default function ModbusWorkbench() {
       }
     } else {
       const rr = buildRegisterRows(addr, res.words, c.map, c.table);
+      setChanged(changedAddresses(prevRowsRef.current, rr));
+      prevRowsRef.current = rr;
+      setHistory((h) => pushHistory(h, Object.fromEntries(rr.map((r) => [r.address, r.mapped && typeof r.value === 'number' ? r.value : r.rawUint16]))));
       setRows(rr);
       setBitRows([]);
       if (c.logging) {
@@ -207,6 +218,9 @@ export default function ModbusWorkbench() {
     setRows([]);
     setBitRows([]);
     setPollError('');
+    prevRowsRef.current = [];
+    setChanged(new Set());
+    setHistory({});
   };
 
   const handleManualPoll = async () => {
@@ -336,18 +350,17 @@ export default function ModbusWorkbench() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  const mbpollCmd = mbpollCommand({ port: portName || '/dev/ttyUSB0', slaveId, baud: baudRate, parity, stopBits, table, start: Number(startAddr) || 0, qty: Number(quantity) || 1 });
   const fmtMs = (v) => (v === null || v === undefined ? '-' : `${v.toFixed(0)} ms`);
 
   return (
-    <div className="space-y-4 font-mono text-xs">
+    <div className="space-y-2 font-mono text-xs">
       {/* Top Controller Bar */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-          <div>
-            <p className="text-[11px] text-slate-400">
-              Read coils, discrete inputs, holding and input registers, write coils and registers, and read device identification from PLCs, meters, inverters and other Modbus RTU devices over USB-RS485 adapters. Register meaning comes from a map you define; nothing is assumed about the device.
-            </p>
-          </div>
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+          <p className="text-[10px] text-slate-500 min-w-0 flex-1" title="Register meaning comes from a map you define; nothing is assumed about the device.">
+            Modbus RTU master over a USB-RS485 adapter.
+          </p>
 
           <div className="flex items-center gap-2">
             {!isConnected ? (
@@ -355,7 +368,7 @@ export default function ModbusWorkbench() {
                 {portConnected ? (
                   <button
                     onClick={handleConnectLive}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-500/30 text-xs font-bold transition-all"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-500/30 text-xs font-bold transition-all"
                     title="Reopen the connected serial port with the selected baud and parity and poll the real slave"
                   >
                     <Radio className="w-3.5 h-3.5" />
@@ -364,7 +377,7 @@ export default function ModbusWorkbench() {
                 ) : (
                   <button
                     onClick={connectPort}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 text-xs font-bold transition-all"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 text-xs font-bold transition-all"
                     title="Open a USB-RS485 adapter first, then connect live"
                   >
                     <Radio className="w-3.5 h-3.5" />
@@ -375,7 +388,7 @@ export default function ModbusWorkbench() {
             ) : (
               <button
                 onClick={handleDisconnect}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold"
               >
                 <span>DISCONNECT</span>
               </button>
@@ -384,7 +397,7 @@ export default function ModbusWorkbench() {
         </div>
 
         {/* Bus Configuration Bar */}
-        <div className="pt-3 flex flex-wrap items-center gap-3">
+        <div className="pt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <Field label="Slave ID:">
             <input type="number" min="1" max="247" value={slaveId}
               onChange={(e) => { const v = Number(e.target.value); setSlaveId(v); client.slaveId = v; }}
@@ -421,10 +434,10 @@ export default function ModbusWorkbench() {
         </div>
 
         {/* Read configuration + poll controls */}
-        <div className="pt-3 flex flex-wrap items-center gap-3">
+        <div className="pt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <Field label="Table:">
             <select value={table}
-              onChange={(e) => { setTable(e.target.value); setRows([]); setBitRows([]); setPollError(''); setQuantity((q) => Math.min(q, READ_TABLES[e.target.value].max)); }}
+              onChange={(e) => { setTable(e.target.value); prevRowsRef.current = []; setHistory({}); setChanged(new Set()); setRows([]); setBitRows([]); setPollError(''); setQuantity((q) => Math.min(q, READ_TABLES[e.target.value].max)); }}
               className={inputCls}>
               {Object.entries(READ_TABLES).map(([k, t]) => <option key={k} value={k}>{t.label}</option>)}
             </select>
@@ -448,7 +461,7 @@ export default function ModbusWorkbench() {
           <button
             onClick={() => setIsAutoPolling(!isAutoPolling)}
             disabled={!isConnected || scanning}
-            className={`flex items-center gap-1 px-3 py-1 rounded border text-xs font-bold transition-all ${
+            className={`flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-bold transition-all ${
               isAutoPolling
                 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-emerald-glow'
                 : 'bg-slate-900 text-slate-400 border-slate-800'
@@ -462,14 +475,14 @@ export default function ModbusWorkbench() {
 
       {/* Data-source banner */}
       {isConnected && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/40 text-cyan-300 text-[11px] font-bold">
+        <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/40 text-cyan-300 text-[11px] font-bold">
           <Radio className="w-3.5 h-3.5 shrink-0" />
           <span>LIVE RS-485 — slave {slaveId} at {baudRate} bps (8-{{ none: 'N', even: 'E', odd: 'O' }[parity]}-{stopBits}). Frames are CRC, slave-ID and function validated; an error line below means no valid reply.</span>
         </div>
       )}
 
       {/* Result table */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 shadow-xl space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
           <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
             <Layers className="w-4 h-4 text-cyan-400" />
@@ -492,16 +505,16 @@ export default function ModbusWorkbench() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="text-[10px] text-slate-500 border-b border-slate-800">
-                  <th className="p-2 font-bold">ADDRESS</th>
-                  <th className="p-2 font-bold">NUMBER</th>
-                  <th className="p-2 font-bold">STATE</th>
+                  <th className="p-1 font-bold">ADDRESS</th>
+                  <th className="p-1 font-bold">NUMBER</th>
+                  <th className="p-1 font-bold">STATE</th>
                 </tr>
               </thead>
               <tbody>
                 {bitRows.map((b) => (
                   <tr key={b.address} className="border-b border-slate-900/60">
-                    <td className="p-2 text-cyan-400 font-bold">{b.address}</td>
-                    <td className="p-2 text-slate-400">{b.number}</td>
+                    <td className="p-1 text-cyan-400 font-bold">{b.address}</td>
+                    <td className="p-1 text-slate-400">{b.number}</td>
                     <td className={`p-2 font-bold ${b.on ? 'text-emerald-400' : 'text-slate-500'}`}>{b.on ? 'ON (1)' : 'OFF (0)'}</td>
                   </tr>
                 ))}
@@ -511,27 +524,35 @@ export default function ModbusWorkbench() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="text-[10px] text-slate-500 border-b border-slate-800">
-                  <th className="p-2 font-bold">ADDRESS</th>
-                  <th className="p-2 font-bold">REGISTER</th>
-                  <th className="p-2 font-bold">LABEL</th>
-                  <th className="p-2 font-bold">TYPE</th>
-                  <th className="p-2 font-bold text-right">RAW HEX</th>
-                  <th className="p-2 font-bold text-right">UINT16</th>
-                  <th className="p-2 font-bold text-right">INT16</th>
-                  <th className="p-2 font-bold text-right">VALUE</th>
+                  <th className="p-1 font-bold">ADDRESS</th>
+                  <th className="p-1 font-bold">REGISTER</th>
+                  <th className="p-1 font-bold">LABEL</th>
+                  <th className="p-1 font-bold">TYPE</th>
+                  <th className="p-1 font-bold text-right">RAW HEX</th>
+                  <th className="p-1 font-bold text-right">UINT16</th>
+                  <th className="p-1 font-bold text-right">INT16</th>
+                  <th className="p-1 font-bold text-right">VALUE</th>
+                  <th className="p-1 font-bold text-right" title="Last 60 polls of this register">TREND</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.address} className="border-b border-slate-900/60 hover:bg-slate-900/30 transition-colors">
-                    <td className="p-2 text-cyan-400 font-bold">{r.address}</td>
-                    <td className="p-2 text-slate-400">{r.registerNumber}</td>
-                    <td className="p-2 font-semibold text-slate-200">{r.label}</td>
-                    <td className="p-2 text-slate-400">{r.type}</td>
-                    <td className="p-2 text-amber-300 text-right">{r.hex}</td>
-                    <td className="p-2 text-slate-300 text-right">{r.words.length === 1 ? r.rawUint16 : '-'}</td>
-                    <td className="p-2 text-slate-300 text-right">{r.words.length === 1 ? r.int16 : '-'}</td>
-                    <td className="p-2 font-extrabold text-emerald-400 text-right">{r.mapped ? r.display : `${r.rawUint16}`}</td>
+                  <tr key={r.address} className={`border-b border-slate-900/60 hover:bg-slate-900/30 transition-colors ${changed.has(r.address) ? 'bg-amber-500/10' : ''}`}>
+                    <td className="p-1 text-cyan-400 font-bold">{r.address}</td>
+                    <td className="p-1 text-slate-400">{r.registerNumber}</td>
+                    <td className="p-1 font-semibold text-slate-200">{r.label}</td>
+                    <td className="p-1 text-slate-400">{r.type}</td>
+                    <td className="p-1 text-amber-300 text-right">{r.hex}</td>
+                    <td className="p-1 text-slate-300 text-right">{r.words.length === 1 ? r.rawUint16 : '-'}</td>
+                    <td className="p-1 text-slate-300 text-right">{r.words.length === 1 ? r.int16 : '-'}</td>
+                    <td className="p-1 font-extrabold text-emerald-400 text-right">{r.mapped ? r.display : `${r.rawUint16}`}</td>
+                    <td className="p-1 text-right">
+                      {(history[r.address] || []).length > 1 ? (
+                        <svg width="60" height="14" viewBox="0 0 60 14" className="inline-block" role="img" aria-label={`Trend of ${r.label}`}>
+                          <polyline points={sparklinePoints(history[r.address])} fill="none" stroke="currentColor" strokeWidth="1" className="text-cyan-400" />
+                        </svg>
+                      ) : <span className="text-slate-600">-</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -540,7 +561,7 @@ export default function ModbusWorkbench() {
         </div>
 
         {/* Stats + CSV */}
-        <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400 pt-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400">
           <span>Sent {stats.sent}</span>
           <span className="text-emerald-400">OK {stats.ok}</span>
           <span className="text-amber-400">Timeouts {stats.timeouts}</span>
@@ -560,9 +581,9 @@ export default function ModbusWorkbench() {
 
       {/* Register map */}
       {!tableInfo.bits && (
-        <details className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl">
+        <details className="bg-[#030712] border border-cyber-border rounded-lg p-2 shadow-xl">
           <summary className="font-bold text-slate-200 text-xs cursor-pointer">REGISTER MAP ({map.ranges.length} ranges{map.ranges.length === 0 ? ', generic labels' : `, ${map.name}`})</summary>
-          <div className="space-y-2 pt-3">
+          <div className="space-y-2 pt-2">
             <p className="text-[11px] text-slate-400">
               Give a register range a type, word order, scale, offset, unit and label. Unmapped registers stay as generic &quot;Register N&quot; uint16 values.
             </p>
@@ -581,7 +602,7 @@ export default function ModbusWorkbench() {
                 <input type="number" step="any" value={r.scale ?? 1} onChange={(e) => updateRange(i, { scale: e.target.value })} className={`w-20 ${inputCls}`} title="scale (multiply)" />
                 <input type="number" step="any" value={r.offset ?? 0} onChange={(e) => updateRange(i, { offset: e.target.value })} className={`w-20 ${inputCls}`} title="offset (add)" />
                 <input type="text" placeholder="unit" value={r.unit || ''} onChange={(e) => updateRange(i, { unit: e.target.value })} className={`w-16 ${inputCls}`} />
-                <input type="text" placeholder="label" value={r.label || ''} onChange={(e) => updateRange(i, { label: e.target.value })} className={`w-40 ${inputCls}`} />
+                <input type="text" placeholder="label" value={r.label || ''} onChange={(e) => updateRange(i, { label: e.target.value })} className={`w-28 @md:w-40 ${inputCls}`} />
                 <span className="text-slate-500">({typeWordCount(r.type || 'u16', r.words)} reg)</span>
                 <button onClick={() => setMap((m) => ({ ...m, ranges: m.ranges.filter((_, idx) => idx !== i) }))} className="px-1.5 rounded bg-slate-900 border border-slate-700 text-rose-300">remove</button>
               </div>
@@ -605,8 +626,39 @@ export default function ModbusWorkbench() {
         </details>
       )}
 
+      {/* Request preview + mbpoll export */}
+      <details className="bg-[#030712] border border-cyber-border rounded-lg p-2 shadow-xl">
+        <summary className="font-bold text-slate-200 text-xs cursor-pointer">
+          <span className="inline-flex items-center gap-1.5"><Terminal className="w-3.5 h-3.5 text-cyan-400" /> REQUEST FRAME &amp; CLI EXPORT</span>
+        </summary>
+        <div className="space-y-1.5 pt-2 text-[11px]">
+          <div className="text-slate-400">
+            Read request frame (with CRC-16):{' '}
+            <code className="text-amber-300 break-all">{readRequestHex(slaveId, tableInfo.fc, Number(startAddr) || 0, Number(quantity) || 1)}</code>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Field label="Port:">
+              <input type="text" value={portName} onChange={(e) => setPortName(e.target.value)} className={`w-32 ${inputCls}`} title="Serial port name to put in the command, e.g. COM3 or /dev/ttyUSB0" />
+            </Field>
+            <button
+              onClick={async () => {
+                try { await navigator.clipboard.writeText(mbpollCmd); setCmdCopied(true); setTimeout(() => setCmdCopied(false), 1500); } catch { /* clipboard unavailable */ }
+              }}
+              className={btnCls}
+              title="Copy the command"
+            >
+              <Copy className="w-3 h-3" /><span>{cmdCopied ? 'COPIED' : 'COPY'}</span>
+            </button>
+          </div>
+          <code className="block bg-slate-950 border border-slate-800 rounded p-1.5 text-emerald-300 break-all">{mbpollCmd}</code>
+          <p className="text-[10px] text-slate-500">
+            This is an export for the separate open-source <strong>mbpoll</strong> command-line tool; this page does not run it. Settings follow the controls above, with -0 for 0-based addresses.
+          </p>
+        </div>
+      </details>
+
       {/* Write panel */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 shadow-xl space-y-2">
         <div className="flex items-center justify-between pb-2 border-b border-slate-800">
           <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
             <Edit3 className="w-4 h-4 text-amber-400" />
@@ -647,12 +699,12 @@ export default function ModbusWorkbench() {
             </>
           )}
           <Field label={writeKind === 'fc05' ? 'State (0/1):' : writeKind === 'fc15' ? 'Bits (e.g. 1 0 1):' : writeKind === 'fc16' ? 'Values (space/comma separated):' : 'Value (uint16):'}>
-            <input type="text" value={writeValue} onChange={(e) => setWriteValue(e.target.value)} className={`w-56 ${inputCls}`} />
+            <input type="text" value={writeValue} onChange={(e) => setWriteValue(e.target.value)} className={`w-40 @md:w-56 ${inputCls}`} />
           </Field>
           <button
             onClick={handleWrite}
             disabled={!isConnected}
-            className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-amber-glow transition-all disabled:opacity-40"
+            className="px-3 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-amber-glow transition-all disabled:opacity-40"
           >
             WRITE
           </button>
@@ -660,7 +712,7 @@ export default function ModbusWorkbench() {
       </div>
 
       {/* Device info + slave scan */}
-      <div className="bg-[#030712] border border-cyber-border rounded-xl p-4 shadow-xl space-y-3">
+      <div className="bg-[#030712] border border-cyber-border rounded-lg p-2 shadow-xl space-y-2">
         <div className="flex items-center gap-1.5 pb-2 border-b border-slate-800 font-bold text-slate-200 text-xs">
           <Search className="w-4 h-4 text-cyan-400" />
           <span>DEVICE INFO &amp; SLAVE-ID SCAN</span>

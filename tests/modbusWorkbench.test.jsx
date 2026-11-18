@@ -16,7 +16,10 @@ describe('ModbusWorkbench rendering (B8)', () => {
     expect(html).not.toMatch(/V AC|kWh/);
   });
   it('intro text matches what is implemented', () => {
-    expect(html).toMatch(/coils, discrete inputs, holding and input registers/i);
+    expect(html).toMatch(/Modbus RTU master/i);
+    expect(html).toContain('Holding registers (FC03)');
+    expect(html).toContain('Discrete inputs (FC02)');
+    expect(html).toContain('REQUEST FRAME');
     expect(html).toContain('Parity:');
     expect(html).toContain("value=\"230400\"");
     expect(html).toContain("value=\"1200\"");
