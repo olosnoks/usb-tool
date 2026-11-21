@@ -96,6 +96,7 @@ export default function CommandTreeForm({
     onExecute({
       cmd: currentAction.cmd,
       ...payloadOptions,
+      op: currentAction.op,
       actionId: currentAction.id,
       actionName: currentAction.name,
       risk: currentAction.risk
@@ -126,7 +127,7 @@ export default function CommandTreeForm({
           <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
             <span>Cascading Command Engine</span>
             <span className="text-xs px-2 py-0.5 rounded font-mono bg-cyan-950/60 text-cyan-400 border border-cyan-800/40">
-              NG Protocol
+              {device?.protocol === 'legacy' ? 'Legacy Protocol' : 'NG Protocol'}
             </span>
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">

@@ -47,7 +47,7 @@ export function evaluateCompatibility(
     return 'unsupported';
   }
 
-  const isKnownTarget = ['PM3RDV4', 'PM3GENERIC', 'PM3ICOPYX', 'PM5'].includes(
+  const isKnownTarget = ['PM3', 'PM3RDV4', 'PM3GENERIC', 'PM3ICOPYX', 'PM5'].includes(
     firmware.hardwareTarget
   );
 

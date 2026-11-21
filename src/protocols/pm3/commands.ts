@@ -24,6 +24,9 @@ export const PM3_COMMANDS = {
   CMD_START_FLASH: 0x0005,
 
   // Low frequency (125 kHz)
+  CMD_LF_ACQ_RAW_ADC: 0x0205,
+  CMD_DOWNLOAD_BIGBUF: 0x0207,
+  CMD_DOWNLOADED_BIGBUF: 0x0208,
   CMD_LF_EM410X_WATCH: 0x021c,
   CMD_LF_EM410X_READ: 0x021c,
   CMD_LF_SNIFF_RAW_ADC: 0x0360,
@@ -35,8 +38,12 @@ export const PM3_COMMANDS = {
   CMD_HF_14A_RAW: 0x0385,
   CMD_HF_14A_INFO: 0x0385,
 
-  // Antenna tuning
+  // High frequency ISO 15693
+  CMD_HF_ISO15693_READER: 0x0310,
+
+  // Antenna tuning (legacy firmware answers with 0x0410)
   CMD_MEASURE_ANTENNA_TUNING: 0x0400,
+  CMD_MEASURED_ANTENNA_TUNING: 0x0410,
 
   // Not a real opcode; kept fail-closed so flashing can never silently run.
   TODO_CMD_FLASH_WRITE_BLOCK: 0x0020,
@@ -78,6 +85,9 @@ export const COMMAND_RISK_MAP: Record<number, CommandRiskLevel> = {
   [PM3_COMMANDS.CMD_HF_ISO14443A_SIMULATE]: 'magic',
 
   [PM3_COMMANDS.CMD_LF_EM410X_WATCH]: 'read',
+  [PM3_COMMANDS.CMD_LF_ACQ_RAW_ADC]: 'read',
+  [PM3_COMMANDS.CMD_DOWNLOAD_BIGBUF]: 'read',
+  [PM3_COMMANDS.CMD_HF_ISO15693_READER]: 'read',
   [PM3_COMMANDS.CMD_LF_SNIFF_RAW_ADC]: 'read',
 
   [PM3_COMMANDS.CMD_HARDWARE_RESET]: 'write',

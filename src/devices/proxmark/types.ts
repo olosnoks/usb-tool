@@ -17,6 +17,8 @@ export type ProxmarkState =
  * Hardware targets supported by Proxmark3 / Proxmark5
  */
 export type HardwareTarget =
+  /** A Proxmark3 whose firmware does not say which board variant it is. */
+  | 'PM3'
   | 'PM3RDV4'
   | 'PM3GENERIC'
   | 'PM3ICOPYX'
@@ -33,6 +35,14 @@ export interface DeviceFirmwareIdentity {
   hardwareTarget: HardwareTarget;
   buildDate?: string;
   bootloaderVersion?: string;
+  /** Wire protocol the firmware speaks: NG (Iceman) or the legacy 544-byte frames. */
+  protocol?: 'ng' | 'legacy';
+  /** MCU chip ID register, when the firmware reported one. */
+  chipId?: number;
+  chipName?: string;
+  flashKb?: number | null;
+  osVersion?: string;
+  bootromVersion?: string;
 }
 
 /**

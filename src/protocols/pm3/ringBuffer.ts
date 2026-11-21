@@ -1,5 +1,6 @@
 import { PM3_COMMAND_PREAMBLE_SIZE, Pm3Packet } from './types';
 import { unpackNgFrame, peekNgFrameLength } from './packet';
+import { PM3_LEGACY_FRAME_SIZE, unpackLegacyFrame } from './legacy';
 
 export interface RingBufferOptions {
   /**
@@ -23,6 +24,12 @@ export class Pm3RingBuffer {
   private buffer: Uint8Array = new Uint8Array(0);
   private readonly maxBufferSize: number;
   private droppedNoiseBytes: number = 0;
+
+  /**
+   * 'ng' scans for magic-framed NG/MIX packets. 'legacy' cuts the stream into
+   * fixed 544-byte frames (pre-NG firmware has no magic to sync on).
+   */
+  public mode: 'ng' | 'legacy' = 'ng';
 
   // Expected magic sequence in Little-Endian byte order: 0x50, 0x4D, 0x33, 0x61|0x62 ('PM3a'/'PM3b')
   private static readonly MAGIC_BYTES = [0x50, 0x4d, 0x33, 0x62];
@@ -100,6 +107,13 @@ export class Pm3RingBuffer {
    * Returns null if no complete packet is currently available.
    */
   public nextPacket(): Pm3Packet | null {
+    if (this.mode === 'legacy') {
+      if (this.buffer.byteLength < PM3_LEGACY_FRAME_SIZE) return null;
+      const frame = this.buffer.slice(0, PM3_LEGACY_FRAME_SIZE);
+      this.buffer = this.buffer.slice(PM3_LEGACY_FRAME_SIZE);
+      return unpackLegacyFrame(frame);
+    }
+
     while (this.buffer.byteLength >= PM3_COMMAND_PREAMBLE_SIZE) {
       const magicIdx = this.findMagicIndex();
 

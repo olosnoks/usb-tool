@@ -28,6 +28,11 @@ export interface CommandAction {
   description: string;
   risk: CommandRiskLevel;
   cmd: number;
+  /**
+   * Runs a decoded device operation (request framing and reply parsing chosen
+   * for the connected firmware) instead of sending `cmd` as a bare frame.
+   */
+  op?: 'hf14aReader' | 'lfEm410x' | 'tune';
   parameters?: CommandParameter[];
   formatPayload?: (params: Record<string, any>) => FormattedCommandPayload;
 }
@@ -162,21 +167,8 @@ export const COMMAND_TREE: DomainNode[] = [
             description: 'Performs anticol and reads UID, ATQA, and SAK from nearby 14443A cards.',
             risk: 'diagnostic',
             cmd: PM3_COMMANDS.CMD_HF_14A_READER,
-            parameters: [
-              {
-                id: 'timeout',
-                name: 'Scan Timeout (ms)',
-                type: 'number',
-                description: 'Duration to hold RF carrier and listen for card response',
-                defaultValue: 2000,
-                min: 100,
-                max: 10000,
-                required: false
-              }
-            ],
-            formatPayload: (p) => ({
-              arg0: Number(p.timeout) || 2000
-            })
+            op: 'hf14aReader',
+            parameters: []
           },
           {
             id: 'raw',
@@ -212,9 +204,10 @@ export const COMMAND_TREE: DomainNode[] = [
           {
             id: 'info',
             name: '14A Detailed Card Info',
-            description: 'Queries tag memory configuration, manufacturer bytes, and PRNG type.',
+            description: 'Selects the card and shows UID, ATQA, SAK, the card family and (ISO 14443-4 cards) the ATS.',
             risk: 'read',
             cmd: PM3_COMMANDS.CMD_HF_14A_INFO,
+            op: 'hf14aReader',
             parameters: []
           }
         ]
@@ -249,9 +242,11 @@ export const COMMAND_TREE: DomainNode[] = [
           {
             id: 'read',
             name: 'EM410x Read / Search',
-            description: 'Listens for 125kHz RF modulation and extracts 5-byte EM410x tag ID.',
+            description:
+              'Samples the 125 kHz antenna, downloads the capture and demodulates the 5-byte EM410x tag ID (legacy firmware only for now).',
             risk: 'read',
-            cmd: PM3_COMMANDS.CMD_LF_EM410X_READ,
+            cmd: PM3_COMMANDS.CMD_LF_ACQ_RAW_ADC,
+            op: 'lfEm410x',
             parameters: []
           }
         ]
@@ -269,17 +264,27 @@ export const COMMAND_TREE: DomainNode[] = [
         description: 'Query hardware subsystem diagnostics and RF antenna voltage',
         actions: [
           {
+            id: 'tune',
+            name: 'Antenna Tuning (hw tune)',
+            description:
+              'Measures the LF antenna voltage at 125 / 134 kHz and the HF antenna voltage at 13.56 MHz. Keep cards away; takes a few seconds.',
+            risk: 'diagnostic',
+            cmd: PM3_COMMANDS.CMD_MEASURE_ANTENNA_TUNING,
+            op: 'tune',
+            parameters: []
+          },
+          {
             id: 'ping',
             name: 'Hardware Ping',
-            description: 'Sends round-trip keepalive ping to test USB/UART latency.',
+            description: 'Sends round-trip keepalive ping to test USB/UART latency (NG firmware).',
             risk: 'diagnostic',
             cmd: PM3_COMMANDS.CMD_PING,
             parameters: []
           },
           {
             id: 'status',
-            name: 'Hardware Status & Voltage',
-            description: 'Reads antenna coil voltage, frequency tuning and battery telemetry.',
+            name: 'Hardware Status',
+            description: 'Asks the firmware to print its status report into the frame log (NG firmware).',
             risk: 'diagnostic',
             cmd: PM3_COMMANDS.CMD_STATUS,
             parameters: []
