@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   ProxmarkDevice,
   DeviceFirmwareIdentity,
-  ProxmarkState
+  ProxmarkState,
+  ProxmarkOpResult,
+  runProxmarkOp
 } from '../../../devices/proxmark';
 import {
   WebFlashService,
@@ -49,6 +51,7 @@ export default function ProxmarkWorkbench() {
     Array<{ type: 'tx' | 'rx' | 'debug' | 'error'; text: string; time: string }>
   >([]);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [opResult, setOpResult] = useState<ProxmarkOpResult | null>(null);
 
   // WebFlash state
   const [selectedTarget, setSelectedTarget] = useState<FlashTarget>('PM3RDV4');
@@ -90,7 +93,8 @@ export default function ProxmarkWorkbench() {
     });
 
     const unsubRx = device.on('packetReceived', ({ packet }) => {
-      if (packet.cmd !== 0x0105) {
+      // 0x0208 = buffer download chunks, dozens per LF read
+      if (packet.cmd !== 0x0105 && packet.cmd !== 0x0208) {
         addLog(
           'rx',
           `RX <- CMD: 0x${(packet.cmd ?? 0).toString(16).padStart(4, '0')} (${describeOpcode(packet.cmd ?? 0)}) | LEN: ${packet.length ?? 0} | ARG0: 0x${(packet.arg0 ?? 0).toString(16)} | ARG1: 0x${(packet.arg1 ?? 0).toString(16)}`
@@ -151,7 +155,17 @@ export default function ProxmarkWorkbench() {
 
   const handleExecuteCommand = async (commandPayload: any) => {
     setIsExecuting(true);
+    setOpResult(null);
     try {
+      if (commandPayload.op) {
+        const result = await runProxmarkOp(device, commandPayload.op);
+        setOpResult(result);
+        addLog(
+          'rx',
+          `${result.title}: ${result.rows.map(([k, v]) => `${k} ${v}`).join(' | ') || result.note || 'done'}`
+        );
+        return;
+      }
       const res = await device.executeCommand(commandPayload);
       addLog(
         'rx',
@@ -159,6 +173,7 @@ export default function ProxmarkWorkbench() {
       );
     } catch (err: any) {
       addLog('error', `Command failed: ${err.message}`);
+      setOpResult({ title: commandPayload.actionName, ok: false, rows: [], note: `Failed: ${err.message}` });
     } finally {
       setIsExecuting(false);
     }
@@ -258,7 +273,9 @@ export default function ProxmarkWorkbench() {
       <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <Radio className="w-4 h-4 text-cyan-400 flex-shrink-0" />
-          <span className="text-[11px] text-slate-400 font-mono truncate">Web Serial CDC ACM, NG framing</span>
+          <span className="text-[11px] text-slate-400 font-mono truncate">
+            Web Serial CDC ACM, {identity?.protocol === 'legacy' ? 'legacy 544-byte framing' : 'NG framing'}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <div className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1.5 border ${stateBadge}`}>
@@ -315,7 +332,20 @@ export default function ProxmarkWorkbench() {
         </div>
       )}
 
-      {deviceState === 'readyCompatible' && (
+      {identity?.protocol === 'legacy' && (
+        <div className="bg-amber-950/40 border border-amber-800/60 rounded-lg p-2 flex items-start gap-2 text-amber-200">
+          <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+          <p className="text-[11px] text-amber-300">
+            <b className="text-amber-200">Legacy firmware{identity.buildDate ? ` (${identity.buildDate.slice(0, 4)})` : ''}.</b>{' '}
+            This Proxmark3 runs firmware from before the Iceman NG protocol, so the workbench talks to it with the old
+            544-byte frames. Antenna tuning, the 14443A reader and the EM410x read work; commands this firmware lacks
+            (ping, status) report that instead of timing out. Everything else needs current Iceman firmware, flashed
+            with the Proxmark3 client.
+          </p>
+        </div>
+      )}
+
+      {deviceState === 'readyCompatible' && identity?.protocol !== 'legacy' && (
         <div className="bg-cyan-950/40 border border-cyan-800/60 rounded-lg p-2 flex flex-wrap items-center justify-between gap-2 text-cyan-200">
           <div className="flex items-start gap-2 min-w-0 flex-1">
             <Info className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
@@ -362,6 +392,33 @@ export default function ProxmarkWorkbench() {
             <span className="text-slate-500 block uppercase tracking-wider text-[10px]">Build Date</span>
             <span className="text-slate-300">{identity.buildDate || 'N/A'}</span>
           </div>
+          {identity.chipName && (
+            <div>
+              <span className="text-slate-500 block uppercase tracking-wider text-[10px]">MCU</span>
+              <span className="text-slate-200">
+                {identity.chipName}
+                {identity.flashKb ? ` (${identity.flashKb} KB flash)` : ''}
+              </span>
+            </div>
+          )}
+          {identity.protocol && (
+            <div>
+              <span className="text-slate-500 block uppercase tracking-wider text-[10px]">Protocol</span>
+              <span className="text-slate-200">{identity.protocol === 'legacy' ? 'Legacy (pre-NG)' : 'NG'}</span>
+            </div>
+          )}
+          {identity.osVersion && (
+            <div className="col-span-2 min-w-0">
+              <span className="text-slate-500 block uppercase tracking-wider text-[10px]">OS</span>
+              <span className="text-slate-300 break-all">{identity.osVersion}</span>
+            </div>
+          )}
+          {identity.bootromVersion && (
+            <div className="col-span-2 min-w-0">
+              <span className="text-slate-500 block uppercase tracking-wider text-[10px]">Bootrom</span>
+              <span className="text-slate-300 break-all">{identity.bootromVersion}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -375,6 +432,27 @@ export default function ProxmarkWorkbench() {
 
       {activeTab === 'commands' && (
         <CommandTreeForm device={device} onExecute={handleExecuteCommand} isExecuting={isExecuting} />
+      )}
+
+      {activeTab === 'commands' && opResult && (
+        <div
+          className={`rounded-lg p-2.5 border text-[11px] ${
+            opResult.ok ? 'bg-emerald-950/30 border-emerald-800/50' : 'bg-slate-900/80 border-slate-700'
+          }`}
+        >
+          <h4 className="text-xs font-semibold text-slate-100 mb-1.5">{opResult.title}</h4>
+          {opResult.rows.length > 0 && (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono">
+              {opResult.rows.map(([label, value]) => (
+                <React.Fragment key={label}>
+                  <dt className="text-slate-500">{label}</dt>
+                  <dd className="text-slate-200 break-all">{value}</dd>
+                </React.Fragment>
+              ))}
+            </dl>
+          )}
+          {opResult.note && <p className="text-slate-400 mt-1.5">{opResult.note}</p>}
+        </div>
       )}
 
       {activeTab === 'offline' && <OfflineDecoders />}

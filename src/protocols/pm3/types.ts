@@ -52,7 +52,7 @@ export const UART_USB_CLIENT_RX_TIMEOUT_MS = 3000;
  */
 export const PROXMARK_USB_IDS = [
   { usbVendorId: 0x9ac4, usbProductId: 0x4b8f, name: 'Proxmark3 RDV4 / Easy / Generic' },
-  { usbVendorId: 0x2d2d, usbProductId: 0x504d, name: 'Proxmark5 DFU / CDC' },
+  { usbVendorId: 0x2d2d, usbProductId: 0x504d, name: 'Proxmark3 (proxmark.org ID, older / factory firmware)' },
   { usbVendorId: 0x1d50, usbProductId: 0x6089, name: 'Openmoko Proxmark3' },
   { usbVendorId: 0x1a86, usbProductId: 0x7523, name: 'Proxmark3 Easy (CH340 Bridge)' },
   { usbVendorId: 0x10c4, usbProductId: 0xea60, name: 'Proxmark3 Easy (CP2102 Bridge)' },

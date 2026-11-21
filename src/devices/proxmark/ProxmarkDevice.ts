@@ -6,7 +6,20 @@ import {
   packNgFrame,
   Pm3Packet,
   Pm3RingBuffer,
-  CreatePacketOptions
+  CreatePacketOptions,
+  ISO14A,
+  PM3_LEGACY_COMMANDS,
+  PM3_LEGACY_FRAME_SIZE,
+  packLegacyFrame,
+  looksLikeLegacyReply,
+  legacyDebugText,
+  Iso14aCard,
+  AntennaTuning,
+  parseIso14aReply,
+  parseLegacyTuning,
+  parseNgTuning,
+  demodEm410x,
+  signalSwing
 } from '../../protocols/pm3';
 import {
   ProxmarkState,
@@ -14,7 +27,7 @@ import {
   ProxmarkEventMap,
   ProxmarkEventListener
 } from './types';
-import { parseVersionPayload } from './version';
+import { parseVersionPayload, parseLegacyVersion } from './version';
 import {
   evaluateCompatibility,
   assertCanExecute,
@@ -34,7 +47,23 @@ interface PendingCommand {
   resolve: (packet: Pm3Packet) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  /** Sees every reply first; returning true consumes it and keeps waiting (multi-frame replies). */
+  intermediate?: (packet: Pm3Packet) => boolean;
 }
+
+export interface LfEm410xRead {
+  found: boolean;
+  /** 5-byte tag ID as 10 hex digits. */
+  cardId?: string;
+  /** Samples per bit of the tag (64 = RF/64). */
+  clock?: number;
+  /** Peak-to-peak modulation seen on the antenna, in ADC counts (0..255). */
+  swing: number;
+  sampleCount: number;
+}
+
+const LEGACY_UNKNOWN_COMMAND = /^unknown command:: 0x([0-9a-f]+)/i;
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export class ProxmarkDevice {
   private _state: ProxmarkState = 'disconnected';
@@ -50,6 +79,12 @@ export class ProxmarkDevice {
   private isReading: boolean = false;
 
   private pendingCommands: PendingCommand[] = [];
+  private _protocol: 'ng' | 'legacy' = 'ng';
+  /** Raw bytes seen while the NG version request is outstanding, to spot legacy firmware. */
+  private legacyProbe: { chunks: Uint8Array[]; size: number; detected: () => void } | null = null;
+  private debugTap: ((message: string) => void) | null = null;
+  /** How this NG firmware wants its 14443A reader request framed, once known. */
+  private hf14aFraming: 'ng' | 'mix' | null = null;
   private listeners: Map<keyof ProxmarkEventMap, Set<Function>> = new Map();
 
   constructor() {
@@ -63,6 +98,11 @@ export class ProxmarkDevice {
 
   public get identity(): DeviceFirmwareIdentity | null {
     return this._identity;
+  }
+
+  /** Wire protocol in use: NG (Iceman firmware) or the legacy 544-byte frames. */
+  public get protocol(): 'ng' | 'legacy' {
+    return this._protocol;
   }
 
   public get allowRiskOverrides(): boolean {
@@ -166,7 +206,7 @@ export class ProxmarkDevice {
           portToOpen = await (navigator as any).serial.requestPort({
             filters: [
               { usbVendorId: 0x9ac4 }, // Proxmark3 RDV4 / Generic / Easy
-              { usbVendorId: 0x2d2d }, // Proxmark5
+              { usbVendorId: 0x2d2d }, // Proxmark3 on older / factory firmware (proxmark.org ID)
               { usbVendorId: 0x1d50 }, // Openmoko Proxmark3
               { usbVendorId: 0x1a86 }, // CH340 clones
               { usbVendorId: 0x10c4 }, // CP2102 clones
@@ -248,7 +288,9 @@ export class ProxmarkDevice {
       const level = evaluateCompatibility(identity);
       this.emit('compatibilityResolved', { level, identity });
 
-      this.setState('readyMatched');
+      this.setState(
+        level === 'matched' ? 'readyMatched' : level === 'compatible' ? 'readyCompatible' : 'lockedUnsupported'
+      );
       return identity;
     } catch (err: any) {
       await this.disconnect(err.message);
@@ -261,12 +303,58 @@ export class ProxmarkDevice {
    * Sends an identity interrogation packet (CMD_VERSION) and parses the response.
    */
   private async interrogateDevice(): Promise<DeviceFirmwareIdentity> {
-    const versionPacket = await this.dispatchRaw(
-      { cmd: PM3_COMMANDS.CMD_VERSION },
-      UART_USB_CLIENT_RX_TIMEOUT_MS
-    );
+    // Legacy firmware answers an NG frame with a 544-byte "unknown command"
+    // debug frame. Watch the raw bytes for that while the NG request is out.
+    const legacySeen = new Promise<'legacy'>((resolve) => {
+      this.legacyProbe = { chunks: [], size: 0, detected: () => resolve('legacy') };
+    });
+    const ngReply = this.dispatchRaw({ cmd: PM3_COMMANDS.CMD_VERSION }, UART_USB_CLIENT_RX_TIMEOUT_MS);
+    ngReply.catch(() => {});
 
-    return parseVersionPayload(versionPacket.payload);
+    let first: Pm3Packet | 'legacy';
+    try {
+      first = await Promise.race([ngReply, legacySeen]);
+    } finally {
+      this.legacyProbe = null;
+    }
+    if (first !== 'legacy') {
+      return parseVersionPayload(first.payload);
+    }
+
+    // Drop the NG request and switch the stream to legacy framing.
+    for (const pending of this.pendingCommands) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Superseded by the legacy protocol handshake'));
+    }
+    this.pendingCommands = [];
+    await sleep(60);
+    this._protocol = 'legacy';
+    this.ringBuffer.mode = 'legacy';
+    this.ringBuffer.clear();
+    return this.interrogateLegacy();
+  }
+
+  /**
+   * Legacy CMD_VERSION: older builds print "bootrom: ..." / "os: ..." debug
+   * strings and then ACK with the chip ID; later ones put the text in the ACK.
+   */
+  private async interrogateLegacy(): Promise<DeviceFirmwareIdentity> {
+    const lines: string[] = [];
+    this.debugTap = (message) => lines.push(message);
+    let ack: Pm3Packet;
+    try {
+      ack = await this.dispatchRaw({ cmd: PM3_LEGACY_COMMANDS.CMD_VERSION }, UART_USB_CLIENT_RX_TIMEOUT_MS);
+    } finally {
+      this.debugTap = null;
+    }
+    if (lines.length === 0) {
+      const end = ack.payload.indexOf(0);
+      const text = new TextDecoder('utf-8', { fatal: false }).decode(
+        ack.payload.subarray(0, end === -1 ? ack.payload.byteLength : end)
+      );
+      lines.push(...text.split('\n'));
+    }
+    return parseLegacyVersion(lines, ack.arg0);
   }
 
   /**
@@ -283,112 +371,91 @@ export class ProxmarkDevice {
   }
 
   /**
-   * Searches for ISO 14443A (13.56MHz) tags in the RF field and decodes UID/ATQA/SAK.
+   * Polls for an ISO 14443A (13.56 MHz) card: anticollision + select, then the
+   * field is dropped again. Returns UID, ATQA, SAK and (for 14443-4 cards) ATS.
    */
-  public async searchHf14a(timeoutMs: number = 2500): Promise<{
-    found: boolean;
-    uid?: string;
-    uidBytes?: number[];
-    atqa?: string;
-    sak?: string;
-    cardType?: string;
-    rawPacket: Pm3Packet;
-  }> {
-    const packet = await this.executeCommand({
-      cmd: PM3_COMMANDS.CMD_HF_14A_READER,
-      arg0: timeoutMs
-    }, timeoutMs + 1000);
+  public async searchHf14a(timeoutMs: number = 2500): Promise<Iso14aCard & { rawPacket: Pm3Packet }> {
+    const cmd = PM3_COMMANDS.CMD_HF_ISO14443A_READER;
+    const done = (packet: Pm3Packet) => ({ ...parseIso14aReply(packet), rawPacket: packet });
 
-    let found = false;
-    let uid = '';
-    let atqa = '';
-    let sak = '';
-    let cardType = 'Unknown ISO14443A Card';
-
-    if (packet.length > 0) {
-      found = true;
-      const p = packet.payload;
-      const uidLen = p[0] > 0 && p[0] <= 10 ? p[0] : Math.min(p.length, 7);
-      const uidSlice = Array.from(p.slice(1, 1 + uidLen));
-      uid = uidSlice.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':');
-
-      if (p.length >= 1 + uidLen + 2) {
-        atqa = `${p[1 + uidLen].toString(16).padStart(2, '0')}${p[1 + uidLen + 1].toString(16).padStart(2, '0')}`.toUpperCase();
-      }
-      if (p.length >= 1 + uidLen + 3) {
-        sak = p[1 + uidLen + 2].toString(16).padStart(2, '0').toUpperCase();
-      }
-    } else if (packet.arg0 !== 0 || packet.arg1 !== 0) {
-      found = true;
-      const b0 = (packet.arg0 & 0xff).toString(16).padStart(2, '0');
-      const b1 = ((packet.arg0 >> 8) & 0xff).toString(16).padStart(2, '0');
-      const b2 = ((packet.arg0 >> 16) & 0xff).toString(16).padStart(2, '0');
-      const b3 = ((packet.arg0 >> 24) & 0xff).toString(16).padStart(2, '0');
-      uid = `${b0}:${b1}:${b2}:${b3}`.toUpperCase();
-      sak = (packet.arg1 & 0xff).toString(16).padStart(2, '0').toUpperCase();
+    // Legacy and older NG firmware: flags in arg0, card struct back in CMD_ACK.
+    const viaArgs = () => this.executeCommand({ cmd, arg0: ISO14A.CONNECT, arg1: 0, arg2: 0 }, timeoutMs);
+    if (this._protocol === 'legacy' || this.hf14aFraming === 'mix') {
+      return done(await viaArgs());
     }
 
-    if (sak === '08') cardType = 'MIFARE Classic 1K / Plus (4-byte UID)';
-    else if (sak === '18') cardType = 'MIFARE Classic 4K (4-byte UID)';
-    else if (sak === '00') cardType = 'MIFARE Ultralight / NTAG213 / NTAG215 / NTAG216 (7-byte UID)';
-    else if (sak === '20') cardType = 'MIFARE DESFire / JCOP / Smart Card (7-byte UID)';
-    else if (sak === '28') cardType = 'MIFARE Classic 1K (Emulated / Smart)';
-
-    return { found, uid, atqa, sak, cardType, rawPacket: packet };
+    // Current NG firmware: iso14a_raw_cmd_t { u32 flags, u32 timeout, u32 wait_us, u16 len, u16 lenbits }.
+    const request = new Uint8Array(16);
+    new DataView(request.buffer).setUint32(0, ISO14A.CONNECT, true);
+    try {
+      const packet = await this.executeCommand({ cmd, mix: false, payload: request }, timeoutMs);
+      this.hf14aFraming = 'ng';
+      return done(packet);
+    } catch (err: any) {
+      if (this.hf14aFraming === 'ng' || !/^Timeout/.test(err?.message ?? '')) throw err;
+    }
+    // No answer to the NG form: firmware from before that change, which takes args.
+    const packet = await viaArgs();
+    this.hf14aFraming = 'mix';
+    return done(packet);
   }
 
   /**
-   * Reads 125kHz EM410x tags from the LF antenna and decodes facility code and card number.
+   * Captures the 125 kHz antenna signal and looks for an EM410x tag in it.
+   * Legacy firmware only: sample with `lf read`, download the buffer, demodulate here.
    */
-  public async readLfEm410x(timeoutMs: number = 3000): Promise<{
-    found: boolean;
-    cardId?: string;
-    facilityCode?: number;
-    cardNumber?: number;
-    rawPacket: Pm3Packet;
-  }> {
-    const packet = await this.executeCommand({
-      cmd: PM3_COMMANDS.CMD_LF_EM410X_READ,
-      arg0: timeoutMs
-    }, timeoutMs + 1000);
-
-    let found = false;
-    let cardId = '';
-    let facilityCode: number | undefined;
-    let cardNumber: number | undefined;
-
-    if (packet.length >= 5) {
-      found = true;
-      const bytes = Array.from(packet.payload.slice(0, 5));
-      cardId = bytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join('');
-      facilityCode = (bytes[1] << 8) | bytes[2];
-      cardNumber = (bytes[3] << 8) | bytes[4];
-    } else if (packet.arg0 !== 0 || packet.arg1 !== 0) {
-      found = true;
-      cardId = packet.arg0.toString(16).padStart(8, '0').toUpperCase();
-      cardNumber = packet.arg0 & 0xffff;
-      facilityCode = (packet.arg0 >> 16) & 0xff;
+  public async readLfEm410x(): Promise<LfEm410xRead> {
+    if (this._protocol !== 'legacy') {
+      throw new Error('LF reads are only implemented for legacy (pre-NG) firmware so far.');
     }
 
-    return { found, cardId, facilityCode, cardNumber, rawPacket: packet };
+    const acquired = await this.executeCommand(
+      { cmd: PM3_LEGACY_COMMANDS.CMD_ACQUIRE_RAW_ADC_SAMPLES_125K, arg0: 1 },
+      6000
+    );
+    // arg0 = bits captured (8 per sample); the default buffer is 30000 samples.
+    const sampleCount = Math.min(40000, acquired.arg0 >= 8 ? Math.floor(acquired.arg0 / 8) : 30000);
+
+    const samples = new Uint8Array(sampleCount);
+    await this.executeCommand(
+      { cmd: PM3_LEGACY_COMMANDS.CMD_DOWNLOAD_RAW_ADC_SAMPLES_125K, arg0: 0, arg1: sampleCount },
+      15000,
+      (packet) => {
+        if (packet.cmd !== PM3_LEGACY_COMMANDS.CMD_DOWNLOADED_RAW_ADC_SAMPLES_125K) return false;
+        const offset = packet.arg0;
+        const length = Math.min(packet.arg1, packet.payload.byteLength, sampleCount - offset);
+        if (length > 0) samples.set(packet.payload.subarray(0, length), offset);
+        return true;
+      }
+    );
+
+    const tag = demodEm410x(samples);
+    return tag
+      ? { found: true, cardId: tag.idHex, clock: tag.clock, swing: tag.swing, sampleCount }
+      : { found: false, swing: signalSwing(samples), sampleCount };
   }
 
   /**
-   * Queries hardware status and antenna voltages (V@125kHz, V@13.56MHz)
+   * Measures the antenna voltages (`hw tune`): LF at 125 and 134 kHz, the LF
+   * peak, and HF at 13.56 MHz. Takes several seconds.
    */
-  public async tuneAntennas(): Promise<{
-    vLf: number;
-    vHf: number;
-    rawPacket: Pm3Packet;
-  }> {
-    const packet = await this.executeCommand({
-      cmd: PM3_COMMANDS.CMD_STATUS
-    }, 4000);
-
-    const vLf = packet.arg0 > 0 ? Number((packet.arg0 / 1000).toFixed(1)) : 28.5;
-    const vHf = packet.arg1 > 0 ? Number((packet.arg1 / 1000).toFixed(1)) : 18.2;
-
-    return { vLf, vHf, rawPacket: packet };
+  public async tuneAntennas(): Promise<AntennaTuning & { rawPacket: Pm3Packet }> {
+    if (this._protocol === 'legacy') {
+      // arg0 = 3 asks for both antennas on builds that take a selector.
+      const packet = await this.executeCommand(
+        { cmd: PM3_LEGACY_COMMANDS.CMD_MEASURE_ANTENNA_TUNING, arg0: 3 },
+        20000
+      );
+      if (packet.cmd !== PM3_LEGACY_COMMANDS.CMD_MEASURED_ANTENNA_TUNING) {
+        throw new Error(`Unexpected reply 0x${packet.cmd.toString(16)} to the antenna tuning request`);
+      }
+      return { ...parseLegacyTuning(packet), rawPacket: packet };
+    }
+    const packet = await this.executeCommand(
+      { cmd: PM3_COMMANDS.CMD_MEASURE_ANTENNA_TUNING, mix: false },
+      20000
+    );
+    return { ...parseNgTuning(packet), rawPacket: packet };
   }
 
   /**
@@ -396,7 +463,8 @@ export class ProxmarkDevice {
    */
   public async executeCommand(
     options: CreatePacketOptions,
-    timeoutMs: number = UART_USB_CLIENT_RX_TIMEOUT_MS
+    timeoutMs: number = UART_USB_CLIENT_RX_TIMEOUT_MS,
+    intermediate?: (packet: Pm3Packet) => boolean
   ): Promise<Pm3Packet> {
     if (!this.isConnected && this._state !== 'interrogating') {
       throw new Error(`Cannot execute command in state '${this._state}'. Device not connected.`);
@@ -412,7 +480,7 @@ export class ProxmarkDevice {
       `0x${options.cmd.toString(16)}`
     );
 
-    return this.dispatchRaw(options, timeoutMs);
+    return this.dispatchRaw(options, timeoutMs, intermediate);
   }
 
   /**
@@ -420,13 +488,14 @@ export class ProxmarkDevice {
    */
   private async dispatchRaw(
     options: CreatePacketOptions,
-    timeoutMs: number
+    timeoutMs: number,
+    intermediate?: (packet: Pm3Packet) => boolean
   ): Promise<Pm3Packet> {
     if (!this.writer) {
       throw new Error('Device stream writer is unavailable.');
     }
 
-    const frameBytes = packNgFrame(options);
+    const frameBytes = this._protocol === 'legacy' ? packLegacyFrame(options) : packNgFrame(options);
 
     return new Promise<Pm3Packet>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -443,7 +512,8 @@ export class ProxmarkDevice {
         expectedCmd: options.cmd,
         resolve,
         reject,
-        timer
+        timer,
+        intermediate
       };
 
       this.pendingCommands.push(pending);
@@ -486,6 +556,20 @@ export class ProxmarkDevice {
           break;
         }
         if (value && value.byteLength > 0) {
+          const probe = this.legacyProbe;
+          if (probe) {
+            probe.chunks.push(value);
+            probe.size += value.byteLength;
+            if (probe.size >= PM3_LEGACY_FRAME_SIZE) {
+              const seen = new Uint8Array(probe.size);
+              let at = 0;
+              for (const chunk of probe.chunks) {
+                seen.set(chunk, at);
+                at += chunk.byteLength;
+              }
+              if (looksLikeLegacyReply(seen)) probe.detected();
+            }
+          }
           this.ringBuffer.append(value);
           this.processPacketsFromBuffer();
         }
@@ -519,9 +603,26 @@ export class ProxmarkDevice {
 
     // Handle unsolicited debug print frames
     if (packet.cmd === PM3_COMMANDS.CMD_DEBUG_PRINT) {
-      const decoder = new TextDecoder('utf-8', { fatal: false });
-      const msg = decoder.decode(packet.payload);
+      const msg =
+        this._protocol === 'legacy'
+          ? legacyDebugText(packet)
+          : new TextDecoder('utf-8', { fatal: false }).decode(packet.payload);
+      this.debugTap?.(msg);
       this.emit('debugPrint', { message: msg, timestamp: Date.now() });
+
+      // Legacy firmware has no error reply: an opcode it lacks is only reported this way.
+      const unknown = this._protocol === 'legacy' ? LEGACY_UNKNOWN_COMMAND.exec(msg) : null;
+      if (unknown && this.pendingCommands.length > 0) {
+        const pending = this.pendingCommands.shift()!;
+        clearTimeout(pending.timer);
+        pending.reject(new Error(`This firmware does not implement command 0x${unknown[1].padStart(4, '0')}.`));
+      }
+      return;
+    }
+
+    // Multi-frame replies (e.g. buffer downloads) are fed to the waiting command first.
+    const waiting = this.pendingCommands[0];
+    if (waiting?.intermediate && waiting.intermediate(packet)) {
       return;
     }
 
@@ -569,6 +670,11 @@ export class ProxmarkDevice {
     }
 
     this.ringBuffer.clear();
+    this.ringBuffer.mode = 'ng';
+    this._protocol = 'ng';
+    this.legacyProbe = null;
+    this.debugTap = null;
+    this.hf14aFraming = null;
     this._identity = null;
     this.setState('disconnected', reason);
     this.emit('disconnected', { reason });
